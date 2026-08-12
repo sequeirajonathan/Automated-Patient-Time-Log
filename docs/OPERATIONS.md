@@ -31,6 +31,23 @@ Step 5 is why the powered hub needs per-port switching — it's the software equ
 unplugging and replugging the phone, and it clears most wedged-USB states without anyone
 being present.
 
+**If the hub doesn't support `uhubctl`**, step 5 degrades to a kernel-level bus reset,
+which clears most wedged states but cannot force the phone itself through a power cycle:
+
+```bash
+echo '1-1' | tee /sys/bus/usb/drivers/usb/unbind   # device path from `lsusb -t`
+sleep 3
+echo '1-1' | tee /sys/bus/usb/drivers/usb/bind
+```
+
+Note that a hub with *physical* per-port buttons is not necessarily `uhubctl`-capable —
+mechanical switches and the USB per-port power switching descriptor are different
+features. Verify with `sudo uhubctl` and `lsusb -v | grep -i "per-port power"`.
+
+Because the hub is self-powered, rebooting the Pi does **not** power-cycle the phone.
+Where a true remote power cycle is needed and the hub can't provide it, a network smart
+plug on the hub's power brick restores that capability.
+
 Step 6 is deliberately near the bottom. Rebooting the Pi is cheap; rebooting the *phone*
 is not, because Android requires the lock PIN to decrypt user storage after a cold boot
 and that has to be scripted (see §1.4).
