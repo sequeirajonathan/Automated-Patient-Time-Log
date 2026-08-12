@@ -67,6 +67,9 @@ At `login.tailscale.com` → Settings → Keys → **Generate auth key**:
 Copy it. It goes into the first-boot script below and lets the Pi join the network with
 no interactive login at the building.
 
+Generate a fresh key rather than reusing one. Auth keys are single-use by default, and
+the tag is what allows ACLs to scope what this device can reach.
+
 ### 0.3 Stage the first-boot script
 
 While the eMMC is still mounted on the laptop from step 0.1, its boot partition appears
@@ -191,6 +194,19 @@ minutes, then re-run 1 through 4. Everything must return with zero interaction.
 
 That power-cycle is the entire recovery procedure for a non-technical person on site, so
 it has to work before you leave the building.
+
+### 4.1 Disable node key expiry — do this the same day
+
+In the Tailscale admin console: **Machines → `aptlog` → disable key expiry**.
+
+This is separate from the auth key's expiry, and conflating the two is the usual mistake.
+The auth key expiring is harmless once it has enrolled the device. The **node** key
+expires on its own schedule (180 days by default), and when it does, the Pi is logged out
+of the tailnet and needs interactive re-authentication.
+
+For a device in someone else's home with no console and no technical user nearby, that
+means remote access disappears roughly six months after installation, with no warning and
+no way back in short of another site visit.
 
 ---
 

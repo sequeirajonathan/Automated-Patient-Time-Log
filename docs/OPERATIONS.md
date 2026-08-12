@@ -160,6 +160,12 @@ distribute or rotate when a laptop changes.
 The Pi joins with a pre-generated auth key baked into `firstboot.sh` — the person at the
 building never logs into a Tailscale account.
 
+**Disable node key expiry on the `aptlog` machine once it has joined** (PI_SETUP.md §4.1).
+Node key expiry is distinct from auth key expiry and defaults to 180 days; left enabled,
+remote access to a console-less device in someone else's home disappears half a year after
+installation. The Pi's key and the cloud-session key in §3.2 are separate — the Pi's is
+single-use and persistent, the cloud one ephemeral and reusable.
+
 ### 3.2 Reaching it from a cloud session
 
 Cloud sessions are ephemeral, so the container has to join the tailnet each time:
