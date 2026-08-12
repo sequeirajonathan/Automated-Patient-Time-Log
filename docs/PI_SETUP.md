@@ -17,8 +17,12 @@ on-site steps then need no troubleshooting.
 
 ### 0.1 Flash the eMMC
 
-There is no card to image — the CM5 has onboard eMMC, which is written over USB with the
-board in device mode.
+**This step is mandatory and must happen before travelling.** The eMMC ships blank, and
+CM5 eMMC variants cannot boot from an SD card — there is no fallback if the module
+arrives unflashed.
+
+There is no card to image; the onboard eMMC is written over USB with the board in device
+mode.
 
 1. Fit the **nRPIBOOT jumper** on the IO Board (marked on the silkscreen).
 2. Connect the board's **USB-C port** to the laptop with the bundled USB-A to USB-C
@@ -84,11 +88,13 @@ No microSD and no card reader — the eMMC replaces both.
 
 ## 1. Assemble
 
-1. Fit the **CM5 Cooler** to the module before anything else; the fan connector is
-   awkward to reach later.
-   **Note the conflict:** the cooler is not designed to be used with the IO Case lid.
-   Pick one. For 24/7 operation choose the cooler and run without the lid, accepting more
-   dust, and plan to blow it out periodically.
+1. Cooling — **pick one, they are alternatives**:
+   - **Preferred: the metal IO Case and its built-in fan.** Connect the fan to the
+     board's 4-pin JST-SH connector before closing the case. Enclosed and actively
+     cooled is the right choice for continuous operation in a living space.
+   - The separate passive **Cooler for CM5** is not designed to fit under the case lid.
+     Using it means running the unit open, which invites dust. Leave it in the box
+     unless the case fan fails.
 2. Seat the Compute Module on the IO Board, and fit the **antenna kit** — the wireless
    variant needs it for any wifi at all. Ethernet is the primary link, but wifi is a
    useful fallback for recovery.
