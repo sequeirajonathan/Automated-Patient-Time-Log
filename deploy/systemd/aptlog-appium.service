@@ -1,0 +1,17 @@
+[Unit]
+Description=Appium server (drives the Android phone over adb)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=apt
+ExecStartPre=/usr/bin/adb start-server
+ExecStart=/usr/bin/appium --address 127.0.0.1 --port 4723 --log-timestamp
+Restart=always
+RestartSec=10
+# Never give up: an unattended box has nobody to clear a failed unit.
+StartLimitIntervalSec=0
+
+[Install]
+WantedBy=multi-user.target

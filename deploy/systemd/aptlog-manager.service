@@ -1,0 +1,13 @@
+[Unit]
+Description=APT Log self-update (pull, verify, restart, roll back on failure)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/aptlog
+ExecStart=/opt/aptlog/scripts/manager.sh
+# A failed update must never leave the agent down; manager.sh rolls back and
+# restarts the last good revision itself.
+TimeoutStartSec=600

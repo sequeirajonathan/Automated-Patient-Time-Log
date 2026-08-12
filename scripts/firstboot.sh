@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# One-time bootstrap for the Raspberry Pi controller.
+#
+# Staged on the boot partition before travelling, then run once over SSH:
+#   sudo bash /boot/firmware/firstboot.sh
+#
+# Safe to re-run: every step is idempotent.
+
+set -euo pipefail
+
+# ---------------------------------------------------------------- configuration
+TAILSCALE_AUTHKEY="${TAILSCALE_AUTHKEY:-PASTE_AUTH_KEY_HERE}"
+REPO_URL="${REPO_URL:-https://github.com/sequeirajonathan/Automated-Patient-Time-Log.git}"
+DEPLOY_REF="${DEPLOY_REF:-release}"   # deploy branch, NOT main — see docs/OPERATIONS.md
+SERVICE_USER="${SERVICE_USER:-apt}"
+APP_DIR="/opt/aptlog"
+NODE_MAJOR=22
+
+log() { printf '\n=== %s\n' "$1"; }
+
+[[ $EUID -eq 0 ]] || { echo "run with sudo" >&2; exit 1; }
+
+# ---------------------------------------------------------------- base packages
+log "installing base packages"
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq
+apt-get install -y -qq \
+    git curl ca-certificates jq sqlite3 \
+    python3 python3-venv python3-pip \
+    android-tools-adb usbutils uhubctl \
+    log2ram || true   # log2ram may not be in the archive; handled below
+
+# ------------------------------------------------------------------------ node
+if ! command -v node >/dev/null || [[ "$(node -v | cut -c2- | cut -d. -f1)" -lt "$NODE_MAJOR" ]]; then
+    log "installing node ${NODE_MAJOR}"
+    curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash -
+    apt-get install -y -qq nodejs
+fi
+
+# ---------------------------------------------------------------------- appium
+if ! command -v appium >/dev/null; then
+    log "installing appium + uiautomator2 driver"
+    npm install -g appium
+    sudo -u "$SERVICE_USER" appium driver install uiautomator2 || \
+        appium driver install uiautomator2
+fi
+
+# ------------------------------------------------------------------- tailscale
+if ! command -v tailscale >/dev/null; then
+    log "installing tailscale"
+    curl -fsSL https://tailscale.com/install.sh | sh
+fi
+
+if ! tailscale status >/dev/null 2>&1; then
+    log "joining tailnet"
+    if [[ "$TAILSCALE_AUTHKEY" == "PASTE_AUTH_KEY_HERE" ]]; then
+        echo "!! TAILSCALE_AUTHKEY not set — skipping. Run 'sudo tailscale up --ssh' manually." >&2
+    else
+        tailscale up --ssh --authkey="$TAILSCALE_AUTHKEY" --hostname=aptlog
+    fi
+fi
+
+# ----------------------------------------------------------- sd card longevity
+# The controller writes logs continuously; unmitigated this kills a card in months.
+log "reducing SD writes"
+if ! systemctl list-unit-files | grep -q log2ram; then
+    echo "note: log2ram unavailable — journal is capped instead"
+fi
+mkdir -p /etc/systemd/journald.conf.d
+cat > /etc/systemd/journald.conf.d/aptlog.conf <<'EOF'
+[Journal]
+Storage=volatile
+RuntimeMaxUse=64M
+EOF
+
+# ------------------------------------------------------------ hardware watchdog
+# Recovers from a kernel-level hang, which no userspace restart policy can catch.
+log "enabling hardware watchdog"
+mkdir -p /etc/systemd/system.conf.d
+cat > /etc/systemd/system.conf.d/aptlog-watchdog.conf <<'EOF'
+[Manager]
+RuntimeWatchdogSec=15
+RebootWatchdogSec=2min
+EOF
+
+# ------------------------------------------------------------------ udev / adb
+# Lets the service user talk to the phone without root.
+log "configuring adb access"
+usermod -aG plugdev "$SERVICE_USER"
+cat > /etc/udev/rules.d/51-android.rules <<'EOF'
+SUBSYSTEM=="usb", ATTR{idVendor}=="*", MODE="0664", GROUP="plugdev"
+EOF
+udevadm control --reload-rules || true
+
+# --------------------------------------------------------------------- the app
+log "deploying application"
+if [[ ! -d "$APP_DIR/.git" ]]; then
+    git clone --branch "$DEPLOY_REF" "$REPO_URL" "$APP_DIR"
+else
+    git -C "$APP_DIR" fetch --all --quiet
+    git -C "$APP_DIR" checkout "$DEPLOY_REF" --quiet
+    git -C "$APP_DIR" pull --quiet
+fi
+chown -R "$SERVICE_USER:$SERVICE_USER" "$APP_DIR"
+
+sudo -u "$SERVICE_USER" python3 -m venv "$APP_DIR/.venv"
+sudo -u "$SERVICE_USER" "$APP_DIR/.venv/bin/pip" install -q --upgrade pip
+if [[ -f "$APP_DIR/pyproject.toml" ]]; then
+    sudo -u "$SERVICE_USER" "$APP_DIR/.venv/bin/pip" install -q -e "$APP_DIR"
+fi
+
+# ------------------------------------------------------------------- services
+log "installing services"
+if [[ -d "$APP_DIR/deploy/systemd" ]]; then
+    install -m 0644 "$APP_DIR"/deploy/systemd/*.service /etc/systemd/system/
+    install -m 0644 "$APP_DIR"/deploy/systemd/*.timer   /etc/systemd/system/ 2>/dev/null || true
+fi
+
+systemctl daemon-reload
+for unit in aptlog-appium aptlog-agent aptlog-ui; do
+    systemctl enable --now "$unit" 2>/dev/null || echo "note: $unit not present yet"
+done
+systemctl enable --now aptlog-manager.timer 2>/dev/null || true
+
+log "done — reboot now, then run the section 4 checks in docs/PI_SETUP.md"

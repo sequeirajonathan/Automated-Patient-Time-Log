@@ -1,0 +1,23 @@
+[Unit]
+Description=APT Log agent (scheduler, location gate, check-off runner)
+After=aptlog-appium.service
+Requires=aptlog-appium.service
+
+[Service]
+Type=notify
+User=apt
+WorkingDirectory=/opt/aptlog
+ExecStart=/opt/aptlog/.venv/bin/python -m apt_log.cli run --daemon
+Restart=always
+RestartSec=15
+StartLimitIntervalSec=0
+
+# The agent pings systemd from its main loop; a wedged loop gets restarted
+# even though the process is technically alive.
+WatchdogSec=120
+
+# Surface failures instead of dying quietly in an empty room.
+OnFailure=aptlog-alert@%n.service
+
+[Install]
+WantedBy=multi-user.target
