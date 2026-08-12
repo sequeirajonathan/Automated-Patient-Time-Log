@@ -1,6 +1,12 @@
-# Raspberry Pi 5 — build and flash checklist
+# Compute Module 5 — build and flash checklist
 
-Audience: whoever physically assembles the Pi at the building. Follow in order.
+Hardware: **Raspberry Pi Development Kit for Compute Module 5** (CM5104032 — wireless,
+4 GB RAM, 32 GB eMMC) on the CM5 IO Board.
+
+The eMMC is the reason this kit suits the job: no microSD to wear out under continuous
+logging, which is the usual way an always-on Pi dies unattended.
+
+Audience: whoever physically assembles the unit at the building. Follow in order.
 
 Do the **Before you travel** section somewhere with good internet and a laptop. The
 on-site steps then need no troubleshooting.
@@ -9,19 +15,28 @@ on-site steps then need no troubleshooting.
 
 ## 0. Before you travel
 
-### 0.1 Flash the card
+### 0.1 Flash the eMMC
 
-Use **Raspberry Pi Imager** (raspberrypi.com/software) on a laptop with the card reader
-from the kit.
+There is no card to image — the CM5 has onboard eMMC, which is written over USB with the
+board in device mode.
 
-- **Device:** Raspberry Pi 5
-- **OS:** `Raspberry Pi OS Lite (64-bit)` — under *Raspberry Pi OS (other)*
+1. Fit the **nRPIBOOT jumper** on the IO Board (marked on the silkscreen).
+2. Connect the board's **USB-C port** to the laptop with the bundled USB-A to USB-C
+   cable. This is what that cable is for — it is **not** the phone cable.
+3. Install and run `rpiboot`
+   ([instructions](https://www.raspberrypi.com/documentation/computers/compute-module.html)).
+   The eMMC then appears on the laptop as a mass-storage device.
+4. Flash it with **Raspberry Pi Imager**, selecting the eMMC as the target:
+   - **Device:** Raspberry Pi 5 (the CM5 shares the Pi 5's SoC)
+   - **OS:** `Raspberry Pi OS Lite (64-bit)` — under *Raspberry Pi OS (other)*
+5. **Remove the nRPIBOOT jumper afterwards**, or the board will keep booting into device
+   mode instead of starting normally.
 
-Lite, not Desktop. No monitor is ever attached to this machine, a desktop session is
-one more thing that can hang, and the GUI roughly triples SD card writes.
+Lite, not Desktop. No monitor is ever attached to this machine, and a desktop session is
+one more thing that can hang.
 
 Before writing, open **⚙ / "Edit Settings"** and set all of the following. This is what
-makes the Pi boot ready with nothing to configure on site:
+makes it boot ready with nothing to configure on site:
 
 | Setting | Value |
 |---|---|
@@ -50,32 +65,47 @@ no interactive login at the building.
 
 ### 0.3 Stage the first-boot script
 
-After Imager finishes, the card remounts as `bootfs`. Copy
-[`scripts/firstboot.sh`](../scripts/firstboot.sh) to the root of that partition and put
-the auth key in it where marked.
+While the eMMC is still mounted on the laptop from step 0.1, its boot partition appears
+as `bootfs`. Copy [`scripts/firstboot.sh`](../scripts/firstboot.sh) to the root of that
+partition and put the auth key in it where marked.
+
+### 0.4 Buy the four things the kit doesn't include
+
+| Item | Note |
+|---|---|
+| Powered USB hub | self-powered, ideally `uhubctl`-capable (e.g. Plugable USB3-HUB7BC) |
+| Ethernet cable, Cat 6 | measure the run to the gateway |
+| Phone data cable | USB-A to the phone's connector — **data, not charge-only** |
+| CR2032 battery | the RTC socket is on the board; the cell is not in the kit |
+
+No microSD and no card reader — the eMMC replaces both.
 
 ---
 
 ## 1. Assemble
 
-1. Fit the **Active Cooler** (or the case's fan) to the board before anything else — the
-   fan connector is awkward to reach once the board is in the case.
-   **Only one cooling solution.** The official case's built-in fan and the Active Cooler
-   occupy the same space; don't try to fit both.
-2. Insert the microSD.
-3. Fit the RTC battery if the kit includes one. It keeps the clock across power cuts,
-   which matters here — a scheduler that reboots at 3am shouldn't run on a wrong clock
-   before it reaches an NTP server.
-4. Board into case.
-5. **Ethernet** from the Pi to a LAN port on the Xfinity gateway.
-6. **Powered USB hub** into its own wall outlet, then hub → a **USB 3.0** port on the Pi
-   (the blue ones).
-7. **Phone → the powered hub**, not the Pi directly. The Pi's ports supply 1.6 A across
-   all four combined, which will not reliably charge a phone. Powering the phone from
-   the Pi causes random disconnects and slow battery drain.
-8. Pi power last, using the **27 W USB-C supply from the kit**. A lower-wattage supply
-   silently drops the USB budget to 600 mA and the phone will misbehave in ways that
-   look like software bugs.
+1. Fit the **CM5 Cooler** to the module before anything else; the fan connector is
+   awkward to reach later.
+   **Note the conflict:** the cooler is not designed to be used with the IO Case lid.
+   Pick one. For 24/7 operation choose the cooler and run without the lid, accepting more
+   dust, and plan to blow it out periodically.
+2. Seat the Compute Module on the IO Board, and fit the **antenna kit** — the wireless
+   variant needs it for any wifi at all. Ethernet is the primary link, but wifi is a
+   useful fallback for recovery.
+3. Fit the **CR2032** in the RTC socket. It keeps the clock across power cuts, which
+   matters here — a unit that reboots at 3am shouldn't run on a wrong clock and fire the
+   whole day's schedule at once.
+4. Board into the case.
+5. **Ethernet** from the IO Board to a LAN port on the Xfinity gateway.
+6. **Powered USB hub** into its own wall outlet, then hub → one of the board's two
+   **USB 3.0 Type-A** ports.
+7. **Phone → the powered hub**, never the board. The IO Board's two USB 3.0 ports share
+   roughly **1.2 A total** through an internal current switch — well under what a phone
+   draws. Powering the phone from the board causes random disconnects and slow battery
+   drain that read as software bugs.
+8. Power last, using the **27 W USB-C supply from the kit**. A lower-wattage supply
+   reduces the USB budget further and the phone will misbehave in ways that look like
+   software faults.
 
 ---
 
@@ -193,9 +223,10 @@ The mitigation is to keep little worth stealing on the device:
   Name resolution stays in the app, on the phone.
 - Keep the app credential and the phone PIN in a file readable only by the service user;
   this is obfuscation against casual access, not protection against someone who takes
-  the card.
-- Treat physical access to the SD card as full compromise, and rotate the app password
-  if the hardware is ever lost or replaced.
+  the hardware.
+- Treat physical possession of the unit as full compromise, and rotate the app password
+  if it is ever lost or replaced. The eMMC is soldered to the module, so unlike a
+  microSD it can't be quietly pulled and read in a laptop — a small but real gain.
 
 The device lives in a private residence rather than a public area, which is the main
 control here. That is a real limitation, not a solved problem — it should be a conscious
