@@ -1,59 +1,53 @@
-# Compute Module 5 — build and flash checklist
+# Raspberry Pi 5 — build and flash checklist
 
-Hardware: **Raspberry Pi Development Kit for Compute Module 5** (CM5104032 — wireless,
-4 GB RAM, 32 GB eMMC) on the CM5 IO Board.
-
-The eMMC is the reason this kit suits the job: no microSD to wear out under continuous
-logging, which is the usual way an always-on Pi dies unattended.
+Hardware: **Raspberry Pi 5** booting from microSD.
 
 Audience: whoever physically assembles the unit at the building. Follow in order.
 
 Do the **Before you travel** section somewhere with good internet and a laptop. The
 on-site steps then need no troubleshooting.
 
+> **Why not the Compute Module.** An earlier revision of this document targeted the CM5
+> Development Kit. The CM5's eMMC is more durable than an SD card, but flashing it
+> requires putting the board into USB device mode with an **nRPIBOOT jumper shunt that
+> the kit does not include** — and with no jumper there is no way to flash it and no
+> fallback, because eMMC variants cannot boot from SD. The Pi 5 trades a wear-item card
+> for a flashing process that works with any laptop and no special parts.
+
 ---
 
 ## 0. Before you travel
 
-### 0.1 Flash the eMMC
+### 0.1 Flash the card
 
-**This step is mandatory and must happen before travelling.** The eMMC ships blank, and
-CM5 eMMC variants cannot boot from an SD card — there is no fallback if the module
-arrives unflashed.
+Use **Raspberry Pi Imager** (raspberrypi.com/software) on a laptop with a microSD reader.
 
-There is no card to image; the onboard eMMC is written over USB with the board in device
-mode.
+- **Device:** Raspberry Pi 5
+- **OS:** `Raspberry Pi OS Lite (64-bit)` — under *Raspberry Pi OS (other)*
 
-1. Fit the **nRPIBOOT jumper** on the IO Board (marked on the silkscreen).
-2. Connect the board's **USB-C port** to the laptop with the bundled USB-A to USB-C
-   cable. This is what that cable is for — it is **not** the phone cable.
-3. Install and run `rpiboot`
-   ([instructions](https://www.raspberrypi.com/documentation/computers/compute-module.html)).
-   The eMMC then appears on the laptop as a mass-storage device.
-4. Flash it with **Raspberry Pi Imager**, selecting the eMMC as the target:
-   - **Device:** Raspberry Pi 5 (the CM5 shares the Pi 5's SoC)
-   - **OS:** `Raspberry Pi OS Lite (64-bit)` — under *Raspberry Pi OS (other)*
-5. **Remove the nRPIBOOT jumper afterwards**, or the board will keep booting into device
-   mode instead of starting normally.
-
-Lite, not Desktop. No monitor is ever attached to this machine, and a desktop session is
-one more thing that can hang.
+Lite, not Desktop. No monitor is ever attached to this machine, a desktop session is one
+more thing that can hang, and the GUI roughly triples card writes.
 
 Before writing, open **⚙ / "Edit Settings"** and set all of the following. This is what
-makes it boot ready with nothing to configure on site:
+makes the Pi boot ready with nothing to configure on site:
 
 | Setting | Value |
 |---|---|
 | Hostname | `aptlog` |
 | Username | `apt` |
-| Password | set one, record it in a password manager |
+| Password | set one — see the note below |
 | Wi-Fi | **skip — this machine runs on ethernet** |
 | Locale / timezone | the building's timezone (matters — the scheduler uses it) |
-| Enable SSH | ✅ **Use public-key authentication only** |
-| Public key | paste the developer's SSH public key |
+| Enable SSH | ✅ |
+| Public keys | paste **every** key that may need access, one per line |
 
-Password auth stays off. The account password is only for a keyboard-and-monitor
-rescue, which should never be needed.
+**Set a password *and* the SSH keys, and leave password authentication enabled.** If
+nobody on site has a keyboard, password-over-SSH is the only way back in when key auth
+fails. Harden it later over Tailscale — `PasswordAuthentication no` in
+`/etc/ssh/sshd_config` — once you know key auth works.
+
+Paste the public key of **whoever is doing the build**, not only the developer's. Someone
+holding an image they cannot log into is the most common way this goes wrong.
 
 ### 0.2 Generate a Tailscale auth key
 
@@ -70,51 +64,72 @@ no interactive login at the building.
 Generate a fresh key rather than reusing one. Auth keys are single-use by default, and
 the tag is what allows ACLs to scope what this device can reach.
 
+**Check the prefix.** An auth key starts with `tskey-auth-`. A key starting with
+`tskey-api-` is an API access token — a different object that manages the tailnet and
+cannot enrol a device. Generating the wrong one is easy and only shows up as a failure at
+the building.
+
 ### 0.3 Stage the first-boot script
 
-While the eMMC is still mounted on the laptop from step 0.1, its boot partition appears
-as `bootfs`. Copy [`scripts/firstboot.sh`](../scripts/firstboot.sh) to the root of that
-partition and put the auth key in it where marked.
+After Imager finishes, the card remounts as `bootfs`. Copy
+[`scripts/firstboot.sh`](../scripts/firstboot.sh) to the root of that partition and put
+the auth key in it where marked.
 
-### 0.4 Buy the four things the kit doesn't include
+### 0.4 Parts
 
-| Item | Note |
+The Pi 5 board on its own is not enough. Either buy a kit that covers the first four rows
+below, or assemble them individually.
+
+| Item | Requirement |
 |---|---|
-| Powered USB hub | self-powered, ideally `uhubctl`-capable (e.g. Plugable USB3-HUB7BC) |
-| Ethernet cable, Cat 6 | measure the run to the gateway |
+| Raspberry Pi 5 | 4 GB is sufficient; 8 GB gives debugging headroom |
+| **27 W USB-C PD power supply** | **not optional — see below** |
+| Active Cooler *or* a case with a fan | one or the other, never both |
+| Case | must fit whichever cooling you chose |
+| microSD, 64 GB | **high-endurance** (Samsung PRO Endurance, SanDisk Max Endurance) |
+| microSD reader | skip if the laptop has a slot |
+| RTC battery | ML2020 / LIR2025 with a **2-pin JST connector** — *not* a bare CR2032 |
+| Powered USB hub | self-powered, ideally `uhubctl`-capable |
+| Ethernet cable, Cat 6 | measure the run to the gateway first |
 | Phone data cable | USB-A to the phone's connector — **data, not charge-only** |
-| CR2032 battery | the RTC socket is on the board; the cell is not in the kit |
 
-No microSD and no card reader — the eMMC replaces both.
+**The 27 W supply is a functional requirement, not a recommendation.** The Pi 5 limits its
+four USB ports to 600 mA combined by default, raising that to 1.6 A only when it detects
+an official USB-C PD supply. Underpower it and the phone misbehaves in ways that look
+exactly like software faults.
+
+**The RTC battery is a connectorized cell, not a coin-cell socket.** A loose CR2032 has
+nowhere to plug in on a Pi 5.
+
+**High-endurance card, not a standard one.** This machine logs continuously; ordinary
+cards fail within 6–18 months of that, in a room with nobody in it. Endurance cards are
+built for dashcam-style continuous writing. `firstboot.sh` also caps the journal to
+volatile storage to cut writes further.
 
 ---
 
 ## 1. Assemble
 
 1. Cooling — **pick one, they are alternatives**:
-   - **Preferred: the metal IO Case and its built-in fan.** Connect the fan to the
-     board's 4-pin JST-SH connector before closing the case. Enclosed and actively
-     cooled is the right choice for continuous operation in a living space.
-   - The separate passive **Cooler for CM5** is not designed to fit under the case lid.
-     Using it means running the unit open, which invites dust. Leave it in the box
-     unless the case fan fails.
-2. Seat the Compute Module on the IO Board, and fit the **antenna kit** — the wireless
-   variant needs it for any wifi at all. Ethernet is the primary link, but wifi is a
-   useful fallback for recovery.
-3. Fit the **CR2032** in the RTC socket. It keeps the clock across power cuts, which
-   matters here — a unit that reboots at 3am shouldn't run on a wrong clock and fire the
-   whole day's schedule at once.
+   - The **Active Cooler**, in a case with clearance for it, or
+   - a case with its own integrated fan.
+
+   The official Pi 5 case's built-in fan and the Active Cooler occupy the same space.
+   Fit whichever you chose before the board goes in the case; the fan connector is
+   awkward to reach afterwards.
+2. Insert the **microSD**.
+3. Connect the **RTC battery** to its 2-pin JST connector and stick it down with the
+   adhesive pad. It keeps the clock across power cuts, which matters here — a unit that
+   reboots at 3am shouldn't run on a wrong clock and fire the whole day's schedule at
+   once.
 4. Board into the case.
-5. **Ethernet** from the IO Board to a LAN port on the Xfinity gateway.
-6. **Powered USB hub** into its own wall outlet, then hub → one of the board's two
-   **USB 3.0 Type-A** ports.
-7. **Phone → the powered hub**, never the board. The IO Board's two USB 3.0 ports share
-   roughly **1.2 A total** through an internal current switch — well under what a phone
-   draws. Powering the phone from the board causes random disconnects and slow battery
-   drain that read as software bugs.
-8. Power last, using the **27 W USB-C supply from the kit**. A lower-wattage supply
-   reduces the USB budget further and the phone will misbehave in ways that look like
-   software faults.
+5. **Ethernet** from the Pi to a LAN port on the Xfinity gateway.
+6. **Powered USB hub** into its own wall outlet, then hub → one of the Pi's **USB 3.0**
+   ports (the blue ones).
+7. **Phone → the powered hub**, never the Pi directly. The Pi's four ports share 1.6 A
+   total, well under what a phone draws. Powering the phone from the Pi causes random
+   disconnects and slow battery drain that read as software bugs.
+8. Pi power last, using the **27 W USB-C supply**.
 
 ---
 
@@ -142,9 +157,10 @@ Do this once, with the phone in hand.
 
 ## 3. First boot
 
-Power on and give it about a minute to come up.
+Power on and give it about a minute.
 
-The Pi is not on Tailscale yet, so find it on the building LAN — check the Xfinity admin
+The Pi is not on Tailscale yet, so find it on the building LAN. If a TV is available,
+HDMI shows the login prompt with the IP address on it. Otherwise check the Xfinity admin
 page for a device named `aptlog`, or try the hostname directly:
 
 ```bash
@@ -178,6 +194,7 @@ adb devices -l
 # 2. per-port power control, for automated recovery
 sudo uhubctl
 #    want: the hub listed with "Current status" per port
+#    if absent, see OPERATIONS.md §1.1 for the fallback
 
 # 3. network anchor
 ip neigh show default          # gateway MAC — record it
@@ -228,27 +245,28 @@ Tape a card to the Pi:
   Questions: <developer name and number>
 ```
 
-Also physically label the phone cable and the ethernet cable so they don't get
-tidied away.
+Also physically label the phone cable and the ethernet cable so they don't get tidied
+away, and tape over the hub's per-port switches — a bumped switch disconnects the phone
+and looks identical to a software failure.
 
 ---
 
 ## Known constraint: disk encryption
 
 The requirement that a non-technical person can power-cycle the Pi and have it recover
-unattended **rules out full-disk encryption**. FDE needs a passphrase at boot; there is
-no TPM-sealed unlock path on a Pi that survives a cold start with nobody present.
+unattended **rules out full-disk encryption**. FDE needs a passphrase at boot; there is no
+TPM-sealed unlock path on a Pi that survives a cold start with nobody present.
 
 The mitigation is to keep little worth stealing on the device:
 
 - Store patient **identifiers**, never names, in the local database and the audit log.
   Name resolution stays in the app, on the phone.
 - Keep the app credential and the phone PIN in a file readable only by the service user;
-  this is obfuscation against casual access, not protection against someone who takes
-  the hardware.
-- Treat physical possession of the unit as full compromise, and rotate the app password
-  if it is ever lost or replaced. The eMMC is soldered to the module, so unlike a
-  microSD it can't be quietly pulled and read in a laptop — a small but real gain.
+  this is obfuscation against casual access, not protection against someone who takes the
+  card.
+- Treat physical access to the SD card as full compromise, and rotate the app password if
+  the hardware is ever lost or replaced. A card is easier to remove and read than soldered
+  storage would be, which makes this a real consideration rather than a theoretical one.
 
 The device lives in a private residence rather than a public area, which is the main
 control here. That is a real limitation, not a solved problem — it should be a conscious
