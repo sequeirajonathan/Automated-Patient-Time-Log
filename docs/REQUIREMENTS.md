@@ -162,6 +162,67 @@ collapsed into one (§1.1).
   from the device and must not discover a silent failure at end of shift.
 - Include the reason, the patient, and whether the gate passed.
 
+### REQ-10 — Remote signature capture and replay
+
+The app requires the **operator's own attestation signature** on each visit. The phone is
+on the ground floor and she is not, so the signature is drawn by her on her own device and
+replayed onto the target phone as a touch gesture.
+
+This is a remote input device, not a signing service. The distinction is REQ-10.6 and it
+is what keeps the signature hers.
+
+**10.1 — Detection.** The agent detects the signature field being rendered, pauses the
+check-off, and emits a `signature_requested` event. It must not proceed past this point
+by any other route.
+
+**10.2 — Notification.** The event is pushed to the UI over SSE or WebSocket, not polled.
+She may be mid-visit on another floor; a page she has to refresh is a page she won't see.
+
+**10.3 — Informed prompt.** Before the canvas is enabled, the UI must show **which patient
+and which scheduled visit** the signature attests to. She cannot attest to something she
+cannot see, and a signature request that doesn't identify its subject is not a valid one.
+
+**10.4 — Capture.** An HTML canvas records pointer events as strokes of
+`(x, y, t)` where x and y are **normalised to 0–1** against the canvas dimensions and `t`
+is milliseconds from stroke start. Multiple strokes are preserved as separate arrays —
+signatures lift the pen.
+
+**10.5 — Transport.** Strokes POST to the agent with a **single-use nonce** issued with
+the `signature_requested` event. A payload without a matching outstanding nonce is
+rejected, so a captured request body cannot be submitted twice.
+
+**10.6 — Freshness (non-negotiable).** Every signature is captured fresh, in response to a
+specific prompt, and **discarded from memory once replayed**. The system must never store
+a signature bitmap or stroke set for reuse on a later patient. Caching and re-stamping
+would make the system sign on her behalf rather than transmit her signing, which is a
+different thing entirely and not one this project builds.
+
+**10.7 — Mapping.** Normalised strokes map onto the target element's bounds, not the
+screen:
+- source of truth is `element.rect` → `{x, y, width, height}` of the signature field
+- `scale = min(rect.w / cap_w, rect.h / cap_h)`, then centre the result within the field
+- **preserve aspect ratio** — letterbox rather than stretch; a stretched signature does
+  not look like hers
+
+**10.8 — Replay.** Appium W3C pointer actions: `pointer_down`, a sequence of
+`pointer_move` interleaved with `pause` durations taken from the captured deltas, then
+`pointer_up` — one batched `perform()` per stroke. Preserve the original timing; some
+signature widgets apply velocity-based stroke smoothing, and uniform-speed replay is
+visibly wrong. `adb shell sendevent` is the fallback if a widget rejects synthetic
+pointer events.
+
+**10.9 — Verification.** Confirm the signature registered before advancing — normally the
+Submit/Next control becoming enabled. Do not assume the strokes landed.
+
+**10.10 — Timeout.** If no signature arrives within a configurable window, **abandon the
+check-off and alert**. Never submit the visit unsigned, and never hold the session open
+indefinitely waiting.
+
+**10.11 — Audit.** Record that a signature occurred: timestamp, patient, stroke count,
+duration, nonce, and a hash of the stroke data. **Do not store the bitmap or the raw
+strokes.** The hash proves a distinct signature happened for that visit without leaving a
+reusable copy of her signature on the device.
+
 ---
 
 ## 5. Non-functional requirements
@@ -192,6 +253,12 @@ will break them; the blast radius should be one file per screen.
 - [ ] Reconciliation report renders and flags an injected divergence
 - [ ] A forced failure produces an alert
 - [ ] `--production` refuses to run while `LocationSource` is a stub
+- [ ] Signature request reaches the UI by push, naming the patient and visit
+- [ ] A signature drawn on a phone-sized canvas replays legibly and undistorted into a
+      differently-proportioned signature field
+- [ ] Replaying a captured payload a second time is rejected (nonce consumed)
+- [ ] No signature bitmap or stroke data survives on disk after replay
+- [ ] Signature timeout abandons the check-off and alerts rather than submitting unsigned
 - [ ] No real patient data or credentials in git history
 
 ---
