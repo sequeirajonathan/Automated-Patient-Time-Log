@@ -223,6 +223,56 @@ duration, nonce, and a hash of the stroke data. **Do not store the bitmap or the
 strokes.** The hash proves a distinct signature happened for that visit without leaving a
 reusable copy of her signature on the device.
 
+### REQ-11 — Bilingual interface (English / Spanish)
+
+- All operator-facing text ships in both `en` and `es`. JSON message catalogs, a toggle
+  persisted in localStorage, lookup in the templates. No i18n framework is warranted at
+  this size.
+- **The signature prompt (REQ-10.3) and all alerts must be translated.** REQ-10.3 requires
+  she can see which patient and visit she is attesting to *before* signing; that is only
+  satisfied in a language she reads. A browser auto-translating a page underneath a
+  signature does not satisfy it.
+- Dates, times, and numbers follow the selected locale.
+- No string is concatenated from fragments — full sentences per key, so grammar survives
+  translation.
+
+### REQ-12 — Liveness heartbeat
+
+Every other alert in this system fires on a failure the agent *notices*. A dead,
+unplugged, or offline Pi notices nothing and reports nothing, which is indistinguishable
+from a quiet, healthy day.
+
+- A timer pings an external monitor (healthchecks.io or equivalent) on a fixed interval.
+  **Missing pings raise the alarm** — silence is the signal.
+- The ping fires **only after** verifying: phone attached over USB and authorised, all
+  units active, `/healthz` responding. A heartbeat sent while the agent is broken is worse
+  than no heartbeat.
+- A known-bad state signals explicitly (`/fail`) rather than going silent, so "broken" is
+  distinguishable from "unreachable".
+- Outbound only — no inbound access, no port forwarding, and it must keep reporting when
+  Tailscale is down.
+- The timer must **not** be `Persistent=true`. A replayed heartbeat would assert liveness
+  for a period the machine was not alive.
+
+### REQ-13 — Image hygiene
+
+The production unit is cloned from an image built on a different machine. Identity and
+data must not travel with it.
+
+- `sanitize-for-image.sh` removes, before capture: SSH host keys, `/etc/machine-id`,
+  Tailscale node state, **all of `/var/lib/aptlog/`**, secrets, logs, shell history, and
+  `~/.android/adbkey`.
+- **No patient data may exist in a shipped image**, under any circumstances. The
+  operational database and audit log ship empty.
+- `aptlog-firstrun.service` regenerates host keys and machine-id on first boot, enrols in
+  Tailscale, starts services, then disables itself. It must be idempotent and must remain
+  armed if it fails, so a missing auth key is recoverable by pasting one in and rebooting.
+- The Tailscale auth key is **not** baked into the image. It is read from
+  `tailscale-authkey.txt` on the FAT32 boot partition — editable from Windows without a
+  terminal — and cleared once consumed.
+- Application state lives in `/var/lib/aptlog/`, never inside the git checkout, since
+  `manager.sh` force-checkouts `/opt/aptlog` on every update.
+
 ---
 
 ## 5. Non-functional requirements
@@ -259,6 +309,13 @@ will break them; the blast radius should be one file per screen.
 - [ ] Replaying a captured payload a second time is rejected (nonce consumed)
 - [ ] No signature bitmap or stroke data survives on disk after replay
 - [ ] Signature timeout abandons the check-off and alerts rather than submitting unsigned
+- [ ] Every operator-facing string renders in both English and Spanish, signature prompt
+      and alerts included
+- [ ] Stopping the agent causes the external monitor to alarm within one interval
+- [ ] Heartbeat does **not** ping while the phone is detached
+- [ ] A sanitized image contains no patient data, no secrets, and no Tailscale identity
+- [ ] Two Pis flashed from the same image come up with distinct host keys and machine-ids
+- [ ] First boot with an empty auth key file leaves `aptlog-firstrun` armed to retry
 - [ ] No real patient data or credentials in git history
 
 ---

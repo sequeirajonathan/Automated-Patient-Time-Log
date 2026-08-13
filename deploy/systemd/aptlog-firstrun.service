@@ -1,0 +1,18 @@
+[Unit]
+Description=APT Log first-boot setup for a cloned image
+After=network-online.target
+Wants=network-online.target
+# Only meaningful before the identity it creates exists.
+ConditionPathExists=/opt/aptlog/scripts/firstrun.sh
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/opt/aptlog/scripts/firstrun.sh
+RemainAfterExit=yes
+TimeoutStartSec=600
+# Disables itself on success; a failure leaves it armed to retry on next boot,
+# which is what you want when the auth key hasn't been pasted in yet.
+
+[Install]
+WantedBy=multi-user.target

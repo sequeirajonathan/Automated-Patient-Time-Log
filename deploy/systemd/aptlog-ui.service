@@ -7,9 +7,11 @@ Wants=network-online.target
 Type=simple
 User=apt
 WorkingDirectory=/opt/aptlog
-# Bound to the Tailscale interface only — never 0.0.0.0. The building LAN is
-# shared with residents, and this page shows visit state.
-ExecStart=/opt/aptlog/.venv/bin/uvicorn apt_log.ui:app --host 100.64.0.0 --port 8080
+# Loopback only — never 0.0.0.0. The building LAN is shared with other residents
+# and this page shows visit state. `tailscale serve` proxies to this port and is
+# what publishes it to the tailnet, so binding an interface here is unnecessary
+# and would be guessing at an address that can change.
+ExecStart=/opt/aptlog/.venv/bin/uvicorn apt_log.ui:app --host 127.0.0.1 --port 8080
 Restart=always
 RestartSec=10
 StartLimitIntervalSec=0

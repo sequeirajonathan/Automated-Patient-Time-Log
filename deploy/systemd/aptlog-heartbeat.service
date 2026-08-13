@@ -1,0 +1,11 @@
+[Unit]
+Description=APT Log outbound heartbeat (dead-man's switch)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=-/etc/aptlog/heartbeat.env
+ExecStart=/opt/aptlog/scripts/heartbeat.sh
+TimeoutStartSec=60

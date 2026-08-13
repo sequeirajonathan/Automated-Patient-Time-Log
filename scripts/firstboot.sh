@@ -120,6 +120,17 @@ systemctl daemon-reload
 for unit in aptlog-appium aptlog-agent aptlog-ui; do
     systemctl enable --now "$unit" 2>/dev/null || echo "note: $unit not present yet"
 done
-systemctl enable --now aptlog-manager.timer 2>/dev/null || true
+systemctl enable --now aptlog-manager.timer aptlog-heartbeat.timer 2>/dev/null || true
+
+# aptlog-firstrun is deliberately NOT enabled here — it is armed by
+# sanitize-for-image.sh so it runs on the first boot of a *cloned* image, not on
+# the reference machine that produced it.
+
+# Publish the UI to the tailnet. Serve, not Funnel: this page shows visit state
+# and must not reach the public internet.
+if tailscale status >/dev/null 2>&1; then
+    tailscale serve --bg 8080 2>/dev/null || \
+        echo "note: tailscale serve failed — enable HTTPS certs on the tailnet"
+fi
 
 log "done — reboot now, then run the section 4 checks in docs/PI_SETUP.md"

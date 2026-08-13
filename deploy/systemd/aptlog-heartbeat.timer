@@ -1,0 +1,11 @@
+[Unit]
+Description=Send an outbound heartbeat every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+# Deliberately NOT Persistent — a heartbeat replayed after downtime would report
+# liveness for a period the machine was not alive.
+
+[Install]
+WantedBy=timers.target
