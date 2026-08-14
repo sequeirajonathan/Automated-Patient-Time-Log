@@ -6,6 +6,7 @@ must not quietly rot. Each test below maps to one of them.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from unittest.mock import patch
 
@@ -15,6 +16,7 @@ from apt_log.probe import usb_devices
 from apt_log.transport import (
     ProductionRefused,
     TransportMode,
+    _config_is_trustworthy,
     assert_production_allowed,
     attached_devices,
     resolve_transport_mode,
@@ -34,11 +36,26 @@ BOTH_ATTACHED = (
 ONLY_TCP = "List of devices attached\n192.168.1.50:5555\tdevice\n"
 
 
+def _fake_stat(uid: int = 0, mode: int = 0o644) -> os.stat_result:
+    """A stat result with the ownership bits we care about.
+
+    Ownership is faked rather than produced by a real chown so the suite behaves
+    identically whether it runs as root in a container or as the service user on
+    the Pi. The real-filesystem case is covered separately below.
+    """
+    return os.stat_result((0o100000 | mode, 0, 0, 1, uid, 0, 0, 0, 0, 0))
+
+
 @pytest.fixture
 def config(tmp_path):
-    """Point CONFIG_PATH at a temp file; return a writer for it."""
+    """Point CONFIG_PATH at a temp file; return a writer for it.
+
+    Defaults to a root-owned 0644 config so the transport-mode tests exercise
+    parsing rather than ownership. Ownership has its own tests.
+    """
     path = tmp_path / "transport.conf"
-    with patch("apt_log.transport.CONFIG_PATH", path):
+    with patch("apt_log.transport.CONFIG_PATH", path), \
+         patch("apt_log.transport._stat_config", return_value=_fake_stat()):
         yield lambda text: path.write_text(text, encoding="utf-8")
 
 
@@ -67,6 +84,54 @@ class TestDefaultIsUsb:
     def test_quoted_and_cased_values_accepted(self, config):
         config('TRANSPORT_MODE = "DEV"\n')
         assert resolve_transport_mode() is TransportMode.DEV
+
+
+class TestConfigMustBeRootOwned:
+    """The module defends itself rather than trusting firstboot.sh to have run.
+
+    `dev` is justified as an act by someone with root; a config the service user
+    could write would let the agent switch off its own containment.
+    """
+
+    def test_root_owned_and_not_group_writable_is_trusted(self):
+        with patch("apt_log.transport._stat_config", return_value=_fake_stat(0, 0o644)):
+            assert _config_is_trustworthy() is True
+
+    def test_non_root_owner_is_refused(self):
+        with patch("apt_log.transport._stat_config", return_value=_fake_stat(1000, 0o644)):
+            assert _config_is_trustworthy() is False
+
+    def test_group_writable_is_refused(self):
+        with patch("apt_log.transport._stat_config", return_value=_fake_stat(0, 0o664)):
+            assert _config_is_trustworthy() is False
+
+    def test_world_writable_is_refused(self):
+        with patch("apt_log.transport._stat_config", return_value=_fake_stat(0, 0o666)):
+            assert _config_is_trustworthy() is False
+
+    def test_absent_config_is_not_trusted(self):
+        with patch("apt_log.transport._stat_config", return_value=None):
+            assert _config_is_trustworthy() is False
+
+    def test_dev_is_refused_when_the_config_is_not_root_owned(self, tmp_path):
+        """End to end: a service-user-writable config cannot enable dev."""
+        path = tmp_path / "transport.conf"
+        path.write_text("TRANSPORT_MODE=dev\n", encoding="utf-8")
+        with patch("apt_log.transport.CONFIG_PATH", path), \
+             patch("apt_log.transport._stat_config", return_value=_fake_stat(1000, 0o644)):
+            assert resolve_transport_mode() is TransportMode.USB
+
+    def test_real_filesystem_config_owned_by_current_user(self, tmp_path):
+        """Sanity check against a real file, whoever the suite runs as.
+
+        Root in a container writes a root-owned file and should be trusted; the
+        service user on the Pi writes one owned by itself and should not.
+        """
+        path = tmp_path / "transport.conf"
+        path.write_text("TRANSPORT_MODE=dev\n", encoding="utf-8")
+        with patch("apt_log.transport.CONFIG_PATH", path):
+            expected = TransportMode.DEV if os.geteuid() == 0 else TransportMode.USB
+            assert resolve_transport_mode() is expected
 
 
 class TestNotEnableableByEnvironment:

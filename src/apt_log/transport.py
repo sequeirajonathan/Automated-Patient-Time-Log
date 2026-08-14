@@ -22,11 +22,16 @@ The containment, all of it load-bearing:
 
 from __future__ import annotations
 
+import logging
+import os
 import re
+import stat as stat_module
 from enum import StrEnum
 from pathlib import Path
 
 from apt_log.probe import _adb, usb_devices
+
+log = logging.getLogger(__name__)
 
 # Deliberately a module constant rather than anything injectable at runtime. Tests
 # patch it; production code never passes a different path.
@@ -45,13 +50,53 @@ class ProductionRefused(RuntimeError):
     """Raised when --production is attempted on a development affordance (REQ-0)."""
 
 
+def _stat_config() -> os.stat_result | None:
+    """Isolated so the ownership rules can be tested without a real chown."""
+    try:
+        return CONFIG_PATH.stat()
+    except OSError:
+        return None
+
+
+def _config_is_trustworthy() -> bool:
+    """Refuse a transport.conf that a non-root account could have written.
+
+    The justification for `dev` existing at all is that enabling it is an act on
+    the device by someone with root. This module enforces that itself rather than
+    trusting the bootstrap to have run: firstboot.sh creating /etc/aptlog as
+    root:root 0755 is a second layer, not the only one. An agent that could write
+    its own config could switch off its own containment.
+    """
+    st = _stat_config()
+    if st is None:
+        return False
+    if st.st_uid != 0:
+        log.error(
+            "REFUSING %s: owned by uid %d, not root. The dev transport exception "
+            "requires a root-owned config (REQ-5.4.1); falling back to usb.",
+            CONFIG_PATH, st.st_uid,
+        )
+        return False
+    if st.st_mode & (stat_module.S_IWGRP | stat_module.S_IWOTH):
+        log.error(
+            "REFUSING %s: mode %o is group- or world-writable, so a non-root "
+            "account could enable dev transport; falling back to usb.",
+            CONFIG_PATH, stat_module.S_IMODE(st.st_mode),
+        )
+        return False
+    return True
+
+
 def resolve_transport_mode() -> TransportMode:
     """Read the transport mode from config. Never from argv or the environment.
 
-    Any absence, parse failure, or unrecognised value resolves to USB. The safe
-    direction is the strict one: a corrupt config must not silently unlock the
-    permissive mode.
+    Any absence, parse failure, unrecognised value, or untrustworthy ownership
+    resolves to USB. The safe direction is the strict one: a corrupt or
+    attacker-writable config must not silently unlock the permissive mode.
     """
+    if not _config_is_trustworthy():
+        return TransportMode.USB
+
     try:
         text = CONFIG_PATH.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
