@@ -10,7 +10,7 @@ agency to the caregiver, which is the specific outcome this whole project exists
 to avoid. So the controller does not answer that question. It stops, shows her
 the screen it is looking at, and asks.
 
-Three kinds of request, and each one asks for something the machine genuinely
+Four kinds of request, and each one asks for something the machine genuinely
 cannot produce:
 
 - **signature** — her attestation (REQ-10). Hers, drawn fresh, replayed as touch.
@@ -18,14 +18,21 @@ cannot produce:
   of a location check. The device travels with her, so the code evidences
   nothing about where she is; what it does is stop the app asking the phone.
 - **choice** — one of the options *the app itself is offering*, relayed back.
+- **otp** — a login code texted to her phone. One of the four apps authenticates
+  by phone number, so this is the only way in.
 
-That distinction is worth stating plainly because it is easy to get backwards. A
+The token one is worth stating plainly because it is easy to get backwards. A
 token is not proof of presence and does not replace the gate. It is the reason
 the app never runs its radius check, which is an operational win and nothing
 more. Whether a visit may be recorded at all is still REQ-5's question, answered
 by the controller's own signals, and the token does not touch it.
 
-The third one is the one to be careful about, so it is built to be narrow. The
+**Opening an OTP request is not free.** By the time one exists the app has already
+sent an SMS, so a caller that retries on timeout is sending a second text to a
+real person and walking toward a rate limit. One request, one code; on timeout,
+abandon and alert rather than asking again.
+
+The choice one is the one to be careful about, so it is built to be narrow. The
 agent enumerates the options when it opens the request, and `submit` refuses
 anything not on that list. There is no free-text answer and no "proceed anyway".
 That matters because a relay that accepts arbitrary input is a remote control
@@ -34,8 +41,9 @@ falls off. If the agent never offers GPS-without-presence as an option, no
 request body from any device can select it.
 
 Everything is dropped once consumed. REQ-10.6 draws that line for signatures,
-and the same reasoning covers a token: it is her EVV credential, a stored copy
-is a reusable one, and nothing here needs it after it has been typed in.
+and the same reasoning covers a token or a login code: they are credentials, a
+stored copy is a reusable one, and nothing here needs them after they have been
+typed in.
 """
 
 from __future__ import annotations
@@ -56,7 +64,14 @@ DEFAULT_TIMEOUT = timedelta(minutes=10)
 KIND_SIGNATURE = "signature"
 KIND_TOKEN = "token"
 KIND_CHOICE = "choice"
-KINDS = (KIND_SIGNATURE, KIND_TOKEN, KIND_CHOICE)
+KIND_OTP = "otp"
+KINDS = (KIND_SIGNATURE, KIND_TOKEN, KIND_CHOICE, KIND_OTP)
+
+# An SMS code is short-lived, and a request that outlives the code it is asking
+# for produces the worst diagnosis available: the controller types an expired
+# code, the app rejects it, and the failure is indistinguishable from a wrong
+# password. Better to give up while the reason is still legible.
+OTP_TIMEOUT = timedelta(minutes=4)
 
 # Separators people type into a code field but that the app does not want.
 _TOKEN_SEPARATORS = re.compile(r"[\s\-]+")
@@ -75,7 +90,7 @@ class RelayExpired(KeyError):
 @dataclass
 class RelayResponse:
     kind: str
-    value: object          # strokes | token string | chosen option
+    value: object          # strokes | code string | chosen option
     digest: str            # of the value, for the audit trail
 
 
@@ -106,6 +121,12 @@ def normalise_token(raw: str) -> str:
     never stored, which is what actually keeps a mistyped name out of the
     record. If a real token turns out to be letters only, this is the line to
     change — and finding that out by being refused is the better way round.
+
+    Shared with the SMS login codes, because the two genuinely have the same
+    shape and inventing a difference would be pretending to a precision this
+    does not have. What separates them is the kind — which the audit trail
+    records, since one attests a visit and the other opens a session — and how
+    long the request stays open.
     """
     cleaned = _TOKEN_SEPARATORS.sub("", (raw or "").strip())
     if not _TOKEN_SHAPE.match(cleaned) or not _HAS_DIGIT.search(cleaned):
@@ -172,6 +193,13 @@ class RelayQueue:
 
     def request_token(self, patient_id: str, scheduled: datetime | None) -> str:
         return self.request(KIND_TOKEN, patient_id, scheduled)
+
+    def request_otp(self, app_name: str) -> str:
+        """Ask for a login code. Not tied to a visit — this is about a session.
+
+        The short window is the point: see OTP_TIMEOUT.
+        """
+        return self.request(KIND_OTP, app_name, None, timeout=OTP_TIMEOUT)
 
     def request_choice(self, patient_id: str, scheduled: datetime | None,
                        options: tuple[str, ...]) -> str:
@@ -257,9 +285,9 @@ class RelayQueue:
                 raise RelayError("no strokes")
             return value
 
-        if kind == KIND_TOKEN:
+        if kind in (KIND_TOKEN, KIND_OTP):
             if not isinstance(value, str):
-                raise RelayError("a token is text")
+                raise RelayError("a code is text")
             # normalise_token raises on anything that is not code-shaped, and
             # the raw value never reaches a log line on the way past.
             return normalise_token(value)

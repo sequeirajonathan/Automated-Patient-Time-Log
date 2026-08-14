@@ -12,7 +12,10 @@ from datetime import datetime, timedelta
 import pytest
 
 from apt_log.ui.relay import (
+    DEFAULT_TIMEOUT,
+    OTP_TIMEOUT,
     KIND_CHOICE,
+    KIND_OTP,
     KIND_SIGNATURE,
     KIND_TOKEN,
     RelayError,
@@ -152,3 +155,31 @@ class TestKindIsPartOfTheAnswer:
         q = RelayQueue()
         with pytest.raises(RelayError):
             q.request("anything", "PT-1", None)
+
+
+class TestOtp:
+    def test_a_login_code_is_carried_and_dropped(self):
+        q = RelayQueue()
+        nonce = q.request_otp("inmyteam")
+        q.submit(nonce, KIND_OTP, "483 921")
+        assert q.wait(0.5).value == "483921"
+        assert q.current() is None
+
+    def test_the_window_is_shorter_than_the_default(self):
+        """An SMS code outlives its request or the reverse; if the request wins,
+        the controller types an expired code and the app rejects it — which is
+        indistinguishable from a wrong password, the worst diagnosis available."""
+        assert OTP_TIMEOUT < DEFAULT_TIMEOUT
+
+    def test_it_is_not_tied_to_a_visit(self):
+        """A login code opens a session; it does not attest to a patient."""
+        q = RelayQueue()
+        q.request_otp("inmyteam")
+        assert q.current()["scheduled"] is None
+        assert q.current()["patient_id"] == "inmyteam"
+
+    def test_a_token_answer_cannot_satisfy_a_login_code(self):
+        q = RelayQueue()
+        nonce = q.request_otp("inmyteam")
+        with pytest.raises(RelayError, match="otp"):
+            q.submit(nonce, KIND_TOKEN, "483921")

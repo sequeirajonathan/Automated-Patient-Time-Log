@@ -107,9 +107,9 @@
 
   {# 1. Relay — what the controller is asking her for.
 
-     Three kinds, one at a time. The signature is the only one that needs a
-     canvas; the other two are forms, because the controller stopping mid-visit
-     is exactly when scripts are least worth depending on. #}
+     Four kinds, one at a time. The signature is the only one that needs a
+     canvas; the rest are forms, because the controller stopping mid-visit is
+     exactly when scripts are least worth depending on. #}
   <section id="relay" {% if pending %}class="asking"{% endif %}>
     {% if not pending %}
       <h2>{{ t('relay.title') }}</h2>
@@ -162,6 +162,24 @@
         <label class="muted" for="token">{{ t('token.label') }}</label>
         <input class="code" id="token" name="value" inputmode="latin"
                autocomplete="off" autocapitalize="characters" spellcheck="false"
+               maxlength="20" required>
+        <div class="controls">
+          <button type="submit" class="primary">{{ t('relay.send') }}</button>
+        </div>
+      </form>
+
+    {% elif pending.kind == KIND_OTP %}
+      <h2>{{ t('otp.title') }}</h2>
+      {# No visit named here: a login code opens a session, it does not attest to
+         a patient. Naming one would be inventing a link that isn't there. #}
+      <p>{{ t('otp.prompt', app=pending.patient_id) }}</p>
+      <p class="muted">{{ t('otp.expires') }}</p>
+      <form method="post" action="/relay">
+        <input type="hidden" name="nonce" value="{{ pending.nonce }}">
+        <input type="hidden" name="kind" value="{{ KIND_OTP }}">
+        <label class="muted" for="otp">{{ t('otp.label') }}</label>
+        <input class="code" id="otp" name="value" inputmode="numeric"
+               autocomplete="one-time-code" spellcheck="false"
                maxlength="20" required>
         <div class="controls">
           <button type="submit" class="primary">{{ t('relay.send') }}</button>

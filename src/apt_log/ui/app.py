@@ -44,6 +44,7 @@ from apt_log.ui import state as state_mod
 from apt_log.ui.i18n import SUPPORTED, Translator, normalise
 from apt_log.ui.relay import (
     KIND_CHOICE,
+    KIND_OTP,
     KIND_SIGNATURE,
     KIND_TOKEN,
     RelayError,
@@ -95,6 +96,7 @@ def dashboard(request: Request):
             "KIND_SIGNATURE": KIND_SIGNATURE,
             "KIND_TOKEN": KIND_TOKEN,
             "KIND_CHOICE": KIND_CHOICE,
+            "KIND_OTP": KIND_OTP,
         },
     )
 
@@ -255,8 +257,8 @@ def submit_relay(nonce: str = Form(...), kind: str = Form(...),
     by the agent when it opened the request; this route can only carry a reply
     back or refuse it.
     """
-    if kind not in (KIND_TOKEN, KIND_CHOICE):
-        # Signatures go through /signature, and there is no third thing.
+    if kind not in (KIND_TOKEN, KIND_CHOICE, KIND_OTP):
+        # Signatures go through /signature, because strokes are not a form field.
         return Response(status_code=400)
 
     try:
