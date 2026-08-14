@@ -46,6 +46,10 @@ log = logging.getLogger(__name__)
 
 DEFAULT_INTERVAL = 5.0
 
+# Bounds as uiautomator writes them: [x1,y1][x2,y2]
+_BOUNDS = re.compile(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]")
+_NODE = re.compile(r"<node[^>]*>")
+
 # Substrings that mark an activity as somewhere a credential can be typed.
 # Deliberately loose: a new app's login screen should be caught without anyone
 # remembering to add it here.
@@ -183,3 +187,54 @@ def run(path: Path, interval: float = DEFAULT_INTERVAL,
         count += 1
         if iterations is None or count < iterations:
             time.sleep(interval)
+
+
+# --------------------------------------------------------------------- overlay
+def _attr(node: str, name: str) -> str:
+    m = re.search(rf'{name}="([^"]*)"', node)
+    return m.group(1) if m else ""
+
+
+def elements(xml: str) -> list[dict]:
+    """The tappable structure of a screen, carrying no text.
+
+    This is what the page draws boxes from and what a tap posts back, so it is
+    built to hold nothing worth protecting. The words stay in the screenshot,
+    where they are already visible to whoever is looking at the page; the
+    structure is what crosses the wire a second time and lands in a log.
+
+    `has_text` is deliberately a boolean. Knowing a row has a label is enough to
+    draw it; knowing the label is a patient name.
+    """
+    found = []
+    for raw in _NODE.findall(xml or ""):
+        if _attr(raw, "clickable") != "true":
+            continue
+        m = _BOUNDS.search(_attr(raw, "bounds"))
+        if not m:
+            continue
+        x1, y1, x2, y2 = (int(g) for g in m.groups())
+        if x2 <= x1 or y2 <= y1:
+            continue
+        found.append({
+            "rid": _attr(raw, "resource-id").split("/")[-1],
+            "cls": _attr(raw, "class").rsplit(".", 1)[-1],
+            "b": [x1, y1, x2, y2],
+            "focused": _attr(raw, "focused") == "true",
+            "selected": _attr(raw, "selected") == "true",
+            "has_text": bool(_attr(raw, "text")),
+        })
+    return found
+
+
+def read_hierarchy(serial: str | None = None) -> str | None:
+    """Raw page source, or None when it cannot be read."""
+    try:
+        dumped = _adb(["shell", "uiautomator", "dump", "/sdcard/.aptlog-feed.xml"],
+                      serial)
+        if dumped.returncode != 0:
+            return None
+        out = _adb(["shell", "cat", "/sdcard/.aptlog-feed.xml"], serial).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.decode("utf-8", "replace") if out else None

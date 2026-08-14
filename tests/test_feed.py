@@ -137,3 +137,61 @@ class TestRun:
              patch.object(feed.time, "sleep"):
             feed.run(tmp_path / "s.png", interval=0, iterations=3)
         assert len(calls) == 3
+
+
+class TestElements:
+    """The overlay's data, which is also what a tap posts back.
+
+    Built to hold nothing worth protecting: the words live in the screenshot,
+    where they are already visible to whoever has the page open. The structure is
+    what crosses the wire a second time and lands in a log.
+    """
+
+    XML = (
+        '<node class="android.widget.Button" resource-id="com.x:id/btn_clock_in"'
+        ' text="Registrar Entrada" clickable="true" focused="true"'
+        ' selected="false" bounds="[19,744][731,804]" />'
+        '<node class="android.widget.TextView" resource-id="com.x:id/lbl_patient_name"'
+        ' text="CARIDAD ROJAS" clickable="false" bounds="[0,100][720,160]" />'
+        '<node class="android.view.ViewGroup" resource-id="" text=""'
+        ' clickable="true" bounds="[0,200][720,400]" />'
+        '<node class="android.widget.View" resource-id="com.x:id/zero"'
+        ' clickable="true" bounds="[5,5][5,5]" />'
+    )
+
+    def test_only_clickable_things_are_offered(self):
+        rids = [e["rid"] for e in feed.elements(self.XML)]
+        assert "btn_clock_in" in rids
+        assert "lbl_patient_name" not in rids
+
+    def test_no_text_survives_anywhere_in_the_output(self):
+        """The one property that matters. A patient name reaching this map would
+        put it in a POST body and a log line."""
+        import json
+        blob = json.dumps(feed.elements(self.XML))
+        for secret in ("CARIDAD", "ROJAS", "Registrar", "Entrada"):
+            assert secret not in blob
+
+    def test_text_presence_is_kept_as_a_boolean(self):
+        """Enough to draw the box; not enough to identify anyone."""
+        btn = next(e for e in feed.elements(self.XML) if e["rid"] == "btn_clock_in")
+        assert btn["has_text"] is True
+
+    def test_bounds_and_state_are_carried(self):
+        btn = next(e for e in feed.elements(self.XML) if e["rid"] == "btn_clock_in")
+        assert btn["b"] == [19, 744, 731, 804]
+        assert btn["focused"] is True and btn["selected"] is False
+
+    def test_an_element_with_no_area_is_dropped(self):
+        """A zero-size box cannot be aimed at and would only add noise."""
+        assert "zero" not in [e["rid"] for e in feed.elements(self.XML)]
+
+    def test_unnamed_containers_are_kept(self):
+        """Rows are often a bare clickable ViewGroup — dropping them would make
+        the visit list untappable, which is the screen that matters most."""
+        assert any(e["cls"] == "ViewGroup" and e["rid"] == ""
+                   for e in feed.elements(self.XML))
+
+    def test_garbage_in_does_not_raise(self):
+        assert feed.elements("") == []
+        assert feed.elements("<node bounds='nonsense' clickable='true'/>") == []
