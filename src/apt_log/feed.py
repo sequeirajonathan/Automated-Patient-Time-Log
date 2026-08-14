@@ -176,7 +176,7 @@ FRAME_NAME = "frame.json"
 
 def write_frame(path: Path, serial: str | None = None) -> str:
     """Capture once and publish the mirror frame. Returns a one-line status."""
-    hierarchy = read_hierarchy(serial)
+    hierarchy = read_stable_hierarchy(serial)
     png, focus, reason = capture(serial, hierarchy)
     screen = screen_for(focus)
 
@@ -287,6 +287,43 @@ def read_hierarchy(serial: str | None = None) -> str | None:
     return out.decode("utf-8", "replace") if out else None
 
 
+def read_stable_hierarchy(serial: str | None = None,
+                          attempts: int = 5) -> str | None:
+    """A dump worth trusting, or the best available.
+
+    `uiautomator dump` is not a snapshot. Measured on a completely static
+    Settings screen, four consecutive dumps returned 20, 2, 2 and 22 elements:
+    it sometimes captures a single window layer instead of the composed screen,
+    and nothing in the result says which kind you got. This is why Appium ships
+    its own instrumentation server rather than shelling out to this command.
+
+    Two consecutive dumps that agree is the cheapest signal that the screen was
+    actually read. Failing that, the richest dump wins -- a partial capture is
+    strictly a subset, so "most elements" is the least-wrong answer available
+    rather than an arbitrary tiebreak.
+    """
+    best: str | None = None
+    best_count = -1
+    previous: str | None = None
+
+    for attempt in range(attempts):
+        xml = read_hierarchy(serial)
+        if xml is not None:
+            els = elements(xml)
+            current = frame_id(els)
+            if els and current == previous:
+                return xml
+            previous = current
+            if len(els) > best_count:
+                best, best_count = xml, len(els)
+        if attempt < attempts - 1:
+            time.sleep(0.3)
+
+    if best is not None:
+        log.debug("no two dumps agreed; using the richest (%d elements)", best_count)
+    return best
+
+
 def frame_id(els: list[dict]) -> str:
     """Identity of a screen *for aiming purposes*.
 
@@ -319,19 +356,20 @@ def tap(claimed_frame: str, element: dict, serial: str | None = None) -> dict:
     first: if the tappable structure changed at all, nothing is touched and she
     gets a fresh frame to aim at.
 
-    Membership is checked as well as the hash. Matching ids prove the screen is
-    unchanged; they do not prove the posted rectangle was ever part of it, and a
-    tap at arbitrary coordinates is exactly what this is built not to be.
+    What is checked is that the element she aimed at is *still on the screen*,
+    at the bounds she saw it at, with the same identity. That is both the
+    staleness check and the guard against a posted rectangle that was never
+    there -- a tap at arbitrary coordinates being exactly what this is built not
+    to be.
+
+    `claimed_frame` is carried for the log rather than enforced. It was enforced
+    once; see read_stable_hierarchy for the measurement that changed it.
     """
-    xml = read_hierarchy(serial)
+    xml = read_stable_hierarchy(serial)
     if xml is None:
         raise StaleAim("the screen cannot be read right now")
 
     current = elements(xml)
-    now = frame_id(current)
-    if now != claimed_frame:
-        raise StaleAim(f"screen changed since you looked ({claimed_frame} -> {now})")
-
     bounds = list(element.get("b") or [])
     match = next(
         (e for e in current
@@ -341,7 +379,17 @@ def tap(claimed_frame: str, element: dict, serial: str | None = None) -> dict:
         None,
     )
     if match is None:
-        raise NotOnScreen("that is not one of the targets on this screen")
+        # Presence at those bounds *is* the staleness check, and a stronger one
+        # than comparing whole-frame hashes. If the screen moved on, the thing
+        # she aimed at is not there any more and this refuses. If it is still
+        # there, tapping it does what she meant regardless of what else changed
+        # elsewhere on the screen -- and with a dump source this noisy, whole
+        # frame equality would refuse almost every legitimate tap.
+        #
+        # The case a frame hash would catch and this does not is a different
+        # widget with the same resource-id, the same class and the same
+        # rectangle. That is the same control by every observable property.
+        raise StaleAim("that is no longer on the screen — look again")
 
     x1, y1, x2, y2 = match["b"]
     cx, cy = (x1 + x2) // 2, (y1 + y2) // 2

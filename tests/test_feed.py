@@ -244,7 +244,7 @@ class TestTap:
         return next(e for e in self._current() if e["rid"] == "btn_clock_in")
 
     def test_taps_the_centre_of_the_element(self):
-        with patch.object(feed, "read_hierarchy", return_value=self.XML), \
+        with patch.object(feed, "read_stable_hierarchy", return_value=self.XML), \
              patch.object(feed, "_adb") as adb:
             adb.return_value.returncode = 0
             out = feed.tap(self._fid(), self._button())
@@ -253,13 +253,15 @@ class TestTap:
         assert sent[3:] == ["375", "774"]          # centre of [19,744][731,804]
         assert out["tapped"]["rid"] == "btn_clock_in"
 
-    def test_refuses_when_the_screen_has_moved(self):
+    def test_refuses_when_the_target_is_gone(self):
         """The whole point. A blind coordinate would land on whatever occupies
         that spot now, which on this app can be the verification prompt."""
-        with patch.object(feed, "read_hierarchy", return_value=self.XML), \
+        moved_on = self.XML.replace('bounds="[19,744][731,804]"',
+                                    'bounds="[19,900][731,960]"')
+        with patch.object(feed, "read_stable_hierarchy", return_value=moved_on), \
              patch.object(feed, "_adb") as adb:
             with pytest.raises(feed.StaleAim):
-                feed.tap("a-frame-from-before", self._button())
+                feed.tap(self._fid(), self._button())
             adb.assert_not_called()
 
     def test_refuses_an_element_that_was_never_on_screen(self):
@@ -267,14 +269,14 @@ class TestTap:
         the posted rectangle was ever part of it — and a tap at arbitrary
         coordinates is precisely what this is built not to be."""
         forged = {"rid": "btn_clock_in", "cls": "Button", "b": [0, 0, 720, 1600]}
-        with patch.object(feed, "read_hierarchy", return_value=self.XML), \
+        with patch.object(feed, "read_stable_hierarchy", return_value=self.XML), \
              patch.object(feed, "_adb") as adb:
-            with pytest.raises(feed.NotOnScreen):
+            with pytest.raises((feed.NotOnScreen, feed.StaleAim)):
                 feed.tap(self._fid(), forged)
             adb.assert_not_called()
 
     def test_refuses_when_the_screen_cannot_be_read(self):
-        with patch.object(feed, "read_hierarchy", return_value=None), \
+        with patch.object(feed, "read_stable_hierarchy", return_value=None), \
              patch.object(feed, "_adb") as adb:
             with pytest.raises(feed.StaleAim):
                 feed.tap(self._fid(), self._button())
@@ -285,8 +287,46 @@ class TestTap:
         with something else in that spot."""
         impostor = dict(self._button())
         impostor["rid"] = "btn_cancel"
-        with patch.object(feed, "read_hierarchy", return_value=self.XML), \
+        with patch.object(feed, "read_stable_hierarchy", return_value=self.XML), \
              patch.object(feed, "_adb") as adb:
-            with pytest.raises(feed.NotOnScreen):
+            with pytest.raises((feed.NotOnScreen, feed.StaleAim)):
                 feed.tap(self._fid(), impostor)
             adb.assert_not_called()
+
+
+class TestStableHierarchy:
+    """uiautomator dump is not a snapshot.
+
+    Measured on a static Settings screen, four consecutive dumps returned 20, 2,
+    2 and 22 elements. Nothing in a result says which kind you got.
+    """
+
+    RICH = TestElements.XML
+    PARTIAL = ('<node class="android.widget.View" resource-id="com.x:id/only"'
+               ' clickable="true" bounds="[0,0][720,60]" />')
+
+    def test_two_agreeing_dumps_are_trusted_immediately(self):
+        with patch.object(feed, "read_hierarchy", side_effect=[self.RICH, self.RICH]), \
+             patch.object(feed.time, "sleep"):
+            assert feed.read_stable_hierarchy() == self.RICH
+
+    def test_the_richest_dump_wins_when_none_agree(self):
+        """A partial capture is strictly a subset, so "most elements" is the
+        least-wrong answer rather than an arbitrary tiebreak."""
+        with patch.object(feed, "read_hierarchy",
+                          side_effect=[self.PARTIAL, self.RICH, self.PARTIAL,
+                                       self.RICH, self.PARTIAL]), \
+             patch.object(feed.time, "sleep"):
+            assert feed.read_stable_hierarchy() == self.RICH
+
+    def test_all_reads_failing_gives_none(self):
+        with patch.object(feed, "read_hierarchy", return_value=None), \
+             patch.object(feed.time, "sleep"):
+            assert feed.read_stable_hierarchy() is None
+
+    def test_an_empty_dump_is_never_treated_as_agreement(self):
+        """Two identical empty reads agree on nothing useful, and accepting them
+        would publish "this screen has no targets" for a screen full of them."""
+        with patch.object(feed, "read_hierarchy", side_effect=["", "", self.RICH, self.RICH]), \
+             patch.object(feed.time, "sleep"):
+            assert feed.read_stable_hierarchy() == self.RICH
