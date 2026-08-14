@@ -16,6 +16,7 @@ message.
 
 from __future__ import annotations
 
+import html
 import logging
 import re
 from collections import Counter
@@ -39,6 +40,43 @@ def looks_like_phi(resource_id: str) -> bool:
     return any(marker in lowered for marker in PHI_ID_MARKERS)
 
 
+# Two or more consecutive all-caps words. This app renders patient names that way
+# ("CARIDAD ROJAS") while its own chrome is title case ("Detalle de Visita",
+# "Registrar Entrada"), so the shape separates data from label reasonably well.
+_SHOUTED_NAME = re.compile(r"\b[^\W\d_]{2,}\b(?:\s+\b[^\W\d_]{2,}\b)+")
+
+
+def _looks_like_a_name(text: str) -> bool:
+    for candidate in _SHOUTED_NAME.findall(text):
+        if candidate.isupper():
+            return True
+    return False
+
+
+def scrub_text(text: str) -> tuple[str, bool]:
+    """Reduce a revealed value to the part that is safe to show.
+
+    Learned the hard way: `lbl_header` carries the agency name on one screen and
+    "Detalle de Visita\\n<PATIENT>" on another. The id is identical, so an
+    id-based rule cannot tell them apart — the content has to be looked at too.
+
+    Two reductions, both conservative:
+
+    - keep only the first line. Where this app combines a label with a datum it
+      separates them with a newline, and the label is the part worth seeing.
+    - redact entirely if what remains looks like a shouted proper name.
+
+    Returns (text, was_reduced).
+    """
+    first, sep, _rest = text.partition("\n")
+    reduced = bool(sep)
+    first = first.strip()
+
+    if _looks_like_a_name(first):
+        return REDACTED, True
+    return first, reduced
+
+
 @dataclass
 class Node:
     cls: str
@@ -56,6 +94,7 @@ class ScreenReport:
     nodes: list[Node] = field(default_factory=list)
     withheld: set[str] = field(default_factory=set)
     refused: set[str] = field(default_factory=set)
+    reduced: set[str] = field(default_factory=set)
 
     def render(self) -> str:
         counts = Counter((n.cls, n.resource_id, n.clickable) for n in self.nodes)
@@ -79,6 +118,9 @@ class ScreenReport:
         if self.refused:
             lines += ["", "text refused for ids that look identifying:",
                       "  " + ", ".join(sorted(self.refused))]
+        if self.reduced:
+            lines += ["", "text reduced (multi-line or name-shaped):",
+                      "  " + ", ".join(sorted(self.reduced))]
         if self.withheld:
             lines += ["", "text withheld (not requested):",
                       "  " + ", ".join(sorted(self.withheld))]
@@ -86,8 +128,15 @@ class ScreenReport:
 
 
 def _attr(node: str, name: str) -> str:
+    """Attribute value with XML entities decoded.
+
+    Appium returns page_source as XML, so a newline inside a label arrives as
+    `&#10;` rather than a literal. Without decoding, the label/datum split in
+    scrub_text never fires — it redacted the right thing for the wrong reason,
+    and would have thrown away the useful half.
+    """
     m = re.search(rf'{name}="([^"]*)"', node)
-    return m.group(1) if m else ""
+    return html.unescape(m.group(1)) if m else ""
 
 
 def inspect_source(
@@ -117,8 +166,13 @@ def inspect_source(
             if rid in wanted or "*" in wanted:
                 if looks_like_phi(rid) and not allow_phi_text:
                     report.refused.add(rid or "<no id>")
-                else:
+                elif allow_phi_text:
                     shown = text
+                else:
+                    scrubbed, reduced = scrub_text(text)
+                    shown = scrubbed
+                    if reduced:
+                        report.reduced.add(rid or "<no id>")
             else:
                 report.withheld.add(rid or "<no id>")
 

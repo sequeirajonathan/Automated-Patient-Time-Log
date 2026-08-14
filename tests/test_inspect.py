@@ -95,3 +95,49 @@ class TestMarkerHeuristic:
     def test_a_new_field_is_caught_without_anyone_updating_a_list(self):
         """lbl_patient_phone does not exist yet; it would still be refused."""
         assert looks_like_phi("lbl_patient_phone") is True
+
+
+class TestContentScrubbing:
+    """An id-based rule cannot tell a safe header from an identifying one.
+
+    lbl_header holds the agency name on one screen and
+    "Detalle de Visita\\n<PATIENT>" on another. This was a real leak, caught
+    only after the name had already been printed.
+    """
+
+    HEADER_SOURCE = f'''
+    <android.widget.TextView class="android.widget.TextView" resource-id="{P}lbl_header" clickable="false" text="Detalle de Visita &#10;CARIDAD ROJAS" bounds="[0,0][750,60]"/>
+    '''
+
+    def test_name_after_a_newline_is_not_printed(self):
+        out = inspect_source(self.HEADER_SOURCE, text_for=("lbl_header",)).render()
+        assert "CARIDAD" not in out
+        assert "ROJAS" not in out
+
+    def test_the_label_half_is_still_shown(self):
+        out = inspect_source(self.HEADER_SOURCE, text_for=("lbl_header",)).render()
+        assert "Detalle de Visita" in out
+
+    def test_reduction_is_reported_not_silent(self):
+        report = inspect_source(self.HEADER_SOURCE, text_for=("lbl_header",))
+        assert "lbl_header" in report.reduced
+
+    def test_a_shouted_name_alone_is_redacted_entirely(self):
+        src = f'<android.widget.TextView class="android.widget.TextView" resource-id="{P}lbl_thing" text="CARIDAD ROJAS"/>'
+        out = inspect_source(src, text_for=("lbl_thing",)).render()
+        assert "CARIDAD" not in out
+
+    def test_title_case_app_chrome_is_untouched(self):
+        src = f'<android.widget.Button class="android.widget.Button" resource-id="{P}btn_clock_in" text="Registrar Entrada"/>'
+        out = inspect_source(src, text_for=("btn_clock_in",)).render()
+        assert "Registrar Entrada" in out
+
+    def test_single_caps_word_is_not_treated_as_a_name(self):
+        src = f'<android.widget.TextView class="android.widget.TextView" resource-id="{P}lbl_x" text="OK"/>'
+        out = inspect_source(src, text_for=("lbl_x",)).render()
+        assert "OK" in out
+
+    def test_explicit_override_still_shows_everything(self):
+        out = inspect_source(self.HEADER_SOURCE, text_for=("lbl_header",),
+                             allow_phi_text=True).render()
+        assert "CARIDAD" in out
