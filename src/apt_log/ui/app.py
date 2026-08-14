@@ -225,36 +225,15 @@ def api_state():
     })
 
 
-def _relay_html(request: Request, t: Translator) -> str:
-    """The relay panel, rendered server-side for the socket to push.
-
-    Same template the full page uses, so the two can never drift into showing
-    different things -- which is the failure mode of every hand-written client
-    renderer, and it shows up as her being asked one question by the page and a
-    different one by the update.
-    """
-    return templates.get_template("_relay.html").render(
-        t=t, pending=queue.current(),
-        KIND_SIGNATURE=KIND_SIGNATURE, KIND_TOKEN=KIND_TOKEN,
-        KIND_CHOICE=KIND_CHOICE, KIND_OTP=KIND_OTP,
-    )
-
-
-def _live_state(request: Request, t: Translator) -> dict:
-    s = state_mod.collect()
-    pending = queue.current()
-    frame_path = state_mod.STATE_DIR / "frame.json"
+def _read_json(path, fallback):
     try:
-        frame = json.loads(frame_path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        frame = {"id": "", "img": "", "size": [0, 0], "elements": []}
-    return {
-        "frame": frame,
-        "mirror": _mirror_payload(s, t),
-        "relay_nonce": pending["nonce"] if pending else "",
-        "relay_html": _relay_html(request, t),
-        "paused": s.paused,
-    }
+        return fallback
+
+
+EMPTY_FRAME = {"id": "", "img": "", "size": [0, 0], "elements": []}
+SLOW_EVERY = 10.0
 
 
 @app.websocket("/ws")
@@ -267,6 +246,14 @@ async def live(ws: WebSocket):
     threw away her scroll position and the screen she was looking at, mid-visit,
     on a phone.
 
+    **Two clocks, because the costs are nothing alike.** The screen changes
+    constantly and reading it is two small file reads. System health barely
+    changes and reading it shells out to systemctl three times and to adb once.
+    The first version ran both every second on the event loop, which stalled the
+    server hard enough that the socket never sent its first message -- the whole
+    UI process blocked on subprocesses, for every connected client. The slow half
+    now runs on a worker thread every ten seconds.
+
     The HTTP routes all still work. A socket is an enhancement, not a
     dependency -- she may be on whatever browser her phone has, standing in
     someone's kitchen.
@@ -277,17 +264,43 @@ async def live(ws: WebSocket):
         chosen = normalise(ws.headers.get("accept-language"))
     t = Translator(chosen)
 
-    last: dict | None = None
+    frame_path = state_mod.STATE_DIR / "frame.json"
+    last: dict = {}
+    slow_at = 0.0
+
     try:
         while True:
-            state = _live_state(ws, t)
-            if state != last:
-                # Only the parts that changed, so a repainting screen does not
-                # re-send a relay panel she may be typing into.
-                delta = {k: v for k, v in state.items()
-                         if last is None or last.get(k) != v}
-                last = state
-                await ws.send_json({"type": "state", **delta})
+            payload: dict = {}
+
+            frame = _read_json(frame_path, EMPTY_FRAME)
+            if frame != last.get("frame"):
+                payload["frame"] = last["frame"] = frame
+
+            pending = queue.current()
+            nonce = pending["nonce"] if pending else ""
+            if nonce != last.get("nonce"):
+                last["nonce"] = nonce
+                payload["relay_nonce"] = nonce
+                # Re-rendered only when the request changes, not every tick: she
+                # may be typing into this panel.
+                payload["relay_html"] = templates.get_template("_relay.html").render(
+                    t=t, pending=pending,
+                    KIND_SIGNATURE=KIND_SIGNATURE, KIND_TOKEN=KIND_TOKEN,
+                    KIND_CHOICE=KIND_CHOICE, KIND_OTP=KIND_OTP,
+                )
+
+            now = asyncio.get_event_loop().time()
+            if now - slow_at >= SLOW_EVERY:
+                slow_at = now
+                s = await asyncio.to_thread(state_mod.collect)
+                mirror = _mirror_payload(s, t)
+                if mirror != last.get("mirror"):
+                    payload["mirror"] = last["mirror"] = mirror
+                if s.paused != last.get("paused"):
+                    payload["paused"] = last["paused"] = s.paused
+
+            if payload:
+                await ws.send_json({"type": "state", **payload})
 
             try:
                 msg = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
@@ -313,6 +326,8 @@ async def _do_tap(msg: dict) -> dict:
     if not frame or not isinstance(element, dict):
         return {"type": "tap_result", "ok": False, "reason": "malformed"}
     try:
+        # A tap dumps the hierarchy up to five times; on the event loop that
+        # would freeze every other viewer's frames while she taps.
         await asyncio.to_thread(tap, frame, element)
     except StaleAim as exc:
         log.info("tap refused: %s", exc)
