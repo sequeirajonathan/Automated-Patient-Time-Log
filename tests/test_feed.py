@@ -421,3 +421,37 @@ class TestHierarchySource:
         with patch.object(resident, "page_source", return_value=None), \
              patch.object(feed, "read_stable_hierarchy", return_value="<node b=2/>"):
             assert feed.read_hierarchy() == "<node b=2/>"
+
+
+class TestHierarchyRegression:
+    """A read can succeed and come back structurally empty.
+
+    Observed on the launcher: 16 targets, 16, then 0, 0, 0, with the screen
+    unchanged throughout. Guarding only against None let each empty result
+    overwrite a good one, so the overlay kept blinking out under her hand.
+    """
+
+    RICH = TestElements.XML
+    EMPTY = "<hierarchy/>"
+
+    def test_an_empty_read_does_not_erase_a_good_overlay(self):
+        h = feed._Hierarchy(None, every=10)
+        h._xml, h._focus = self.RICH, "com.x/.Home"
+        assert h._accept(self.EMPTY, "com.x/.Home") is False
+
+    def test_an_empty_read_is_believed_when_the_screen_changed(self):
+        """Some screens really have nothing to tap, and refusing to ever show
+        that would be its own lie."""
+        h = feed._Hierarchy(None, every=10)
+        h._xml, h._focus = self.RICH, "com.x/.Home"
+        assert h._accept(self.EMPTY, "com.x/.Somewhere") is True
+
+    def test_a_good_read_always_wins(self):
+        h = feed._Hierarchy(None, every=10)
+        h._xml, h._focus = self.EMPTY, "com.x/.Home"
+        assert h._accept(self.RICH, "com.x/.Home") is True
+
+    def test_empty_replaces_empty_so_it_cannot_wedge(self):
+        h = feed._Hierarchy(None, every=10)
+        h._xml, h._focus = self.EMPTY, "com.x/.Home"
+        assert h._accept(self.EMPTY, "com.x/.Home") is True

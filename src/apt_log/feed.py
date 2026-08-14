@@ -271,6 +271,7 @@ class _Hierarchy:
         self._serial = serial
         self._every = every
         self._xml: str | None = None
+        self._focus = ""
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -280,13 +281,34 @@ class _Hierarchy:
         with self._lock:
             return self._xml
 
+    def _accept(self, fresh: str, focus: str) -> bool:
+        """Whether a fresh read should replace what we are showing.
+
+        Guarding against None was not enough. A read can succeed and come back
+        structurally empty -- observed alternating 16 targets, 16, then 0, 0, 0
+        on a launcher that had not changed -- and an empty-but-valid result
+        happily overwrote a good one, so the overlay kept blinking out.
+
+        An empty read is only believed when the screen has actually changed.
+        Otherwise the previous boxes stay: they are stale, and if they are wrong
+        she can see they are wrong, which is more than an empty overlay offers.
+        """
+        if elements(fresh):
+            return True
+        if focus != self._focus:
+            return True                      # genuinely a different screen
+        return not elements(self._xml or "")  # nothing better to keep
+
     def _loop(self) -> None:
         while not self._stop.is_set():
             try:
                 fresh = read_hierarchy(self._serial)
                 if fresh is not None:
+                    focus = current_focus(self._serial)
                     with self._lock:
-                        self._xml = fresh
+                        if self._accept(fresh, focus):
+                            self._xml = fresh
+                            self._focus = focus
             except Exception as exc:  # noqa: BLE001
                 log.warning("hierarchy read failed: %s", exc)
             self._stop.wait(self._every)
