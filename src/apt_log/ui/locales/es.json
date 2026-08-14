@@ -142,5 +142,20 @@
   "control.pause": "Pausar",
   "control.resume": "Reanudar",
   "control.paused_notice": "El programa está en pausa. No se registrará nada hasta que lo reanude.",
-  "error.unavailable": "Esta información no está disponible en este momento."
+  "error.unavailable": "Esta información no está disponible en este momento.",
+  "macro.title": "Atajos",
+  "macro.explain": "Estos hacen los pasos tediosos por usted. Nunca registran la entrada ni la salida de una visita — eso sigue siendo su toque, en la pantalla de arriba.",
+  "macro.hhax_legacy_login": "Iniciar sesión en HHAeXchange",
+  "macro.state.idle": "No hay nada en marcha.",
+  "macro.state.done": "Terminado.",
+  "macro.state.failed": "Eso no terminó. Mire la pantalla del teléfono arriba.",
+  "macro.step.starting": "Comenzando…",
+  "macro.step.launching": "Abriendo la aplicación…",
+  "macro.step.clearing": "Despejando lo que hay en pantalla…",
+  "macro.step.signing_in": "Iniciando sesión…",
+  "macro.step.agency": "Eligiendo la agencia…",
+  "macro.step.checking": "Comprobando que funcionó…",
+  "macro.step.finished": "Terminado.",
+  "macro.started": "Iniciado. Mire la pantalla del teléfono abajo.",
+  "macro.unknown": "Ese atajo no es uno que esta página ofrezca."
 }

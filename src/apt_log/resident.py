@@ -149,6 +149,43 @@ class Resident:
                     self._discard()
         return None
 
+    def run(self, work):
+        """Execute `work(driver)` on the resident session.
+
+        Macros need the same session the overlay reads through. Opening a second
+        one is not an option -- UiAutomator2 allows exactly one, and the two
+        processes fighting over it cost 14 seconds a tap when it was tried.
+
+        Held under the same lock as page_source, so a macro and a screen read
+        cannot interleave on one driver.
+        """
+        for attempt in (1, 2):
+            with self._lock:
+                if self._driver is None:
+                    if time.monotonic() < self._blocked_until:
+                        raise RuntimeError("no Appium session available")
+                    try:
+                        self._driver = self._create()
+                    except Exception as exc:
+                        self._blocked_until = time.monotonic() + RETRY_AFTER
+                        raise RuntimeError(f"cannot open a session: {exc}") from exc
+                try:
+                    return work(self._driver)
+                except Exception:
+                    # A dead session is worth one rebuild; a failing macro is
+                    # not, or a bad step would be run twice on the phone.
+                    if attempt == 2 or self._driver is not None and self._alive():
+                        raise
+                    self._discard()
+        raise RuntimeError("session unavailable")
+
+    def _alive(self) -> bool:
+        try:
+            self._driver.current_activity
+            return True
+        except Exception:
+            return False
+
     def alive(self) -> bool:
         with self._lock:
             return self._driver is not None
@@ -161,6 +198,10 @@ _resident = Resident()
 
 def page_source() -> str | None:
     return _resident.page_source()
+
+
+def run(work):
+    return _resident.run(work)
 
 
 def close() -> None:

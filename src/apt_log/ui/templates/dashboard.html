@@ -134,6 +134,33 @@
     {% include "_relay.html" %}
   </section>
 
+  {# 1b. Shortcuts — the automation that survived.
+
+     What was abandoned was a machine deciding *when* to record a visit. What is
+     left is a machine doing the tedious parts *when she asks*, on a screen she
+     is watching. Nothing here fires on a timer.
+
+     They navigate and fill. Clocking in is not here and will not be: it is one
+     tap that produces a record, and if it is wrong it produces a phone call. #}
+  <section>
+    <h2>{{ t('macro.title') }}</h2>
+    <div class="controls">
+      {% for macro in macros %}
+      <form method="post" action="/macro">
+        <input type="hidden" name="name" value="{{ macro.name }}">
+        <button type="submit" class="primary">{{ t(macro.label_key) }}</button>
+      </form>
+      {% endfor %}
+    </div>
+    <p id="macro-status" class="muted">
+      {% if macro_status.state == 'running' %}{{ t(macro_status.step) }}
+      {% elif macro_status.state == 'done' %}{{ t('macro.state.done') }}
+      {% elif macro_status.state == 'failed' %}{{ t('macro.state.failed') }}
+      {% else %}{{ t('macro.state.idle') }}{% endif %}
+    </p>
+    <p class="muted">{{ t('macro.explain') }}</p>
+  </section>
+
   {# 2. Mirror — the same screen the controller is on, so the question above has
      something to be about. #}
   <section>

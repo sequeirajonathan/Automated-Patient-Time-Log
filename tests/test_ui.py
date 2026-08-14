@@ -100,7 +100,7 @@ class TestWritePaths:
             if getattr(r, "methods", None) and "POST" in r.methods
         }
         assert posts == {"/language", "/signature", "/relay", "/device", "/tap",
-                         "/acknowledge", "/control"}
+                         "/macro", "/acknowledge", "/control"}
 
     def test_no_route_accepts_a_raw_coordinate_or_keycode(self, client):
         """/tap takes an element from a named frame; /device takes an action
@@ -370,3 +370,36 @@ class TestLiveSocket:
         assert client.get("/frame.json").status_code == 200
         assert client.post("/tap", json={"frame": "x", "element": {}}
                            ).status_code in (400, 409)
+
+
+class TestMacroRoute:
+    """A name from a list, never steps.
+
+    A route that accepted a sequence from a browser would be arbitrary remote
+    scripting with a friendlier label, and "the portal cannot do anything she did
+    not ask for" would quietly become "the client is well-behaved".
+    """
+
+    def test_a_known_macro_is_accepted(self, client, tmp_path):
+        with patch("apt_log.macros.REQUEST_PATH", tmp_path / "req.json"):
+            r = client.post("/macro", follow_redirects=False,
+                            data={"name": "hhax_legacy_login"})
+        assert r.headers["location"] == "/?macro=started"
+
+    def test_an_unknown_macro_is_refused(self, client, tmp_path):
+        with patch("apt_log.macros.REQUEST_PATH", tmp_path / "req.json"):
+            r = client.post("/macro", follow_redirects=False,
+                            data={"name": "sudo-rm-rf"})
+        assert r.headers["location"] == "/?macro=unknown"
+        assert not (tmp_path / "req.json").exists()
+
+    def test_the_page_offers_only_registered_macros(self, client):
+        from apt_log import macros
+        body = client.get("/").text
+        for name in macros.MACROS:
+            assert f'value="{name}"' in body
+
+    def test_the_page_says_shortcuts_never_clock_in(self, client):
+        """The line, stated where she reads it rather than only in a docstring."""
+        body = client.get("/").text
+        assert "registran la entrada" in body

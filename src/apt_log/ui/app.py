@@ -40,6 +40,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from apt_log import __version__
+from apt_log import macros as macros_mod
 from apt_log import video as video_mod
 from apt_log.ui import state as state_mod
 from apt_log.ui.i18n import SUPPORTED, Translator, normalise
@@ -130,6 +131,8 @@ def dashboard(request: Request):
             "KIND_TOKEN": KIND_TOKEN,
             "KIND_CHOICE": KIND_CHOICE,
             "KIND_OTP": KIND_OTP,
+            "macros": list(macros_mod.MACROS.values()),
+            "macro_status": macros_mod.read_status(),
         },
     )
 
@@ -337,6 +340,12 @@ async def live(ws: WebSocket):
                 payload["frame"] = last["frame"] = frame
 
             pending = queue.current()
+            macro = macros_mod.read_status()
+            macro_state = {"state": macro.state, "step": macro.step,
+                           "name": macro.name, "error": macro.error}
+            if macro_state != last.get("macro"):
+                payload["macro"] = last["macro"] = macro_state
+
             nonce = pending["nonce"] if pending else ""
             if nonce != last.get("nonce"):
                 last["nonce"] = nonce
@@ -548,6 +557,25 @@ def device_action(action: str = Form(...)):
         return RedirectResponse(url="/?device=failed", status_code=303)
     log.info("device action %s sent from the UI", action)
     return RedirectResponse(url="/?device=sent", status_code=303)
+
+
+@app.post("/macro")
+def start_macro(name: str = Form(...)):
+    """Ask the feed process to run a named sequence.
+
+    A name from a list, never steps. The list lives in apt_log.macros and the
+    page is handed it; a route that accepted a sequence from a browser would be
+    arbitrary remote scripting with a friendlier label, and "the portal cannot
+    do anything she did not ask for" would become "the client is well-behaved".
+    """
+    from apt_log import macros
+
+    try:
+        macros.request(name)
+    except KeyError:
+        log.warning("unknown macro requested: %r", name)
+        return RedirectResponse(url="/?macro=unknown", status_code=303)
+    return RedirectResponse(url="/?macro=started", status_code=303)
 
 
 @app.post("/acknowledge")

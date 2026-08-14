@@ -142,5 +142,20 @@
   "control.pause": "Pause",
   "control.resume": "Resume",
   "control.paused_notice": "The schedule is paused. Nothing will be recorded until you resume it.",
-  "error.unavailable": "This information is not available right now."
+  "error.unavailable": "This information is not available right now.",
+  "macro.title": "Shortcuts",
+  "macro.explain": "These do the tedious steps for you. They never clock a visit in or out — that stays your tap, on the screen above.",
+  "macro.hhax_legacy_login": "Sign in to HHAeXchange",
+  "macro.state.idle": "Nothing running.",
+  "macro.state.done": "Finished.",
+  "macro.state.failed": "That did not finish. Have a look at the phone screen above.",
+  "macro.step.starting": "Starting…",
+  "macro.step.launching": "Opening the app…",
+  "macro.step.clearing": "Clearing what is on screen…",
+  "macro.step.signing_in": "Signing in…",
+  "macro.step.agency": "Choosing the agency…",
+  "macro.step.checking": "Checking it worked…",
+  "macro.step.finished": "Finished.",
+  "macro.started": "Started. Watch the phone screen below.",
+  "macro.unknown": "That shortcut is not one this page offers."
 }

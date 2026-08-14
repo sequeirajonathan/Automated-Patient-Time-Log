@@ -383,6 +383,15 @@ def run(path: Path, interval: float = DEFAULT_INTERVAL,
     """
     watcher = _Hierarchy(serial, HIERARCHY_EVERY)
     watcher.start()
+
+    # Macros run here rather than in the web process, because this is where the
+    # resident Appium session lives and UiAutomator2 allows exactly one. A second
+    # session in the UI cost 14 seconds a tap when it was tried.
+    from apt_log.macros import Runner
+
+    runner = Runner()
+    runner.start()
+
     count = 0
     try:
         while iterations is None or count < iterations:
@@ -396,6 +405,7 @@ def run(path: Path, interval: float = DEFAULT_INTERVAL,
                 time.sleep(interval)
     finally:
         watcher.stop()
+        runner.stop()
 
 
 def _attr(node: str, name: str) -> str:
