@@ -101,6 +101,7 @@ def advance_past_startup_gates(
 
     deadline = time.monotonic() + timeout
     dismissed: list[str] = []
+    seen_settled: str | None = None
 
     while time.monotonic() < deadline:
         if LoginScreen(driver).is_displayed():
@@ -115,15 +116,26 @@ def advance_past_startup_gates(
                 )
             gate.apply()
             dismissed.append("language")
+            seen_settled = None
             time.sleep(poll)
             continue
 
-        if _activity(driver).endswith(TRANSIENT_ACTIVITIES):
+        activity = _activity(driver)
+        if activity.endswith(TRANSIENT_ACTIVITIES):
+            seen_settled = None
             time.sleep(poll)
             continue
 
-        # Settled on something that is neither a gate nor login: already signed in.
-        return dismissed
+        # Anything else *might* mean already signed in — but each check above is a
+        # separate round trip, so the app can move between them. Observed: the gate
+        # appeared after is_displayed() read splash and before this line read the
+        # activity, and the mismatch was misread as "settled". Require the same
+        # activity twice before believing it, so a transition in flight is waited
+        # out rather than mistaken for a destination.
+        if seen_settled == activity:
+            return dismissed
+        seen_settled = activity
+        time.sleep(poll)
 
     raise TimeoutError(
         f"app did not reach a login screen or a settled state within {timeout}s "

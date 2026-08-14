@@ -152,3 +152,46 @@ class TestAdvancePastGates:
         d = FakeDriver({}, activity=".AppLaunchActivity")
         with pytest.raises(TimeoutError, match="AppLaunchActivity"):
             advance_past_startup_gates(d, timeout=0.05, poll=0)
+
+    def test_a_transition_between_checks_is_not_mistaken_for_settled(self):
+        """The bug this replaced: each check is a separate round trip.
+
+        Observed on hardware — the gate appeared after the gate check read splash
+        and before the transient check read the activity. The mismatch looked like
+        "settled on something else" and returned, leaving the driver on the gate.
+        """
+
+        class RacingDriver:
+            """Reports splash to the gate check, then the gate to the next read."""
+
+            def __init__(self):
+                self.reads = 0
+                self.clicks = 0
+                self.phase = "racing"
+
+            @property
+            def current_activity(self):
+                self.reads += 1
+                if self.phase == "cleared":
+                    return ".LoginActivity"
+                # 1st read (inside the gate check) sees splash; the 2nd, in the
+                # transient check, sees the gate — the exact interleaving observed.
+                return ".AppLaunchActivity" if self.reads == 1 else \
+                       ".LanguageSelectionActivity"
+
+            def find_elements(self, _by, value):
+                if value == PW:
+                    return [MagicMock()] if self.phase == "cleared" else []
+                if value == APPLY and self.phase != "cleared":
+                    el = MagicMock()
+                    el.click.side_effect = self._click
+                    return [el]
+                return []
+
+            def _click(self, *_a, **_k):
+                self.clicks += 1
+                self.phase = "cleared"
+
+        d = RacingDriver()
+        assert advance_past_startup_gates(d, timeout=5, poll=0) == ["language"]
+        assert d.clicks == 1
