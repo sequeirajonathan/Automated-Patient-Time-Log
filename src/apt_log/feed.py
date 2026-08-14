@@ -72,7 +72,13 @@ SCREEN_SIZE: list[int] = [0, 0]
 
 # Bounds as uiautomator writes them: [x1,y1][x2,y2]
 _BOUNDS = re.compile(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]")
-_NODE = re.compile(r"<node[^>]*>")
+# Two producers, two dialects. `uiautomator dump` writes every element as
+# <node class="android.widget.Button" .../>; Appium's page_source writes
+# <android.widget.Button class="android.widget.Button" .../>, using the class as
+# the tag and emitting no <node> at all. Matching only <node> silently parsed
+# zero elements out of a perfectly good 19 KB Appium document -- the overlay was
+# empty for an hour with the read succeeding every time.
+_NODE = re.compile(r"<[A-Za-z][\w.$]*[^>]*>")
 
 # Substrings that mark an activity as somewhere a credential can be typed.
 # Deliberately loose: a new app's login screen should be caught without anyone
@@ -377,9 +383,12 @@ def elements(xml: str) -> list[dict]:
         x1, y1, x2, y2 = (int(g) for g in m.groups())
         if x2 <= x1 or y2 <= y1:
             continue
+        # Appium always sets class= as well as using it as the tag, but the
+        # tag is the fallback so a dialect that only does one still works.
+        cls = _attr(raw, "class") or raw[1:].split()[0].rstrip("/>")
         found.append({
             "rid": _attr(raw, "resource-id").split("/")[-1],
-            "cls": _attr(raw, "class").rsplit(".", 1)[-1],
+            "cls": cls.rsplit(".", 1)[-1],
             "b": [x1, y1, x2, y2],
             "focused": _attr(raw, "focused") == "true",
             "selected": _attr(raw, "selected") == "true",

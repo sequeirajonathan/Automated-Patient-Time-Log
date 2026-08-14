@@ -466,3 +466,43 @@ class TestHierarchyRegression:
         h = feed._Hierarchy(None, every=10)
         h._xml, h._focus = self.EMPTY, "com.x/.Home"
         assert h._accept(self.EMPTY, "com.x/.Home") is True
+
+
+class TestBothXmlDialects:
+    """uiautomator dump and Appium's page_source do not agree on the shape.
+
+    `uiautomator dump`  ->  <node class="android.widget.Button" .../>
+    Appium page_source  ->  <android.widget.Button class="..." .../>
+
+    Matching only <node> parsed zero elements out of a perfectly good 19 KB
+    Appium document. The read succeeded every time, so nothing looked broken
+    except an overlay that was simply never there.
+    """
+
+    APPIUM = (
+        '<hierarchy rotation="0">'
+        '<android.widget.TextView index="0" package="com.android.launcher3"'
+        ' class="android.widget.TextView" text="OfferUp" content-desc="OfferUp"'
+        ' clickable="true" focused="false" selected="false"'
+        ' bounds="[42,1180][162,1300]" />'
+        '</hierarchy>'
+    )
+
+    def test_appium_dialect_parses(self):
+        els = feed.elements(self.APPIUM)
+        assert len(els) == 1
+        assert els[0]["cls"] == "TextView"
+        assert els[0]["b"] == [42, 1180, 162, 1300]
+
+    def test_uiautomator_dialect_still_parses(self):
+        assert len(feed.elements(TestElements.XML)) == 2
+
+    def test_the_hierarchy_root_is_not_a_target(self):
+        assert all(e["cls"] != "hierarchy" for e in feed.elements(self.APPIUM))
+
+    def test_appium_text_still_never_escapes(self):
+        """Appium puts text and content-desc on every node; the map must carry
+        neither, or a patient name reaches a POST body by a new route."""
+        import json
+        blob = json.dumps(feed.elements(self.APPIUM))
+        assert "OfferUp" not in blob
