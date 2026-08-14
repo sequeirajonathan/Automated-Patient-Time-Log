@@ -1,0 +1,11 @@
+[Unit]
+Description=Send an alert for failed unit %i
+# Target of OnFailure= on the other units. Instanced so the failing unit's name
+# is passed through and its journal tail can be included in the alert.
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=-/etc/aptlog/alert.env
+ExecStart=/opt/aptlog/scripts/alert.sh --unit %i
+TimeoutStartSec=60
