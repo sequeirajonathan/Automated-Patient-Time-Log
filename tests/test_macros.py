@@ -150,3 +150,42 @@ class TestTheLineMacrosDoNotCross:
              patch.object(session_mod, "is_expired", return_value=False):
             with pytest.raises(RuntimeError, match="unrecognised"):
                 macros._hhax_legacy_login(driver, lambda _s: None)
+
+
+class TestWaiting:
+    """The macro is faster than a person reading output, which is the bug.
+
+    The first live run submitted credentials, asked whether the agency screen was
+    showing before the app had drawn it, skipped the selection, and failed the
+    home check — with the phone sitting on the agency screen the whole time. The
+    manual walkthrough that "proved" the steps had prints between them, and that
+    delay was enough to hide it.
+    """
+
+    def test_it_waits_rather_than_asking_once(self):
+        answers = [False, False, True]
+        assert macros.wait_for(lambda: answers.pop(0), timeout=5, poll=0.01) is True
+
+    def test_it_gives_up_rather_than_hanging(self):
+        assert macros.wait_for(lambda: False, timeout=0.05, poll=0.01) is False
+
+    def test_a_screen_mid_transition_reads_as_not_yet(self):
+        """Reading a hierarchy while it is being rebuilt raises. That is "not
+        ready", not "broken", and treating it as an error would abandon a macro
+        that was about to succeed."""
+        state = {"n": 0}
+
+        def flaky():
+            state["n"] += 1
+            if state["n"] < 3:
+                raise RuntimeError("stale element")
+            return True
+
+        assert macros.wait_for(flaky, timeout=5, poll=0.01) is True
+
+    def test_either_landing_screen_is_accepted(self):
+        """One agency goes straight to home; several stop to ask. Waiting for
+        the agency picker specifically would hang on the single-agency case."""
+        import inspect
+        source = inspect.getsource(macros._hhax_legacy_login)
+        assert "screen.is_displayed() or home.is_displayed()" in source

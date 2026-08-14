@@ -68,6 +68,29 @@ class Status:
     at: str = field(default_factory=lambda: datetime.now().isoformat())
 
 
+def wait_for(predicate, timeout: float = 20.0, poll: float = 0.5) -> bool:
+    """Poll until `predicate()` is true, or give up.
+
+    Every step here needs one. The first run of the sign-in macro submitted the
+    credentials, then asked whether the agency screen was showing *before the
+    app had drawn it*, concluded it was not, skipped the selection and failed on
+    the home check -- with the phone sitting on the agency screen the whole time.
+
+    The manual walkthrough that "proved" these steps had print statements
+    between them, which was enough delay to hide it. A macro is faster than a
+    person reading output, and that is precisely what makes it need waits.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            if predicate():
+                return True
+        except Exception:  # noqa: BLE001
+            pass          # a screen mid-transition reads as an error, not a no
+        time.sleep(poll)
+    return False
+
+
 # --------------------------------------------------------------------- macros
 def _hhax_legacy_login(driver, report) -> None:
     """Cold app to the agency's home screen.
@@ -86,6 +109,9 @@ def _hhax_legacy_login(driver, report) -> None:
     report("macro.step.launching")
     driver.activate_app("com.hhaexchange.caregiver")
 
+    # A cold launch shows a splash before anything is readable.
+    wait_for(lambda: bool(driver.current_activity), timeout=15.0)
+
     report("macro.step.clearing")
     message = session_mod.modal_message(driver)
     if message:
@@ -102,11 +128,19 @@ def _hhax_legacy_login(driver, report) -> None:
 
     report("macro.step.agency")
     screen = agency_mod.AgencyScreen(driver)
+    home = home_mod.HomeScreen(driver)
+
+    # Either screen is a legitimate landing place: one agency goes straight to
+    # home, several stop to ask. Waiting for "one of them" rather than for the
+    # agency picker specifically is what keeps this working on both.
+    if not wait_for(lambda: screen.is_displayed() or home.is_displayed()):
+        raise RuntimeError("neither the agency nor the home screen appeared")
+
     if screen.is_displayed():
         screen.select(config.get("AGENCY_NAME"))
 
     report("macro.step.checking")
-    if not home_mod.HomeScreen(driver).is_displayed():
+    if not wait_for(home.is_displayed):
         raise RuntimeError("did not reach the home screen")
 
 
