@@ -7,6 +7,7 @@ this module needed writing at all is that it runs outside the process holding
 
 from __future__ import annotations
 
+import io
 import time
 from unittest.mock import patch
 
@@ -384,10 +385,17 @@ class TestCompression:
     """
 
     def _png(self, w=720, h=1600):
+        """Noisy on purpose. A flat colour is a degenerate case: PNG stores it in
+        a few bytes and any JPEG of it is larger, so the size assertion would be
+        measuring the fixture rather than the compression."""
         from PIL import Image
-        import io
+        import io, random
+        rng = random.Random(0)
+        img = Image.new("RGB", (w, h))
+        img.putdata([(rng.randrange(256), rng.randrange(256), rng.randrange(256))
+                     for _ in range(w * h)])
         buf = io.BytesIO()
-        Image.new("RGB", (w, h), (30, 60, 90)).save(buf, "PNG")
+        img.save(buf, "PNG")
         return buf.getvalue()
 
     def test_a_frame_gets_much_smaller(self):
@@ -506,3 +514,42 @@ class TestBothXmlDialects:
         import json
         blob = json.dumps(feed.elements(self.APPIUM))
         assert "OfferUp" not in blob
+
+
+class TestRawScreencap:
+    """The phone should not be compressing anything.
+
+    Measured on the Pi: `screencap -p` costs 2,416 ms and sends 1.27 MB;
+    `screencap` costs 649 ms and sends 4.61 MB. Four times the bytes and nearly
+    four times faster, because a budget MediaTek CPU compresses far slower than
+    USB moves data.
+    """
+
+    def _raw(self, w=8, h=4, header=16):
+        import struct
+        return (struct.pack("<III", w, h, 1) + b"\x00" * (header - 12)
+                + bytes([90, 120, 150, 255]) * (w * h))
+
+    def test_a_raw_framebuffer_becomes_a_jpeg(self):
+        from PIL import Image
+        out = feed.compress(self._raw())
+        assert Image.open(io.BytesIO(out)).format == "JPEG"
+
+    def test_the_older_twelve_byte_header_also_works(self):
+        """The header grew by four bytes at some Android version; guessing wrong
+        shears the image rather than failing, which is far worse to diagnose."""
+        from PIL import Image
+        assert Image.open(io.BytesIO(feed.compress(self._raw(header=12)))).format == "JPEG"
+
+    def test_png_input_still_works(self):
+        """Some paths still hand us a PNG, and a mirror that only understands one
+        encoding breaks silently when the other shows up."""
+        from PIL import Image
+        buf = io.BytesIO()
+        Image.new("RGB", (16, 8), (10, 20, 30)).save(buf, "PNG")
+        assert Image.open(io.BytesIO(feed.compress(buf.getvalue()))).format == "JPEG"
+
+    def test_a_truncated_frame_is_refused_rather_than_sheared(self):
+        import pytest as _p
+        with _p.raises(ValueError):
+            feed._decode(self._raw()[:-40])
