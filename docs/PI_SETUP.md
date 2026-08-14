@@ -137,16 +137,16 @@ volatile storage to cut writes further.
 
 Do this once, with the phone in hand.
 
-0. **Set the phone's language to the caregiver's language** (Spanish for the Florida
+0. **Set Android's own language** to the caregiver's language (Spanish for the Florida
    deployment) in Settings → System → Languages.
 
-   This is a human step and cannot be automated. The agency app's language picker is a
-   custom-drawn view with no accessibility exposure — nothing to select by name and no
-   way to read back what is selected — so the automation can only verify which language
-   the app is already rendering in, not change it. Getting this wrong means the caregiver
-   reads her visit records in the wrong language.
+   This covers the phone's system UI — notifications, the keyboard, Settings itself.
+   It is a human step because changing the locale over adb needs root, which this
+   handheld does not have.
 
-   Setting it also requires no root, unlike changing the locale over adb.
+   The **agency app's** language is separate and is handled by the automation: it has
+   its own picker on first launch, and `LanguageScreen.select_language()` drives it and
+   verifies the result. Nothing to do by hand there.
 1. Settings → About → tap Build number 7× → Developer options.
 2. Enable **USB debugging**.
 3. Enable **Stay awake while charging**.
