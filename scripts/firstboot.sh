@@ -149,6 +149,15 @@ else
 fi
 chown -R "$SERVICE_USER:$SERVICE_USER" "$APP_DIR"
 
+# manager.sh runs as root against this service-user-owned tree, and git refuses
+# that pairing ("detected dubious ownership") unless told the directory is
+# trusted. Without this the self-update path fails on every timer fire, on a box
+# with nobody watching the logs. See scripts/manager.sh for why the underlying
+# ownership split is accepted rather than changed.
+if ! git config --system --get-all safe.directory 2>/dev/null | grep -qx "$APP_DIR"; then
+    git config --system --add safe.directory "$APP_DIR"
+fi
+
 sudo -u "$SERVICE_USER" python3 -m venv "$APP_DIR/.venv"
 sudo -u "$SERVICE_USER" "$APP_DIR/.venv/bin/pip" install -q --upgrade pip
 if [[ -f "$APP_DIR/pyproject.toml" ]]; then

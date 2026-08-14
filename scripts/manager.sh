@@ -34,6 +34,26 @@ alert() {
 
 cd "$APP_DIR"
 
+# ------------------------------------------------------------ git safe.directory
+# The repo is owned by the service user; this script runs as root. Modern git
+# refuses that combination outright -- "detected dubious ownership" -- and every
+# command below is a git command, so the whole self-update and rollback path dies
+# silently on a timer nobody is watching. Found on the Florida unit, where the
+# manager had failed on every single fire since install.
+#
+# Git's objection is a real one: root executing from a tree a lesser user can
+# write is an escalation path. It is also a property this design already accepts
+# and documents -- OPERATIONS.md section 2.4 states that push access to the
+# deploy branch is root on the Pi, because the manager installs unit files. So
+# this records a decision already made rather than waving away a surprise.
+#
+# --system, not --global: under systemd HOME is not reliably /root, and a global
+# config written to the wrong home is a fix that silently does nothing.
+if ! git config --system --get-all safe.directory 2>/dev/null | grep -qx "$APP_DIR"; then
+    git config --system --add safe.directory "$APP_DIR" || \
+        log "could not mark $APP_DIR safe for root -- git operations will fail"
+fi
+
 # ------------------------------------------------------------------ is there work
 git fetch --quiet origin "$DEPLOY_REF"
 current="$(git rev-parse HEAD)"
