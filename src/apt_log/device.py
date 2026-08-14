@@ -30,6 +30,9 @@ log = logging.getLogger(__name__)
 DEFAULT_SERVER = "http://127.0.0.1:4723"
 
 KEYCODE_WAKEUP = "224"
+KEYCODE_BACK = "4"
+KEYCODE_HOME = "3"
+KEYCODE_RECENTS = "187"
 KEYCODE_MENU = "82"   # dismisses the keyguard
 KEYCODE_ENTER = "66"
 
@@ -46,6 +49,15 @@ KEYCODE_ENTER = "66"
 # the phone and pressing it *because* they cannot see what happened.
 UI_ACTIONS = {
     "wake": KEYCODE_WAKEUP,
+    # Navigation, because without it a screen with no on-screen way out is a
+    # dead end. A keypad came up with its nav bar outside the tappable set and
+    # there was no way back -- from Texas, with the phone in Florida. These are
+    # 92ms each and cannot record anything; being stuck is the worse risk by a
+    # wide margin.
+    "back": KEYCODE_BACK,
+    "home": KEYCODE_HOME,
+    "recents": KEYCODE_RECENTS,
+    "enter": KEYCODE_ENTER,
 }
 
 

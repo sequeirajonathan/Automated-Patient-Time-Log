@@ -177,11 +177,15 @@
        Wake is the only thing this page may send to the phone. It cannot record a
        visit or answer a verification prompt, which is exactly why it is an
        allow-listed action name rather than a keycode field. #}
-    <form method="post" action="/device" class="controls">
-      <input type="hidden" name="action" value="wake">
-      <button type="submit">{{ t('phone.wake') }}</button>
-      <span class="muted">{{ t('phone.wake_note') }}</span>
-    </form>
+    <div class="controls">
+      {% for act in ['back', 'home', 'recents', 'wake'] %}
+      <form method="post" action="/device">
+        <input type="hidden" name="action" value="{{ act }}">
+        <button type="submit">{{ t('phone.' ~ act) }}</button>
+      </form>
+      {% endfor %}
+    </div>
+    <p class="muted">{{ t('phone.nav_note') }}</p>
   </section>
 
   {# 3. Health #}

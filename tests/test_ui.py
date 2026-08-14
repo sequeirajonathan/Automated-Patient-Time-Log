@@ -287,9 +287,15 @@ class TestDeviceAction:
                         data={"action": "66"})
         assert r.headers["location"] == "/?device=failed"
 
-    def test_wake_is_the_only_thing_offered_on_the_page(self, client):
+    def test_navigation_is_offered_so_no_screen_is_a_dead_end(self, client):
+        """A keypad came up with its nav bar outside the tappable set, leaving
+        no way back from a thousand miles away."""
         body = client.get("/").text
-        assert 'name="action" value="wake"' in body
+        for act in ("wake", "back", "home", "recents"):
+            assert f'name="action" value="{act}"' in body
+
+    def test_the_page_still_never_offers_a_raw_keycode(self, client):
+        body = client.get("/").text
         for forbidden in ("keyevent", "keycode", 'value="tap"'):
             assert forbidden not in body
 
