@@ -6,6 +6,13 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=apt
+# appium-uiautomator2-driver refuses to create ANY session without an SDK root,
+# failing with "Neither ANDROID_HOME nor ANDROID_SDK_ROOT environment variable
+# was exported". Debian's adb package already ships the layout it wants, at
+# /usr/lib/android-sdk/platform-tools/adb -- it just has to be pointed at.
+# Without these two lines the agent cannot drive the phone at all.
+Environment=ANDROID_HOME=/usr/lib/android-sdk
+Environment=ANDROID_SDK_ROOT=/usr/lib/android-sdk
 ExecStartPre=/usr/bin/adb start-server
 ExecStart=/usr/bin/appium --address 127.0.0.1 --port 4723 --log-timestamp
 Restart=always

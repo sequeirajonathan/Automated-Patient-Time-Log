@@ -107,6 +107,20 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="*", MODE="0664", GROUP="plugdev"
 EOF
 udevadm control --reload-rules || true
 
+# The uiautomator2 driver will not create a session without an SDK root. Debian's
+# adb package ships one; verify it rather than discovering the gap during the
+# REQ-1 probe, which reports it as a session failure a long way from this cause.
+ANDROID_SDK_HOME=/usr/lib/android-sdk
+if [[ -x "$ANDROID_SDK_HOME/platform-tools/adb" ]]; then
+    cat > /etc/profile.d/android-sdk.sh <<EOF
+export ANDROID_HOME=$ANDROID_SDK_HOME
+export ANDROID_SDK_ROOT=$ANDROID_SDK_HOME
+EOF
+    chmod 0644 /etc/profile.d/android-sdk.sh
+else
+    echo "!! $ANDROID_SDK_HOME/platform-tools/adb missing — Appium cannot start a session" >&2
+fi
+
 # --------------------------------------------------------------------- the app
 log "deploying application"
 if [[ ! -d "$APP_DIR/.git" ]]; then
