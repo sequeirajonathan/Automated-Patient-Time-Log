@@ -8,6 +8,7 @@ this module needed writing at all is that it runs outside the process holding
 from __future__ import annotations
 
 import io
+import json
 import time
 from unittest.mock import patch
 
@@ -278,6 +279,15 @@ class TestTap:
 
     XML = TestElements.XML
 
+    def _frame(self, tmp_path, els=None, age=0.0):
+        import datetime as dt
+        path = tmp_path / "frame.json"
+        path.write_text(json.dumps({
+            "at": (dt.datetime.now() - dt.timedelta(seconds=age)).isoformat(),
+            "elements": self._current() if els is None else els,
+        }), encoding="utf-8")
+        return path
+
     def _current(self):
         return feed.elements(self.XML)
 
@@ -287,54 +297,53 @@ class TestTap:
     def _button(self):
         return next(e for e in self._current() if e["rid"] == "btn_clock_in")
 
-    def test_taps_the_centre_of_the_element(self):
-        with patch.object(feed, "read_stable_hierarchy", return_value=self.XML), \
-             patch.object(feed, "_adb") as adb:
+    def test_taps_the_centre_of_the_element(self, tmp_path):
+        with patch.object(feed, "_adb") as adb:
             adb.return_value.returncode = 0
-            out = feed.tap(self._fid(), self._button())
+            out = feed.tap(self._fid(), self._button(),
+                           frame_path=self._frame(tmp_path))
         sent = adb.call_args.args[0]
         assert sent[:3] == ["shell", "input", "tap"]
         assert sent[3:] == ["375", "774"]          # centre of [19,744][731,804]
         assert out["tapped"]["rid"] == "btn_clock_in"
 
-    def test_refuses_when_the_target_is_gone(self):
+    def test_refuses_when_the_target_is_gone(self, tmp_path):
         """The whole point. A blind coordinate would land on whatever occupies
         that spot now, which on this app can be the verification prompt."""
-        moved_on = self.XML.replace('bounds="[19,744][731,804]"',
-                                    'bounds="[19,900][731,960]"')
-        with patch.object(feed, "read_stable_hierarchy", return_value=moved_on), \
-             patch.object(feed, "_adb") as adb:
+        moved_on = feed.elements(
+            self.XML.replace('bounds="[19,744][731,804]"',
+                             'bounds="[19,900][731,960]"'))
+        with patch.object(feed, "_adb") as adb:
             with pytest.raises(feed.StaleAim):
-                feed.tap(self._fid(), self._button())
+                feed.tap(self._fid(), self._button(),
+                         frame_path=self._frame(tmp_path, moved_on))
             adb.assert_not_called()
 
-    def test_refuses_an_element_that_was_never_on_screen(self):
+    def test_refuses_an_element_that_was_never_on_screen(self, tmp_path):
         """A matching frame id proves the screen is unchanged. It does not prove
         the posted rectangle was ever part of it — and a tap at arbitrary
         coordinates is precisely what this is built not to be."""
         forged = {"rid": "btn_clock_in", "cls": "Button", "b": [0, 0, 720, 1600]}
-        with patch.object(feed, "read_stable_hierarchy", return_value=self.XML), \
-             patch.object(feed, "_adb") as adb:
+        with patch.object(feed, "_adb") as adb:
             with pytest.raises((feed.NotOnScreen, feed.StaleAim)):
-                feed.tap(self._fid(), forged)
+                feed.tap(self._fid(), forged, frame_path=self._frame(tmp_path))
             adb.assert_not_called()
 
-    def test_refuses_when_the_screen_cannot_be_read(self):
-        with patch.object(feed, "read_stable_hierarchy", return_value=None), \
-             patch.object(feed, "_adb") as adb:
+    def test_refuses_when_the_screen_cannot_be_read(self, tmp_path):
+        with patch.object(feed, "_adb") as adb:
             with pytest.raises(feed.StaleAim):
-                feed.tap(self._fid(), self._button())
+                feed.tap(self._fid(), self._button(),
+                         frame_path=tmp_path / "nothing.json")
             adb.assert_not_called()
 
-    def test_an_element_matching_bounds_but_not_identity_is_refused(self):
+    def test_an_element_matching_bounds_but_not_identity_is_refused(self, tmp_path):
         """Same rectangle, different widget — the layout was rebuilt underneath
         with something else in that spot."""
         impostor = dict(self._button())
         impostor["rid"] = "btn_cancel"
-        with patch.object(feed, "read_stable_hierarchy", return_value=self.XML), \
-             patch.object(feed, "_adb") as adb:
+        with patch.object(feed, "_adb") as adb:
             with pytest.raises((feed.NotOnScreen, feed.StaleAim)):
-                feed.tap(self._fid(), impostor)
+                feed.tap(self._fid(), impostor, frame_path=self._frame(tmp_path))
             adb.assert_not_called()
 
 
@@ -555,23 +564,41 @@ class TestRawScreencap:
             feed._decode(self._raw()[:-40])
 
 
-class TestTapUsesTheOverlaySource:
-    """The tap and the overlay must read the screen the same way.
+class TestTapUsesThePublishedFrame:
+    """A tap is checked against the overlay she was looking at.
 
-    They did not: the feed published Appium's page_source while tap() verified
-    against the adb dump. Different dialects, different element sets, so every
-    tap came back stale — and took 20.6s doing it.
+    Reading the device again was wrong twice. Slow: the tap runs in the UI
+    process, which had to open a second Appium session while the feed held the
+    only one UiAutomator2 allows — 14 seconds of contention per tap. And wrong:
+    a fresh read says what is on the screen *now*, when what makes a tap safe is
+    that it was on the screen *she saw*.
     """
 
-    def test_tap_verifies_through_the_same_reader_as_the_feed(self):
-        seen = []
-        with patch.object(feed, "read_hierarchy",
-                          side_effect=lambda *a: seen.append("shared") or TestElements.XML), \
+    def test_it_reads_no_device_at_all(self, tmp_path):
+        import datetime as dt
+        els = feed.elements(TestElements.XML)
+        btn = next(e for e in els if e["rid"] == "btn_clock_in")
+        path = tmp_path / "frame.json"
+        path.write_text(json.dumps({"at": dt.datetime.now().isoformat(),
+                                    "elements": els}), encoding="utf-8")
+        with patch.object(feed, "read_hierarchy") as appium, \
              patch.object(feed, "read_stable_hierarchy") as adb_only, \
              patch.object(feed, "_adb") as adb:
             adb.return_value.returncode = 0
-            els = feed.elements(TestElements.XML)
-            btn = next(e for e in els if e["rid"] == "btn_clock_in")
-            feed.tap(feed.frame_id(els), btn)
-        assert seen == ["shared"]
+            feed.tap(feed.frame_id(els), btn, frame_path=path)
+        appium.assert_not_called()
         adb_only.assert_not_called()
+
+    def test_a_frame_nobody_is_updating_stops_being_tappable(self, tmp_path):
+        """An overlay nothing is refreshing is one she cannot trust either."""
+        import datetime as dt
+        els = feed.elements(TestElements.XML)
+        btn = next(e for e in els if e["rid"] == "btn_clock_in")
+        path = tmp_path / "frame.json"
+        old = dt.datetime.now() - dt.timedelta(seconds=feed.TAP_FRAME_MAX_AGE + 5)
+        path.write_text(json.dumps({"at": old.isoformat(), "elements": els}),
+                        encoding="utf-8")
+        with patch.object(feed, "_adb") as adb:
+            with pytest.raises(feed.StaleAim, match="old"):
+                feed.tap(feed.frame_id(els), btn, frame_path=path)
+            adb.assert_not_called()

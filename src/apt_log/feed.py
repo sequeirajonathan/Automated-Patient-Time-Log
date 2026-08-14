@@ -250,6 +250,11 @@ def compress(shot: bytes) -> bytes:
 
 FRAME_NAME = "frame.json"
 
+# How stale the published frame may be and still be tapped against. Generous
+# against the overlay's own refresh cadence, tight enough that a dead feed
+# refuses rather than letting her aim at a screen from minutes ago.
+TAP_FRAME_MAX_AGE = 15.0
+
 
 def write_frame(path: Path, serial: str | None = None,
                 hierarchy: str | None = None) -> str:
@@ -537,7 +542,40 @@ class NotOnScreen(RuntimeError):
     """The element posted back is not one this frame offered."""
 
 
-def tap(claimed_frame: str, element: dict, serial: str | None = None) -> dict:
+def published_elements(path: Path | None = None) -> list[dict]:
+    """The overlay the page is actually showing, from the feed's own frame file.
+
+    Reading the device again here was wrong twice over. It was slow -- the tap
+    runs in the UI process, which would have to open a second Appium session
+    while the feed holds the only one UiAutomator2 allows, and the contention
+    cost 14 seconds a tap. And it answered the wrong question: a fresh read tells
+    you what is on the screen *now*, when what makes a tap safe is that it was on
+    the screen *she was looking at*.
+
+    So this reads the same file the page drew its boxes from. If the feed has
+    stopped, the frame ages out and taps refuse -- which is the correct answer,
+    because an overlay nobody is updating is one she cannot trust either.
+    """
+    from apt_log.ui.state import STATE_DIR
+
+    target = path or (STATE_DIR / FRAME_NAME)
+    try:
+        frame = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        raise StaleAim("no screen has been published to aim at") from None
+
+    try:
+        age = (datetime.now() - datetime.fromisoformat(frame["at"])).total_seconds()
+    except (KeyError, TypeError, ValueError):
+        raise StaleAim("the published screen has no timestamp") from None
+
+    if age > TAP_FRAME_MAX_AGE:
+        raise StaleAim(f"the screen on your page is {age:.0f}s old — look again")
+    return frame.get("elements") or []
+
+
+def tap(claimed_frame: str, element: dict, serial: str | None = None,
+        frame_path: Path | None = None) -> dict:
     """Tap an element she aimed at, or refuse because the screen has moved.
 
     The refusal is the feature. A coordinate replayed blind lands on whatever
@@ -555,19 +593,8 @@ def tap(claimed_frame: str, element: dict, serial: str | None = None) -> dict:
     `claimed_frame` is carried for the log rather than enforced. It was enforced
     once; see read_stable_hierarchy for the measurement that changed it.
     """
-    # The SAME source the overlay was built from. This called
-    # read_stable_hierarchy -- the adb-only path -- while the feed published
-    # elements from Appium, so every tap was compared against a different
-    # reading of the screen and every tap came back stale. It also cost 20.6
-    # seconds, because that path dumps up to five times.
-    #
-    # Two sources of truth for "what is on the screen" is one too many when the
-    # whole safety argument is that she taps a thing she can see.
-    xml = read_hierarchy(serial)
-    if xml is None:
-        raise StaleAim("the screen cannot be read right now")
 
-    current = elements(xml)
+    current = published_elements(frame_path)
     bounds = list(element.get("b") or [])
     match = next(
         (e for e in current
