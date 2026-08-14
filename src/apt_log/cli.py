@@ -40,6 +40,41 @@ def probe(
 
 
 @app.command()
+def inspect(
+    package: str = typer.Option("com.hhaexchange.caregiver", "--package", "-p"),
+    text_for: str = typer.Option(
+        "", "--text-for",
+        help="Comma-separated resource-id suffixes to reveal text for. "
+             "Ids that look identifying are refused regardless.",
+    ),
+    server: str = typer.Option(DEFAULT_SERVER, "--server"),
+) -> None:
+    """Summarise the current screen without leaking patient data.
+
+    Text is withheld unless asked for by resource-id, and refused outright for
+    ids that look identifying. Safe to paste into a chat or an issue.
+    """
+    from appium import webdriver
+    from appium.options.android import UiAutomator2Options
+
+    from apt_log.inspect import inspect_driver
+
+    options = UiAutomator2Options()
+    options.platform_name = "Android"
+    options.automation_name = "UiAutomator2"
+    options.app_package = package
+    options.no_reset = True
+    options.set_capability("appium:skipDeviceInitialization", True)
+
+    driver = webdriver.Remote(server, options=options)
+    try:
+        wanted = tuple(x.strip() for x in text_for.split(",") if x.strip())
+        typer.echo(inspect_driver(driver, text_for=wanted).render())
+    finally:
+        driver.quit()
+
+
+@app.command()
 def run(
     daemon: bool = typer.Option(False, "--daemon", help="Run as a long-lived service."),
 ) -> None:
