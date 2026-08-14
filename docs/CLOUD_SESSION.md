@@ -150,12 +150,15 @@ REQUIREMENTS §3 was amended to match.
 
 **~~Python 3.13 vs 3.12~~ — SETTLED. 3.13**, the version trixie ships. Spec amended.
 
-**Still open: which `Appium-Python-Client`.** 6.0.0 and the 5.x line are both on PyPI. Do
-not guess the client/server major mapping — start at 6.0.0 against server 3.6.0 and step
-back through 5.x if session creation fails. **The REQ-1 probe is the instrument that
-settles this**, and it has to run anyway. Pin whatever it proves into `pyproject.toml`; an
-unpinned client reintroduces the same reproducibility hole one layer up (REQUIREMENTS
-§3.1).
+**~~Which `Appium-Python-Client`~~ — SETTLED. `6.0.0` against server `3.6.0`**, proven by a
+full six-check probe run. No stepping back through 5.x was needed. Keep it pinned.
+
+**Lesson for the probe's UNKNOWN heuristic.** It twice reported "resembles an
+Appium-Python-Client / server major mismatch" when the real causes were different: first a
+missing `ANDROID_HOME`, then `io.appium.settings` failing to start. The instinct to say
+UNKNOWN rather than FAIL was right and saved the project from a false negative — but both
+of those have distinctive error strings and should be matched explicitly so the hint points
+at the actual cause.
 
 **REQUIREMENTS.md contradicts itself on the secret store.** §6's acceptance list says
 credentials come from "the OS keychain"; REQ-3 mandates a file-backed provider at
@@ -190,36 +193,63 @@ Ask for the app package name, site coordinates, and any auth keys when you need 
 
 ## 9. Where the work is
 
-Phases 1 and 2 are not finished. Do not start Phase 3.
+**Phase 2 is done. REQ-1 passed all six checks — the project is feasible. REQ-2 is
+greenlit.**
 
-**Phase 1** — blocked on hardware. Three of the five PI_SETUP §4 checks cannot run until
-the test phone is attached over USB: `adb devices -l`, the `uhubctl` port check, and the
-pull-the-plug recovery test. Checks 3 and 4 pass (with `aptlog-agent` failing as expected
-per §3).
+| # | Check | Result |
+|---|---|---|
+| 1 | launches under Appium *(blocking)* | **PASS** — process alive 8s after session start |
+| 2 | view hierarchy dumpable *(blocking)* | **PASS** — 8,709 chars of XML |
+| 3 | FLAG_SECURE | **PASS** — screenshot captured, not set |
+| 4 | automation not blocked *(blocking)* | **PASS** — ran with UiAutomator attached |
+| 5 | Play Integrity | **PASS** — runs on an uncertified handheld |
+| 6 | cold start reaches login | **PASS** — login screen present after `pm clear` |
 
-**Phase 2** — the REQ-1 feasibility probe, and it gates everything else. Build and run it
-against the real target app on the real phone. It answers whether this project is possible
-at all:
+Because check 3 passed, the UI's phone-view panel renders real screenshots rather than the
+`FLAG_SECURE` placeholder the spec allows for.
 
-1. Does the app launch and stay running under Appium?
-2. Is `driver.page_source` a usable tree?
-3. Does the app set `FLAG_SECURE`?
-4. Does it detect and refuse the UiAutomator service?
-5. Does it run under Play Integrity on this device?
-6. Is the login screen reachable from a cold start (`pm clear` → launch)?
+**This run is not a validated result and must be repeated.** It deviated from production
+in three ways, all recorded here so nobody mistakes it for the real thing:
 
-**If 1, 2, or 4 fail, stop and report.** No engineering rescues those, and the vendor's
-sanctioned API becomes the only viable path — which REQ-0 says to check for first anyway.
+- **adb over TCP**, not USB — a one-off operator-authorised exception because the USB
+  cable is dead. REQ-5.4 still stands and the code guard was never weakened; the override
+  lived in a throwaway clone and was never committed.
+- **A Retroid Pocket 4 Pro gaming handheld**, not a phone.
+- **`appium:skipDeviceInitialization`** was required, because `io.appium.settings` cannot
+  start on that device — the intent is accepted and no process ever spawns. **That
+  workaround must not reach production**; a real phone will not need it.
 
-Report the PASS/FAIL table and wait for an explicit go/no-go. Do not begin REQ-2.
+Checks 1, 2, 3, 4 and 6 are properties of *the app* and transfer. Check 4 is sound despite
+the workaround, because `skipServerInstallation` was left `False`, so UiAutomator really
+was attached and the app really did tolerate it.
+
+**Re-run the probe on the production phone, over USB, before the golden image ships.**
+
+**Phase 1 is still incomplete.** Three of the five PI_SETUP §4 checks need a phone attached
+over *USB*: `adb devices -l`, the `uhubctl` port check, and the pull-the-plug test.
 
 ---
 
 ## 10. Hardware notes
 
-The phone is currently plugged **directly into the Pi**, not through the powered hub the
-spec calls for. The Pi caps all four USB ports at 1.6 A combined, and PI_SETUP §1.7 is
-explicit that a phone drawing more produces random disconnects that read exactly like
-software faults. **If Phase 2 goes flaky, suspect power before code.** `uhubctl` can still
-power-cycle the port — the Pi 5's root hubs report `ppps` — so recovery-ladder rung 5
-remains available. The hub is still required before the golden image ships.
+**There is currently no working USB link to the device.** `lsusb` shows only the Pi's four
+root hubs and the kernel logged zero enumeration events across a monitored replug — so the
+cable carries no data lines, or the connection isn't seating. PI_SETUP §0.4 asks for "USB-A
+to the phone's connector — **data, not charge-only**" precisely because of this.
+
+Until that is fixed:
+
+- REQ-5's USB-transport signal cannot be exercised, so **the presence gate can never pass**
+  (REQ-5.2 requires USB *plus* one strong anchor). Gate work can be unit-tested against
+  `StubLocationSource`, but not validated end to end.
+- Three PI_SETUP §4 checks stay blocked.
+
+**The powered hub is also still absent.** It is required before the golden image ships:
+the Pi caps all four ports at 1.6 A combined, and PI_SETUP §1.7 is explicit that a phone
+drawing more produces random disconnects that read exactly like software faults. `uhubctl`
+2.6.0 is installed and the Pi 5's root hubs report `ppps`, so recovery-ladder rung 5 works
+against the Pi's own ports in the meantime.
+
+**The Appium server needs `ANDROID_HOME`.** Without it the uiautomator2 driver refuses to
+create any session. Fixed in the unit file and `firstboot.sh`; if you rebuild a Pi from an
+older revision, that is the first thing to check.
