@@ -104,7 +104,7 @@ def dashboard(request: Request):
     )
 
 
-@app.get("/screen.png")
+@app.get("/screen.jpg")
 def phone_screen():
     """The last capture of the phone screen.
 
@@ -119,7 +119,7 @@ def phone_screen():
         return Response(status_code=404)
     return Response(
         path.read_bytes(),
-        media_type="image/png",
+        media_type="image/jpeg",
         headers={"Cache-Control": "no-store"},
     )
 

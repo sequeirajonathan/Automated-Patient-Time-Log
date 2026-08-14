@@ -50,7 +50,7 @@
       lastShotAt = m.screen_at;
       // Cache-busted: the response is no-store, but a phone browser that has
       // decided otherwise would leave her looking at a frozen screen.
-      shot.src = '/screen.png?t=' + encodeURIComponent(m.screen_at);
+      shot.src = '/screen.jpg?t=' + encodeURIComponent(m.screen_at);
     }
     if (shot) shot.classList.toggle('stale', !!m.stale);
 

@@ -330,3 +330,40 @@ class TestStableHierarchy:
         with patch.object(feed, "read_hierarchy", side_effect=["", "", self.RICH, self.RICH]), \
              patch.object(feed.time, "sleep"):
             assert feed.read_stable_hierarchy() == self.RICH
+
+
+class TestCompression:
+    """The wire size decides whether the portal gets used at all.
+
+    Measured on the Pi: 121 KB for a light screen, 925 KB for a busy one, both
+    landing near 32 KB once downscaled. She reads this on cellular between
+    floors; a portal that stalls is one she walks past.
+    """
+
+    def _png(self, w=720, h=1600):
+        from PIL import Image
+        import io
+        buf = io.BytesIO()
+        Image.new("RGB", (w, h), (30, 60, 90)).save(buf, "PNG")
+        return buf.getvalue()
+
+    def test_a_frame_gets_much_smaller(self):
+        raw = self._png()
+        assert len(feed.compress(raw)) < len(raw)
+
+    def test_it_is_downscaled_to_the_mirror_width(self):
+        from PIL import Image
+        import io
+        out = Image.open(io.BytesIO(feed.compress(self._png())))
+        assert out.width == feed.MIRROR_WIDTH
+
+    def test_aspect_ratio_survives(self):
+        from PIL import Image
+        import io
+        out = Image.open(io.BytesIO(feed.compress(self._png(720, 1600))))
+        assert abs(out.height / out.width - 1600 / 720) < 0.01
+
+    def test_undecodable_input_comes_back_unchanged(self):
+        """A large picture is a slow portal; no picture is one she cannot use."""
+        junk = b"not an image at all"
+        assert feed.compress(junk) == junk

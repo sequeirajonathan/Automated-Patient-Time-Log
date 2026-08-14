@@ -35,6 +35,7 @@ precise.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import logging
 import os
@@ -49,6 +50,15 @@ from apt_log.ui import mirror as mirror_mod
 log = logging.getLogger(__name__)
 
 DEFAULT_INTERVAL = 5.0
+
+# She reads this over cellular while walking between floors, so the wire size is
+# what decides whether the portal gets used or she walks down to the phone.
+# Measured on the Pi: a 720x1600 screenshot is 121 KB on a light screen and
+# 925 KB on a busy one; at 480 wide and quality 65 the same frames land at ~32 KB
+# and encode in 43 ms. 480 is two-thirds of the device width, which still gives a
+# ~1.2x pixel ratio on a phone-sized viewport rather than a soft upscale.
+MIRROR_WIDTH = 480
+MIRROR_QUALITY = 65
 
 # Filled from `wm size` at first use; the overlay needs it to scale boxes onto a
 # phone-sized <img>. Cached because it does not change and the loop is hot.
@@ -168,7 +178,26 @@ def capture(serial: str | None = None,
     if shot.returncode != 0 or not shot.stdout:
         # FLAG_SECURE screens refuse capture outright; that is a valid answer.
         return None, focus, "the app does not allow capture of this screen"
-    return shot.stdout, focus, ""
+    return compress(shot.stdout), focus, ""
+
+
+def compress(png: bytes) -> bytes:
+    """Downscale and re-encode for the wire.
+
+    Falls back to the original bytes rather than failing: a large picture is a
+    slow portal, but no picture is a portal she cannot use at all.
+    """
+    try:
+        from PIL import Image
+
+        image = Image.open(io.BytesIO(png)).convert("RGB")
+        image.thumbnail((MIRROR_WIDTH, MIRROR_WIDTH * 10), Image.LANCZOS)
+        buf = io.BytesIO()
+        image.save(buf, "JPEG", quality=MIRROR_QUALITY, optimize=True)
+        return buf.getvalue()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("cannot compress the frame (%s); sending it raw", exc)
+        return png
 
 
 FRAME_NAME = "frame.json"
@@ -183,6 +212,10 @@ def write_frame(path: Path, serial: str | None = None) -> str:
     els = elements(hierarchy) if hierarchy else []
     frame = {
         "id": frame_id(els),
+        # Separate from the structural id on purpose. Typing into a field moves
+        # no targets at all, so a client refreshing only on structure change
+        # would show her a picture with none of her own keystrokes in it.
+        "img": hashlib.sha256(png).hexdigest()[:12] if png else "",
         "at": datetime.now().isoformat(),
         "size": screen_size(serial),
         "elements": els,

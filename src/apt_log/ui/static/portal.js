@@ -20,7 +20,7 @@
 
   const i18n = window.APTLOG_PORTAL || {};
   const status = document.getElementById('portal-status');
-  let frame = { id: '', size: [0, 0], elements: [] };
+  let frame = { id: '', img: '', size: [0, 0], elements: [] };
   let busy = false;
 
   function say(msg) { if (status) status.textContent = msg || ''; }
@@ -64,12 +64,14 @@
       const res = await fetch('/frame.json', { cache: 'no-store' });
       if (!res.ok) return;
       const next = await res.json();
-      const changed = next.id !== frame.id;
+      // Two reasons to refetch the picture, and only one of them is structural.
+      // Typing into a field moves no targets at all, so refreshing on `id`
+      // alone would show her a screen with none of her own keystrokes in it.
+      const moved = next.id !== frame.id;
+      const repainted = next.img !== frame.img;
       frame = next;
-      if (changed) {
-        // Cache-busted on the frame id rather than a timer: the picture only
-        // needs refetching when something actually moved.
-        shot.src = '/screen.png?f=' + encodeURIComponent(frame.id);
+      if (moved || repainted) {
+        shot.src = '/screen.jpg?f=' + encodeURIComponent(frame.img || frame.id);
       }
       draw();
     } catch (e) { /* transient; the next tick tries again */ }

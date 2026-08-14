@@ -31,6 +31,11 @@ dependencies = [
     "uvicorn[standard]==0.52.3",
     "jinja2==3.1.6",
     "python-multipart==0.0.32",
+    # The mirror's frames go over cellular. Uncompressed screencap output is
+    # 121 KB on a light screen and 925 KB on a busy one; downscaled JPEG puts
+    # both around 32 KB, which is the difference between a portal she uses and
+    # one she gives up on.
+    "pillow==12.1.0",
 ]
 
 [project.optional-dependencies]

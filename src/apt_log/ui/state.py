@@ -29,7 +29,7 @@ STATE_DIR = Path("/var/lib/aptlog")
 AUDIT_PATH = STATE_DIR / "audit.jsonl"
 PAUSED_FLAG = STATE_DIR / "paused"
 ACK_PATH = STATE_DIR / "acknowledged.json"
-SCREENSHOT_PATH = STATE_DIR / "last-screen.png"
+SCREENSHOT_PATH = STATE_DIR / "last-screen.jpg"
 HEARTBEAT_PATH = STATE_DIR / "last-heartbeat"
 
 UNITS = ("aptlog-agent", "aptlog-appium", "aptlog-ui")
