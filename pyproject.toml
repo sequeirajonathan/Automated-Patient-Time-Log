@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "apt-log"
+version = "0.1.0"
+description = "Automated patient time log controller"
+requires-python = ">=3.13"
+
+# Every version below is an exact pin, per REQUIREMENTS §3.1. Not a stability
+# preference — the golden image's claim is that Florida receives something already
+# proven, and IMAGE_BUILD §6 makes a rebuild the recovery path from a lost
+# reference Pi. A range would resolve to whatever shipped that day, silently, at
+# the moment you are already recovering from a failure.
+#
+# Upgrades are a deliberate edit here, revalidated against IMAGE_BUILD §1.
+#
+# Appium-Python-Client is the one pin with a live question attached: the client's
+# major must match the server major (pinned to 3.6.0 in scripts/firstboot.sh) or
+# session creation fails in a way that mimics the app rejecting automation — the
+# exact call REQ-1 exists to make. 6.0.0 is the starting point; if the probe shows
+# that failure mode, step back through the 5.x line and pin what it proves.
+dependencies = [
+    "Appium-Python-Client==6.0.0",
+    "selenium==4.47.0",
+    "typer==0.27.1",
+    "structlog==26.1.0",
+    "APScheduler==3.11.3",
+    "fastapi==0.141.1",
+    "uvicorn[standard]==0.52.3",
+    "jinja2==3.1.6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "pytest-rerunfailures==16.5",
+]
+
+[project.scripts]
+apt-log = "apt_log.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
