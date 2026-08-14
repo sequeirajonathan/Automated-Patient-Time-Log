@@ -159,14 +159,25 @@ class TestRun:
 
     def test_the_picture_uses_the_last_good_hierarchy(self, tmp_path):
         """A read that fails leaves the previous overlay standing rather than
-        blanking it — stale boxes beat no boxes."""
+        blanking it — stale boxes beat no boxes.
+
+        Polled rather than slept. The first version waited a fixed 150ms, which
+        passed on a laptop and lost the race on the Pi, where the focus read the
+        loop makes is a real 173ms adb call. The deploy gate caught it. A test
+        whose result depends on the speed of the machine under it is the same
+        bug twice in one session.
+        """
+        good = '<node clickable="true" bounds="[0,0][10,10]"/>'
         h = feed._Hierarchy(None, every=0.01)
         with patch.object(feed, "read_hierarchy",
-                          side_effect=["<node a=1/>", None, None]):
+                          side_effect=[good] + [None] * 50), \
+             patch.object(feed, "current_focus", return_value="com.x/.Home"):
             h.start()
-            time.sleep(0.15)
+            deadline = time.monotonic() + 5
+            while h.xml is None and time.monotonic() < deadline:
+                time.sleep(0.01)
             h.stop()
-        assert h.xml == "<node a=1/>"
+        assert h.xml == good
 
 
 class TestElements:
