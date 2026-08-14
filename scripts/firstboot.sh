@@ -13,6 +13,11 @@ TAILSCALE_AUTHKEY="${TAILSCALE_AUTHKEY:-PASTE_AUTH_KEY_HERE}"
 REPO_URL="${REPO_URL:-https://github.com/sequeirajonathan/Automated-Patient-Time-Log.git}"
 DEPLOY_REF="${DEPLOY_REF:-release}"   # deploy branch, NOT main — see docs/OPERATIONS.md
 SERVICE_USER="${SERVICE_USER:-apt}"
+# Overridable because a tailnet name is unique: the reference Pi in Texas already
+# holds "aptlog", and a second machine claiming it is silently renamed aptlog-1 by
+# Tailscale. Every command either person writes afterwards then targets the wrong
+# one, on install day, with nobody on site who can tell them apart.
+TS_HOSTNAME="${TS_HOSTNAME:-aptlog}"
 APP_DIR="/opt/aptlog"
 NODE_MAJOR=22
 
@@ -71,7 +76,7 @@ if ! tailscale status >/dev/null 2>&1; then
     if [[ "$TAILSCALE_AUTHKEY" == "PASTE_AUTH_KEY_HERE" ]]; then
         echo "!! TAILSCALE_AUTHKEY not set — skipping. Run 'sudo tailscale up --ssh' manually." >&2
     else
-        tailscale up --ssh --authkey="$TAILSCALE_AUTHKEY" --hostname=aptlog
+        tailscale up --ssh --authkey="$TAILSCALE_AUTHKEY" --hostname="$TS_HOSTNAME"
     fi
 fi
 
