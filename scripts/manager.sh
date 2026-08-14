@@ -56,7 +56,7 @@ apply() {
 
     git checkout --quiet --force "$ref" || { log "checkout of $ref FAILED"; rc=1; }
 
-    sudo -u "$SERVICE_USER" "$APP_DIR/.venv/bin/pip" install -q -e "$APP_DIR" \
+    sudo -u "$SERVICE_USER" "$APP_DIR/.venv/bin/pip" install -q -e "$APP_DIR[dev]" \
         || { log "pip install FAILED on $ref"; rc=1; }
 
     # Units can change between revisions; reinstall before restarting.
