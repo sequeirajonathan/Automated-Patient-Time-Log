@@ -104,6 +104,11 @@
       {{ t('relay.' ~ relay_notice) }}
     </div>
   {% endif %}
+  {% if device_notice %}
+    <div class="banner {{ 'bad' if device_notice == 'failed' else '' }}">
+      {{ t('phone.' ~ device_notice) }}
+    </div>
+  {% endif %}
 
   {# 1. Relay — what the controller is asking her for.
 
@@ -244,6 +249,18 @@
     {% else %}
       <p class="muted">{{ t('phone.none') }}</p>
     {% endif %}
+
+    {# Offered whether or not a picture exists: a black rectangle and a dead feed
+       look identical from Texas, and this is how you tell them apart.
+
+       Wake is the only thing this page may send to the phone. It cannot record a
+       visit or answer a verification prompt, which is exactly why it is an
+       allow-listed action name rather than a keycode field. #}
+    <form method="post" action="/device" class="controls">
+      <input type="hidden" name="action" value="wake">
+      <button type="submit">{{ t('phone.wake') }}</button>
+      <span class="muted">{{ t('phone.wake_note') }}</span>
+    </form>
   </section>
 
   {# 3. Health #}

@@ -92,6 +92,9 @@ def dashboard(request: Request):
             "s": state_mod.collect(),
             "pending": queue.current(),
             "relay_notice": notice if notice in ("sent", "expired", "refused") else "",
+            "device_notice": (request.query_params.get("device")
+                              if request.query_params.get("device") in ("sent", "failed")
+                              else ""),
             "Health": state_mod.Health,
             "KIND_SIGNATURE": KIND_SIGNATURE,
             "KIND_TOKEN": KIND_TOKEN,
@@ -273,6 +276,31 @@ def submit_relay(nonce: str = Form(...), kind: str = Form(...),
 
     log.info("relay accepted a %s (sha256 %s…)", kind, digest[:8])
     return RedirectResponse(url="/?relay=sent", status_code=303)
+
+
+@app.post("/device")
+def device_action(action: str = Form(...)):
+    """Send one of a fixed set of harmless actions to the phone.
+
+    Added because the screen goes to sleep and the phone-view panel then shows a
+    black rectangle, which is indistinguishable from the feed being broken.
+
+    The action names are an allow-list in `device.UI_ACTIONS`, not a keycode
+    parameter. That distinction is the whole safety argument: waking a screen
+    cannot record a visit or answer a verification prompt, but a route that
+    forwards arbitrary keycodes could do both by driving the app directly. The
+    "no override from the UI" property has to live in the routing rather than in
+    what someone types into a form.
+    """
+    from apt_log.device import DeviceUnavailable, send_ui_action
+
+    try:
+        send_ui_action(action)
+    except DeviceUnavailable as exc:
+        log.warning("device action refused: %s", exc)
+        return RedirectResponse(url="/?device=failed", status_code=303)
+    log.info("device action %s sent from the UI", action)
+    return RedirectResponse(url="/?device=sent", status_code=303)
 
 
 @app.post("/acknowledge")

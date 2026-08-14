@@ -83,7 +83,7 @@ class TestNoOverrideControl:
             r.path for r in app.routes
             if getattr(r, "methods", None) and "POST" in r.methods
         }
-        assert posts == {"/language", "/signature", "/relay",
+        assert posts == {"/language", "/signature", "/relay", "/device",
                          "/acknowledge", "/control"}
 
 
@@ -242,3 +242,28 @@ class TestMirrorPanel:
         body = client.get("/api/state").json()
         assert set(body["mirror"]) >= {"screen", "step", "stale", "screen_at"}
         assert set(body) >= {"relay", "mirror", "signature_pending"}
+
+
+class TestDeviceAction:
+    """/device exists so a sleeping screen doesn't look like a broken feed.
+
+    The safety argument is that the action is a name from an allow-list, not a
+    keycode. Waking a screen cannot record a visit; a route forwarding arbitrary
+    keycodes could drive the app and do exactly that.
+    """
+
+    def test_an_unlisted_action_is_refused(self, client):
+        r = client.post("/device", follow_redirects=False,
+                        data={"action": "tap"})
+        assert r.headers["location"] == "/?device=failed"
+
+    def test_a_raw_keycode_is_not_an_action(self, client):
+        r = client.post("/device", follow_redirects=False,
+                        data={"action": "66"})
+        assert r.headers["location"] == "/?device=failed"
+
+    def test_wake_is_the_only_thing_offered_on_the_page(self, client):
+        body = client.get("/").text
+        assert 'name="action" value="wake"' in body
+        for forbidden in ("keyevent", "keycode", 'value="tap"'):
+            assert forbidden not in body

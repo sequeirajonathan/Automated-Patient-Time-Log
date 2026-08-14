@@ -34,8 +34,40 @@ KEYCODE_MENU = "82"   # dismisses the keyguard
 KEYCODE_ENTER = "66"
 
 
+# Actions the UI is allowed to send to the phone. An allow-list rather than a
+# keyevent parameter, and it stays that way: the moment the page can post an
+# arbitrary keycode it is a remote control for the device, and "the UI cannot
+# record a visit" stops being a property of the routing and starts being a
+# property of whatever someone types into a form field.
+#
+# KEYCODE_WAKEUP over KEYCODE_POWER because wake is idempotent. Power toggles,
+# so a double-tap from an impatient thumb on a slow connection would put the
+# screen back to sleep -- and the person pressing it is a thousand miles from
+# the phone and pressing it *because* they cannot see what happened.
+UI_ACTIONS = {
+    "wake": KEYCODE_WAKEUP,
+}
+
+
 class DeviceUnavailable(RuntimeError):
     """The ladder ran to the end without recovering the device."""
+
+
+def send_ui_action(action: str, serial: str | None = None) -> None:
+    """Send one of the enumerated UI actions. Raises on anything else."""
+    keycode = UI_ACTIONS.get(action)
+    if keycode is None:
+        raise DeviceUnavailable(
+            f"{action!r} is not an action this page may send; "
+            f"known: {sorted(UI_ACTIONS)}"
+        )
+    cmd = ["adb"] + (["-s", serial] if serial else []) + \
+          ["shell", "input", "keyevent", keycode]
+    result = subprocess.run(cmd, capture_output=True, timeout=20)
+    if result.returncode != 0:
+        raise DeviceUnavailable(
+            f"adb refused {action}: {result.stderr.decode('utf-8', 'replace').strip()}"
+        )
 
 
 class Rung(StrEnum):
