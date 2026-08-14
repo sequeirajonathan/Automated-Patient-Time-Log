@@ -36,20 +36,18 @@ class LanguageSelectors:
     header: str = f"{PACKAGE}:id/lbl_header"
 
 
-# The picker cannot be driven. Inspected on the device it is an android.view.View
-# with no children, no text, no content-desc, clickable=false, scrollable=false
-# and a11y-important=false — custom-drawn, so the language options are not in the
-# accessibility tree at all. There is nothing to select by name and no way to read
-# back what is currently selected.
+# The picker is opaque. Inspected on the device it is an android.view.View with no
+# children, no text, no content-desc, clickable=false, scrollable=false and
+# a11y-important=false — custom-drawn, so the options are not in the accessibility
+# tree. Dragging it changes the selection but reads back nothing: after a 240px
+# drag it still reported text='' and no content-desc.
 #
-# Blind swiping would "work" in the sense of changing something, but it could not
-# be verified, and silently choosing the wrong language for the caregiver is
-# exactly the class of guess this project refuses elsewhere.
+# It can therefore be *moved* but not *read*. select_language() does the moving,
+# and deals with the missing read in the only honest way available — it refuses to
+# infer where the wheel is and requires the caller to say. Everything else here
+# exists to make the result checkable afterwards, since it cannot be checked at
+# the time.
 #
-# So the phone's language is set by a human when the device is provisioned
-# (PI_SETUP.md §2) and the app follows it. What the automation *can* do is check
-# that the screen is rendering in the language it expects before accepting the
-# default, which is what header_language() is for.
 # Two signals rather than one, because only the English side is confirmed. The
 # header reads "Select Language" and the apply control reads "Next" on the device
 # in front of us; the Spanish strings are the app's likely wording but have not
@@ -69,6 +67,20 @@ APPLY_BY_LANGUAGE = {
     "en": ("next",),
     "es": ("siguiente", "continuar", "aceptar"),
 }
+
+# Wheel order, read off the device screen. The items are drawn inside the custom
+# view, so this list is the only record of them that code can use.
+LANGUAGE_ORDER = ("en", "es", "fr", "zh", "ru", "ht")
+
+LANGUAGE_NAMES = {
+    "en": "English", "es": "Espanol", "fr": "Francais",
+    "zh": "Chinese", "ru": "Russian", "ht": "Kreyol Ayisyen",
+}
+
+# Measured: a 240px drag moved exactly two items. Device-specific — a different
+# screen density will need recalibrating, which is why select_language() insists
+# on being told where the wheel currently is rather than tracking it.
+ITEM_PITCH_PX = 120
 
 
 class LanguageMismatch(RuntimeError):
@@ -109,13 +121,59 @@ class LanguageScreen:
                 return code
         return None
 
+    def select_language(
+        self, target: str, *, current: str, pitch_px: int = ITEM_PITCH_PX
+    ) -> None:
+        """Move the wheel from `current` to `target`.
+
+        `current` is required and never inferred. The picker exposes no state, so
+        the only honest way to know where the wheel is, is to have been told —
+        after `pm clear` it is the first entry, and otherwise a human has looked
+        at it. Guessing here is how the wheel ends up on Francais.
+
+        Uses a settled drag rather than a swipe: a fling travels further than
+        asked, which is exactly how this went wrong the first time.
+
+        This still cannot verify the result. Confirm with header_language() after
+        applying, or by looking at the screen.
+        """
+        if target not in LANGUAGE_ORDER:
+            raise ValueError(f"unknown language {target!r}; expected one of {LANGUAGE_ORDER}")
+        if current not in LANGUAGE_ORDER:
+            raise ValueError(f"unknown current language {current!r}")
+
+        steps = LANGUAGE_ORDER.index(target) - LANGUAGE_ORDER.index(current)
+        if steps == 0:
+            log.info("wheel already on %s", LANGUAGE_NAMES[target])
+            return
+
+        pickers = self.driver.find_elements(ID, self.sel.picker)
+        if not pickers:
+            raise RuntimeError("language picker not on screen")
+        rect = pickers[0].rect
+        x = rect["x"] + rect["width"] // 2
+        centre = rect["y"] + rect["height"] // 2
+
+        # Imported here so this module stays unit-testable without selenium,
+        # matching how probe.py defers its appium import.
+        from apt_log.gestures import drag
+
+        # Dragging up advances down the list, confirmed on the device.
+        distance = steps * pitch_px
+        drag(self.driver, x, centre + distance // 2, centre - distance // 2)
+        log.info(
+            "moved the wheel %+d item(s): %s -> %s",
+            steps, LANGUAGE_NAMES[current], LANGUAGE_NAMES[target],
+        )
+
     def apply(self, expect_language: str | None = None) -> None:
         """Accept the picker's current selection and move on.
 
-        Does not choose a language — it cannot, see the note above the selectors.
-        `expect_language` asserts the screen is already rendering in the language
+        Does not choose a language; that is select_language()'s job, and it is a
+        separate call because moving the wheel and committing it carry different
+        risks. `expect_language` asserts the screen is rendering in the language
         the deployment expects, turning a silent wrong-language run into a loud
-        failure at provisioning time rather than a surprise in Florida.
+        failure while someone is still holding the phone.
         """
         if expect_language is not None:
             actual = self.header_language()
