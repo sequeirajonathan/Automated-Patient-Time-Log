@@ -110,6 +110,40 @@ if ! git checkout --quiet --force "$target"; then
     alert "Deploy blocked: could not check out ${target:0:8}"
     exit 1
 fi
+# Install the target's dependencies BEFORE testing it. Skipping this produced two
+# distinct failures on the Florida unit, and the second one is unrecoverable.
+#
+# The mild version: a revision that adds a dependency gets tested against the
+# previous revision's venv, fails for a reason that has nothing to do with its
+# tests, and rolls back.
+#
+# The serious version: a venv with no pytest in it at all reports "TESTS FAILED"
+# and rolls back -- and rolling back can never install pytest. The machine then
+# refuses every future update forever, with the rollback being the thing holding
+# it stuck. That is not a failing gate, it is a deadlock, and it took a hand-run
+# pip install over SSH to break. On a box in someone else's building, that is a
+# trip.
+#
+# "Cannot run the tests" and "the tests failed" are different answers. Only the
+# second one means the revision is bad.
+if ! sudo -u "$SERVICE_USER" "$APP_DIR/.venv/bin/pip" install -q -e "$APP_DIR[dev]"; then
+    log "DEPENDENCIES WOULD NOT INSTALL for ${target:0:8} — staying on ${current:0:8}"
+    apply "$current" || log "rollback to ${current:0:8} reported errors"
+    alert "Deploy blocked: dependencies would not install for ${target:0:8}"
+    exit 1
+fi
+
+if ! sudo -u "$SERVICE_USER" "$APP_DIR/.venv/bin/python" -c "import pytest" 2>/dev/null; then
+    # Distinct message on purpose. This exact condition spent an hour looking
+    # like a failing test suite, which sent every diagnosis in the wrong
+    # direction -- toward the revision under test rather than the environment
+    # meant to be judging it.
+    log "CANNOT RUN TESTS: pytest missing after install — staying on ${current:0:8}"
+    apply "$current" || log "rollback to ${current:0:8} reported errors"
+    alert "Deploy blocked: test environment is broken on ${target:0:8}, not the tests"
+    exit 1
+fi
+
 if ! sudo -u "$SERVICE_USER" "$APP_DIR/.venv/bin/python" -m pytest -q --maxfail=1 \
         "$APP_DIR/tests" 2>&1 | tail -20; then
     log "TESTS FAILED — staying on ${current:0:8}"
