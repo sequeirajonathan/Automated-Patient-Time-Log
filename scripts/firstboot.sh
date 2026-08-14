@@ -135,7 +135,9 @@ chown -R "$SERVICE_USER:$SERVICE_USER" "$APP_DIR"
 sudo -u "$SERVICE_USER" python3 -m venv "$APP_DIR/.venv"
 sudo -u "$SERVICE_USER" "$APP_DIR/.venv/bin/pip" install -q --upgrade pip
 if [[ -f "$APP_DIR/pyproject.toml" ]]; then
-    sudo -u "$SERVICE_USER" "$APP_DIR/.venv/bin/pip" install -q -e "$APP_DIR"
+    # [dev] is required, not optional: manager.sh gates every deploy on a pytest
+    # run, so without pytest present every update "fails tests" and rolls back.
+    sudo -u "$SERVICE_USER" "$APP_DIR/.venv/bin/pip" install -q -e "$APP_DIR[dev]"
 fi
 
 # ------------------------------------------------------------------- services
