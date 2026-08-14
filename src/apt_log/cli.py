@@ -78,7 +78,7 @@ def inspect(
 
 @app.command()
 def feed(
-    interval: float = typer.Option(5.0, "--interval", "-i",
+    interval: float = typer.Option(1.0, "--interval", "-i",
                                    help="Seconds between frames."),
     serial: str = typer.Option("", "--serial", help="adb serial, if more than one."),
 ) -> None:

@@ -49,7 +49,7 @@ from apt_log.ui import mirror as mirror_mod
 
 log = logging.getLogger(__name__)
 
-DEFAULT_INTERVAL = 5.0
+DEFAULT_INTERVAL = 1.0
 
 # She reads this over cellular while walking between floors, so the wire size is
 # what decides whether the portal gets used or she walks down to the phone.
@@ -59,6 +59,11 @@ DEFAULT_INTERVAL = 5.0
 # ~1.2x pixel ratio on a phone-sized viewport rather than a soft upscale.
 MIRROR_WIDTH = 480
 MIRROR_QUALITY = 65
+
+# How often the overlay is refreshed, in seconds. The picture rides the loop
+# interval; this rides a multiple of it, because reading the hierarchy costs
+# roughly twice what a compressed screenshot does.
+HIERARCHY_EVERY = 3.0
 
 # Filled from `wm size` at first use; the overlay needs it to scale boxes onto a
 # phone-sized <img>. Cached because it does not change and the loop is hot.
@@ -203,9 +208,13 @@ def compress(png: bytes) -> bytes:
 FRAME_NAME = "frame.json"
 
 
-def write_frame(path: Path, serial: str | None = None) -> str:
-    """Capture once and publish the mirror frame. Returns a one-line status."""
-    hierarchy = read_stable_hierarchy(serial)
+def write_frame(path: Path, serial: str | None = None,
+                hierarchy: str | None = None) -> str:
+    """Capture once and publish the mirror frame. Returns a one-line status.
+
+    The hierarchy is handed in rather than fetched, so the caller decides how
+    often to pay for it. See `run`.
+    """
     png, focus, reason = capture(serial, hierarchy)
     screen = screen_for(focus)
 
@@ -249,20 +258,36 @@ def write_frame(path: Path, serial: str | None = None) -> str:
 
 def run(path: Path, interval: float = DEFAULT_INTERVAL,
         serial: str | None = None, iterations: int | None = None) -> None:
-    """Loop until stopped. `iterations` bounds it for tests."""
+    """Loop until stopped. `iterations` bounds it for tests.
+
+    Two clocks, because the halves cost nothing alike. Measured on the Pi: a
+    screenshot is 865 ms and compressing it 49 ms, while reading the hierarchy
+    is 1.75 s through the resident session -- and was 12.7 s before it. On one
+    clock the picture could never update faster than the slowest thing it waited
+    on, which is what made the portal feel dead under the hand.
+
+    The picture is what she is looking at, so it gets the fast clock. The overlay
+    only has to be right when she taps, and a tap re-checks anyway.
+    """
     count = 0
+    tick = 0
+    hierarchy: str | None = None
+    every = max(1, round(HIERARCHY_EVERY / max(interval, 0.1)))
+
     while iterations is None or count < iterations:
         try:
-            log.info("%s", write_frame(path, serial))
+            if tick % every == 0:
+                hierarchy = read_hierarchy(serial)
+            log.info("%s", write_frame(path, serial, hierarchy))
         except Exception as exc:  # noqa: BLE001
             # A watcher that dies on one bad read stops being a watcher.
             log.warning("frame failed: %s", exc)
         count += 1
+        tick += 1
         if iterations is None or count < iterations:
             time.sleep(interval)
 
 
-# --------------------------------------------------------------------- overlay
 def _attr(node: str, name: str) -> str:
     m = re.search(rf'{name}="([^"]*)"', node)
     return m.group(1) if m else ""
@@ -301,13 +326,27 @@ def elements(xml: str) -> list[dict]:
 
 
 def read_hierarchy(serial: str | None = None) -> str | None:
-    """Raw page source, or None when it cannot be read.
+    """The current hierarchy, through the resident Appium session.
+
+    This used to shell out to `uiautomator dump`, which spawns a fresh
+    instrumentation on every call: 6.1 s measured, and partial often enough to
+    need retrying, which took a screen read to 12.7 s. The resident server
+    answers in 1.75 s and does not come back partial -- which is why the
+    stabilise-and-retry machinery below is now unused rather than tuned.
+    """
+    from apt_log import resident
+
+    return resident.page_source()
+
+
+def read_hierarchy_via_adb(serial: str | None = None) -> str | None:
+    """The old path, kept for when there is no Appium server to talk to.
 
     The remote path carries this process's pid. A fixed name looked harmless
-    until the feed loop and a one-off call raced on it and one of them read a
-    file the other was mid-write on -- which surfaced as an intermittent "the
-    hierarchy is unavailable", the single most misleading symptom available,
-    since it is also what a live Appium session legitimately produces.
+    until the feed loop and a one-off call raced on it and one read a file the
+    other was mid-write on -- surfacing as an intermittent "hierarchy
+    unavailable", the most misleading symptom available, since that is also what
+    a live Appium session legitimately produces.
     """
     remote = f"/sdcard/.aptlog-feed-{os.getpid()}.xml"
     try:
@@ -340,7 +379,7 @@ def read_stable_hierarchy(serial: str | None = None,
     previous: str | None = None
 
     for attempt in range(attempts):
-        xml = read_hierarchy(serial)
+        xml = read_hierarchy_via_adb(serial)
         if xml is not None:
             els = elements(xml)
             current = frame_id(els)

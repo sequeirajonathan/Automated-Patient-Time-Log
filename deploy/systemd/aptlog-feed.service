@@ -14,7 +14,7 @@ Type=simple
 User=apt
 Group=apt
 WorkingDirectory=/opt/aptlog
-ExecStart=/opt/aptlog/.venv/bin/apt-log feed --interval 5
+ExecStart=/opt/aptlog/.venv/bin/apt-log feed --interval 1
 Restart=always
 RestartSec=5
 

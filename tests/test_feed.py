@@ -125,16 +125,40 @@ class TestRun:
     def test_one_bad_frame_does_not_stop_the_watcher(self, tmp_path):
         calls = []
 
-        def flaky(_path, _serial=None):
+        def flaky(_path, _serial=None, _hierarchy=None):
             calls.append(1)
             if len(calls) == 1:
                 raise RuntimeError("adb hiccup")
             return "ok"
 
         with patch.object(feed, "write_frame", side_effect=flaky), \
+             patch.object(feed, "read_hierarchy", return_value=None), \
              patch.object(feed.time, "sleep"):
             feed.run(tmp_path / "s.png", interval=0, iterations=3)
         assert len(calls) == 3
+
+    def test_the_hierarchy_is_read_far_less_often_than_the_picture(self, tmp_path):
+        """The whole point of two clocks. The picture is 0.9s of work and the
+        hierarchy 1.75s; on one clock the screen could never update faster than
+        the slowest thing it waited on."""
+        reads = []
+        with patch.object(feed, "write_frame", return_value="ok"), \
+             patch.object(feed, "read_hierarchy",
+                          side_effect=lambda *_: reads.append(1)), \
+             patch.object(feed.time, "sleep"):
+            feed.run(tmp_path / "s.png", interval=1.0, iterations=9)
+        assert len(reads) == 3          # 9 pictures, 3 hierarchies at every=3
+
+    def test_a_slow_interval_still_reads_the_hierarchy_every_frame(self, tmp_path):
+        """When a frame already costs more than HIERARCHY_EVERY, skipping reads
+        would leave the overlay staler than the picture for no saving at all."""
+        reads = []
+        with patch.object(feed, "write_frame", return_value="ok"), \
+             patch.object(feed, "read_hierarchy",
+                          side_effect=lambda *_: reads.append(1)), \
+             patch.object(feed.time, "sleep"):
+            feed.run(tmp_path / "s.png", interval=5.0, iterations=3)
+        assert len(reads) == 3
 
 
 class TestElements:
@@ -295,7 +319,7 @@ class TestTap:
 
 
 class TestStableHierarchy:
-    """uiautomator dump is not a snapshot.
+    """The adb fallback path. uiautomator dump is not a snapshot.
 
     Measured on a static Settings screen, four consecutive dumps returned 20, 2,
     2 and 22 elements. Nothing in a result says which kind you got.
@@ -306,28 +330,28 @@ class TestStableHierarchy:
                ' clickable="true" bounds="[0,0][720,60]" />')
 
     def test_two_agreeing_dumps_are_trusted_immediately(self):
-        with patch.object(feed, "read_hierarchy", side_effect=[self.RICH, self.RICH]), \
+        with patch.object(feed, "read_hierarchy_via_adb", side_effect=[self.RICH, self.RICH]), \
              patch.object(feed.time, "sleep"):
             assert feed.read_stable_hierarchy() == self.RICH
 
     def test_the_richest_dump_wins_when_none_agree(self):
         """A partial capture is strictly a subset, so "most elements" is the
         least-wrong answer rather than an arbitrary tiebreak."""
-        with patch.object(feed, "read_hierarchy",
+        with patch.object(feed, "read_hierarchy_via_adb",
                           side_effect=[self.PARTIAL, self.RICH, self.PARTIAL,
                                        self.RICH, self.PARTIAL]), \
              patch.object(feed.time, "sleep"):
             assert feed.read_stable_hierarchy() == self.RICH
 
     def test_all_reads_failing_gives_none(self):
-        with patch.object(feed, "read_hierarchy", return_value=None), \
+        with patch.object(feed, "read_hierarchy_via_adb", return_value=None), \
              patch.object(feed.time, "sleep"):
             assert feed.read_stable_hierarchy() is None
 
     def test_an_empty_dump_is_never_treated_as_agreement(self):
         """Two identical empty reads agree on nothing useful, and accepting them
         would publish "this screen has no targets" for a screen full of them."""
-        with patch.object(feed, "read_hierarchy", side_effect=["", "", self.RICH, self.RICH]), \
+        with patch.object(feed, "read_hierarchy_via_adb", side_effect=["", "", self.RICH, self.RICH]), \
              patch.object(feed.time, "sleep"):
             assert feed.read_stable_hierarchy() == self.RICH
 
