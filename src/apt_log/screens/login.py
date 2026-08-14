@@ -24,7 +24,21 @@ log = logging.getLogger(__name__)
 
 XPATH = "xpath"
 
-SUBMIT_WORDS = re.compile(r"\b(sign ?in|log ?in|login|submit|continue|next)\b", re.I)
+# Both languages, because the production phone is set to Spanish (the caregiver's
+# language) while development happens on an English device. Matching only English
+# would work here and fail in Florida — the worst possible split.
+#
+# is_displayed() deliberately does NOT rely on these; it keys on the password
+# field's accessibility attribute, which is language-independent. This list is
+# only the fallback for identifying a submit control, and an unmatched control is
+# refused rather than guessed.
+SUBMIT_WORDS = re.compile(
+    r"\b("
+    r"sign ?in|log ?in|login|submit|continue|next"          # en
+    r"|iniciar ?sesi[oó]n|acceder|entrar|continuar|siguiente|aceptar"  # es
+    r")\b",
+    re.I | re.UNICODE,
+)
 
 
 class LoginError(RuntimeError):

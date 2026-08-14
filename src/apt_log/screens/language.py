@@ -33,6 +33,31 @@ ACTIVITY = ".LanguageSelectionActivity"
 class LanguageSelectors:
     picker: str = f"{PACKAGE}:id/pickerView"
     apply: str = f"{PACKAGE}:id/txtApply"
+    header: str = f"{PACKAGE}:id/lbl_header"
+
+
+# The picker cannot be driven. Inspected on the device it is an android.view.View
+# with no children, no text, no content-desc, clickable=false, scrollable=false
+# and a11y-important=false — custom-drawn, so the language options are not in the
+# accessibility tree at all. There is nothing to select by name and no way to read
+# back what is currently selected.
+#
+# Blind swiping would "work" in the sense of changing something, but it could not
+# be verified, and silently choosing the wrong language for the caregiver is
+# exactly the class of guess this project refuses elsewhere.
+#
+# So the phone's language is set by a human when the device is provisioned
+# (PI_SETUP.md §2) and the app follows it. What the automation *can* do is check
+# that the screen is rendering in the language it expects before accepting the
+# default, which is what header_language() is for.
+HEADER_BY_LANGUAGE = {
+    "en": ("select language",),
+    "es": ("seleccionar idioma", "seleccione idioma", "elegir idioma"),
+}
+
+
+class LanguageMismatch(RuntimeError):
+    """The app is not in the language this deployment expects."""
 
 
 class LanguageScreen:
@@ -49,15 +74,39 @@ class LanguageScreen:
             pass
         return bool(self.driver.find_elements(ID, self.sel.picker))
 
-    def apply(self) -> None:
+    def header_language(self) -> str | None:
+        """Which language this screen is rendering in, or None if unrecognised.
+
+        The only readable signal on the screen. The picker itself is opaque, so
+        the header is how we tell an English device from a Spanish one.
+        """
+        controls = self.driver.find_elements(ID, self.sel.header)
+        if not controls:
+            return None
+        text = (controls[0].text or "").strip().lower()
+        for code, phrases in HEADER_BY_LANGUAGE.items():
+            if any(p in text for p in phrases):
+                return code
+        return None
+
+    def apply(self, expect_language: str | None = None) -> None:
         """Accept the picker's current selection and move on.
 
-        Deliberately does not choose a language. The app's own language affects
-        what the caregiver sees on the phone, and REQ-11 governs the operator's
-        UI rather than this one — changing it here would be a silent decision
-        about someone else's screen. Whatever the device is already set to is
-        the setting a human chose.
+        Does not choose a language — it cannot, see the note above the selectors.
+        `expect_language` asserts the screen is already rendering in the language
+        the deployment expects, turning a silent wrong-language run into a loud
+        failure at provisioning time rather than a surprise in Florida.
         """
+        if expect_language is not None:
+            actual = self.header_language()
+            if actual != expect_language:
+                raise LanguageMismatch(
+                    f"expected the app in {expect_language!r} but the language "
+                    f"screen reads {actual or 'an unrecognised language'}. The "
+                    "picker cannot be driven programmatically — set the phone's "
+                    "language in Android Settings (PI_SETUP.md §2)."
+                )
+
         controls = self.driver.find_elements(ID, self.sel.apply)
         if not controls:
             raise RuntimeError(

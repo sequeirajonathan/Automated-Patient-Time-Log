@@ -13,6 +13,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from apt_log.screens.language import (
+    LanguageMismatch,
     LanguageScreen,
     advance_past_startup_gates,
 )
@@ -52,6 +53,64 @@ class TestDetection:
             )
         })
         assert LanguageScreen(d).is_displayed() is True
+
+
+HEADER = "com.hhaexchange.caregiver:id/lbl_header"
+
+
+def _text_el(text):
+    e = MagicMock()
+    e.text = text
+    return e
+
+
+class TestHeaderLanguage:
+    """The only readable language signal — the picker itself is opaque."""
+
+    def test_recognises_english(self):
+        d = FakeDriver({HEADER: [_text_el("Select Language")]})
+        assert LanguageScreen(d).header_language() == "en"
+
+    def test_recognises_spanish(self):
+        d = FakeDriver({HEADER: [_text_el("Seleccionar idioma")]})
+        assert LanguageScreen(d).header_language() == "es"
+
+    def test_unrecognised_language_is_none_not_a_guess(self):
+        d = FakeDriver({HEADER: [_text_el("Sprache auswählen")]})
+        assert LanguageScreen(d).header_language() is None
+
+    def test_missing_header_is_none(self):
+        assert LanguageScreen(FakeDriver({})).header_language() is None
+
+
+class TestLanguageExpectation:
+    def test_accepts_when_the_app_matches_the_expected_language(self):
+        apply_el = MagicMock()
+        d = FakeDriver({HEADER: [_text_el("Seleccionar idioma")], APPLY: [apply_el]},
+                       activity=".LanguageSelectionActivity")
+        LanguageScreen(d).apply(expect_language="es")
+        apply_el.click.assert_called_once()
+
+    def test_refuses_and_does_not_tap_on_a_mismatch(self):
+        """A wrong-language run must fail at provisioning, not surprise Florida."""
+        apply_el = MagicMock()
+        d = FakeDriver({HEADER: [_text_el("Select Language")], APPLY: [apply_el]},
+                       activity=".LanguageSelectionActivity")
+        with pytest.raises(LanguageMismatch, match="expected the app in 'es'"):
+            LanguageScreen(d).apply(expect_language="es")
+        apply_el.click.assert_not_called()
+
+    def test_mismatch_message_points_at_the_manual_fix(self):
+        d = FakeDriver({HEADER: [_text_el("Select Language")], APPLY: [MagicMock()]},
+                       activity=".LanguageSelectionActivity")
+        with pytest.raises(LanguageMismatch, match="Android Settings"):
+            LanguageScreen(d).apply(expect_language="es")
+
+    def test_no_expectation_means_no_check(self):
+        apply_el = MagicMock()
+        d = FakeDriver({APPLY: [apply_el]}, activity=".LanguageSelectionActivity")
+        LanguageScreen(d).apply()
+        apply_el.click.assert_called_once()
 
 
 class TestApply:
