@@ -14,7 +14,11 @@ DEPLOY_REF="${DEPLOY_REF:-release}"
 SERVICE_USER="${SERVICE_USER:-apt}"
 STATE_DIR="/var/lib/aptlog"
 LAST_GOOD="$STATE_DIR/last-good-sha"
-SERVICES=(aptlog-agent aptlog-ui)
+# aptlog-agent is deliberately absent until REQ-6 exists: `apt-log run` is still
+# the placeholder that exits 2, so gating deploys on it would roll back every
+# revision forever now that the health check actually works. Put it back the
+# moment the agent has a main loop -- it is the service that matters most here.
+SERVICES=(aptlog-ui)
 HEALTH_URL="http://127.0.0.1:8080/healthz"
 
 mkdir -p "$STATE_DIR"
@@ -93,11 +97,26 @@ apply() {
 }
 
 # ------------------------------------------------------------------ verify it
+# `systemctl is-active --quiet a b c` exits 0 when ANY ONE of them is active,
+# not all. This gate was written as though it meant all, so on the Florida unit a
+# dead, crash-looping agent passed the health check because the UI beside it was
+# up -- and the deploy was blessed and recorded as last-good. Every rollback this
+# mechanism claims to provide was fiction for as long as one service survived.
+#
+# Checked one at a time, where the exit code means what it reads like.
+all_active() {
+    local unit
+    for unit in "${SERVICES[@]}"; do
+        systemctl is-active --quiet "$unit" || return 1
+    done
+    return 0
+}
+
 healthy() {
     # Give services time to bind before believing a failure.
     for _ in $(seq 1 12); do
         sleep 5
-        systemctl is-active --quiet "${SERVICES[@]}" || continue
+        all_active || continue
         curl -fsS --max-time 5 "$HEALTH_URL" >/dev/null 2>&1 && return 0
     done
     return 1
