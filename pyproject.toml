@@ -37,6 +37,9 @@ dependencies = [
 dev = [
     "pytest==9.1.1",
     "pytest-rerunfailures==16.5",
+    # starlette.testclient needs it; without it the whole suite fails to
+    # COLLECT, and manager.sh gates every deploy on pytest.
+    "httpx==0.28.1",
 ]
 
 [project.scripts]
