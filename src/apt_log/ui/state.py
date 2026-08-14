@@ -20,6 +20,9 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 
+from apt_log.ui.mirror import Mirror
+from apt_log.ui import mirror as mirror_mod
+
 log = logging.getLogger(__name__)
 
 STATE_DIR = Path("/var/lib/aptlog")
@@ -73,6 +76,7 @@ class DashboardState:
     paused: bool = False
     heartbeat: datetime | None = None
     screenshot_at: datetime | None = None
+    mirror: Mirror = field(default_factory=Mirror)
     generated_at: datetime = field(default_factory=datetime.now)
 
     @property
@@ -243,4 +247,5 @@ def collect() -> DashboardState:
         paused=is_paused(),
         heartbeat=heartbeat,
         screenshot_at=_mtime(SCREENSHOT_PATH),
+        mirror=mirror_mod.read(),
     )

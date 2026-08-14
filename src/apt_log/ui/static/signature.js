@@ -66,6 +66,10 @@
     started = Date.now();
     current = { width: width(), points: [point(ev)] };
     strokes.push(current);
+    // The live stream reloads the page when the outstanding request changes.
+    // Once she has put pen to canvas, a reload would silently discard strokes
+    // she would then have to redraw without being told why.
+    window.APTLOG_DRAWING = true;
   });
 
   pad.addEventListener('pointermove', (ev) => {
@@ -80,6 +84,7 @@
 
   document.getElementById('clear').addEventListener('click', () => {
     strokes = []; redraw(); msg.textContent = '';
+    window.APTLOG_DRAWING = false;
   });
 
   document.getElementById('undo').addEventListener('click', () => {
@@ -99,6 +104,7 @@
       if (!res.ok) { msg.textContent = i18n.failed || ''; return; }
       msg.textContent = i18n.sent || '';
       strokes = []; redraw();          // nothing reusable is left behind
+      window.APTLOG_DRAWING = false;
       setTimeout(() => window.location.reload(), 1200);
     } catch (e) {
       msg.textContent = i18n.failed || '';

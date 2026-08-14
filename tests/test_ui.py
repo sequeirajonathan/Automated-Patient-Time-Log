@@ -1,20 +1,28 @@
-"""The dashboard and the signature queue.
+"""The relay-and-mirror page.
 
 The routing tests exist mainly to hold two lines that are easy to erode: the page
 renders in the caregiver's language, and there is no way to record a visit from
 it. The gate is what makes a recorded visit mean anything, and a helpful
 "record anyway" button would quietly undo the whole system.
+
+The relay makes that second line harder to hold and therefore worth testing more
+carefully, because it does accept input now. What keeps it honest is that every
+answer it accepts was enumerated by the agent first — the queue's own tests cover
+that, and the tests here cover the route not widening it on the way through.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
 
-from apt_log.ui.app import LANGUAGE_COOKIE, app, queue
-from apt_log.ui.signature_queue import SignatureExpired, SignatureQueue
+from apt_log.ui.app import LANGUAGE_COOKIE, _mirror_payload, app, queue
+from apt_log.ui.i18n import Translator
+from apt_log.ui.mirror import Mirror
+from apt_log.ui.relay import KIND_CHOICE, KIND_SIGNATURE, KIND_TOKEN
+from apt_log.ui.state import DashboardState
 
 
 @pytest.fixture
@@ -73,7 +81,8 @@ class TestNoOverrideControl:
             r.path for r in app.routes
             if getattr(r, "methods", None) and "POST" in r.methods
         }
-        assert posts == {"/language", "/signature", "/acknowledge", "/control"}
+        assert posts == {"/language", "/signature", "/relay",
+                         "/acknowledge", "/control"}
 
 
 class TestApiState:
@@ -93,61 +102,122 @@ class TestSignatureRoute:
         assert r.status_code == 409
 
     def test_accepts_the_outstanding_nonce(self, client):
-        nonce = queue.request("PT-0042", datetime.now())
+        nonce = queue.request_signature("PT-0042", datetime.now())
         r = client.post("/signature", json={"nonce": nonce, "strokes": [[[0.1, 0.2, 0]]]})
         assert r.status_code == 200
 
     def test_a_captured_payload_cannot_be_replayed(self, client):
         """REQ-10.5 — the nonce is what makes a copied request body useless."""
-        nonce = queue.request("PT-0042", datetime.now())
+        nonce = queue.request_signature("PT-0042", datetime.now())
         payload = {"nonce": nonce, "strokes": [[[0.1, 0.2, 0]]]}
         assert client.post("/signature", json=payload).status_code == 200
         queue.wait(0.1)                       # agent consumes it
         assert client.post("/signature", json=payload).status_code == 409
 
     def test_prompt_names_the_patient_and_renders_in_spanish(self, client):
-        queue.request("PT-0042", datetime(2026, 8, 14, 14, 0))
+        queue.request_signature("PT-0042", datetime(2026, 8, 14, 14, 0))
         body = client.get("/").text
         assert "PT-0042" in body      # REQ-10.3: she must see what she is signing for
         assert "Firme" in body
         queue.cancel()
 
 
-class TestSignatureQueue:
-    def test_only_one_request_outstanding_at_a_time(self):
-        q = SignatureQueue()
-        q.request("PT-1", None)
-        second = q.request("PT-2", None)
-        assert q.current()["nonce"] == second
-        assert q.current()["patient_id"] == "PT-2"
+class TestRelayRoute:
+    def test_a_token_request_renders_a_code_field_in_spanish(self, client):
+        queue.request_token("PT-0042", datetime(2026, 8, 14, 20, 0))
+        body = client.get("/").text
+        assert "PT-0042" in body          # she must see which visit this is for
+        assert "Token de seguridad" in body
+        assert 'name="value"' in body
+        queue.cancel()
 
-    def test_strokes_are_dropped_once_consumed(self):
-        """REQ-10.6 — nothing re-stampable survives."""
-        q = SignatureQueue()
-        nonce = q.request("PT-1", None)
-        q.submit(nonce, [[[0.1, 0.1, 0]]])
-        assert q.wait(0.5) is not None
-        assert q.current() is None
-        with pytest.raises(SignatureExpired):
-            q.submit(nonce, [[[0.1, 0.1, 0]]])
+    def test_a_choice_renders_the_apps_own_words(self, client):
+        """Relayed, not reworded — she is answering on a screen the controller
+        is looking at, and a paraphrase here would be a different screen."""
+        queue.request_choice("PT-0042", None, ("GPS", "token de seguridad"))
+        body = client.get("/").text
+        assert "GPS" in body and "token de seguridad" in body
+        queue.cancel()
 
-    def test_hash_is_stable_and_distinguishes_signatures(self):
-        q = SignatureQueue()
-        n1 = q.request("PT-1", None)
-        d1 = q.submit(n1, [[[0.1, 0.1, 0]]])
-        q.wait(0.5)
-        n2 = q.request("PT-2", None)
-        d2 = q.submit(n2, [[[0.9, 0.9, 5]]])
-        q.wait(0.5)
-        assert d1 != d2 and len(d1) == 64
+    def test_choosing_location_carries_a_warning_about_where_the_phone_is(self, client):
+        queue.request_choice("PT-0042", None, ("GPS", "token de seguridad"))
+        body = client.get("/").text
+        assert "el teléfono no está con usted" in body
+        queue.cancel()
 
-    def test_timeout_returns_none_so_the_caller_can_abandon(self):
-        """REQ-10.10 — never submit unsigned, never wait forever."""
-        q = SignatureQueue()
-        q.request("PT-1", None)
-        assert q.wait(0.05) is None
+    def test_an_option_the_app_never_offered_is_refused(self, client):
+        """The route must not widen what the queue allows."""
+        nonce = queue.request_choice("PT-0042", None, ("token de seguridad",))
+        r = client.post("/relay", follow_redirects=False,
+                        data={"nonce": nonce, "kind": KIND_CHOICE, "value": "GPS"})
+        assert r.headers["location"] == "/?relay=refused"
+        assert queue.current() is not None      # still outstanding, not consumed
+        queue.cancel()
 
-    def test_an_expired_request_stops_being_offered(self):
-        q = SignatureQueue(timeout=timedelta(seconds=-1))
-        q.request("PT-1", None)
-        assert q.current() is None
+    def test_an_offered_option_is_carried(self, client):
+        nonce = queue.request_choice("PT-0042", None, ("token de seguridad",))
+        r = client.post("/relay", follow_redirects=False,
+                        data={"nonce": nonce, "kind": KIND_CHOICE,
+                              "value": "token de seguridad"})
+        assert r.headers["location"] == "/?relay=sent"
+        assert queue.wait(0.5).value == "token de seguridad"
+
+    def test_a_token_is_carried(self, client):
+        nonce = queue.request_token("PT-0042", None)
+        r = client.post("/relay", follow_redirects=False,
+                        data={"nonce": nonce, "kind": KIND_TOKEN, "value": "4821-77"})
+        assert r.headers["location"] == "/?relay=sent"
+        assert queue.wait(0.5).value == "482177"
+
+    def test_a_stale_nonce_is_told_so_rather_than_silently_dropped(self, client):
+        r = client.post("/relay", follow_redirects=False,
+                        data={"nonce": "nope", "kind": KIND_TOKEN, "value": "482177"})
+        assert r.headers["location"] == "/?relay=expired"
+
+    def test_a_signature_cannot_be_posted_through_the_form_route(self, client):
+        """One kind, one route. /signature carries strokes and nothing else does."""
+        nonce = queue.request_signature("PT-0042", None)
+        r = client.post("/relay", follow_redirects=False,
+                        data={"nonce": nonce, "kind": KIND_SIGNATURE, "value": "x"})
+        assert r.status_code == 400
+        queue.cancel()
+
+    def test_the_refusal_reason_does_not_echo_the_token(self, client):
+        nonce = queue.request_token("PT-0042", None)
+        r = client.post("/relay", follow_redirects=False,
+                        data={"nonce": nonce, "kind": KIND_TOKEN,
+                              "value": "Alice Example"})
+        assert "Alice" not in r.headers["location"]
+        queue.cancel()
+
+
+class TestMirrorPanel:
+    def test_an_unpublished_mirror_says_it_does_not_know(self, client):
+        body = client.get("/").text
+        assert "no ha informado" in body
+
+    def test_the_stream_payload_carries_translated_text_not_keys(self):
+        """The script has no catalog and must never acquire one: a page that
+        renders in Spanish until it updates itself into English is worse than
+        one that does not update.
+
+        Built rather than streamed — /events is an endless generator by design,
+        and a test that reads one frame from it and walks away leaves the stream
+        open.
+        """
+        s = DashboardState(mirror=Mirror(at=datetime.now(), screen="verification",
+                                         step="waiting"))
+        payload = _mirror_payload(s, Translator("es"))
+        assert payload["text_where"] == Translator("es")("mirror.screen.verification")
+        assert "mirror.screen." not in payload["text_where"]
+        assert "mirror.step." not in payload["text_step"]
+
+    def test_the_stream_payload_omits_text_when_no_language_is_bound(self):
+        """/api/state is machine-readable and has no reader to translate for."""
+        payload = _mirror_payload(DashboardState())
+        assert "text_where" not in payload
+
+    def test_api_state_exposes_the_mirror(self, client):
+        body = client.get("/api/state").json()
+        assert set(body["mirror"]) >= {"screen", "step", "stale", "screen_at"}
+        assert set(body) >= {"relay", "mirror", "signature_pending"}
