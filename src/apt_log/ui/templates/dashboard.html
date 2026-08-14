@@ -1,0 +1,254 @@
+{#
+  One page, seven panels. No build step and no node_modules on the Pi
+  (ARCHITECTURE section 3.3) — the whole thing is server-rendered, and the only
+  script is the signature canvas, which genuinely needs one.
+
+  Every visible string goes through t(). The tests assert the catalogs have
+  identical keys, so an untranslated addition fails there rather than rendering
+  English into a Spanish page.
+#}
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{ t('app.title') }}</title>
+<style>
+  :root {
+    --bg:#f6f7f9; --card:#fff; --ink:#16202c; --muted:#5b6875; --line:#dfe4ea;
+    --ok:#137a3f; --bad:#b3261e; --unknown:#8a6d1f; --accent:#1b3f8b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#11151a; --card:#182029; --ink:#e8edf2; --muted:#9aa7b4;
+            --line:#2a3543; --ok:#4ac07a; --bad:#ff6b60; --unknown:#e3b341; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  header { background:var(--accent); color:#fff; padding:14px 16px;
+           display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0; flex:1; }
+  main { padding:12px; max-width:900px; margin:0 auto; }
+  section { background:var(--card); border:1px solid var(--line);
+            border-radius:10px; padding:14px 16px; margin-bottom:12px; }
+  h2 { font-size:15px; margin:0 0 10px; letter-spacing:.02em; }
+  .row { display:flex; justify-content:space-between; align-items:center;
+         gap:12px; padding:7px 0; border-bottom:1px solid var(--line); }
+  .row:last-child { border-bottom:0; }
+  .pill { font-size:13px; font-weight:600; padding:2px 10px; border-radius:999px;
+          white-space:nowrap; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); } .unknown { color:var(--unknown); }
+  .pill.ok { background:rgba(19,122,63,.12); }
+  .pill.bad { background:rgba(179,38,30,.12); }
+  .pill.unknown { background:rgba(138,109,31,.14); }
+  .muted { color:var(--muted); font-size:14px; }
+  .banner { border-left:4px solid var(--unknown); background:rgba(138,109,31,.1);
+            padding:10px 12px; border-radius:6px; margin-bottom:12px; font-size:14px; }
+  .banner.bad { border-color:var(--bad); background:rgba(179,38,30,.1); }
+  button, .btn { font:inherit; padding:9px 14px; border-radius:8px;
+                 border:1px solid var(--line); background:var(--card);
+                 color:var(--ink); cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  table { width:100%; border-collapse:collapse; font-size:15px; }
+  th,td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); }
+  th { font-size:13px; color:var(--muted); font-weight:600; }
+  canvas { width:100%; height:220px; touch-action:none; background:#fff;
+           border:2px dashed var(--line); border-radius:8px; }
+  .controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>{{ t('app.title') }}</h1>
+  <form method="post" action="/language">
+    <label class="muted" for="lang" style="color:#fff">{{ t('app.language') }}</label>
+    <select id="lang" name="language" onchange="this.form.submit()">
+      {% for code in languages %}
+      <option value="{{ code }}" {% if code == lang %}selected{% endif %}>
+        {{ 'Español' if code == 'es' else 'English' }}
+      </option>
+      {% endfor %}
+    </select>
+  </form>
+</header>
+
+<main>
+  {% if s.paused %}
+    <div class="banner bad">{{ t('control.paused_notice') }}</div>
+  {% endif %}
+  {% if s.transport_mode == 'dev' %}
+    <div class="banner">{{ t('gate.dev_transport') }}</div>
+  {% endif %}
+
+  {# 1. Health #}
+  <section>
+    <h2>{{ t('health.title') }}</h2>
+    {% for sig in s.health %}
+    <div class="row">
+      <span>{{ t(sig.key) }}</span>
+      <span class="pill {{ sig.status.value }}">
+        {% if sig.status == Health.OK %}{{ t('health.ok') }}
+        {% elif sig.status == Health.BAD %}{{ t('health.bad') }}
+        {% else %}{{ t('common.unknown') }}{% endif %}
+      </span>
+    </div>
+    {% endfor %}
+    <p class="muted">
+      {% if s.overall == Health.OK %}{{ t('health.all_ok') }}
+      {% else %}{{ t('health.problem') }}{% endif %}
+    </p>
+    <p class="muted">{{ t('common.updated_at', time=t.time(s.generated_at)) }}</p>
+  </section>
+
+  {# 5. Signature — placed high; it is the only thing that needs her now #}
+  <section id="signature">
+    <h2>{{ t('signature.title') }}</h2>
+    {% if pending_signature %}
+      <p>{{ t('signature.prompt',
+              patient=pending_signature.patient_id,
+              time=t.time(pending_signature.scheduled)) }}</p>
+      <p class="muted">{{ t('signature.instruction') }}</p>
+      <canvas id="pad" data-nonce="{{ pending_signature.nonce }}"></canvas>
+      <div class="controls">
+        <label class="muted" for="brush">{{ t('signature.brush') }}</label>
+        <input id="brush" type="range" min="1" max="8" value="3">
+        <button type="button" id="undo">{{ t('signature.undo') }}</button>
+        <button type="button" id="clear">{{ t('signature.clear') }}</button>
+        <button type="button" id="send" class="primary">{{ t('signature.submit') }}</button>
+        <span id="sigmsg" class="muted"></span>
+      </div>
+      <script>
+        window.APTLOG_I18N = {
+          sending: {{ t('signature.sending')|tojson }},
+          sent:    {{ t('signature.sent')|tojson }},
+          failed:  {{ t('signature.failed')|tojson }},
+          expired: {{ t('signature.expired')|tojson }},
+          empty:   {{ t('signature.empty')|tojson }}
+        };
+      </script>
+    {% else %}
+      <p class="muted">{{ t('signature.none') }}</p>
+    {% endif %}
+  </section>
+
+  {# 6. Needs attention #}
+  <section>
+    <h2>{{ t('attention.title') }}</h2>
+    {% if not s.attention %}
+      <p class="muted">{{ t('attention.empty') }}</p>
+    {% else %}
+      {% for v in s.attention %}
+      <div class="row">
+        <span>
+          {% if v.gate_passed is sameas false %}
+            {{ t('attention.gate_failed', patient=v.patient_id, time=t.time(v.scheduled)) }}
+          {% elif v.reason %}
+            {{ t('attention.run_failed', patient=v.patient_id,
+                  time=t.time(v.scheduled), reason=v.reason) }}
+          {% else %}
+            {{ t('attention.no_signature', patient=v.patient_id, time=t.time(v.scheduled)) }}
+          {% endif %}
+        </span>
+        <form method="post" action="/acknowledge">
+          <input type="hidden" name="attempt_id" value="{{ v.attempt_id }}">
+          <button type="submit">{{ t('attention.acknowledge') }}</button>
+        </form>
+      </div>
+      {% endfor %}
+    {% endif %}
+  </section>
+
+  {# 2. Today #}
+  <section>
+    <h2>{{ t('today.title') }}</h2>
+    {% if not s.visits %}
+      <p class="muted">{{ t('today.empty') }}</p>
+    {% else %}
+    <table>
+      <thead><tr>
+        <th>{{ t('today.patient') }}</th>
+        <th>{{ t('today.scheduled') }}</th>
+        <th>{{ t('today.observed') }}</th>
+        <th>{{ t('today.status') }}</th>
+      </tr></thead>
+      <tbody>
+      {% for v in s.visits %}
+        <tr>
+          <td>{{ v.patient_id }}</td>
+          <td>{{ t.time(v.scheduled) }}</td>
+          <td>{{ t.time(v.observed) }}</td>
+          <td class="{{ 'ok' if v.status == 'done' else 'bad' if v.status in ('failed','skipped') else '' }}">
+            {{ t('today.status.' ~ v.status) }}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </section>
+
+  {# 3. Gate #}
+  <section>
+    <h2>{{ t('gate.title') }}</h2>
+    <p class="muted">{{ t('gate.explain') }}</p>
+    {% for sig in s.gate %}
+    <div class="row">
+      <span>{{ t(sig.key) }}</span>
+      <span class="pill {{ sig.status.value }}">
+        {{ t('gate.signal_ok') if sig.status == Health.OK else t('gate.signal_bad') }}
+      </span>
+    </div>
+    {% else %}
+      <p class="muted">{{ t('gate.fix_none') }}</p>
+    {% endfor %}
+  </section>
+
+  {# 4. Phone view #}
+  <section>
+    <h2>{{ t('phone.title') }}</h2>
+    {% if s.screenshot_at %}
+      <p class="muted">{{ t('phone.stale', time=t.time(s.screenshot_at)) }}</p>
+      <img src="/screen.png" alt="" style="max-width:100%;border-radius:8px">
+    {% else %}
+      <p class="muted">{{ t('phone.none') }}</p>
+    {% endif %}
+  </section>
+
+  {# 7. Reconciliation #}
+  <section>
+    <h2>{{ t('reconcile.title') }}</h2>
+    <p class="muted">{{ t('reconcile.explain') }}</p>
+    {% if not s.visits %}
+      <p class="muted">{{ t('reconcile.empty') }}</p>
+    {% else %}
+      {% for v in s.visits %}
+      <div class="row">
+        <span>
+          {% if v.divergence_minutes %}
+            {{ t('today.diverged', observed=t.time(v.observed),
+                  scheduled=t.time(v.scheduled), minutes=v.divergence_minutes) }}
+          {% elif v.observed %}
+            {{ t('today.on_time') }}
+          {% else %}
+            {{ t('today.not_yet') }}
+          {% endif %}
+        </span>
+        <span class="pill {{ 'unknown' if v.divergence_minutes else 'ok' }}">
+          {{ t('reconcile.differs') if v.divergence_minutes else t('reconcile.matches') }}
+        </span>
+      </div>
+      {% endfor %}
+    {% endif %}
+  </section>
+
+  <section>
+    <form method="post" action="/control">
+      <input type="hidden" name="action" value="{{ 'resume' if s.paused else 'pause' }}">
+      <button type="submit">{{ t('control.resume') if s.paused else t('control.pause') }}</button>
+    </form>
+  </section>
+</main>
+
+<script src="/static/signature.js" defer></script>
+</body>
+</html>
