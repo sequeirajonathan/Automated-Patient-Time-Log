@@ -299,3 +299,60 @@ def frame_id(els: list[dict]) -> str:
     shape = [[e["rid"], e["cls"], e["b"]] for e in els]
     return hashlib.sha256(
         json.dumps(shape, separators=(",", ":")).encode()).hexdigest()[:16]
+
+
+# ----------------------------------------------------------------------- tap
+class StaleAim(RuntimeError):
+    """The screen moved between the frame she aimed at and now."""
+
+
+class NotOnScreen(RuntimeError):
+    """The element posted back is not one this frame offered."""
+
+
+def tap(claimed_frame: str, element: dict, serial: str | None = None) -> dict:
+    """Tap an element she aimed at, or refuse because the screen has moved.
+
+    The refusal is the feature. A coordinate replayed blind lands on whatever
+    occupies that spot now, and on this app that can be the GPS verification
+    that produces a call from the agency. So the frame is re-read and re-hashed
+    first: if the tappable structure changed at all, nothing is touched and she
+    gets a fresh frame to aim at.
+
+    Membership is checked as well as the hash. Matching ids prove the screen is
+    unchanged; they do not prove the posted rectangle was ever part of it, and a
+    tap at arbitrary coordinates is exactly what this is built not to be.
+    """
+    xml = read_hierarchy(serial)
+    if xml is None:
+        raise StaleAim("the screen cannot be read right now")
+
+    current = elements(xml)
+    now = frame_id(current)
+    if now != claimed_frame:
+        raise StaleAim(f"screen changed since you looked ({claimed_frame} -> {now})")
+
+    bounds = list(element.get("b") or [])
+    match = next(
+        (e for e in current
+         if e["b"] == bounds
+         and e["rid"] == element.get("rid", "")
+         and e["cls"] == element.get("cls", "")),
+        None,
+    )
+    if match is None:
+        raise NotOnScreen("that is not one of the targets on this screen")
+
+    x1, y1, x2, y2 = match["b"]
+    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+    result = _adb(["shell", "input", "tap", str(cx), str(cy)], serial, timeout=20.0)
+    if result.returncode != 0:
+        raise StaleAim(
+            f"adb refused the tap: "
+            f"{result.stderr.decode('utf-8', 'replace').strip()}")
+
+    # Identity only. The element map carries no text by construction, so this
+    # log line cannot name a patient however the screen is laid out.
+    log.info("tapped %s/%s at (%d,%d) on frame %s",
+             match["cls"], match["rid"] or "-", cx, cy, claimed_frame)
+    return {"tapped": {"rid": match["rid"], "cls": match["cls"], "at": [cx, cy]}}

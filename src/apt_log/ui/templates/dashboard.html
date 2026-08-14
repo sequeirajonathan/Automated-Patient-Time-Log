@@ -71,8 +71,19 @@
           background:var(--bg); color:var(--ink); }
   .choices { display:flex; flex-direction:column; gap:8px; margin-top:10px; }
   .choices button { width:100%; padding:14px; font-size:17px; }
-  .shot { max-width:100%; border-radius:8px; border:1px solid var(--line); }
+  .shot { max-width:100%; border-radius:8px; border:1px solid var(--line);
+          display:block; }
   .shot.stale { opacity:.55; }
+  .mirror-frame { position:relative; display:inline-block; max-width:100%; }
+  .overlay { position:absolute; inset:0; pointer-events:none; }
+  /* Boxes are buttons so a keyboard and a screen reader can reach them too. */
+  .hit { position:absolute; pointer-events:auto; padding:0; margin:0;
+         background:transparent; border:1px solid rgba(27,63,139,.45);
+         border-radius:3px; cursor:pointer; }
+  .hit:hover, .hit:focus { background:rgba(27,63,139,.18);
+                           border-color:var(--accent); outline:none; }
+  .hit.focused { border-color:var(--ok); border-width:2px; }
+  .hit.selected { background:rgba(19,122,63,.16); }
 </style>
 </head>
 {# The nonce is what the live stream compares against to notice that the request
@@ -243,9 +254,22 @@
     <h2 style="margin-top:14px">{{ t('phone.title') }}</h2>
     {% if s.screenshot_at %}
       <p class="muted" id="shot-taken">{{ t('phone.stale', time=t.time(s.screenshot_at)) }}</p>
-      <img id="shot" class="shot {% if s.mirror.stale %}stale{% endif %}"
-           src="/screen.png" alt="">
-      <p class="muted">{{ t('phone.live') }}</p>
+      {# The picture and the hit boxes share one positioned container so the
+         overlay stays in register when the image reflows. #}
+      <div class="mirror-frame">
+        <img id="shot" class="shot {% if s.mirror.stale %}stale{% endif %}"
+             src="/screen.png" alt="">
+        <div id="overlay" class="overlay"></div>
+      </div>
+      <p class="muted">{{ t('portal.instruction') }}
+        <span id="portal-status"></span></p>
+      <script>
+        window.APTLOG_PORTAL = {
+          sending: {{ t('portal.sending')|tojson }},
+          moved:   {{ t('portal.moved')|tojson }},
+          failed:  {{ t('portal.failed')|tojson }}
+        };
+      </script>
     {% else %}
       <p class="muted">{{ t('phone.none') }}</p>
     {% endif %}
@@ -392,5 +416,6 @@
 
 <script src="/static/signature.js" defer></script>
 <script src="/static/mirror.js" defer></script>
+<script src="/static/portal.js" defer></script>
 </body>
 </html>

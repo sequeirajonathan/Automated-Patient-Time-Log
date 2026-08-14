@@ -124,6 +124,53 @@ def phone_screen():
     )
 
 
+@app.get("/frame.json")
+def frame_map():
+    """The tappable structure of the current screen, for the overlay.
+
+    Carries no text by construction (see feed.elements), so this is the one
+    endpoint that can be logged, cached, or dumped into a console without
+    thinking about who is on the screen.
+    """
+    path = state_mod.STATE_DIR / "frame.json"
+    if not path.exists():
+        return JSONResponse({"id": "", "size": [0, 0], "elements": []})
+    return Response(path.read_text(encoding="utf-8"),
+                    media_type="application/json",
+                    headers={"Cache-Control": "no-store"})
+
+
+@app.post("/tap")
+async def tap_element(request: Request):
+    """Tap something she aimed at on the mirrored screen.
+
+    Coordinates are never accepted. The body names an element from a specific
+    frame, and the server re-reads the screen and refuses if anything tappable
+    moved — because a blind coordinate lands on whatever occupies that spot now,
+    and on this app that can be a verification prompt that calls the agency.
+
+    409 means "look again", not "failed". The page refreshes and she re-aims.
+    """
+    from apt_log.feed import NotOnScreen, StaleAim, tap
+
+    payload = await request.json()
+    frame = payload.get("frame")
+    element = payload.get("element") or {}
+    if not frame or not isinstance(element, dict):
+        return JSONResponse({"error": "malformed"}, status_code=400)
+
+    try:
+        result = tap(frame, element)
+    except StaleAim as exc:
+        log.info("tap refused: %s", exc)
+        return JSONResponse({"error": "stale"}, status_code=409)
+    except NotOnScreen as exc:
+        log.warning("tap refused: %s", exc)
+        return JSONResponse({"error": "not_on_screen"}, status_code=409)
+
+    return JSONResponse({"ok": True, **result})
+
+
 @app.post("/language")
 def set_language(request: Request, language: str = Form(...)):
     response = RedirectResponse(url="/", status_code=303)

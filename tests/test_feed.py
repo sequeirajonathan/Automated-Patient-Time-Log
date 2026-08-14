@@ -222,3 +222,71 @@ class TestFrameId:
     def test_a_vanished_target_changes_the_frame(self):
         els = feed.elements(TestElements.XML)
         assert feed.frame_id(els[1:]) != feed.frame_id(els)
+
+
+class TestTap:
+    """Tapping through the mirror.
+
+    Every test here is a refusal. Landing a tap correctly is the easy half; the
+    reason this exists is that a tap aimed at a screen that has since moved must
+    not land at all.
+    """
+
+    XML = TestElements.XML
+
+    def _current(self):
+        return feed.elements(self.XML)
+
+    def _fid(self):
+        return feed.frame_id(self._current())
+
+    def _button(self):
+        return next(e for e in self._current() if e["rid"] == "btn_clock_in")
+
+    def test_taps_the_centre_of_the_element(self):
+        with patch.object(feed, "read_hierarchy", return_value=self.XML), \
+             patch.object(feed, "_adb") as adb:
+            adb.return_value.returncode = 0
+            out = feed.tap(self._fid(), self._button())
+        sent = adb.call_args.args[0]
+        assert sent[:3] == ["shell", "input", "tap"]
+        assert sent[3:] == ["375", "774"]          # centre of [19,744][731,804]
+        assert out["tapped"]["rid"] == "btn_clock_in"
+
+    def test_refuses_when_the_screen_has_moved(self):
+        """The whole point. A blind coordinate would land on whatever occupies
+        that spot now, which on this app can be the verification prompt."""
+        with patch.object(feed, "read_hierarchy", return_value=self.XML), \
+             patch.object(feed, "_adb") as adb:
+            with pytest.raises(feed.StaleAim):
+                feed.tap("a-frame-from-before", self._button())
+            adb.assert_not_called()
+
+    def test_refuses_an_element_that_was_never_on_screen(self):
+        """A matching frame id proves the screen is unchanged. It does not prove
+        the posted rectangle was ever part of it — and a tap at arbitrary
+        coordinates is precisely what this is built not to be."""
+        forged = {"rid": "btn_clock_in", "cls": "Button", "b": [0, 0, 720, 1600]}
+        with patch.object(feed, "read_hierarchy", return_value=self.XML), \
+             patch.object(feed, "_adb") as adb:
+            with pytest.raises(feed.NotOnScreen):
+                feed.tap(self._fid(), forged)
+            adb.assert_not_called()
+
+    def test_refuses_when_the_screen_cannot_be_read(self):
+        with patch.object(feed, "read_hierarchy", return_value=None), \
+             patch.object(feed, "_adb") as adb:
+            with pytest.raises(feed.StaleAim):
+                feed.tap(self._fid(), self._button())
+            adb.assert_not_called()
+
+    def test_an_element_matching_bounds_but_not_identity_is_refused(self):
+        """Same rectangle, different widget — the layout was rebuilt underneath
+        with something else in that spot."""
+        impostor = dict(self._button())
+        impostor["rid"] = "btn_cancel"
+        with patch.object(feed, "read_hierarchy", return_value=self.XML), \
+             patch.object(feed, "_adb") as adb:
+            with pytest.raises(feed.NotOnScreen):
+                feed.tap(self._fid(), impostor)
+            adb.assert_not_called()

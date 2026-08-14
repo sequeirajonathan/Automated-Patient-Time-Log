@@ -69,10 +69,26 @@ class TestLanguage:
         assert r.status_code == 200
 
 
-class TestNoOverrideControl:
-    """ARCHITECTURE §3.2 — three write paths, and none of them records a visit."""
+class TestWritePaths:
+    """What the page may do to the phone.
+
+    The old invariant here was "no write path records a visit". That stopped
+    being true on purpose: the portal exists so she can drive the app herself,
+    and driving the app is how a visit gets recorded. Pretending otherwise would
+    leave a docstring guarding a property the product no longer has.
+
+    Two narrower invariants replace it, and they are the ones worth keeping:
+
+    - the write routes are an enumerated set, not whatever a handler grew
+    - nothing accepts a raw coordinate or a raw keycode. She acts on things she
+      can see, named from a frame the server can re-check. A route taking a
+      point or a keycode could drive the app blind, and blind is the failure
+      that produces a call from the agency.
+    """
 
     def test_page_offers_no_record_anyway_action(self, client):
+        """Still true, and still the point: nothing claims a visit happened
+        except the app itself, driven by her, on a screen she is looking at."""
         body = client.get("/").text.lower()
         for phrase in ("record anyway", "registrar de todos modos",
                        "force", "forzar", "override"):
@@ -83,8 +99,17 @@ class TestNoOverrideControl:
             r.path for r in app.routes
             if getattr(r, "methods", None) and "POST" in r.methods
         }
-        assert posts == {"/language", "/signature", "/relay", "/device",
+        assert posts == {"/language", "/signature", "/relay", "/device", "/tap",
                          "/acknowledge", "/control"}
+
+    def test_no_route_accepts_a_raw_coordinate_or_keycode(self, client):
+        """/tap takes an element from a named frame; /device takes an action
+        name from an allow-list. Neither takes a number that means "here"."""
+        assert client.post("/tap", json={"frame": "f", "x": 100, "y": 200}
+                           ).status_code in (400, 409)
+        assert client.post("/device", data={"action": "66"},
+                           follow_redirects=False
+                           ).headers["location"] == "/?device=failed"
 
 
 class TestApiState:
@@ -266,4 +291,27 @@ class TestDeviceAction:
         body = client.get("/").text
         assert 'name="action" value="wake"' in body
         for forbidden in ("keyevent", "keycode", 'value="tap"'):
+            assert forbidden not in body
+
+
+class TestPortal:
+    def test_frame_map_is_served_even_before_the_feed_runs(self, client):
+        body = client.get("/frame.json").json()
+        assert set(body) >= {"id", "size", "elements"}
+
+    def test_a_tap_without_a_frame_is_malformed(self, client):
+        r = client.post("/tap", json={"element": {"rid": "x"}})
+        assert r.status_code == 400
+
+    def test_a_stale_aim_is_409_and_not_an_error(self, client):
+        """409 means "look again", which the page turns into a fresh frame and
+        another try — not a failure she has to interpret."""
+        r = client.post("/tap", json={"frame": "gone", "element": {"b": [0, 0, 1, 1]}})
+        assert r.status_code == 409
+
+    def test_the_page_never_offers_a_coordinate_field(self, client):
+        """Coordinates are not accepted anywhere. The element identity is the
+        only thing that can be posted, and that is the safety property."""
+        body = client.get("/").text
+        for forbidden in ('name="x"', 'name="y"', "input tap"):
             assert forbidden not in body
