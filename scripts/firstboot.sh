@@ -16,6 +16,17 @@ SERVICE_USER="${SERVICE_USER:-apt}"
 APP_DIR="/opt/aptlog"
 NODE_MAJOR=22
 
+# Pinned deliberately. IMAGE_BUILD.md section 6 says the way back from a lost
+# reference Pi is this script against a fresh card -- so an unpinned install
+# would rebuild with whatever shipped that day, not what was validated, and the
+# golden image stops being proven (ARCHITECTURE.md section 5.1).
+#
+# Appium 3, not the 2 named in REQUIREMENTS.md section 3: appium-uiautomator2-driver
+# now declares peerDependencies { appium: ^3.0.0-rc.2 }, so "Appium 2 + uiautomator2"
+# is no longer a combination that exists upstream.
+APPIUM_VERSION="${APPIUM_VERSION:-3.6.0}"
+UIA2_VERSION="${UIA2_VERSION:-8.4.0}"
+
 log() { printf '\n=== %s\n' "$1"; }
 
 [[ $EUID -eq 0 ]] || { echo "run with sudo" >&2; exit 1; }
@@ -38,11 +49,15 @@ if ! command -v node >/dev/null || [[ "$(node -v | cut -c2- | cut -d. -f1)" -lt 
 fi
 
 # ---------------------------------------------------------------------- appium
-if ! command -v appium >/dev/null; then
-    log "installing appium + uiautomator2 driver"
-    npm install -g appium
-    sudo -u "$SERVICE_USER" appium driver install uiautomator2 || \
-        appium driver install uiautomator2
+if [[ "$(appium --version 2>/dev/null)" != "$APPIUM_VERSION" ]]; then
+    log "installing appium ${APPIUM_VERSION}"
+    npm install -g "appium@${APPIUM_VERSION}"
+fi
+
+if ! sudo -u "$SERVICE_USER" appium driver list --installed 2>&1 | grep -q "uiautomator2@${UIA2_VERSION}"; then
+    log "installing uiautomator2 driver ${UIA2_VERSION}"
+    sudo -u "$SERVICE_USER" appium driver install "uiautomator2@${UIA2_VERSION}" || \
+        appium driver install "uiautomator2@${UIA2_VERSION}"
 fi
 
 # ------------------------------------------------------------------- tailscale
