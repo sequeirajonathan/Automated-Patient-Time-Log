@@ -98,6 +98,19 @@ class ScreenReport:
 
     def render(self) -> str:
         counts = Counter((n.cls, n.resource_id, n.clickable) for n in self.nodes)
+
+        # Collapsing rows that share a key is what makes a long list readable,
+        # but collapsing their *text* hid the second entry of a two-item chooser
+        # — the tool reported "GPS" and silently dropped "token de seguridad".
+        # Distinct values are kept and shown together.
+        texts: dict[tuple, list[str]] = {}
+        for n in self.nodes:
+            key = (n.cls, n.resource_id, n.clickable)
+            value = REDACTED if n.text is None else (n.text or "")
+            bucket = texts.setdefault(key, [])
+            if value and value not in bucket:
+                bucket.append(value)
+
         lines = [
             f"activity : {self.activity}",
             f"nodes    : {self.node_count}",
@@ -110,7 +123,10 @@ class ScreenReport:
             if key in seen:
                 continue
             seen.add(key)
-            shown = REDACTED if n.text is None else (n.text[:34] or "-")
+            values = texts.get(key) or ["-"]
+            shown = " | ".join(v[:34] for v in values[:4])
+            if len(values) > 4:
+                shown += f" | (+{len(values) - 4} more)"
             lines.append(
                 f"  {n.cls:<22} {n.resource_id:<30} "
                 f"{str(n.clickable):<5} {counts[key]:<4} {shown}"

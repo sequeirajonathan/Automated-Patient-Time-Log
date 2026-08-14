@@ -141,3 +141,41 @@ class TestContentScrubbing:
         out = inspect_source(self.HEADER_SOURCE, text_for=("lbl_header",),
                              allow_phi_text=True).render()
         assert "CARIDAD" in out
+
+
+class TestDistinctValuesSurvivedCollapsing:
+    """Collapsing repeated rows must not collapse their values.
+
+    The EVV chooser has two label_title rows, GPS and token de seguridad. The
+    first version of this renderer reported only "GPS" — it hid the alternative
+    that turned out to matter most.
+    """
+
+    CHOOSER = f'''
+    <android.widget.TextView class="android.widget.TextView" resource-id="{P}label_title" clickable="false" text="GPS"/>
+    <android.widget.TextView class="android.widget.TextView" resource-id="{P}label_title" clickable="false" text="token de seguridad"/>
+    <android.widget.Button class="android.widget.Button" resource-id="{P}button_cancel" clickable="true" text="Anular"/>
+    '''
+
+    def test_both_options_are_shown(self):
+        out = inspect_source(self.CHOOSER, text_for=("label_title",)).render()
+        assert "GPS" in out
+        assert "token de seguridad" in out
+
+    def test_the_row_is_still_collapsed_to_one_line(self):
+        out = inspect_source(self.CHOOSER, text_for=("label_title",)).render()
+        assert out.count("label_title") == 1
+
+    def test_count_still_reports_how_many(self):
+        out = inspect_source(self.CHOOSER, text_for=("label_title",)).render()
+        line = [x for x in out.splitlines() if "label_title" in x][0]
+        assert " 2 " in line
+
+    def test_identical_values_are_not_repeated(self):
+        src = f'''
+        <android.widget.TextView class="android.widget.TextView" resource-id="{P}lbl_x" text="Same"/>
+        <android.widget.TextView class="android.widget.TextView" resource-id="{P}lbl_x" text="Same"/>
+        '''
+        out = inspect_source(src, text_for=("lbl_x",)).render()
+        line = [x for x in out.splitlines() if "lbl_x" in x][0]
+        assert line.count("Same") == 1
