@@ -23,6 +23,8 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +43,12 @@ COMMAND_TIMEOUT = 3600
 # spent every cycle in a doomed 25-second connect, which is worse than having no
 # hierarchy at all -- it had no hierarchy AND no time left for anything else.
 RETRY_AFTER = 30.0
+
+# Creating a session can also hang outright rather than failing -- observed on
+# the Pi sitting past 90 seconds with no error and no session, which leaves the
+# overlay dead forever rather than merely slow. Nothing in the Appium client
+# bounds this, so it is bounded here.
+CONNECT_BUDGET = 40.0
 
 
 class Resident:
@@ -74,7 +82,19 @@ class Resident:
         # No appPackage: the session attaches to whatever is in the foreground,
         # which is the point. She drives; this watches.
         log.info("opening a resident Appium session (about 11s)")
-        return webdriver.Remote(self._server, options=options)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            # The worker is abandoned on timeout rather than cancelled -- there
+            # is no way to interrupt a blocked HTTP call. It is a daemon thread
+            # in a daemon thread; it will die with the process. Leaking one of
+            # those beats an overlay that never returns.
+            future = pool.submit(webdriver.Remote, self._server, options=options)
+            try:
+                return future.result(timeout=CONNECT_BUDGET)
+            except FuturesTimeout:
+                pool.shutdown(wait=False, cancel_futures=True)
+                raise TimeoutError(
+                    f"Appium did not open a session within {CONNECT_BUDGET:.0f}s"
+                ) from None
 
     def _discard(self) -> None:
         driver, self._driver = self._driver, None

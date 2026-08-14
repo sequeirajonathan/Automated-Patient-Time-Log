@@ -399,3 +399,25 @@ class TestCompression:
         """A large picture is a slow portal; no picture is one she cannot use."""
         junk = b"not an image at all"
         assert feed.compress(junk) == junk
+
+
+class TestHierarchySource:
+    """Appium first for speed, adb so the overlay never simply vanishes."""
+
+    def test_appium_is_preferred(self):
+        from apt_log import resident
+        with patch.object(resident, "page_source", return_value="<node/>"), \
+             patch.object(feed, "read_stable_hierarchy") as fallback:
+            assert feed.read_hierarchy() == "<node/>"
+            fallback.assert_not_called()
+
+    def test_it_falls_back_rather_than_going_blank(self):
+        """Session creation fails on the first attempt after an idle spell and
+        has been seen to hang past 90s. An overlay that disappears because a
+        session would not open is not acceptable; the fallback's 12.7s costs a
+        staler overlay, not a frozen picture, now that it runs on its own thread.
+        """
+        from apt_log import resident
+        with patch.object(resident, "page_source", return_value=None), \
+             patch.object(feed, "read_stable_hierarchy", return_value="<node b=2/>"):
+            assert feed.read_hierarchy() == "<node b=2/>"

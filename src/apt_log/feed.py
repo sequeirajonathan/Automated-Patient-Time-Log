@@ -367,17 +367,27 @@ def elements(xml: str) -> list[dict]:
 
 
 def read_hierarchy(serial: str | None = None) -> str | None:
-    """The current hierarchy, through the resident Appium session.
+    """The current hierarchy: resident Appium if it will have us, adb if not.
 
-    This used to shell out to `uiautomator dump`, which spawns a fresh
-    instrumentation on every call: 6.1 s measured, and partial often enough to
-    need retrying, which took a screen read to 12.7 s. The resident server
-    answers in 1.75 s and does not come back partial -- which is why the
-    stabilise-and-retry machinery below is now unused rather than tuned.
+    An established Appium session answers in 664-796 ms and never returns a
+    partial screen. `adb shell uiautomator dump` takes 6.1 s, spawns a fresh
+    instrumentation every call, and comes back partial often enough to need the
+    stabilising retry underneath -- 12.7 s in total.
+
+    Appium is tried first for those numbers, but it is not depended on. Session
+    creation on this device fails on the first attempt after an idle spell, and
+    has been seen to hang past 90 seconds with no error at all. A portal whose
+    overlay disappears because a session would not open is not acceptable, and
+    the fallback's cost stopped mattering the moment this moved to its own
+    thread: 12.7 s there buys a staler overlay, not a frozen picture.
     """
     from apt_log import resident
 
-    return resident.page_source()
+    source = resident.page_source()
+    if source is not None:
+        return source
+    log.info("no Appium session; falling back to the adb dump")
+    return read_stable_hierarchy(serial)
 
 
 def read_hierarchy_via_adb(serial: str | None = None) -> str | None:
