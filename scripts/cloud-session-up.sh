@@ -96,16 +96,21 @@ cat <<EOF
 
 === ready ===
 
-Interactive shell (Tailscale SSH — no private key needed, auth is by ACL):
+Use this. Tailscale SSH, authenticated by the tailnet policy — no private key
+needed anywhere in this container:
 
     tailscale --socket=$SOCK ssh apt@${PI_HOST}
 
-Or route OpenSSH through the SOCKS5 proxy:
+Do NOT reach for the SOCKS5 proxy as a substitute. It carries you to the Pi's
+own sshd rather than to Tailscale SSH, so it wants a private key this container
+does not have and fails with "Permission denied (publickey,password)". Verified,
+not assumed. The proxy is for other TCP traffic:
 
-    ALL_PROXY=socks5://localhost:${SOCKS_PORT} ssh apt@${PI_HOST}
+    ALL_PROXY=socks5://localhost:${SOCKS_PORT} <some-tcp-client>
 
-If SSH is refused, the tailnet policy is missing an "ssh" block. "tailscale up
---ssh" on the Pi only starts the server; access is denied by default until the
-policy grants it. See docs/OPERATIONS.md section 3.2.
+If Tailscale SSH itself is refused, the tailnet policy is missing an "ssh" block
+whose dst matches this node's target. "tailscale up --ssh" on the Pi only starts
+the server; access is denied by default until the policy grants it. See
+docs/OPERATIONS.md section 3.2.
 
 EOF
