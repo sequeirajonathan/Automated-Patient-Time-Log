@@ -67,8 +67,8 @@ built or described as a system of record.
 | Layer | Choice | Rationale |
 |---|---|---|
 | Controller | Raspberry Pi 5, Raspberry Pi OS Lite 64-bit, microSD | see §7 for what was tried and rejected |
-| Language | Python 3.12 | glue for secrets, scheduling, parsing |
-| Driver | Appium 2 + `uiautomator2` driver | the mature Android equivalent of Playwright |
+| Language | Python 3.13 | glue for secrets, scheduling, parsing; the version Raspberry Pi OS trixie ships |
+| Driver | Appium 3 + `uiautomator2` driver, both **version-pinned** | the mature Android equivalent of Playwright. `appium-uiautomator2-driver` requires `appium ^3`, so Appium 2 is no longer available with a current driver. Pinned in `firstboot.sh` because an unpinned install makes a rebuilt image unreproducible — see §3.1 |
 | Client | `Appium-Python-Client` | thin WebDriver wrapper |
 | Device | **real phone over USB** (not emulator) | emulators fail Play Integrity; the phone's own GPS and wifi are presence signals |
 | Runner | `pytest` + `pytest-rerunfailures` | fixtures for device lifecycle, free retries |
@@ -83,6 +83,21 @@ built or described as a system of record.
 **No Docker**, and no emulator. Rationale in ARCHITECTURE.md §6 — the short version is
 that container USB passthrough is fragile in a box whose recovery mechanism *is* USB
 power-cycling, and the golden image already provides the reproducibility Docker would.
+
+### 3.1 Pin every third-party version
+
+Every externally-sourced dependency — the Appium server, its drivers, Python packages —
+must be pinned to an explicit version in the script or manifest that installs it. Never
+`npm install -g <pkg>` or an unbounded `pip install`.
+
+The golden image's whole claim is that Florida receives something **already proven**
+(ARCHITECTURE.md §5.1), and IMAGE_BUILD.md §6 makes `firstboot.sh` the way back if the
+reference Pi is lost. An unpinned install breaks both: a rebuild months later installs
+whatever shipped that day rather than what was validated, and it does so silently, at the
+moment you are already recovering from a failure.
+
+This is a reproducibility requirement, not a stability preference. Upgrades are a
+deliberate edit to the pin, validated against the checklist in IMAGE_BUILD.md §1.
 
 ---
 

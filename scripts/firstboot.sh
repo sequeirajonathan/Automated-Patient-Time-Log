@@ -16,14 +16,14 @@ SERVICE_USER="${SERVICE_USER:-apt}"
 APP_DIR="/opt/aptlog"
 NODE_MAJOR=22
 
-# Pinned deliberately. IMAGE_BUILD.md section 6 says the way back from a lost
-# reference Pi is this script against a fresh card -- so an unpinned install
-# would rebuild with whatever shipped that day, not what was validated, and the
+# Pinned per REQUIREMENTS.md section 3.1. IMAGE_BUILD.md section 6 makes this
+# script the way back from a lost reference Pi, so an unpinned install would
+# rebuild with whatever shipped that day rather than what was validated, and the
 # golden image stops being proven (ARCHITECTURE.md section 5.1).
 #
-# Appium 3, not the 2 named in REQUIREMENTS.md section 3: appium-uiautomator2-driver
-# now declares peerDependencies { appium: ^3.0.0-rc.2 }, so "Appium 2 + uiautomator2"
-# is no longer a combination that exists upstream.
+# Appium 3 because appium-uiautomator2-driver declares peerDependencies
+# { appium: ^3.0.0-rc.2 } -- Appium 2 is no longer available with a current driver.
+# Changing either pin is a deliberate edit, revalidated per IMAGE_BUILD.md section 1.
 APPIUM_VERSION="${APPIUM_VERSION:-3.6.0}"
 UIA2_VERSION="${UIA2_VERSION:-8.4.0}"
 

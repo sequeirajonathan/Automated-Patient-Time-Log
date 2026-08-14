@@ -143,14 +143,19 @@ not treat them as defaults to be optimised away.
 
 ## 7. Open questions — get answers before building
 
-**Appium 3 vs Appium 2 (blocking REQ-1).** `firstboot.sh` runs a bare `npm install -g
-appium`, which installed **3.6.0**; REQUIREMENTS §3 specifies Appium 2. Appium 3 dropped
-the legacy JSONWP protocol and changed driver-install semantics, and
-`Appium-Python-Client` must match the server major or sessions fail confusingly. Either
-pin the server to 2.x in `firstboot.sh` or amend the spec — **ask, do not pick silently.**
+**~~Appium 3 vs 2~~ — SETTLED. Appium 3, pinned.** `appium-uiautomator2-driver` declares
+`peerDependencies { appium: ^3.0.0-rc.2 }`, so "Appium 2 + uiautomator2" no longer exists
+upstream. `firstboot.sh` now pins `APPIUM_VERSION=3.6.0` and `UIA2_VERSION=8.4.0`, and
+REQUIREMENTS §3 was amended to match.
 
-**Python 3.13 vs 3.12.** Trixie ships 3.13.5; REQUIREMENTS §3 says 3.12. Nothing appears
-to need 3.12 specifically. Recommend amending the spec.
+**~~Python 3.13 vs 3.12~~ — SETTLED. 3.13**, the version trixie ships. Spec amended.
+
+**Still open: which `Appium-Python-Client`.** 6.0.0 and the 5.x line are both on PyPI. Do
+not guess the client/server major mapping — start at 6.0.0 against server 3.6.0 and step
+back through 5.x if session creation fails. **The REQ-1 probe is the instrument that
+settles this**, and it has to run anyway. Pin whatever it proves into `pyproject.toml`; an
+unpinned client reintroduces the same reproducibility hole one layer up (REQUIREMENTS
+§3.1).
 
 **REQUIREMENTS.md contradicts itself on the secret store.** §6's acceptance list says
 credentials come from "the OS keychain"; REQ-3 mandates a file-backed provider at
