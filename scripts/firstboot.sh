@@ -138,6 +138,13 @@ fi
 log "creating config directory"
 install -d -o root -g root -m 0755 /etc/aptlog
 
+# State, unlike config, is written by the service user: the feed drops
+# screenshots and mirror frames here every few seconds. Left root-owned -- which
+# is what happens when the first thing to touch it is manager.sh -- the feed
+# fails on every frame with EACCES and the UI's phone view stays blank with no
+# obvious cause.
+install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0755 /var/lib/aptlog
+
 # --------------------------------------------------------------------- the app
 log "deploying application"
 if [[ ! -d "$APP_DIR/.git" ]]; then

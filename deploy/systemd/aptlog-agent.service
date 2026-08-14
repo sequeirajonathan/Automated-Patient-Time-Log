@@ -1,4 +1,10 @@
 [Unit]
+# StartLimitIntervalSec belongs in [Unit]. It sat in [Service] in every unit
+# here, where systemd ignores it with a warning nobody was reading -- so the
+# protection OPERATIONS.md section 1.2 describes was never actually in place.
+# Restart=always with the default limit gives up after 5 starts in 10s and
+# leaves the unit failed, with nobody in the building to clear it.
+StartLimitIntervalSec=0
 Description=APT Log agent (scheduler, location gate, check-off runner)
 After=aptlog-appium.service
 Requires=aptlog-appium.service
@@ -10,7 +16,6 @@ WorkingDirectory=/opt/aptlog
 ExecStart=/opt/aptlog/.venv/bin/python -m apt_log.cli run --daemon
 Restart=always
 RestartSec=15
-StartLimitIntervalSec=0
 
 # The agent pings systemd from its main loop; a wedged loop gets restarted
 # even though the process is technically alive.

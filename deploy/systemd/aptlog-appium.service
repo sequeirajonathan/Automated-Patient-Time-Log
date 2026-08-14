@@ -1,4 +1,10 @@
 [Unit]
+# StartLimitIntervalSec belongs in [Unit]. It sat in [Service] in every unit
+# here, where systemd ignores it with a warning nobody was reading -- so the
+# protection OPERATIONS.md section 1.2 describes was never actually in place.
+# Restart=always with the default limit gives up after 5 starts in 10s and
+# leaves the unit failed, with nobody in the building to clear it.
+StartLimitIntervalSec=0
 Description=Appium server (drives the Android phone over adb)
 After=network-online.target
 Wants=network-online.target
@@ -18,7 +24,6 @@ ExecStart=/usr/bin/appium --address 127.0.0.1 --port 4723 --log-timestamp
 Restart=always
 RestartSec=10
 # Never give up: an unattended box has nobody to clear a failed unit.
-StartLimitIntervalSec=0
 
 [Install]
 WantedBy=multi-user.target

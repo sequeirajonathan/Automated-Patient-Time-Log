@@ -1,4 +1,10 @@
 [Unit]
+# StartLimitIntervalSec belongs in [Unit]. It sat in [Service] in every unit
+# here, where systemd ignores it with a warning nobody was reading -- so the
+# protection OPERATIONS.md section 1.2 describes was never actually in place.
+# Restart=always with the default limit gives up after 5 starts in 10s and
+# leaves the unit failed, with nobody in the building to clear it.
+StartLimitIntervalSec=0
 Description=APT Log mirror feed (phone screenshots for the UI)
 After=network-online.target
 Wants=network-online.target
@@ -11,9 +17,6 @@ WorkingDirectory=/opt/aptlog
 ExecStart=/opt/aptlog/.venv/bin/apt-log feed --interval 5
 Restart=always
 RestartSec=5
-# No start limit, for the same reason as every other unit here: a permanently
-# failed unit with nobody to clear it is the failure this design exists to avoid.
-StartLimitIntervalSec=0
 
 [Install]
 WantedBy=multi-user.target
