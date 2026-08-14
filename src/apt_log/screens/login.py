@@ -139,7 +139,16 @@ def authenticate_if_needed(driver, secrets: SecretProvider,
 
     Returns True if a login was performed. A live session is never assumed — the
     agent fires hours apart and the app may have expired its own.
+
+    Startup gates are cleared first. A cold start of this app lands on language
+    selection, not login, so checking for a password field straight away would
+    always find nothing and conclude, wrongly, that the session was still valid.
     """
+    from apt_log.screens.language import advance_past_startup_gates
+
+    for gate in advance_past_startup_gates(driver):
+        log.info("cleared startup gate: %s", gate)
+
     screen = LoginScreen(driver, selectors)
     if not screen.is_displayed():
         return False
