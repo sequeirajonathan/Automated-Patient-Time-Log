@@ -8,7 +8,7 @@ is still valid.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -72,11 +72,11 @@ class TestHeaderLanguage:
         assert LanguageScreen(d).header_language() == "en"
 
     def test_recognises_spanish(self):
-        d = FakeDriver({HEADER: [_text_el("Seleccionar idioma")]})
+        d = FakeDriver({HEADER: [_text_el("Seleccione el idioma")]})
         assert LanguageScreen(d).header_language() == "es"
 
     def test_unrecognised_language_is_none_not_a_guess(self):
-        d = FakeDriver({HEADER: [_text_el("Sprache auswählen")]})
+        d = FakeDriver({HEADER: [_text_el("Sprache auswaehlen")]})
         assert LanguageScreen(d).header_language() is None
 
     def test_missing_header_is_none(self):
@@ -86,7 +86,7 @@ class TestHeaderLanguage:
 class TestLanguageExpectation:
     def test_accepts_when_the_app_matches_the_expected_language(self):
         apply_el = MagicMock()
-        d = FakeDriver({HEADER: [_text_el("Seleccionar idioma")], APPLY: [apply_el]},
+        d = FakeDriver({HEADER: [_text_el("Seleccione el idioma")], APPLY: [apply_el]},
                        activity=".LanguageSelectionActivity")
         LanguageScreen(d).apply(expect_language="es")
         apply_el.click.assert_called_once()
@@ -96,15 +96,16 @@ class TestLanguageExpectation:
         apply_el = MagicMock()
         d = FakeDriver({HEADER: [_text_el("Select Language")], APPLY: [apply_el]},
                        activity=".LanguageSelectionActivity")
-        with pytest.raises(LanguageMismatch, match="expected the app in 'es'"):
+        with pytest.raises(LanguageMismatch, match="expected 'es'"):
             LanguageScreen(d).apply(expect_language="es")
         apply_el.click.assert_not_called()
 
-    def test_mismatch_message_points_at_the_manual_fix(self):
+    def test_mismatch_message_names_expected_and_actual(self):
         d = FakeDriver({HEADER: [_text_el("Select Language")], APPLY: [MagicMock()]},
                        activity=".LanguageSelectionActivity")
-        with pytest.raises(LanguageMismatch, match="Android Settings"):
+        with pytest.raises(LanguageMismatch) as exc:
             LanguageScreen(d).apply(expect_language="es")
+        assert "'es'" in str(exc.value) and "en" in str(exc.value)
 
     def test_no_expectation_means_no_check(self):
         apply_el = MagicMock()
@@ -265,14 +266,14 @@ class TestApplyButtonAsLanguageSignal:
 
     def test_apply_text_identifies_spanish_when_the_header_wording_is_unexpected(self):
         d = FakeDriver({
-            HEADER: [_text_el("Elija su idioma preferido")],  # not in the phrase list
+            HEADER: [_text_el("Seleccione el idioma")],  # not in the phrase list
             APPLY: [_text_el("Siguiente")],
         })
         assert LanguageScreen(d).header_language() == "es"
 
     def test_header_identifies_spanish_when_the_button_wording_is_unexpected(self):
         d = FakeDriver({
-            HEADER: [_text_el("Seleccionar idioma")],
+            HEADER: [_text_el("Seleccione el idioma")],
             APPLY: [_text_el("Adelante")],
         })
         assert LanguageScreen(d).header_language() == "es"
@@ -281,3 +282,98 @@ class TestApplyButtonAsLanguageSignal:
         # Both values read off the real handheld.
         d = FakeDriver({HEADER: [_text_el("Select Language")], APPLY: [_text_el("Next")]})
         assert LanguageScreen(d).header_language() == "en"
+
+
+class TestObservedLabels:
+    """Header strings read off the device, not guessed.
+
+    An earlier guess at Spanish ("seleccionar idioma"/"siguiente") was wrong on
+    both counts and would have made expect_language="es" refuse a correctly
+    configured phone.
+    """
+
+    @pytest.mark.parametrize("header,code", [
+        ("Select Language", "en"),
+        ("Seleccione el idioma", "es"),
+        ("Choisir la langue", "fr"),
+        ("選擇語言", "zh"),
+        ("Выбрать язык", "ru"),
+        ("Chwazi lang", "ht"),
+        ("언어 선택", "ko"),
+    ])
+    def test_identifies_each_observed_language(self, header, code):
+        d = FakeDriver({HEADER: [_text_el(header)]})
+        assert LanguageScreen(d).header_language() == code
+
+    def test_kreyol_and_english_share_a_button_label(self):
+        """Which is why the header is the primary signal, not the button."""
+        from apt_log.screens.language import HEADER_TEXT
+        assert HEADER_TEXT["ht"] != HEADER_TEXT["en"]
+
+    def test_unknown_header_is_none_not_a_guess(self):
+        d = FakeDriver({HEADER: [_text_el("Sprache auswaehlen")]})
+        assert LanguageScreen(d).header_language() is None
+
+
+class TestSelectLanguageLoop:
+    """Verified at every step, so an imprecise pitch costs an iteration."""
+
+    class WheelDriver:
+        def __init__(self, start="en", order=("en", "es", "fr", "zh")):
+            from apt_log.screens.language import HEADER_TEXT
+            self.order = list(order)
+            self.index = self.order.index(start)
+            self.headers = HEADER_TEXT
+            self.drags = 0
+
+        current_activity = ".LanguageSelectionActivity"
+
+        def find_elements(self, _by, value):
+            if value == HEADER:
+                return [_text_el(self.headers[self.order[self.index]])]
+            if value == PICKER:
+                el = MagicMock()
+                el.rect = {"x": 0, "y": 113, "width": 750, "height": 1185}
+                return [el]
+            if value == APPLY:
+                return [MagicMock()]
+            return []
+
+        def step(self, direction):
+            self.drags += 1
+            self.index = max(0, min(len(self.order) - 1, self.index + direction))
+
+    def _patched_drag(self, driver):
+        def fake(_d, _x, y_from, y_to, **_kw):
+            driver.step(1 if y_to < y_from else -1)
+        return fake
+
+    def test_no_movement_when_already_on_target(self):
+        d = self.WheelDriver(start="es")
+        with patch("apt_log.gestures.drag", self._patched_drag(d)):
+            LanguageScreen(d).select_language("es")
+        assert d.drags == 0
+
+    def test_moves_forward_to_the_target(self):
+        d = self.WheelDriver(start="en")
+        with patch("apt_log.gestures.drag", self._patched_drag(d)):
+            LanguageScreen(d).select_language("es")
+        assert d.order[d.index] == "es"
+        assert d.drags == 1
+
+    def test_moves_backward_when_the_target_is_above(self):
+        d = self.WheelDriver(start="zh")
+        with patch("apt_log.gestures.drag", self._patched_drag(d)):
+            LanguageScreen(d).select_language("es")
+        assert d.order[d.index] == "es"
+        assert d.drags == 2
+
+    def test_refuses_an_unknown_target(self):
+        d = self.WheelDriver()
+        with pytest.raises(ValueError, match="cannot target"):
+            LanguageScreen(d).select_language("de")
+
+    def test_refuses_to_navigate_when_the_header_is_unreadable(self):
+        d = FakeDriver({PICKER: [MagicMock()]}, activity=".LanguageSelectionActivity")
+        with pytest.raises(RuntimeError, match="refusing to navigate"):
+            LanguageScreen(d).select_language("es")

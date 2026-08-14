@@ -5,13 +5,16 @@ Apply control, before it will show a login form. Discovered by inspecting the re
 app: a cold start lands here, not on login, so anything that assumes otherwise
 waits forever for a password field that is one screen away.
 
-Unlike login.py this screen uses resource-ids. They are app-scoped and stable
-across a session, and there is nothing structural to key on — a picker and a
-clickable TextView look like any other view group. The ids are the app's own
-public UI identifiers, not site data.
+**The wheel is readable after all.** The picker view itself exposes nothing — no
+children, no text, no content-desc — which led to an early conclusion that the
+selection could not be verified. That was wrong. The app re-renders its own chrome
+live as the wheel moves, so `lbl_header` and `txtApply` always describe the
+*currently highlighted* language, before it is applied. Reading them turns
+selection from a calibrated guess into a closed loop.
 
-`txtApply` being a TextView rather than a Button is why login.py's submit search
-falls back to clickable text; the same pattern shows up throughout this app.
+The labels below were read off the device rather than guessed. An earlier guess at
+the Spanish wording ("seleccionar idioma" / "siguiente") was wrong on both counts,
+which would have made expect_language="es" refuse a correctly configured phone.
 """
 
 from __future__ import annotations
@@ -36,51 +39,35 @@ class LanguageSelectors:
     header: str = f"{PACKAGE}:id/lbl_header"
 
 
-# The picker is opaque. Inspected on the device it is an android.view.View with no
-# children, no text, no content-desc, clickable=false, scrollable=false and
-# a11y-important=false — custom-drawn, so the options are not in the accessibility
-# tree. Dragging it changes the selection but reads back nothing: after a 240px
-# drag it still reported text='' and no content-desc.
-#
-# It can therefore be *moved* but not *read*. select_language() does the moving,
-# and deals with the missing read in the only honest way available — it refuses to
-# infer where the wheel is and requires the caller to say. Everything else here
-# exists to make the result checkable afterwards, since it cannot be checked at
-# the time.
-#
-# Two signals rather than one, because only the English side is confirmed. The
-# header reads "Select Language" and the apply control reads "Next" on the device
-# in front of us; the Spanish strings are the app's likely wording but have not
-# been seen yet, so matching either field lets one carry the check if the other
-# is phrased differently than guessed.
-#
-# When someone sets the phone to Spanish, read the two actual strings off the
-# screen and correct these — a wrong guess here makes apply(expect_language="es")
-# refuse a correctly-configured phone, which is a safe failure but a confusing one.
-HEADER_BY_LANGUAGE = {
-    "en": ("select language",),
-    "es": ("seleccionar idioma", "seleccione idioma", "elegir idioma",
-           "seleccionar lenguaje", "idioma"),
+# Header text per language, observed on the device by stepping the wheel one item
+# at a time. The header is the primary signal because it is unique per language;
+# the apply control is not — Kreyol Ayisyen also reads "Next", so it cannot
+# distinguish itself from English.
+HEADER_TEXT = {
+    "en": "select language",
+    "es": "seleccione el idioma",
+    "fr": "choisir la langue",
+    "zh": "選擇語言",
+    "ru": "выбрать язык",
+    "ht": "chwazi lang",
+    "ko": "언어 선택",
 }
 
-APPLY_BY_LANGUAGE = {
-    "en": ("next",),
-    "es": ("siguiente", "continuar", "aceptar"),
-}
-
-# Wheel order, read off the device screen. The items are drawn inside the custom
-# view, so this list is the only record of them that code can use.
-LANGUAGE_ORDER = ("en", "es", "fr", "zh", "ru", "ht")
+# Wheel order, observed. Used only to pick a direction to drag; the loop verifies
+# every step, so an incomplete or slightly wrong list costs an extra iteration
+# rather than a wrong result. The list continues past Korean (Armenian, Bengali,
+# and more) — unlisted languages simply cannot be targeted.
+LANGUAGE_ORDER = ("en", "es", "fr", "zh", "ru", "ht", "ko")
 
 LANGUAGE_NAMES = {
-    "en": "English", "es": "Espanol", "fr": "Francais",
-    "zh": "Chinese", "ru": "Russian", "ht": "Kreyol Ayisyen",
+    "en": "English", "es": "Espanol", "fr": "Francais", "zh": "Chinese",
+    "ru": "Russian", "ht": "Kreyol Ayisyen", "ko": "Korean",
 }
 
-# Measured: a 240px drag moved exactly two items. Device-specific — a different
-# screen density will need recalibrating, which is why select_language() insists
-# on being told where the wheel currently is rather than tracking it.
-ITEM_PITCH_PX = 120
+# One item per drag, measured: a 400px drag moved exactly three items, and the
+# label spacing at the selection band is ~131px. Only needs to be accurate enough
+# to move one detent — the loop re-reads and corrects, so it is not load-bearing.
+ITEM_PITCH_PX = 133
 
 
 class LanguageMismatch(RuntimeError):
@@ -106,46 +93,35 @@ class LanguageScreen:
         return (controls[0].text or "").strip().lower() if controls else ""
 
     def header_language(self) -> str | None:
-        """Which language this screen is rendering in, or None if unrecognised.
+        """The language currently highlighted on the wheel, or None if unknown.
 
-        Reads the header and the apply control. The picker is opaque, so these
-        two labels are the only readable evidence of the app's language.
+        Live: the app re-renders this text as the wheel moves, so it reflects the
+        highlighted item rather than the applied setting.
         """
         header = self._text_of(self.sel.header)
-        apply_text = self._text_of(self.sel.apply)
-
-        for code in ("es", "en"):  # check the specific case before the default
-            if any(p in header for p in HEADER_BY_LANGUAGE.get(code, ())):
+        if not header:
+            return None
+        for code, expected in HEADER_TEXT.items():
+            if header == expected:
                 return code
-            if apply_text and apply_text in APPLY_BY_LANGUAGE.get(code, ()):
-                return code
+        log.info("unrecognised language header %r", header)
         return None
 
-    def select_language(
-        self, target: str, *, current: str, pitch_px: int = ITEM_PITCH_PX
-    ) -> None:
-        """Move the wheel from `current` to `target`.
+    def select_language(self, target: str, *, max_steps: int = 12) -> None:
+        """Move the wheel to `target`, verifying after every step.
 
-        `current` is required and never inferred. The picker exposes no state, so
-        the only honest way to know where the wheel is, is to have been told —
-        after `pm clear` it is the first entry, and otherwise a human has looked
-        at it. Guessing here is how the wheel ends up on Francais.
-
-        Uses a settled drag rather than a swipe: a fling travels further than
-        asked, which is exactly how this went wrong the first time.
-
-        This still cannot verify the result. Confirm with header_language() after
-        applying, or by looking at the screen.
+        A closed loop rather than a calculated drag. Each iteration reads what is
+        actually highlighted and moves one detent toward the goal, so an imprecise
+        pitch or a missed detent costs an extra iteration instead of silently
+        landing on the wrong language — which is how an earlier version left the
+        app on Francais.
         """
         if target not in LANGUAGE_ORDER:
-            raise ValueError(f"unknown language {target!r}; expected one of {LANGUAGE_ORDER}")
-        if current not in LANGUAGE_ORDER:
-            raise ValueError(f"unknown current language {current!r}")
+            raise ValueError(
+                f"cannot target {target!r}; known languages are {LANGUAGE_ORDER}"
+            )
 
-        steps = LANGUAGE_ORDER.index(target) - LANGUAGE_ORDER.index(current)
-        if steps == 0:
-            log.info("wheel already on %s", LANGUAGE_NAMES[target])
-            return
+        from apt_log.gestures import drag
 
         pickers = self.driver.find_elements(ID, self.sel.picker)
         if not pickers:
@@ -153,36 +129,45 @@ class LanguageScreen:
         rect = pickers[0].rect
         x = rect["x"] + rect["width"] // 2
         centre = rect["y"] + rect["height"] // 2
+        half = ITEM_PITCH_PX // 2
 
-        # Imported here so this module stays unit-testable without selenium,
-        # matching how probe.py defers its appium import.
-        from apt_log.gestures import drag
+        for _ in range(max_steps):
+            current = self.header_language()
+            if current == target:
+                log.info("wheel on %s", LANGUAGE_NAMES[target])
+                return
+            if current is None:
+                raise RuntimeError(
+                    "cannot read the highlighted language — refusing to navigate "
+                    "the wheel blind"
+                )
 
-        # Dragging up advances down the list, confirmed on the device.
-        distance = steps * pitch_px
-        drag(self.driver, x, centre + distance // 2, centre - distance // 2)
-        log.info(
-            "moved the wheel %+d item(s): %s -> %s",
-            steps, LANGUAGE_NAMES[current], LANGUAGE_NAMES[target],
+            delta = LANGUAGE_ORDER.index(target) - LANGUAGE_ORDER.index(current)
+            # Dragging up advances down the list, confirmed on the device.
+            if delta > 0:
+                drag(self.driver, x, centre + half, centre - half)
+            else:
+                drag(self.driver, x, centre - half, centre + half)
+            time.sleep(0.4)
+
+        raise RuntimeError(
+            f"wheel did not reach {LANGUAGE_NAMES[target]} in {max_steps} steps; "
+            f"last read {self.header_language()!r}"
         )
 
     def apply(self, expect_language: str | None = None) -> None:
-        """Accept the picker's current selection and move on.
+        """Commit the highlighted selection.
 
-        Does not choose a language; that is select_language()'s job, and it is a
-        separate call because moving the wheel and committing it carry different
-        risks. `expect_language` asserts the screen is rendering in the language
-        the deployment expects, turning a silent wrong-language run into a loud
-        failure while someone is still holding the phone.
+        `expect_language` re-reads the live header immediately before tapping, so
+        a wrong-language run fails while someone can still fix it rather than
+        surfacing in Florida.
         """
         if expect_language is not None:
             actual = self.header_language()
             if actual != expect_language:
                 raise LanguageMismatch(
-                    f"expected the app in {expect_language!r} but the language "
-                    f"screen reads {actual or 'an unrecognised language'}. The "
-                    "picker cannot be driven programmatically — set the phone's "
-                    "language in Android Settings (PI_SETUP.md §2)."
+                    f"expected {expect_language!r} but the wheel is on "
+                    f"{actual or 'an unrecognised language'} — refusing to apply"
                 )
 
         controls = self.driver.find_elements(ID, self.sel.apply)
@@ -192,7 +177,7 @@ class LanguageScreen:
                 "the app's layout has changed"
             )
         controls[0].click()
-        log.info("dismissed the language-selection gate")
+        log.info("applied the language selection")
 
 
 # Activities the app passes through on its way somewhere else. Checking for a
@@ -210,7 +195,11 @@ def _activity(driver) -> str:
 
 
 def advance_past_startup_gates(
-    driver, timeout: float = 45.0, poll: float = 1.0, max_clears: int = 3
+    driver,
+    timeout: float = 45.0,
+    poll: float = 1.0,
+    max_clears: int = 3,
+    language: str | None = None,
 ) -> list[str]:
     """Wait out splash screens and clear pre-login gates until login is reachable.
 
@@ -218,6 +207,9 @@ def advance_past_startup_gates(
     first thing on screen is a launch activity, not the gate — so a single
     immediate check reliably sees nothing to do and returns while the app is
     still on its way to the screen it was meant to clear.
+
+    When `language` is given, the wheel is moved to it before applying; otherwise
+    whatever is highlighted is accepted.
 
     Stops as soon as a login form appears, or the app settles on something that
     is neither transient nor a known gate (already signed in). Bounded by both a
@@ -241,7 +233,9 @@ def advance_past_startup_gates(
                     f"language gate still present after {max_clears} attempts — "
                     "not advancing blind"
                 )
-            gate.apply()
+            if language:
+                gate.select_language(language)
+            gate.apply(expect_language=language)
             dismissed.append("language")
             seen_settled = None
             time.sleep(poll)
