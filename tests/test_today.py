@@ -112,11 +112,33 @@ class TestFindByName:
         assert "Carol" not in str(exc.value)
         assert "CN" in str(exc.value)
 
-    def test_duplicate_names_refuse_rather_than_guess(self):
-        d = FakeDriver([ALICE, ALICE], ["09:00", "14:00"], ["10:00", "15:00"],
-                       ["", ""], ["", ""])
-        with pytest.raises(TodayScheduleError, match="refusing to"):
+    def test_same_patient_twice_needs_a_slot_to_disambiguate(self):
+        """The real schedule holds two back-to-back visits for one patient.
+
+        That is an ordinary split shift, not an error — but name alone is then
+        not a unique key, so a slot is required rather than one being picked.
+        """
+        d = FakeDriver([ALICE, ALICE], ["08:00PM", "09:00PM"],
+                       ["09:00PM", "10:00PM"], ["", ""], ["", ""])
+        with pytest.raises(TodayScheduleError, match="scheduled start time is required"):
             TodayScheduleScreen(d).find(ALICE)
+
+    def test_slot_selects_the_right_one_of_two_visits(self):
+        d = FakeDriver([ALICE, ALICE], ["08:00PM", "09:00PM"],
+                       ["09:00PM", "10:00PM"], ["", ""], ["", ""])
+        row = TodayScheduleScreen(d).find(ALICE, "09:00PM")
+        assert row.index == 1
+        assert row.scheduled_end == "10:00PM"
+
+    def test_unknown_slot_lists_the_real_ones(self):
+        d = FakeDriver([ALICE, ALICE], ["08:00PM", "09:00PM"],
+                       ["09:00PM", "10:00PM"], ["", ""], ["", ""])
+        with pytest.raises(TodayScheduleError) as exc:
+            TodayScheduleScreen(d).find(ALICE, "11:00PM")
+        assert "08:00PM" in str(exc.value) and "09:00PM" in str(exc.value)
+
+    def test_a_single_visit_still_needs_no_slot(self):
+        assert TodayScheduleScreen(_two_visits()).find(BOB).index == 1
 
 
 class TestOpen:
@@ -126,6 +148,15 @@ class TestOpen:
         assert row.patient_name == ALICE
         d._ancestor.click.assert_called_once()
         assert "lbl_patient_name" in d.clicked_xpath
+
+    def test_click_target_is_matched_by_name_and_slot_together(self):
+        """Name alone matches both cards when a patient has two visits."""
+        d = FakeDriver([ALICE, ALICE], ["08:00PM", "09:00PM"],
+                       ["09:00PM", "10:00PM"], ["", ""], ["", ""])
+        TodayScheduleScreen(d).open(ALICE, "09:00PM")
+        assert "lbl_patient_name" in d.clicked_xpath
+        assert "lbl_schedule_start_time" in d.clicked_xpath
+        assert "09:00PM" in d.clicked_xpath
 
     def test_apostrophe_in_a_name_is_escaped(self):
         """O'Brien would otherwise terminate the XPath literal."""

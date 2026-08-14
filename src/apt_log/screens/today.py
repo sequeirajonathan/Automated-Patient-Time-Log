@@ -124,47 +124,92 @@ class TodayScheduleScreen:
             for i in range(len(names))
         ]
 
-    def find(self, patient_name: str) -> VisitRow:
-        """Locate a visit by patient name (REQ-4), never by position.
+    def find(self, patient_name: str,
+             scheduled_start: str | None = None) -> VisitRow:
+        """Locate a visit by patient name and scheduled slot (REQ-4).
 
-        List order follows the agency's scheduling and can change between runs;
-        an index would silently point at a different patient.
+        Never by position: list order follows the agency's scheduling and can
+        change between runs, so an index points at a different visit on a
+        different day.
+
+        **A patient can appear more than once.** Today's real schedule holds two
+        back-to-back visits for the same person, which is ordinary in home care.
+        Name alone is therefore not a unique key — the key is (patient, slot),
+        matching the UNIQUE constraint REQ-4 puts on the local store. When a name
+        matches several rows and no slot is given, this refuses rather than
+        picking one, because clocking into the wrong hour of the right patient is
+        still the wrong record.
         """
         wanted = _normalise(patient_name)
         rows = self.visits()
+
         matches = [r for r in rows if wanted == _normalise(r.patient_name)]
+        if not matches:
+            matches = [r for r in rows if wanted in _normalise(r.patient_name)]
 
         if not matches:
-            partial = [r for r in rows if wanted in _normalise(r.patient_name)]
-            if len(partial) == 1:
-                return partial[0]
             raise TodayScheduleError(
                 f"no visit for {redact(patient_name)} among {len(rows)} rows "
-                f"({len(partial)} partial matches) — refusing to guess"
+                "— refusing to guess"
             )
+
+        if scheduled_start is not None:
+            slot = _normalise(scheduled_start)
+            slotted = [r for r in matches if _normalise(r.scheduled_start) == slot]
+            if not slotted:
+                offered = [r.scheduled_start for r in matches]
+                raise TodayScheduleError(
+                    f"{redact(patient_name)} has no visit scheduled at "
+                    f"{scheduled_start!r}; scheduled slots today: {offered!r}"
+                )
+            if len(slotted) > 1:
+                raise TodayScheduleError(
+                    f"{len(slotted)} visits for {redact(patient_name)} share the "
+                    f"slot {scheduled_start!r}; refusing to guess"
+                )
+            return slotted[0]
+
         if len(matches) > 1:
+            offered = [r.scheduled_start for r in matches]
             raise TodayScheduleError(
-                f"{len(matches)} visits match {redact(patient_name)}; refusing to "
-                "guess which one"
+                f"{redact(patient_name)} has {len(matches)} visits today "
+                f"({offered!r}) — a scheduled start time is required to tell them "
+                "apart. Clocking into the wrong hour of the right patient is "
+                "still the wrong record."
             )
         return matches[0]
 
-    def open(self, patient_name: str) -> VisitRow:
+    def open(self, patient_name: str,
+             scheduled_start: str | None = None) -> VisitRow:
         """Tap a visit row via its nearest clickable ancestor.
 
         The row's own fields are inert, as on the home menu.
         """
-        row = self.find(patient_name)
-        xpath = (
-            f"//*[@resource-id='{self.sel.patient_name}' "
-            f"and @text={_xpath_literal(row.patient_name)}]"
-            "/ancestor::*[@clickable='true'][1]"
-        )
+        row = self.find(patient_name, scheduled_start)
+
+        # Match the card that contains BOTH the name and the slot. Keying on the
+        # name alone would return two elements when a patient has back-to-back
+        # visits, and taking the first would tap whichever the layout happened to
+        # render first.
+        predicates = [
+            f".//*[@resource-id='{self.sel.patient_name}' "
+            f"and @text={_xpath_literal(row.patient_name)}]",
+            f".//*[@resource-id='{self.sel.schedule_start}' "
+            f"and @text={_xpath_literal(row.scheduled_start)}]",
+        ]
+        xpath = "//*[@clickable='true'][" + " and ".join(predicates) + "]"
+
         found = self.driver.find_elements(XPATH, xpath)
         if not found:
             raise TodayScheduleError(
-                f"found the row for {redact(patient_name)} but nothing clickable "
-                "above it — the layout has changed"
+                f"found the row for {redact(patient_name)} at "
+                f"{row.scheduled_start} but nothing clickable contains it — "
+                "the layout has changed"
+            )
+        if len(found) > 1:
+            raise TodayScheduleError(
+                f"{len(found)} clickable cards contain {redact(patient_name)} at "
+                f"{row.scheduled_start}; refusing to guess which to tap"
             )
         found[0].click()
         log.info("opened visit for %s scheduled %s",
