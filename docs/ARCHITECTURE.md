@@ -205,7 +205,7 @@ would otherwise fix things.
 
 ### 7.2 Interactive — Tailscale
 
-SSH from a cloud session, joining the tailnet with an ephemeral key (OPERATIONS.md §3.2).
+SSH from a cloud session, joining the tailnet with a reusable tagged key (OPERATIONS.md §3.2).
 May be blocked by a restrictive egress policy; test early. Losing it costs debugging, not
 the ability to ship.
 

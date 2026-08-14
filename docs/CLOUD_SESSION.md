@@ -16,7 +16,7 @@ person you are working with wrote it — see §8.
 ## 1. Connecting to the Pi
 
 ```bash
-export TS_EPHEMERAL_KEY='tskey-auth-...'    # ask; reusable + ephemeral + tag:cloud
+export TS_AUTH_KEY='tskey-auth-...'    # ask; reusable + tagged, NOT ephemeral
 bash scripts/cloud-session-up.sh
 ```
 

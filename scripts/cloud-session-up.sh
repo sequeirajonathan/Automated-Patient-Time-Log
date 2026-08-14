@@ -2,7 +2,7 @@
 # Join the tailnet from an ephemeral cloud session, then verify the Pi is
 # actually reachable.
 #
-#   export TS_EPHEMERAL_KEY='tskey-auth-...'
+#   export TS_AUTH_KEY='tskey-auth-...'
 #   bash scripts/cloud-session-up.sh
 #
 # Uses userspace networking because a cloud sandbox usually has no /dev/net/tun
@@ -24,12 +24,15 @@ SOCK="${TS_SOCK:-/tmp/tailscaled.sock}"
 log()  { printf '\n=== %s\n' "$1"; }
 die()  { printf '\n!! %s\n' "$1" >&2; exit 1; }
 
-[[ -n "${TS_EPHEMERAL_KEY:-}" ]] || die "TS_EPHEMERAL_KEY is not set.
+[[ -n "${TS_AUTH_KEY:-}" ]] || die "TS_AUTH_KEY is not set.
 Generate one at login.tailscale.com -> Settings -> Keys:
-  Reusable: YES   Ephemeral: YES   Tags: tag:cloud
-Ephemeral so dead container nodes clean themselves up instead of accumulating."
+  Reusable: YES   Ephemeral: NO   Tags: tag:cloud
+Not ephemeral: it is metered in minutes, and Tailscale reclassifies any node present
+for four or more hours as an ordinary tagged device regardless. Sessions long enough
+to matter get billed as tagged devices either way. The cost is stale tag:cloud entries
+in the admin console, which are pruned by hand. See docs/OPERATIONS.md section 3.2."
 
-case "$TS_EPHEMERAL_KEY" in
+case "$TS_AUTH_KEY" in
     tskey-auth-*) : ;;
     tskey-api-*)  die "That is an API access token (tskey-api-), not an auth key.
 It manages the tailnet and cannot enrol a node. Generate an auth key instead." ;;
@@ -62,7 +65,7 @@ fi
 # -------------------------------------------------------------------------- up
 log "joining tailnet"
 if ! tailscale --socket="$SOCK" up \
-        --authkey="$TS_EPHEMERAL_KEY" \
+        --authkey="$TS_AUTH_KEY" \
         --hostname="cloud-$(date +%s)" \
         --accept-routes=false \
         --timeout=90s; then

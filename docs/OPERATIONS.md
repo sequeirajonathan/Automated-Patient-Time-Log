@@ -172,7 +172,7 @@ credential never rides along on a cloud drive. See ARCHITECTURE.md §5.3.
 Node key expiry is distinct from auth key expiry and defaults to 180 days; left enabled,
 remote access to a console-less device in someone else's home disappears half a year after
 installation. The Pi's key and the cloud-session key in §3.2 are separate — the Pi's is
-single-use and persistent, the cloud one ephemeral and reusable.
+single-use and persistent, the cloud one reusable and tagged.
 
 ### 3.2 Reaching it from a cloud session
 
@@ -180,11 +180,19 @@ Cloud sessions are ephemeral, so the container has to join the tailnet each time
 
 ```bash
 tailscaled --tun=userspace-networking --socks5-server=localhost:1055 &
-tailscale up --authkey="$TS_EPHEMERAL_KEY" --hostname="cloud-$(date +%s)"
+tailscale up --authkey="$TS_AUTH_KEY" --hostname="cloud-$(date +%s)"
 ```
 
-Use an **ephemeral, reusable, tagged** auth key so dead container nodes clean themselves
-up instead of accumulating.
+Use a **reusable, tagged** auth key. Ephemeral looks like the obvious choice — dead
+container nodes clean themselves up instead of accumulating — but it is metered in
+minutes against a monthly allowance, and Tailscale reclassifies any node present for four
+or more hours as an ordinary tagged device anyway. A provisioning or debugging session
+runs for hours, so the ephemeral billing buys nothing on the sessions that matter and
+charges for the container recycles in between.
+
+The cost of not using it is that each container enrols as a new machine — the daemon
+state lives in `/tmp` and dies with the container — so stale `tag:cloud` entries collect
+in the admin console. Prune them when it gets untidy; nothing depends on them.
 
 **This may not work from every environment.** Tailscale prefers UDP and falls back to
 DERP relays over TCP/443; a restrictive egress policy can block both. Test it early
