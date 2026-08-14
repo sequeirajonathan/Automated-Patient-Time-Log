@@ -157,8 +157,16 @@ and can be revoked from a web console without physical access to the device.
 `tailscale up --ssh` handles SSH auth through the tailnet, so there are no keys to
 distribute or rotate when a laptop changes.
 
-The Pi joins with a pre-generated auth key baked into `firstboot.sh` — the person at the
-building never logs into a Tailscale account.
+The Pi joins with a pre-generated auth key — the person at the building never logs into a
+Tailscale account. Where that key comes from depends on how the unit was built:
+
+| Unit | Mechanism |
+|---|---|
+| Reference Pi (built by hand) | key placed in `scripts/firstboot.sh`, run once over SSH |
+| Cloned from a golden image | `aptlog-firstrun.service` reads `tailscale-authkey.txt` from the FAT32 boot partition on first boot, then clears it |
+
+The image path deliberately keeps the key **out** of the shipped file, so a live
+credential never rides along on a cloud drive. See ARCHITECTURE.md §5.3.
 
 **Disable node key expiry on the `aptlog` machine once it has joined** (PI_SETUP.md §4.1).
 Node key expiry is distinct from auth key expiry and defaults to 180 days; left enabled,
@@ -226,12 +234,20 @@ Expose `/healthz` for the manager's health gate (§2.3).
 
 ### 4.4 Binding
 
-`aptlog-ui.service` binds the **Tailscale interface only**, never `0.0.0.0`.
+`aptlog-ui.service` binds **loopback only** — `127.0.0.1:8080`, never `0.0.0.0` and never
+a Tailscale address directly.
 
-The building LAN is a shared residential network — other residents are on it. This page
-shows visit state, so it doesn't belong on that broadcast domain. Tailscale gives
-device-level access control instead, and it works from any floor over cell if the wifi
-doesn't reach.
+`tailscale serve --bg 8080` proxies it onto the tailnet at
+`https://aptlog.<tailnet>.ts.net`. Binding loopback and letting `serve` publish avoids
+hardcoding a CGNAT address that can change, and gives real TLS without a certificate to
+manage.
+
+**`serve`, not `funnel`.** Funnel publishes to the open internet; this page shows visit
+state. The caregiver reaches it through Tailscale **node sharing** — she is invited to the
+`aptlog` machine alone, never joins the tailnet, and sees nothing else on it.
+
+The building LAN is a shared residential network with other residents on it, which is why
+the page never binds an interface reachable from it.
 
 Show patient **initials or IDs by default**, full names only behind an explicit reveal.
 Most glances at this page are "did the 2pm fire?", which needs no identifying detail.

@@ -11,9 +11,9 @@ Build in Texas on a Windows laptop, ship a file, clone it in Florida.
 > recycle bin.
 >
 > **Identify the target device explicitly every single time**, immediately before the
-> command, and confirm the size matches the SD card (~64 GB, not ~1 TB). Never reuse a
-> device path from an earlier step or an earlier session — Windows and Linux both
-> renumber devices between reboots and replugs.
+> command, and confirm the reported size matches the SD card — currently **~32 GB, not
+> ~931 GB**. Never reuse a device path from an earlier step or an earlier session:
+> Windows and Linux both renumber devices between reboots and replugs.
 
 ---
 
@@ -38,8 +38,9 @@ git clone https://github.com/Drewsif/PiShrink.git
 sudo install -m 755 PiShrink/pishrink.sh /usr/local/bin/pishrink
 ```
 
-**Free disk space:** the raw read of a 64 GB card is a 64 GB file, before shrinking.
-Budget ~80 GB free. The final artefact is 1–2 GB.
+**Free disk space:** a raw read produces a file the full size of the card, before
+shrinking — so a 32 GB card needs ~32 GB free, plus room for the shrunk output. Budget
+~45 GB. The final artefact is 1–2 GB.
 
 ---
 
@@ -91,10 +92,11 @@ Pull the card and put it in the Windows laptop.
 Get-Disk | Format-Table Number, FriendlyName, @{n='GB';e={[int]($_.Size/1GB)}}, BusType
 ```
 
-Find the row that is **~59–64 GB** with `BusType` of `USB` or `SD`. Note its `Number`.
+Find the row matching the SD card's size — **~29–32 GB** for a 32 GB card — with
+`BusType` of `USB` or `SD`. Note its `Number`.
 
-> Confirm the size. A `Number` pointing at a ~931 GB disk is the arcade SSD. Writing
-> to it destroys that install.
+> Confirm the size before going further. A `Number` pointing at a ~931 GB disk is the
+> arcade SSD; writing to it destroys that install, with no undo.
 
 ### 3.2 Mount it into WSL and read it
 
@@ -125,12 +127,13 @@ sudo pishrink -Z /mnt/c/pi/aptlog-raw.img /mnt/c/pi/aptlog.img
 
 PiShrink does two things that matter:
 
-- shrinks the root filesystem to its actual used size, so a 64 GB image becomes ~3 GB
+- shrinks the root filesystem to its actual used size, so a 32 GB image becomes ~3 GB
 - **adds a first-boot auto-expand**, so the image fits any card at least as large as the
   used space and grows to fill whatever it lands on
 
 Without it the recipient's card would have to be **at least as large as yours**, and the
-upload would be 64 GB.
+upload would be the full card size. Shrinking also means the recipient's card does not
+have to match yours — a larger one is fine and will expand to fill.
 
 `-Z` produces `aptlog.img.xz`, typically 1–2 GB.
 

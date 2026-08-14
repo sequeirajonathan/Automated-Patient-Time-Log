@@ -86,7 +86,7 @@ below, or assemble them individually.
 | **27 W USB-C PD power supply** | **not optional — see below** |
 | Active Cooler *or* a case with a fan | one or the other, never both |
 | Case | must fit whichever cooling you chose |
-| microSD, 64 GB | **high-endurance** (Samsung PRO Endurance, SanDisk Max Endurance) |
+| microSD, 32 GB or larger | **high-endurance** (Samsung PRO Endurance, SanDisk Max Endurance) |
 | microSD reader | skip if the laptop has a slot |
 | RTC battery | ML2020 / LIR2025 with a **2-pin JST connector** — *not* a bare CR2032 |
 | Powered USB hub | self-powered, ideally `uhubctl`-capable |

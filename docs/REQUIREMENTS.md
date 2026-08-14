@@ -1,7 +1,18 @@
-# Automated Patient Time Log — POC Requirements
+# Automated Patient Time Log — Requirements
 
-Status: **Phase 1 (POC)** — local machine + one real Android phone over USB.
-Target production environment (Phase 2) is a Raspberry Pi driving the same phone.
+**Status:** building on a Raspberry Pi 5 in Texas against a test Android phone, to be
+cloned as an SD image and deployed to a resident's room in Florida.
+
+This document is the spec. Where anything else disagrees with it, this wins.
+
+| Document | Covers |
+|---|---|
+| **REQUIREMENTS.md** (this) | what the system must do |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | how the pieces fit together |
+| [PI_SETUP.md](./PI_SETUP.md) | building and flashing a unit |
+| [OPERATIONS.md](./OPERATIONS.md) | self-healing, updates, remote access |
+| [IMAGE_BUILD.md](./IMAGE_BUILD.md) | capturing and shipping the golden image |
+| [AGENT_PROMPT.md](./AGENT_PROMPT.md) | kickoff prompt for a development session |
 
 ---
 
@@ -37,15 +48,17 @@ built or described as a system of record.
 
 ## 2. Scope
 
-### In scope for this POC
-Everything needed to prove the mechanics work end to end on a local machine against a
-real phone, using a non-production target (staging/sandbox account, or a stand-in app).
+### In scope
+- The Raspberry Pi 5 controller, driving a real Android phone over USB
+- The status and signature UI (REQ-10, REQ-11) — the caregiver works on other floors and
+  this is her only view of what the system is doing
+- Self-update, self-healing, and liveness monitoring (REQ-12, OPERATIONS.md)
+- The golden-image build and deployment path (REQ-13, IMAGE_BUILD.md)
 
-### Out of scope for this POC
-- Raspberry Pi deployment and the GPS HAT (Phase 2)
-- Any write to a **production** EVV/agency system — see REQ-0
+### Out of scope
+- Any write to a **production** EVV/agency system until REQ-0 is satisfied
 - Multi-operator or multi-site support
-- Real-time UI or dashboard
+- A dedicated GPS receiver — see §7
 
 ---
 
@@ -53,19 +66,23 @@ real phone, using a non-production target (staging/sandbox account, or a stand-i
 
 | Layer | Choice | Rationale |
 |---|---|---|
+| Controller | Raspberry Pi 5, Raspberry Pi OS Lite 64-bit, microSD | see §7 for what was tried and rejected |
 | Language | Python 3.12 | glue for secrets, scheduling, parsing |
 | Driver | Appium 2 + `uiautomator2` driver | the mature Android equivalent of Playwright |
 | Client | `Appium-Python-Client` | thin WebDriver wrapper |
-| Device | **real phone over USB** (not emulator) | emulators fail Play Integrity; matches Phase 2 target |
+| Device | **real phone over USB** (not emulator) | emulators fail Play Integrity; the phone's own GPS and wifi are presence signals |
 | Runner | `pytest` + `pytest-rerunfailures` | fixtures for device lifecycle, free retries |
-| Scheduler | APScheduler (POC) → systemd timers (Pi) | in-process is fine locally; systemd gives `OnFailure=` on the Pi |
-| Secrets | `keyring` (OS keychain) behind a `SecretProvider` interface | nothing in the repo, nothing in `.env` |
-| Store | SQLite + append-only JSONL audit | idempotency constraints + tamper-evident trail |
+| Scheduling | APScheduler **inside** the agent process; systemd supervises the process | one long-lived daemon is easier to watchdog than many timer-fired shots |
+| Secrets | `SecretProvider` interface; file-backed at `/etc/aptlog/`, service-user readable | a headless Pi has no unlocked OS keychain — see REQ-3 |
+| Store | SQLite (WAL) at `/var/lib/aptlog/` + append-only JSONL audit | idempotency constraints + tamper-evident trail |
+| UI | FastAPI + Jinja, SSE for signature prompts, EN/ES | no build step, no `node_modules` on the Pi |
+| Publishing | `tailscale serve` → `https://aptlog.<tailnet>.ts.net` | no domain, no port forwarding, not public |
 | Logging | `structlog` with a redaction processor | credentials and PHI must never reach a log sink |
 | CLI | `typer` | subcommands for probe / run / report |
 
-Emulator support via `budtmo/docker-android` is optional and secondary — useful only for
-cheap selector iteration if and only if the target app tolerates running on one.
+**No Docker**, and no emulator. Rationale in ARCHITECTURE.md §6 — the short version is
+that container USB passthrough is fragile in a box whose recovery mechanism *is* USB
+power-cycling, and the golden image already provides the reproducibility Docker would.
 
 ---
 
@@ -76,10 +93,11 @@ The POC must **not** submit check-offs into a live agency/EVV system.
 
 - Target must be a staging/sandbox account or a stand-in app.
 - A `--production` flag must exist but hard-fail with an explanatory error unless a
-  `POC_PRODUCTION_AUTHORIZED` config value is explicitly set, and must refuse entirely
-  while `LocationSource` is a stub (REQ-5.4).
-- Rationale: a cloud/laptop run is not at the building, so any location it attests to is
-  not one it observed. See §1.1.
+  `PRODUCTION_AUTHORIZED` config value is explicitly set, and must refuse entirely while
+  the presence gate is running on stub signals (REQ-5.7).
+- Rationale: the development unit in Texas is not at the building, so any presence it
+  attests to is not presence it observed. This holds for the Texas Pi exactly as it held
+  for a laptop. See §1.1.
 
 **Before any production use**, check whether the agency's EVV vendor (HHAeXchange, Sandata,
 CareBridge, etc.) offers a sanctioned API, batch import, or supervisor-correction path. If
@@ -105,11 +123,17 @@ rescues it, and the vendor-API route becomes the only viable path.
 - Watchdog: re-initialize the adb connection if the device disappears mid-run.
 
 ### REQ-3 — Authentication
-- Credentials resolved through a `SecretProvider` interface with a `KeyringProvider`
-  implementation (OS keychain) for local use.
+- Credentials resolved through a `SecretProvider` interface. The production
+  implementation is **file-backed** at `/etc/aptlog/secrets.env`, mode `0600`, owned by
+  the service user.
+- A headless Pi that must boot unattended has no unlocked OS keychain and no operator to
+  unlock one, so `keyring` is not usable here. This is obfuscation against casual access,
+  not protection against someone holding the SD card — see PI_SETUP.md "Known constraint".
 - Never accept a password as a CLI argument (leaks to `ps` and shell history).
 - Detect the login screen at the start of every run and re-authenticate if present.
 - Suppress screenshots while a password field has focus.
+- The phone's unlock PIN lives in the same store (OPERATIONS.md §1.4).
+- Secrets are stripped by `sanitize-for-image.sh` and never ship in an image (REQ-13).
 
 ### REQ-4 — Patient check-off flow
 - Locate the patient by **search-by-name**, never by list index or scroll position.
@@ -119,19 +143,57 @@ rescues it, and the vendor-API route becomes the only viable path.
   A tap that appeared to land is not evidence it did.
 - On ambiguity (multiple name matches, unexpected screen), abort and alert — never guess.
 
-### REQ-5 — Location gate
-1. `LocationSource` interface with two implementations: `StubLocationSource` (POC,
-   scripted fixtures) and `GpsdLocationSource` (Phase 2, real receiver).
-2. A check-off may proceed only if **all** hold:
-   - 3D fix (`mode >= 3`)
-   - `>= 6` satellites
-   - horizontal accuracy `< 25 m`
-   - haversine distance to site `< GEOFENCE_M` (default 100 m)
-   - `N >= 3` consecutive qualifying fixes
-3. **Fail closed.** If the gate fails, skip the action and alert. Never queue it to fire
-   later from an unverified location.
-4. The active `LocationSource` implementation must be recorded in every audit entry, so a
-   stub-sourced record is never mistakable for an observed one.
+### REQ-5 — Presence gate (multi-signal)
+
+The controller and phone live indoors, in a resident's room. GPS alone is the *weakest*
+available signal there — concrete and interior walls make a satellite fix unreliable or
+absent. The strongest evidence is physical and network attachment, so the gate is built
+on those and treats location as corroboration.
+
+**5.1 — Signals.**
+
+| Signal | Source | Strength |
+|---|---|---|
+| adb transport is **USB, not TCP** | `adb devices -l` on the controller | strong — the phone is physically attached to this machine |
+| Default gateway MAC matches the recorded building gateway | `ip neigh show default` | strong — the router does not move |
+| Phone's associated wifi **BSSID** matches the building AP | `adb shell cmd wifi status` | strong — APs do not move, and range is ~30 m |
+| Phone location fix inside the geofence | `LocationSource` | corroborating |
+| WAN IP matches | outbound lookup, cached | weak — residential DHCP rotates |
+
+**5.2 — Passing condition.** A check-off may proceed only if **both**:
+- the adb transport is USB, **and**
+- at least one **strong** network anchor matches (gateway MAC or wifi BSSID)
+
+A location fix alone is never sufficient. Its absence is not disqualifying, since a fix
+may be genuinely unavailable indoors.
+
+**5.3 — Per-provider thresholds.** Location thresholds are **configuration, not
+constants**, and differ by provider. A GPS fix and a fused/network fix have different
+accuracy characteristics; a single threshold rejects one or rubber-stamps the other. As a
+starting point, `gps` ≤ 25 m and `fused`/`network` ≤ 100 m, tuned by a documented site
+survey — take an hour of readings where the phone will actually sit before fixing values.
+
+**5.4 — adb over TCP is prohibited.** Enforce in code, not convention. `adb tcpip` would
+let the phone be anywhere on the network and silently breaks the whole chain of
+reasoning. Reject any device entry matching `<ip>:<port>`.
+
+**5.5 — Fail closed.** If the gate fails, skip the action and alert. Never queue it to
+fire later from an unverified position.
+
+**5.6 — Record everything.** Every audit entry carries all five signals with their
+individual results, not just the verdict, so a later reader can see *why* a check-off was
+allowed.
+
+**5.7 — Implementations.** `LocationSource` has `StubLocationSource` (scripted fixtures,
+for testing that the gate correctly allows *and* denies) and `PhoneLocationSource`
+(production; reads the phone's own fix over adb). The active implementation is stamped
+into every audit entry so a stub-sourced record can never be mistaken for an observed one,
+and REQ-0 refuses production while a stub is active.
+
+**5.8 — What this does and does not prove.** The gate establishes that the *devices* are
+at the building. It cannot establish that the caregiver is. That limit is inherent, and it
+is why the handwritten log stays authoritative (§1.1) — no amount of signal strength
+changes it.
 
 ### REQ-6 — Scheduler
 - Load a shift schedule (patient, scheduled time, slot) from a local config file.
@@ -143,9 +205,15 @@ Append-only JSONL, one record per attempt, containing at minimum:
 
 ```
 attempt_id, patient_id, scheduled_time_utc, observed_time_utc,
-gate_result, location_source_type, fix{lat, lon, accuracy_m, sats, mode, timestamp},
+gate_result, location_source_type,
+signals{ usb_transport, gateway_mac_match, bssid_match, wan_ip_match,
+         fix{lat, lon, accuracy_m, provider, sats, timestamp} },
+signature{ occurred, nonce, stroke_count, duration_ms, hash },
 action_taken, ui_verification_result, error, app_version
 ```
+
+Record the individual signal results, not only `gate_result` (REQ-5.6). Store the
+signature hash and metadata only, never the strokes or a bitmap (REQ-10.11).
 
 `scheduled_time_utc` and `observed_time_utc` are **separate fields** and must never be
 collapsed into one (§1.1).
@@ -277,10 +345,19 @@ data must not travel with it.
 
 ## 5. Non-functional requirements
 
-**Security / PHI.** Patient names and IDs are PHI. Encrypt the local store at rest; keep
-the audit log outside any synced folder (iCloud/Dropbox/OneDrive); redact credentials and
-patient identifiers from all log output via a `structlog` processor; never commit
-schedules, fixtures, or audit output containing real patient data.
+**Security / PHI.** Patient names and IDs are PHI.
+
+- **Full-disk encryption is not available** — it is incompatible with unattended
+  power-cycle recovery (§7). The mitigation is to reduce what is worth taking: store
+  patient **identifiers, never names**, in the database and audit log, and resolve names
+  in the app on the phone.
+- Treat physical possession of the SD card as full compromise, and rotate the app
+  password if the hardware is lost or replaced.
+- Redact credentials and patient identifiers from all log output via a `structlog`
+  processor.
+- On the development machine, keep the audit log and any fixtures outside synced folders
+  (OneDrive/Dropbox/iCloud).
+- Never commit schedules, fixtures, or audit output containing real patient data.
 
 **Reliability.** Every failure mode is silent by default here, because nobody is watching
 the device. Prefer loud failure over graceful degradation in every ambiguous case.
@@ -297,7 +374,10 @@ will break them; the blast radius should be one file per screen.
 - [ ] One patient check-off completes and is verified in-UI
 - [ ] Re-running the same check-off does **not** create a duplicate
 - [ ] Gate **denies** on an out-of-range fixture and **allows** on an in-range one
-- [ ] Gate denies on a low-accuracy / too-few-satellites fixture
+- [ ] Gate denies when the gateway MAC and BSSID both fail to match, even with a good fix
+- [ ] Gate denies when adb reports the device over TCP rather than USB
+- [ ] Gate **allows** with no location fix at all, provided USB plus one strong anchor hold
+- [ ] Audit entry records each signal individually, not just the verdict
 - [ ] Scheduler fires a run at its scheduled time and writes a complete audit record
 - [ ] Audit record carries scheduled and observed times as distinct values
 - [ ] Reconciliation report renders and flags an injected divergence
@@ -320,10 +400,31 @@ will break them; the blast radius should be one file per screen.
 
 ---
 
-## 7. Phase 2 (not this POC)
+## 7. Explicitly dropped
 
-Raspberry Pi + u-blox NEO-M9N HAT via `gpsd`, driving the same phone over USB. Swap
-`StubLocationSource` → `GpsdLocationSource`, APScheduler → systemd timers with
-`OnFailure=`. Add full-disk encryption and TPM/systemd-sealed credentials. The phone stays
-on a charge-limited hub (~60–80%) to avoid battery swelling, with Play Store auto-update
-disabled so an overnight app change cannot silently break every selector.
+Recorded so these are not rediscovered and re-proposed.
+
+**Dedicated GPS receiver (u-blox HAT, `gpsd`, USB puck).** The phone has its own GPS and
+sits in the same room as the controller, so a second receiver adds a part and a failure
+mode without adding evidence. Indoors it would also perform no better than the phone.
+`GpsdLocationSource` is not to be built — REQ-5.7 defines the two implementations.
+
+**Compute Module 5.** Its eMMC is more durable than an SD card, but flashing requires an
+nRPIBOOT jumper shunt the dev kit does not ship, and eMMC variants cannot boot from SD —
+so without that part there is no way to flash it and no fallback. Cost an afternoon on
+site. See PI_SETUP.md.
+
+**Emulators** (AVD, Genymotion, redroid). Healthcare/EVV apps refuse to run under Play
+Integrity on them, and an emulator has no real GPS or wifi association, so it cannot
+produce any of the REQ-5 signals.
+
+**Docker.** ARCHITECTURE.md §6.
+
+**Full-disk encryption.** Directly incompatible with the requirement that a
+non-technical person can power-cycle the unit and have it recover unattended — FDE needs
+a passphrase at boot and a Pi has no TPM-sealed unlock that survives a cold start with
+nobody present. Mitigated by storing identifiers rather than names. PI_SETUP.md records
+this as a conscious acceptance.
+
+**Cloud-hosted emulator POC.** No `/dev/kvm` in the target container, and a cloud host is
+not at the building, so it could not exercise REQ-5 at all.
