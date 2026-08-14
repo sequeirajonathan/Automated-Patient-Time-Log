@@ -308,20 +308,25 @@ async def live(ws: WebSocket):
     slow_at = 0.0
     watching_video = False
     sinks: list = []
-    pending: list[bytes] = []
+    # NOT `pending`: that name is already the outstanding relay request in this
+    # function, and reusing it meant every loop reassigned the video backlog to a
+    # dict-or-None. The send loop then saw a falsy value and shipped nothing,
+    # while the cleanup path called .clear() on None. Video looked switched off
+    # rather than broken, which is the expensive kind of quiet.
+    outbox: list[bytes] = []
 
     def queue_chunk(chunk: bytes) -> None:
         # Dropped rather than queued without bound: on a slow link the right
         # thing for live video is to fall behind by losing frames, not by
         # growing a backlog she will watch play out minutes late.
-        if len(pending) < VIDEO_BACKLOG:
-            pending.append(chunk)
+        if len(outbox) < VIDEO_BACKLOG:
+            outbox.append(chunk)
 
     def _release() -> None:
         for sink in sinks:
             _video_sinks.discard(sink)
         sinks.clear()
-        pending.clear()
+        outbox.clear()
 
     try:
         while True:
@@ -357,8 +362,8 @@ async def live(ws: WebSocket):
             if payload:
                 await ws.send_json({"type": "state", **payload})
 
-            while pending:
-                await ws.send_bytes(pending.pop(0))
+            while outbox:
+                await ws.send_bytes(outbox.pop(0))
 
             try:
                 msg = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
