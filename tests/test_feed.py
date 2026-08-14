@@ -53,9 +53,9 @@ class TestCaptureRefusals:
     def test_refuses_when_a_password_field_is_anywhere_on_screen(self):
         """Anywhere, not merely focused. This runs on a timer with no idea what
         is about to happen, and the picture ends up on a web page."""
-        with patch.object(feed, "current_focus", return_value=HOME), \
-             patch.object(feed, "password_field_on_screen", return_value=True):
-            png, _, reason = feed.capture()
+        with patch.object(feed, "current_focus", return_value=HOME):
+            png, _, reason = feed.capture(
+                hierarchy='<node password="true" bounds="[0,0][1,1]"/>')
         assert png is None
         assert "password" in reason
 
@@ -63,20 +63,18 @@ class TestCaptureRefusals:
         """The documented weak point: UiAutomator2 holds the dump service during
         an Appium session, which is exactly when watching matters most."""
         with patch.object(feed, "current_focus", return_value=HOME), \
-             patch.object(feed, "password_field_on_screen", return_value=None), \
              patch.object(feed, "_adb") as adb:
             adb.return_value.returncode = 0
             adb.return_value.stdout = PNG
-            png, _, reason = feed.capture()
+            png, _, reason = feed.capture(hierarchy=None)
         assert png == PNG and reason == ""
 
     def test_a_refused_capture_is_reported_not_silent(self):
         with patch.object(feed, "current_focus", return_value=HOME), \
-             patch.object(feed, "password_field_on_screen", return_value=None), \
              patch.object(feed, "_adb") as adb:
             adb.return_value.returncode = 0
             adb.return_value.stdout = b""
-            png, _, reason = feed.capture()
+            png, _, reason = feed.capture(hierarchy=None)
         assert png is None and "does not allow capture" in reason
 
 
@@ -195,3 +193,32 @@ class TestElements:
     def test_garbage_in_does_not_raise(self):
         assert feed.elements("") == []
         assert feed.elements("<node bounds='nonsense' clickable='true'/>") == []
+
+
+class TestFrameId:
+    """Identity of a screen for aiming purposes."""
+
+    def test_the_same_structure_is_the_same_frame(self):
+        els = feed.elements(TestElements.XML)
+        assert feed.frame_id(els) == feed.frame_id(feed.elements(TestElements.XML))
+
+    def test_a_moved_target_changes_the_frame(self):
+        els = feed.elements(TestElements.XML)
+        moved = [dict(e) for e in els]
+        moved[0]["b"] = [19, 900, 731, 960]
+        assert feed.frame_id(moved) != feed.frame_id(els)
+
+    def test_cosmetic_change_does_not_invalidate_her_aim(self):
+        """A clock ticking repaints the screen without moving anything tappable.
+        Invalidating an aim for that would make the control unusable on any
+        screen with a timer, which includes every visit screen in this app."""
+        els = feed.elements(TestElements.XML)
+        same = [dict(e) for e in els]
+        for e in same:
+            e["focused"] = not e["focused"]
+            e["has_text"] = not e["has_text"]
+        assert feed.frame_id(same) == feed.frame_id(els)
+
+    def test_a_vanished_target_changes_the_frame(self):
+        els = feed.elements(TestElements.XML)
+        assert feed.frame_id(els[1:]) != feed.frame_id(els)

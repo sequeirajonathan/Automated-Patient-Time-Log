@@ -34,10 +34,14 @@ precise.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import os
 import re
 import subprocess
 import time
+from datetime import datetime
 from pathlib import Path
 
 from apt_log.ui import mirror as mirror_mod
@@ -45,6 +49,10 @@ from apt_log.ui import mirror as mirror_mod
 log = logging.getLogger(__name__)
 
 DEFAULT_INTERVAL = 5.0
+
+# Filled from `wm size` at first use; the overlay needs it to scale boxes onto a
+# phone-sized <img>. Cached because it does not change and the loop is hot.
+SCREEN_SIZE: list[int] = [0, 0]
 
 # Bounds as uiautomator writes them: [x1,y1][x2,y2]
 _BOUNDS = re.compile(r"\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]")
@@ -74,6 +82,20 @@ ACTIVITY_SCREENS = {
 }
 
 
+def screen_size(serial: str | None = None) -> list[int]:
+    """Device resolution, cached. [0, 0] when it cannot be read."""
+    if SCREEN_SIZE != [0, 0]:
+        return SCREEN_SIZE
+    try:
+        out = _adb(["shell", "wm", "size"], serial).stdout.decode("utf-8", "replace")
+    except (OSError, subprocess.SubprocessError):
+        return SCREEN_SIZE
+    m = re.search(r"(\d+)x(\d+)", out)
+    if m:
+        SCREEN_SIZE[:] = [int(m.group(1)), int(m.group(2))]
+    return SCREEN_SIZE
+
+
 def _adb(args: list[str], serial: str | None = None, timeout: float = 15.0):
     cmd = ["adb"] + (["-s", serial] if serial else []) + args
     return subprocess.run(cmd, capture_output=True, timeout=timeout)
@@ -96,23 +118,15 @@ def looks_like_a_login_screen(focus: str) -> bool:
     return any(marker in lowered for marker in LOGIN_ACTIVITY_MARKERS)
 
 
-def password_field_on_screen(serial: str | None = None) -> bool | None:
+def password_field_in(xml: str | None) -> bool | None:
     """True/False, or None when the hierarchy could not be read.
 
     None is distinct from False on purpose — the caller treats "I could not
     look" differently from "I looked and there was nothing".
     """
-    try:
-        dumped = _adb(["shell", "uiautomator", "dump", "/sdcard/.aptlog-feed.xml"],
-                      serial)
-        if dumped.returncode != 0:
-            return None
-        xml = _adb(["shell", "cat", "/sdcard/.aptlog-feed.xml"], serial).stdout
-    except (OSError, subprocess.SubprocessError):
+    if xml is None:
         return None
-    if not xml:
-        return None
-    return bool(_PASSWORD_NODE.search(xml.decode("utf-8", "replace")))
+    return bool(_PASSWORD_NODE.search(xml))
 
 
 def screen_for(focus: str) -> str:
@@ -127,10 +141,14 @@ def screen_for(focus: str) -> str:
     return ACTIVITY_SCREENS.get(activity, "unknown")
 
 
-def capture(serial: str | None = None) -> tuple[bytes | None, str, str]:
+def capture(serial: str | None = None,
+            hierarchy: str | None = None) -> tuple[bytes | None, str, str]:
     """Return (png_or_None, focus, reason).
 
-    `reason` is why nothing was captured, empty when something was.
+    `reason` is why nothing was captured, empty when something was. The
+    hierarchy is passed in rather than fetched: one dump serves both the
+    password check and the overlay, which halves the adb work and removes a
+    race two callers of the old version had against each other.
     """
     focus = current_focus(serial)
     if not focus:
@@ -139,7 +157,7 @@ def capture(serial: str | None = None) -> tuple[bytes | None, str, str]:
     if looks_like_a_login_screen(focus):
         return None, focus, "a credential can be typed on this screen"
 
-    if password_field_on_screen(serial) is True:
+    if password_field_in(hierarchy) is True:
         return None, focus, "a password field is on screen"
 
     try:
@@ -153,10 +171,31 @@ def capture(serial: str | None = None) -> tuple[bytes | None, str, str]:
     return shot.stdout, focus, ""
 
 
+FRAME_NAME = "frame.json"
+
+
 def write_frame(path: Path, serial: str | None = None) -> str:
     """Capture once and publish the mirror frame. Returns a one-line status."""
-    png, focus, reason = capture(serial)
+    hierarchy = read_hierarchy(serial)
+    png, focus, reason = capture(serial, hierarchy)
     screen = screen_for(focus)
+
+    els = elements(hierarchy) if hierarchy else []
+    frame = {
+        "id": frame_id(els),
+        "at": datetime.now().isoformat(),
+        "size": screen_size(serial),
+        "elements": els,
+        "captured": bool(png),
+    }
+    target = path.parent / FRAME_NAME
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(".tmp")
+        tmp.write_text(json.dumps(frame), encoding="utf-8")
+        os.replace(tmp, target)
+    except OSError as exc:
+        log.warning("cannot publish the frame map (%s)", exc)
 
     if png:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -171,7 +210,8 @@ def write_frame(path: Path, serial: str | None = None) -> str:
         step = "blocked" if reason else "working"
 
     mirror_mod.publish(screen=screen, step=step)
-    return f"{screen:<10} {focus or '?':<50} {reason or 'captured'}"
+    return (f"{screen:<10} {len(els):>3} tappable  "
+            f"{focus or '?':<46} {reason or 'captured'}")
 
 
 def run(path: Path, interval: float = DEFAULT_INTERVAL,
@@ -228,13 +268,34 @@ def elements(xml: str) -> list[dict]:
 
 
 def read_hierarchy(serial: str | None = None) -> str | None:
-    """Raw page source, or None when it cannot be read."""
+    """Raw page source, or None when it cannot be read.
+
+    The remote path carries this process's pid. A fixed name looked harmless
+    until the feed loop and a one-off call raced on it and one of them read a
+    file the other was mid-write on -- which surfaced as an intermittent "the
+    hierarchy is unavailable", the single most misleading symptom available,
+    since it is also what a live Appium session legitimately produces.
+    """
+    remote = f"/sdcard/.aptlog-feed-{os.getpid()}.xml"
     try:
-        dumped = _adb(["shell", "uiautomator", "dump", "/sdcard/.aptlog-feed.xml"],
-                      serial)
+        dumped = _adb(["shell", "uiautomator", "dump", remote], serial)
         if dumped.returncode != 0:
             return None
-        out = _adb(["shell", "cat", "/sdcard/.aptlog-feed.xml"], serial).stdout
+        out = _adb(["shell", "cat", remote], serial).stdout
     except (OSError, subprocess.SubprocessError):
         return None
     return out.decode("utf-8", "replace") if out else None
+
+
+def frame_id(els: list[dict]) -> str:
+    """Identity of a screen *for aiming purposes*.
+
+    A hash of the tappable structure, not of the pixels. That is the useful
+    definition: a clock ticking in the corner repaints the screen without moving
+    anything she could tap, and invalidating her aim for that would make the
+    control unusable on any screen with a timer on it. Anything that does move a
+    target changes this.
+    """
+    shape = [[e["rid"], e["cls"], e["b"]] for e in els]
+    return hashlib.sha256(
+        json.dumps(shape, separators=(",", ":")).encode()).hexdigest()[:16]
