@@ -202,8 +202,12 @@ class DeviceSession:
         except SecretNotFound:
             log.info("no %s configured; assuming a swipe-only lock", PHONE_PIN)
             return
-        # Never logged, never passed as a command-line argument to anything that
-        # appears in `ps` on a multi-user box.
+        # Honest limitation: `input text` takes the PIN as an argv element, so it
+        # is briefly visible in `ps` on this host and in the phone's own process
+        # list. There is no stdin-fed equivalent. The exposure is bounded — the
+        # only other account on the Pi is root, which can read the secrets file
+        # anyway — but it is real, and this is not the same protection as the app
+        # password, which travels over the Appium session and never hits argv.
         _adb("shell", "input", "text", pin)
         _adb("shell", "input", "keyevent", KEYCODE_ENTER)
 
@@ -241,7 +245,22 @@ class DeviceSession:
             options.udid = self.serial
 
         self.driver = webdriver.Remote(self.server_url, options=options)
+        self.ensure_authenticated()
         return self.driver
+
+    def ensure_authenticated(self) -> bool:
+        """REQ-3: check for the login screen on every run, re-auth if present.
+
+        Called from open() rather than left to the caller. A session that expired
+        overnight is the normal case here, not the exception, and a check that
+        depends on someone remembering to make it is a check that eventually
+        stops happening.
+        """
+        from apt_log.screens.login import authenticate_if_needed
+
+        if self.driver is None:
+            raise RuntimeError("no active session")
+        return authenticate_if_needed(self.driver, self.secrets)
 
     def close(self) -> None:
         if self.driver is not None:
