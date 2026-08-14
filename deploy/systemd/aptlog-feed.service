@@ -1,0 +1,19 @@
+[Unit]
+Description=APT Log mirror feed (phone screenshots for the UI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=apt
+Group=apt
+WorkingDirectory=/opt/aptlog
+ExecStart=/opt/aptlog/.venv/bin/apt-log feed --interval 5
+Restart=always
+RestartSec=5
+# No start limit, for the same reason as every other unit here: a permanently
+# failed unit with nobody to clear it is the failure this design exists to avoid.
+StartLimitIntervalSec=0
+
+[Install]
+WantedBy=multi-user.target

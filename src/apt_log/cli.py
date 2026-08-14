@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import typer
 
 from apt_log import __version__
@@ -72,6 +74,25 @@ def inspect(
         typer.echo(inspect_driver(driver, text_for=wanted).render())
     finally:
         driver.quit()
+
+
+@app.command()
+def feed(
+    interval: float = typer.Option(5.0, "--interval", "-i",
+                                   help="Seconds between frames."),
+    serial: str = typer.Option("", "--serial", help="adb serial, if more than one."),
+) -> None:
+    """Keep the UI's phone view and status panel fed.
+
+    Runs outside Appium so it never competes for the session the agent needs.
+    Refuses to capture anything that looks like a credential screen — see
+    apt_log.feed for exactly what that means and where it is weak.
+    """
+    from apt_log.feed import run as run_feed
+    from apt_log.ui.state import SCREENSHOT_PATH
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+    run_feed(SCREENSHOT_PATH, interval=interval, serial=serial or None)
 
 
 @app.command()
