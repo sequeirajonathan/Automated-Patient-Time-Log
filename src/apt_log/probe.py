@@ -32,6 +32,12 @@ class Status(str, Enum):
     PASS = "PASS"
     FAIL = "FAIL"
     UNKNOWN = "UNKNOWN"
+    # Not used by the probe, whose six checks always run. The login check shares
+    # this vocabulary and has steps that legitimately do not apply — a login form
+    # that never appeared because the app was already signed in, say. That is a
+    # different statement from UNKNOWN, which means the check ran and could not
+    # tell.
+    SKIP = "SKIP"
 
 
 @dataclass

@@ -8,6 +8,7 @@ a dashboard.
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from unittest.mock import call, patch
 
 import pytest
@@ -144,6 +145,36 @@ class TestSessionLifecycle:
         with patch("apt_log.device._device_present",
                    return_value=_present("DIFFERENT")):
             assert session.is_alive() is False
+
+    def _traced(self, session, order):
+        """Patch every lifecycle step to record that it ran, in order."""
+        return [
+            patch.object(session, name, side_effect=lambda n=name: order.append(n))
+            for name in ("ensure_device", "wake_and_unlock", "cold_start",
+                         "attach", "ensure_authenticated")
+        ]
+
+    def test_open_cold_starts_before_attaching(self):
+        """REQ-2: a scheduled run starts from a known state, not from whatever
+        the phone was left doing hours earlier."""
+        session = DeviceSession("com.example.app", MemorySecretProvider())
+        order: list[str] = []
+        with ExitStack() as stack:
+            for p in self._traced(session, order):
+                stack.enter_context(p)
+            session.open()
+        assert order == ["ensure_device", "wake_and_unlock", "cold_start",
+                         "attach", "ensure_authenticated"]
+
+    def test_open_can_skip_the_cold_start_and_the_sign_in(self):
+        """The login check drives these itself so it can report each one."""
+        session = DeviceSession("com.example.app", MemorySecretProvider())
+        order: list[str] = []
+        with ExitStack() as stack:
+            for p in self._traced(session, order):
+                stack.enter_context(p)
+            session.open(cold_start=False, authenticate=False)
+        assert order == ["ensure_device", "wake_and_unlock", "attach"]
 
     def test_cold_start_force_stops_before_launching(self):
         session = DeviceSession("com.example.app", MemorySecretProvider())

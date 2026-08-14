@@ -194,7 +194,7 @@ After the reboot the Pi is on Tailscale and reachable from anywhere as `ssh apt@
 
 ## 4. Verify before leaving
 
-Run these on the Pi. **All five must pass** — do not leave the building until they do.
+Run these on the Pi. **All six must pass** — do not leave the building until they do.
 
 ```bash
 # 1. phone is attached over USB (not TCP) and authorised
@@ -214,6 +214,10 @@ tailscale ip -4                # Tailscale address — record it
 systemctl status aptlog-appium aptlog-agent --no-pager
 
 # 5. the real test: pull the plug
+
+# 6. the app itself: open it and sign in
+sudo -u apt /opt/aptlog/.venv/bin/apt-log login-check --clear-data
+#    want: every step PASS, ending "Signed in."
 ```
 
 For (5): **unplug the Pi's power, wait ten seconds, plug it back in.** Wait three
@@ -221,6 +225,13 @@ minutes, then re-run 1 through 4. Everything must return with zero interaction.
 
 That power-cycle is the entire recovery procedure for a non-technical person on site, so
 it has to work before you leave the building.
+
+For (6): `--clear-data` wipes the app's local data first, so the run genuinely exercises
+the language gate and the login form rather than resuming a session that was already
+open. It stops at agency selection — nothing is chosen and nothing is checked off, so it
+writes nothing to the agency's record. Run it again after (5): a phone that comes back
+from a power cut locked, or an Appium server that came up without `ANDROID_HOME`, both
+look fine in 1 through 4 and fail here.
 
 ### 4.1 Disable node key expiry — do this the same day
 

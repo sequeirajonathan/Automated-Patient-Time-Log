@@ -226,12 +226,16 @@ class DeviceSession:
         return present and serial == self.serial
 
     # ------------------------------------------------------------- lifecycle
-    def open(self):
+    def attach(self):
+        """Create the Appium session against an already-prepared device.
+
+        Split out of open() so a caller that reports each step separately — the
+        REQ-3 login check — can drive the lifecycle piece by piece. It must not
+        have to call wake_and_unlock() a second time to get a driver: on a phone
+        that is already unlocked, that types the PIN into whatever is on screen.
+        """
         from appium import webdriver
         from appium.options.android import UiAutomator2Options
-
-        self.ensure_device()
-        self.wake_and_unlock()
 
         options = UiAutomator2Options()
         options.platform_name = "Android"
@@ -245,7 +249,24 @@ class DeviceSession:
             options.udid = self.serial
 
         self.driver = webdriver.Remote(self.server_url, options=options)
-        self.ensure_authenticated()
+        return self.driver
+
+    def open(self, *, cold_start: bool = True, authenticate: bool = True):
+        """Prepare the device, launch the app, and sign in if asked.
+
+        `cold_start` defaults to True because REQ-2 requires it of every
+        scheduled run: whatever the phone was doing in the hours since the last
+        one is not this run's starting state. Both flags exist for the login
+        check, which reports each of these as its own step and so has to run
+        them itself.
+        """
+        self.ensure_device()
+        self.wake_and_unlock()
+        if cold_start:
+            self.cold_start()
+        self.attach()
+        if authenticate:
+            self.ensure_authenticated()
         return self.driver
 
     def ensure_authenticated(self) -> bool:

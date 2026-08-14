@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import typer
 
 from apt_log import __version__
 from apt_log.probe import DEFAULT_SERVER, run_probe
+from apt_log.secrets import SECRETS_PATH, FileSecretProvider
 
 app = typer.Typer(add_completion=False, help="Automated patient time log controller.")
 
@@ -72,6 +75,59 @@ def inspect(
         typer.echo(inspect_driver(driver, text_for=wanted).render())
     finally:
         driver.quit()
+
+
+@app.command("login-check")
+def login_check(
+    package: str = typer.Option("com.hhaexchange.caregiver", "--package", "-p"),
+    activity: str | None = typer.Option(
+        None, "--activity", "-a", help="Launch activity, if the default is wrong."
+    ),
+    server: str = typer.Option(DEFAULT_SERVER, "--server", help="Appium server URL."),
+    secrets_file: Path = typer.Option(
+        SECRETS_PATH, "--secrets",
+        help="File-backed credential store. A password is never accepted as an "
+             "argument (REQ-3).",
+    ),
+    language: str | None = typer.Option(
+        None, "--language",
+        help="Move the language wheel to this code (en, es, fr, zh, ru, ht, ko) "
+             "before applying it. Without this, whatever is highlighted is accepted.",
+    ),
+    cold_start: bool = typer.Option(
+        True, "--cold-start/--no-cold-start",
+        help="Force-stop and relaunch first, as a scheduled run does (REQ-2).",
+    ),
+    clear_data: bool = typer.Option(
+        False, "--clear-data",
+        help="`pm clear` before launching: wipes the app's local data, which signs "
+             "it out and puts the login form back. Use this to test the login path "
+             "itself — a force-stop alone leaves the session intact. Implies a "
+             "restart, since clearing data kills the process.",
+    ),
+    timeout: float = typer.Option(
+        30.0, "--timeout", help="Seconds to wait for a screen after submitting."
+    ),
+) -> None:
+    """Open the app and sign in, reporting each step. Signs in and stops.
+
+    No agency is selected and nothing is checked off, so this writes nothing to
+    the agency's record. Exits non-zero unless a signed-in screen was reached.
+    """
+    from apt_log.login_check import run_login_check
+
+    report = run_login_check(
+        package,
+        FileSecretProvider(secrets_file),
+        activity=activity,
+        server_url=server,
+        language=language,
+        cold_start=cold_start,
+        clear_data=clear_data,
+        settle_timeout=timeout,
+    )
+    typer.echo(report.render())
+    raise typer.Exit(code=0 if report.signed_in else 1)
 
 
 @app.command()
