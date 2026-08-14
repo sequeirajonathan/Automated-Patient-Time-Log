@@ -152,6 +152,10 @@
       {% endif %}
       <p>{{ t('token.prompt') }}</p>
       <p class="muted">{{ t('token.why') }}</p>
+      {# Said out loud on the page, because the natural reading of "the token
+         replaces the location check" is that the token proves location. It does
+         not — the device travels with her — and the gate is unaffected. #}
+      <p class="muted">{{ t('token.gate_note') }}</p>
       <form method="post" action="/relay">
         <input type="hidden" name="nonce" value="{{ pending.nonce }}">
         <input type="hidden" name="kind" value="{{ KIND_TOKEN }}">

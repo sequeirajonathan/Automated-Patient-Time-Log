@@ -18,9 +18,13 @@ phone, the controller types it in.
 Everything else is read-only, and one control is deliberately absent: there is no
 "record this visit anyway". Overriding the presence gate from a web page would
 defeat the gate, and the gate is the thing that makes a recorded visit mean
-anything. The relay does not weaken that — a token is *evidence* from the
-patient's home rather than an override of the question, and a choice is limited
-to options the agent enumerated when it opened the request.
+anything.
+
+The relay does not weaken that, but not because a token proves anything — her
+token device travels with her and says nothing about where either of them is.
+It is because none of the three answers is about presence at all. A choice is
+limited to options the agent enumerated when it opened the request, and REQ-5
+decides whether a visit may be recorded before any of this is reached.
 """
 
 from __future__ import annotations

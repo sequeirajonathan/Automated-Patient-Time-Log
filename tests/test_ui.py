@@ -131,6 +131,16 @@ class TestRelayRoute:
         assert 'name="value"' in body
         queue.cancel()
 
+    def test_the_token_panel_does_not_claim_to_prove_where_she_is(self, client):
+        """Her token device travels with her. It is the reason the app never
+        runs a location check, not evidence of one — and the natural misreading
+        goes the other way, so the page says so where she can see it."""
+        queue.request_token("PT-0042", None)
+        body = client.get("/").text
+        assert "no indica dónde está usted" in body
+        assert "el teléfono está en el edificio" in body
+        queue.cancel()
+
     def test_a_choice_renders_the_apps_own_words(self, client):
         """Relayed, not reworded — she is answering on a screen the controller
         is looking at, and a paraphrase here would be a different screen."""

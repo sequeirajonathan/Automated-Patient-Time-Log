@@ -9,12 +9,16 @@ verifying a tap; the actual workflow is larger, and the spec should say so befor
 anything is built against the smaller version.
 
 **Clock-in offers a choice of verification method: GPS or a security token.**
-That second option matters more than it looks. A token is read from a device in
-the patient's home, so it evidences presence at the *patient's residence* — which
-is what the agency actually needs — and it does not depend on a phone parked four
-floors away getting a satellite fix through a concrete building. Nothing here
-chooses between them; that is a decision about how the deployment works, not one
-this module should make silently.
+The token is the caregiver's own device, carried with her, and the agency accepts
+its codes in place of a location check. It therefore evidences nothing about
+where anyone is — it is not a better GPS, it is a way of not invoking GPS. That
+matters here only because the alternative is asking a phone parked four floors
+away for a satellite fix it cannot honestly give, and a wrong answer there
+reaches the agency as a phone call.
+
+Presence remains REQ-5's question, decided from the controller's own signals
+before any of this. Nothing in this module chooses between the two methods;
+that is a decision about how the deployment works, not one to make silently.
 
 Nothing in this module completes a clock-in. `open_verification_chooser` stops at
 the chooser and `cancel_verification` backs out of it.

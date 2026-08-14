@@ -14,9 +14,16 @@ Three kinds of request, and each one asks for something the machine genuinely
 cannot produce:
 
 - **signature** — her attestation (REQ-10). Hers, drawn fresh, replayed as touch.
-- **token** — a code read off a device in the patient's home. She is standing
-  there; the controller is not.
+- **token** — a code off her own token device, which the agency accepts in place
+  of a location check. The device travels with her, so the code evidences
+  nothing about where she is; what it does is stop the app asking the phone.
 - **choice** — one of the options *the app itself is offering*, relayed back.
+
+That distinction is worth stating plainly because it is easy to get backwards. A
+token is not proof of presence and does not replace the gate. It is the reason
+the app never runs its radius check, which is an operational win and nothing
+more. Whether a visit may be recorded at all is still REQ-5's question, answered
+by the controller's own signals, and the token does not touch it.
 
 The third one is the one to be careful about, so it is built to be narrow. The
 agent enumerates the options when it opens the request, and `submit` refuses
@@ -26,9 +33,9 @@ with a presence gate bolted to the side, and the gate would be the part that
 falls off. If the agent never offers GPS-without-presence as an option, no
 request body from any device can select it.
 
-Everything is dropped once consumed. REQ-10.6 draws that line for signatures;
-the same reasoning applies to a security token, which is a credential attesting
-to presence at a specific home at a specific hour. Neither is kept.
+Everything is dropped once consumed. REQ-10.6 draws that line for signatures,
+and the same reasoning covers a token: it is her EVV credential, a stored copy
+is a reusable one, and nothing here needs it after it has been typed in.
 """
 
 from __future__ import annotations

@@ -74,8 +74,9 @@ class TestSignature:
 
 class TestToken:
     def test_a_token_is_carried_and_then_dropped(self):
-        """A token attests to being in one home at one hour. Keeping it would
-        make it reusable at another, which is the same objection as REQ-10.6."""
+        """It is her EVV credential, and a stored copy is a reusable one — the
+        same objection REQ-10.6 makes about strokes. Nothing here needs it once
+        it has been typed in."""
         q = RelayQueue()
         nonce = q.request_token("PT-1", datetime.now())
         q.submit(nonce, KIND_TOKEN, "4821 77")
