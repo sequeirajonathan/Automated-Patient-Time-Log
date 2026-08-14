@@ -254,3 +254,30 @@ class TestAdvancePastGates:
         d = RacingDriver()
         assert advance_past_startup_gates(d, timeout=5, poll=0) == ["language"]
         assert d.clicks == 1
+
+
+class TestApplyButtonAsLanguageSignal:
+    """Two signals, because only the English strings have been seen on device.
+
+    If the Spanish header wording differs from the guess, the apply control can
+    still carry the check — and vice versa.
+    """
+
+    def test_apply_text_identifies_spanish_when_the_header_wording_is_unexpected(self):
+        d = FakeDriver({
+            HEADER: [_text_el("Elija su idioma preferido")],  # not in the phrase list
+            APPLY: [_text_el("Siguiente")],
+        })
+        assert LanguageScreen(d).header_language() == "es"
+
+    def test_header_identifies_spanish_when_the_button_wording_is_unexpected(self):
+        d = FakeDriver({
+            HEADER: [_text_el("Seleccionar idioma")],
+            APPLY: [_text_el("Adelante")],
+        })
+        assert LanguageScreen(d).header_language() == "es"
+
+    def test_confirmed_english_strings_from_the_device(self):
+        # Both values read off the real handheld.
+        d = FakeDriver({HEADER: [_text_el("Select Language")], APPLY: [_text_el("Next")]})
+        assert LanguageScreen(d).header_language() == "en"

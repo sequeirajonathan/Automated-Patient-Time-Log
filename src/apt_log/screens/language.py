@@ -50,9 +50,24 @@ class LanguageSelectors:
 # (PI_SETUP.md §2) and the app follows it. What the automation *can* do is check
 # that the screen is rendering in the language it expects before accepting the
 # default, which is what header_language() is for.
+# Two signals rather than one, because only the English side is confirmed. The
+# header reads "Select Language" and the apply control reads "Next" on the device
+# in front of us; the Spanish strings are the app's likely wording but have not
+# been seen yet, so matching either field lets one carry the check if the other
+# is phrased differently than guessed.
+#
+# When someone sets the phone to Spanish, read the two actual strings off the
+# screen and correct these — a wrong guess here makes apply(expect_language="es")
+# refuse a correctly-configured phone, which is a safe failure but a confusing one.
 HEADER_BY_LANGUAGE = {
     "en": ("select language",),
-    "es": ("seleccionar idioma", "seleccione idioma", "elegir idioma"),
+    "es": ("seleccionar idioma", "seleccione idioma", "elegir idioma",
+           "seleccionar lenguaje", "idioma"),
+}
+
+APPLY_BY_LANGUAGE = {
+    "en": ("next",),
+    "es": ("siguiente", "continuar", "aceptar"),
 }
 
 
@@ -74,18 +89,23 @@ class LanguageScreen:
             pass
         return bool(self.driver.find_elements(ID, self.sel.picker))
 
+    def _text_of(self, selector: str) -> str:
+        controls = self.driver.find_elements(ID, selector)
+        return (controls[0].text or "").strip().lower() if controls else ""
+
     def header_language(self) -> str | None:
         """Which language this screen is rendering in, or None if unrecognised.
 
-        The only readable signal on the screen. The picker itself is opaque, so
-        the header is how we tell an English device from a Spanish one.
+        Reads the header and the apply control. The picker is opaque, so these
+        two labels are the only readable evidence of the app's language.
         """
-        controls = self.driver.find_elements(ID, self.sel.header)
-        if not controls:
-            return None
-        text = (controls[0].text or "").strip().lower()
-        for code, phrases in HEADER_BY_LANGUAGE.items():
-            if any(p in text for p in phrases):
+        header = self._text_of(self.sel.header)
+        apply_text = self._text_of(self.sel.apply)
+
+        for code in ("es", "en"):  # check the specific case before the default
+            if any(p in header for p in HEADER_BY_LANGUAGE.get(code, ())):
+                return code
+            if apply_text and apply_text in APPLY_BY_LANGUAGE.get(code, ()):
                 return code
         return None
 
