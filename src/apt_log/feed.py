@@ -555,7 +555,15 @@ def tap(claimed_frame: str, element: dict, serial: str | None = None) -> dict:
     `claimed_frame` is carried for the log rather than enforced. It was enforced
     once; see read_stable_hierarchy for the measurement that changed it.
     """
-    xml = read_stable_hierarchy(serial)
+    # The SAME source the overlay was built from. This called
+    # read_stable_hierarchy -- the adb-only path -- while the feed published
+    # elements from Appium, so every tap was compared against a different
+    # reading of the screen and every tap came back stale. It also cost 20.6
+    # seconds, because that path dumps up to five times.
+    #
+    # Two sources of truth for "what is on the screen" is one too many when the
+    # whole safety argument is that she taps a thing she can see.
+    xml = read_hierarchy(serial)
     if xml is None:
         raise StaleAim("the screen cannot be read right now")
 

@@ -553,3 +553,25 @@ class TestRawScreencap:
         import pytest as _p
         with _p.raises(ValueError):
             feed._decode(self._raw()[:-40])
+
+
+class TestTapUsesTheOverlaySource:
+    """The tap and the overlay must read the screen the same way.
+
+    They did not: the feed published Appium's page_source while tap() verified
+    against the adb dump. Different dialects, different element sets, so every
+    tap came back stale — and took 20.6s doing it.
+    """
+
+    def test_tap_verifies_through_the_same_reader_as_the_feed(self):
+        seen = []
+        with patch.object(feed, "read_hierarchy",
+                          side_effect=lambda *a: seen.append("shared") or TestElements.XML), \
+             patch.object(feed, "read_stable_hierarchy") as adb_only, \
+             patch.object(feed, "_adb") as adb:
+            adb.return_value.returncode = 0
+            els = feed.elements(TestElements.XML)
+            btn = next(e for e in els if e["rid"] == "btn_clock_in")
+            feed.tap(feed.frame_id(els), btn)
+        assert seen == ["shared"]
+        adb_only.assert_not_called()
