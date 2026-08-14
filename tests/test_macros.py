@@ -189,3 +189,33 @@ class TestWaiting:
         import inspect
         source = inspect.getsource(macros._hhax_legacy_login)
         assert "screen.is_displayed() or home.is_displayed()" in source
+
+
+class TestAutofillDialog:
+    """Android's own "Save password?" prompt.
+
+    It appears over the app the instant credentials are submitted. Because it
+    belongs to the system rather than the app, nothing in screens/session.py was
+    looking for it — so the sign-in macro reached the agency step and then waited
+    twenty seconds at a screen that was never going to change.
+    """
+
+    def test_it_is_declined_when_present(self):
+        driver = MagicMock()
+        button = MagicMock()
+        driver.find_elements.return_value = [button]
+        assert macros.dismiss_autofill(driver) is True
+        button.click.assert_called_once()
+
+    def test_nothing_happens_when_it_is_absent(self):
+        driver = MagicMock()
+        driver.find_elements.return_value = []
+        assert macros.dismiss_autofill(driver) is False
+
+    def test_it_declines_rather_than_accepts(self):
+        """Storing the agency password in the phone's autofill is a credential
+        decision, and taking it silently in the affirmative on someone else's
+        work phone is not this code's call."""
+        assert macros.AUTOFILL_DECLINE.endswith("autofill_save_no")
+        import inspect
+        assert "autofill_save_yes" not in inspect.getsource(macros)

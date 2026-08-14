@@ -68,6 +68,32 @@ class Status:
     at: str = field(default_factory=lambda: datetime.now().isoformat())
 
 
+# Android's own "Save password?" prompt, by resource-id. It appears over the app
+# the moment credentials are submitted, and because it belongs to the system
+# rather than to the app, nothing in screens/session.py was looking for it -- the
+# sign-in macro reached the agency step and then waited twenty seconds at a
+# screen that was not going to change.
+#
+# Dismissed with "no", deliberately. Storing the agency password in the phone's
+# autofill is a credential decision, and taking it silently in the affirmative on
+# someone else's work phone is not this code's call to make.
+#
+# This does not contradict the rule about unread dialogs. That rule is about
+# dialogs whose *message* is unrecognised; this one is identified exactly, by id,
+# and both of its answers are known.
+AUTOFILL_DECLINE = "android:id/autofill_save_no"
+
+
+def dismiss_autofill(driver) -> bool:
+    """Decline the system offer to save the password. True if one was showing."""
+    found = driver.find_elements("id", AUTOFILL_DECLINE)
+    if not found:
+        return False
+    found[0].click()
+    log.info("declined the system offer to save the password")
+    return True
+
+
 def wait_for(predicate, timeout: float = 20.0, poll: float = 0.5) -> bool:
     """Poll until `predicate()` is true, or give up.
 
@@ -125,6 +151,10 @@ def _hhax_legacy_login(driver, report) -> None:
 
     report("macro.step.signing_in")
     login_mod.authenticate_if_needed(driver, FileSecretProvider())
+
+    # Before anything waits on the app: a system dialog on top means the app
+    # cannot advance, and every wait below would burn its full timeout.
+    wait_for(lambda: dismiss_autofill(driver), timeout=6.0, poll=0.5)
 
     report("macro.step.agency")
     screen = agency_mod.AgencyScreen(driver)
