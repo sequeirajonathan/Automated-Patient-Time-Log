@@ -109,7 +109,9 @@ The POC must **not** submit check-offs into a live agency/EVV system.
 - Target must be a staging/sandbox account or a stand-in app.
 - A `--production` flag must exist but hard-fail with an explanatory error unless a
   `PRODUCTION_AUTHORIZED` config value is explicitly set, and must refuse entirely while
-  the presence gate is running on stub signals (REQ-5.7).
+  the presence gate is running on stub signals (REQ-5.7) **or while the transport mode is
+  `dev` rather than `usb` (REQ-5.4.1)**. Both are development affordances that let the gate
+  reach a verdict it did not earn from observation.
 - Rationale: the development unit in Texas is not at the building, so any presence it
   attests to is not presence it observed. This holds for the Texas Pi exactly as it held
   for a laptop. See §1.1.
@@ -188,9 +190,35 @@ accuracy characteristics; a single threshold rejects one or rubber-stamps the ot
 starting point, `gps` ≤ 25 m and `fused`/`network` ≤ 100 m, tuned by a documented site
 survey — take an hour of readings where the phone will actually sit before fixing values.
 
-**5.4 — adb over TCP is prohibited.** Enforce in code, not convention. `adb tcpip` would
-let the phone be anywhere on the network and silently breaks the whole chain of
-reasoning. Reject any device entry matching `<ip>:<port>`.
+**5.4 — adb over TCP is prohibited in production.** Enforce in code, not convention.
+`adb tcpip` would let the phone be anywhere on the network and silently breaks the whole
+chain of reasoning. Reject any device entry matching `<ip>:<port>`.
+
+**5.4.1 — The development transport exception.** A `dev` transport mode exists so work can
+continue when no USB data link is available. It is contained exactly as
+`StubLocationSource` is (REQ-5.7), for exactly the same reason.
+
+- **The default is `usb`.** The rejection in 5.4 is the default code path and is not
+  weakened, removed, or made conditional on anything a caller passes.
+- **`dev` is enabled only by a config value under `/etc/aptlog/`.** Never a CLI flag, never
+  a default, never an environment variable a stray shell could set. Turning it on is a
+  deliberate act on the device.
+- **`transport_mode` is stamped into every audit entry** (REQ-7), so a TCP-sourced record
+  can never be mistaken for one observed over USB — including by a reader who was not
+  present when it was written.
+- **`--production` refuses entirely while it is active** (REQ-0).
+
+While `dev` is active the gate's transport precondition is treated as satisfied, so the
+check-off flow, scheduler, audit trail and signature path can be exercised end to end
+against a real device. **That concession is the whole reason for the clauses above**: a
+gate that can pass without USB is tolerable only because the record says so and production
+will not run.
+
+**What `dev` cannot do.** It cannot validate REQ-5 end to end — the gate's central claim is
+that the phone is physically attached to *this* controller, and no amount of stamping
+substitutes for it. It also cannot satisfy REQ-12, whose heartbeat deliberately signals
+`/fail` on a TCP-attached device. Both require USB before sign-off, and neither may be
+marked complete on the strength of a `dev` run.
 
 **5.5 — Fail closed.** If the gate fails, skip the action and alert. Never queue it to
 fire later from an unverified position.
@@ -220,12 +248,18 @@ Append-only JSONL, one record per attempt, containing at minimum:
 
 ```
 attempt_id, patient_id, scheduled_time_utc, observed_time_utc,
-gate_result, location_source_type,
+gate_result, location_source_type, transport_mode,
 signals{ usb_transport, gateway_mac_match, bssid_match, wan_ip_match,
          fix{lat, lon, accuracy_m, provider, sats, timestamp} },
 signature{ occurred, nonce, stroke_count, duration_ms, hash },
 action_taken, ui_verification_result, error, app_version
 ```
+
+`transport_mode` is `usb` or `dev` (REQ-5.4.1), and `location_source_type` names the active
+`LocationSource` (REQ-5.7). **Both are mandatory on every record.** They are what let a
+later reader tell an observed check-off from one produced under a development affordance,
+and that distinction cannot be reconstructed after the fact — so a record missing either
+field is not a valid record.
 
 Record the individual signal results, not only `gate_result` (REQ-5.6). Store the
 signature hash and metadata only, never the strokes or a bitmap (REQ-10.11).
@@ -393,6 +427,11 @@ will break them; the blast radius should be one file per screen.
 - [ ] Gate denies when adb reports the device over TCP rather than USB
 - [ ] Gate **allows** with no location fix at all, provided USB plus one strong anchor hold
 - [ ] Audit entry records each signal individually, not just the verdict
+- [ ] Every audit entry carries `transport_mode` and `location_source_type`
+- [ ] `--production` refuses while `transport_mode` is `dev`
+- [ ] `dev` transport cannot be enabled by a CLI flag or environment variable — only by
+      config under `/etc/aptlog/`
+- [ ] With `dev` off, a TCP device entry is still rejected outright
 - [ ] Scheduler fires a run at its scheduled time and writes a complete audit record
 - [ ] Audit record carries scheduled and observed times as distinct values
 - [ ] Reconciliation report renders and flags an injected divergence
