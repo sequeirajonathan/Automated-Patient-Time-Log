@@ -17,6 +17,7 @@ falls back to clickable text; the same pattern shows up throughout this app.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
@@ -67,21 +68,64 @@ class LanguageScreen:
         log.info("dismissed the language-selection gate")
 
 
-def advance_past_startup_gates(driver, max_steps: int = 3) -> list[str]:
-    """Clear pre-login screens until a login form can be reached.
+# Activities the app passes through on its way somewhere else. Checking for a
+# gate while one of these is up finds nothing and wrongly concludes there is
+# nothing to clear — observed on real hardware, where the language gate appears
+# roughly three seconds after .AppLaunchActivity.
+TRANSIENT_ACTIVITIES = (".AppLaunchActivity",)
 
-    Bounded rather than a while-loop: if a gate does not clear, this must fail
-    and be reported, not spin. Returns the gates it dismissed.
+
+def _activity(driver) -> str:
+    try:
+        return driver.current_activity or ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def advance_past_startup_gates(
+    driver, timeout: float = 45.0, poll: float = 1.0, max_clears: int = 3
+) -> list[str]:
+    """Wait out splash screens and clear pre-login gates until login is reachable.
+
+    Polls rather than checking once. A cold start is not instantaneous, and the
+    first thing on screen is a launch activity, not the gate — so a single
+    immediate check reliably sees nothing to do and returns while the app is
+    still on its way to the screen it was meant to clear.
+
+    Stops as soon as a login form appears, or the app settles on something that
+    is neither transient nor a known gate (already signed in). Bounded by both a
+    deadline and a clear count, so a gate that refuses to advance is reported
+    rather than looped on.
     """
+    from apt_log.screens.login import LoginScreen
+
+    deadline = time.monotonic() + timeout
     dismissed: list[str] = []
-    for _ in range(max_steps):
-        screen = LanguageScreen(driver)
-        if not screen.is_displayed():
-            break
-        screen.apply()
-        dismissed.append("language")
-    else:
-        raise RuntimeError(
-            f"still on a startup gate after {max_steps} attempts — not advancing blind"
-        )
-    return dismissed
+
+    while time.monotonic() < deadline:
+        if LoginScreen(driver).is_displayed():
+            return dismissed
+
+        gate = LanguageScreen(driver)
+        if gate.is_displayed():
+            if len(dismissed) >= max_clears:
+                raise RuntimeError(
+                    f"language gate still present after {max_clears} attempts — "
+                    "not advancing blind"
+                )
+            gate.apply()
+            dismissed.append("language")
+            time.sleep(poll)
+            continue
+
+        if _activity(driver).endswith(TRANSIENT_ACTIVITIES):
+            time.sleep(poll)
+            continue
+
+        # Settled on something that is neither a gate nor login: already signed in.
+        return dismissed
+
+    raise TimeoutError(
+        f"app did not reach a login screen or a settled state within {timeout}s "
+        f"(last activity: {_activity(driver) or 'unknown'})"
+    )

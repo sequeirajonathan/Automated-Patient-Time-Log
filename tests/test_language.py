@@ -77,22 +77,78 @@ class TestApply:
         picker.send_keys.assert_not_called()
 
 
+PW = "//*[@password='true']"
+
+
+class ScriptedDriver:
+    """Splash for two polls, then the gate, then login once Apply is tapped.
+
+    Mirrors what the real app does: .AppLaunchActivity first, the language gate
+    a few seconds later.
+    """
+
+    ACTIVITIES = {
+        "splash": ".AppLaunchActivity",
+        "gate": ".LanguageSelectionActivity",
+        "login": ".LoginActivity",
+    }
+
+    def __init__(self, splash_polls: int = 2):
+        self.phase = "splash"
+        self.splash_polls = splash_polls
+        self.polls = 0
+        self.clicks = 0
+
+    @property
+    def current_activity(self):
+        return self.ACTIVITIES[self.phase]
+
+    def find_elements(self, _by, value):
+        if value == PW:
+            # One PW lookup per loop iteration; use it as the poll marker.
+            self.polls += 1
+            if self.phase == "splash" and self.polls >= self.splash_polls:
+                self.phase = "gate"
+            return [MagicMock()] if self.phase == "login" else []
+        if self.phase == "gate" and value == APPLY:
+            el = MagicMock()
+            el.click.side_effect = self._click
+            return [el]
+        if self.phase == "gate" and value == PICKER:
+            return [MagicMock()]
+        return []
+
+    def _click(self, *_a, **_k):
+        self.clicks += 1
+        self.phase = "login"
+
+
 class TestAdvancePastGates:
-    def test_no_gates_is_a_no_op(self):
-        assert advance_past_startup_gates(FakeDriver({})) == []
+    def test_already_signed_in_is_a_no_op(self):
+        d = FakeDriver({}, activity=".DashboardActivity")
+        assert advance_past_startup_gates(d, timeout=2, poll=0) == []
 
-    def test_clears_a_single_gate(self):
-        apply_el = MagicMock()
-        d = FakeDriver({APPLY: [apply_el]}, activity=".LanguageSelectionActivity")
+    def test_waits_out_a_splash_before_the_gate_appears(self):
+        """Observed on hardware: .AppLaunchActivity first, gate ~3s later.
 
-        def clear(*_a, **_k):
-            d.current_activity = ".LoginActivity"
-            d.ids = {}
+        A single immediate check sees no gate and returns while the app is still
+        on its way to the screen it was meant to clear.
+        """
+        d = ScriptedDriver(splash_polls=2)
+        assert advance_past_startup_gates(d, timeout=5, poll=0) == ["language"]
+        assert d.clicks == 1
+        assert d.phase == "login"
 
-        apply_el.click.side_effect = clear
-        assert advance_past_startup_gates(d) == ["language"]
+    def test_stops_as_soon_as_login_is_reachable(self):
+        d = FakeDriver({PW: [MagicMock()]}, activity=".LoginActivity")
+        assert advance_past_startup_gates(d, timeout=2, poll=0) == []
 
-    def test_a_stuck_gate_raises_rather_than_spinning(self):
+    def test_a_stuck_gate_raises_rather_than_looping(self):
         d = FakeDriver({APPLY: [MagicMock()]}, activity=".LanguageSelectionActivity")
         with pytest.raises(RuntimeError, match="not advancing blind"):
-            advance_past_startup_gates(d, max_steps=3)
+            advance_past_startup_gates(d, timeout=5, poll=0, max_clears=3)
+
+    def test_a_permanent_splash_times_out_with_the_activity_named(self):
+        d = FakeDriver({}, activity=".AppLaunchActivity")
+        with pytest.raises(TimeoutError, match="AppLaunchActivity"):
+            advance_past_startup_gates(d, timeout=0.05, poll=0)
