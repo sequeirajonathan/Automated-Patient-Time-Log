@@ -217,6 +217,7 @@ def advance_past_startup_gates(
     rather than looped on.
     """
     from apt_log.screens.login import LoginScreen
+    from apt_log.screens.permissions import PermissionsScreen
 
     deadline = time.monotonic() + timeout
     dismissed: list[str] = []
@@ -225,6 +226,14 @@ def advance_past_startup_gates(
     while time.monotonic() < deadline:
         if LoginScreen(driver).is_displayed():
             return dismissed
+
+        perms = PermissionsScreen(driver)
+        if perms.is_displayed():
+            control = perms.allow()
+            dismissed.append(f"permission[{control}]")
+            seen_settled = None
+            time.sleep(poll)
+            continue
 
         gate = LanguageScreen(driver)
         if gate.is_displayed():
