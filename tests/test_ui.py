@@ -315,3 +315,52 @@ class TestPortal:
         body = client.get("/").text
         for forbidden in ('name="x"', 'name="y"', "input tap"):
             assert forbidden not in body
+
+
+class TestLiveSocket:
+    """One connection, and no page reloads behind it."""
+
+    def test_the_socket_pushes_rendered_html_not_a_catalog(self, client):
+        """The client never assembles a sentence. Owning a catalog in the
+        browser is how a page ends up half in one language."""
+        with client.websocket_connect("/ws") as ws:
+            msg = ws.receive_json()
+        assert msg["type"] == "state"
+        assert "relay_html" in msg
+        assert "<" in msg["relay_html"]
+
+    def test_the_pushed_panel_is_in_the_requested_language(self, client):
+        client.cookies.set(LANGUAGE_COOKIE, "en")
+        with client.websocket_connect("/ws") as ws:
+            msg = ws.receive_json()
+        assert "Nothing needs your answer" in msg["relay_html"]
+        client.cookies.clear()
+
+    def test_a_tap_over_the_socket_is_refused_when_stale(self, client):
+        with client.websocket_connect("/ws") as ws:
+            ws.receive_json()
+            ws.send_json({"type": "tap", "frame": "gone",
+                          "element": {"rid": "x", "cls": "y", "b": [0, 0, 1, 1]}})
+            while True:
+                msg = ws.receive_json()
+                if msg.get("type") == "tap_result":
+                    break
+        assert msg["ok"] is False
+
+    def test_a_tap_without_a_frame_is_malformed_not_attempted(self, client):
+        with client.websocket_connect("/ws") as ws:
+            ws.receive_json()
+            ws.send_json({"type": "tap", "element": {}})
+            while True:
+                msg = ws.receive_json()
+                if msg.get("type") == "tap_result":
+                    break
+        assert msg["reason"] == "malformed"
+
+    def test_the_http_routes_still_work_without_a_socket(self, client):
+        """A socket is an enhancement. She may be on whatever browser her phone
+        has, standing in someone's kitchen."""
+        assert client.get("/").status_code == 200
+        assert client.get("/frame.json").status_code == 200
+        assert client.post("/tap", json={"frame": "x", "element": {}}
+                           ).status_code in (400, 409)

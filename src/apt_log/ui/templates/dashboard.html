@@ -127,110 +127,7 @@
      canvas; the rest are forms, because the controller stopping mid-visit is
      exactly when scripts are least worth depending on. #}
   <section id="relay" {% if pending %}class="asking"{% endif %}>
-    {% if not pending %}
-      <h2>{{ t('relay.title') }}</h2>
-      <p class="muted">{{ t('relay.none') }}</p>
-
-    {% elif pending.kind == KIND_SIGNATURE %}
-      <h2>{{ t('signature.title') }}</h2>
-      {# REQ-10.3: she must see which visit she is attesting to, before signing. #}
-      <p>{{ t('signature.prompt', patient=pending.patient_id,
-                                  time=t.time(pending.scheduled)) }}</p>
-      <p class="muted">{{ t('signature.instruction') }}</p>
-      <canvas id="pad" data-nonce="{{ pending.nonce }}"></canvas>
-      <div class="controls">
-        <label class="muted" for="brush">{{ t('signature.brush') }}</label>
-        <input id="brush" type="range" min="1" max="8" value="3">
-        <button type="button" id="undo">{{ t('signature.undo') }}</button>
-        <button type="button" id="clear">{{ t('signature.clear') }}</button>
-        <button type="button" id="send" class="primary">{{ t('signature.submit') }}</button>
-        <span id="sigmsg" class="muted"></span>
-      </div>
-      <script>
-        window.APTLOG_I18N = {
-          sending: {{ t('signature.sending')|tojson }},
-          sent:    {{ t('signature.sent')|tojson }},
-          failed:  {{ t('signature.failed')|tojson }},
-          expired: {{ t('signature.expired')|tojson }},
-          empty:   {{ t('signature.empty')|tojson }}
-        };
-      </script>
-
-    {% elif pending.kind == KIND_TOKEN %}
-      <h2>{{ t('token.title') }}</h2>
-      {# REQ-10.3 wants the patient and the visit. A missing scheduled time says
-         so out loud rather than rendering "scheduled for —". #}
-      {% if pending.scheduled %}
-        <p>{{ t('relay.for_visit', patient=pending.patient_id,
-                                   time=t.time(pending.scheduled)) }}</p>
-      {% else %}
-        <p>{{ t('relay.for_visit_untimed', patient=pending.patient_id) }}</p>
-      {% endif %}
-      <p>{{ t('token.prompt') }}</p>
-      <p class="muted">{{ t('token.why') }}</p>
-      {# Said out loud on the page, because the natural reading of "the token
-         replaces the location check" is that the token proves location. It does
-         not — the device travels with her — and the gate is unaffected. #}
-      <p class="muted">{{ t('token.gate_note') }}</p>
-      <form method="post" action="/relay">
-        <input type="hidden" name="nonce" value="{{ pending.nonce }}">
-        <input type="hidden" name="kind" value="{{ KIND_TOKEN }}">
-        <label class="muted" for="token">{{ t('token.label') }}</label>
-        <input class="code" id="token" name="value" inputmode="latin"
-               autocomplete="off" autocapitalize="characters" spellcheck="false"
-               maxlength="20" required>
-        <div class="controls">
-          <button type="submit" class="primary">{{ t('relay.send') }}</button>
-        </div>
-      </form>
-
-    {% elif pending.kind == KIND_OTP %}
-      <h2>{{ t('otp.title') }}</h2>
-      {# No visit named here: a login code opens a session, it does not attest to
-         a patient. Naming one would be inventing a link that isn't there. #}
-      <p>{{ t('otp.prompt', app=pending.patient_id) }}</p>
-      <p class="muted">{{ t('otp.expires') }}</p>
-      <form method="post" action="/relay">
-        <input type="hidden" name="nonce" value="{{ pending.nonce }}">
-        <input type="hidden" name="kind" value="{{ KIND_OTP }}">
-        <label class="muted" for="otp">{{ t('otp.label') }}</label>
-        <input class="code" id="otp" name="value" inputmode="numeric"
-               autocomplete="one-time-code" spellcheck="false"
-               maxlength="20" required>
-        <div class="controls">
-          <button type="submit" class="primary">{{ t('relay.send') }}</button>
-        </div>
-      </form>
-
-    {% elif pending.kind == KIND_CHOICE %}
-      <h2>{{ t('choice.title') }}</h2>
-      {# REQ-10.3 wants the patient and the visit. A missing scheduled time says
-         so out loud rather than rendering "scheduled for —". #}
-      {% if pending.scheduled %}
-        <p>{{ t('relay.for_visit', patient=pending.patient_id,
-                                   time=t.time(pending.scheduled)) }}</p>
-      {% else %}
-        <p>{{ t('relay.for_visit_untimed', patient=pending.patient_id) }}</p>
-      {% endif %}
-      <p>{{ t('choice.prompt') }}</p>
-      {# The labels are the app's own words, relayed rather than reworded — she
-         is choosing on a screen the controller is looking at, and a helpful
-         paraphrase here would be a different screen. #}
-      <div class="choices">
-        {% for option in pending.options %}
-        <form method="post" action="/relay">
-          <input type="hidden" name="nonce" value="{{ pending.nonce }}">
-          <input type="hidden" name="kind" value="{{ KIND_CHOICE }}">
-          <input type="hidden" name="value" value="{{ option }}">
-          <button type="submit">{{ option }}</button>
-        </form>
-        {% if 'gps' in option|lower %}
-          <p class="muted">{{ t('choice.gps_warning') }}</p>
-        {% endif %}
-        {% endfor %}
-      </div>
-      <p class="muted">{{ t('choice.only_offered') }}</p>
-    {% endif %}
+    {% include "_relay.html" %}
   </section>
 
   {# 2. Mirror — the same screen the controller is on, so the question above has
@@ -415,7 +312,6 @@
 </main>
 
 <script src="/static/signature.js" defer></script>
-<script src="/static/mirror.js" defer></script>
-<script src="/static/portal.js" defer></script>
+<script src="/static/live.js" defer></script>
 </body>
 </html>

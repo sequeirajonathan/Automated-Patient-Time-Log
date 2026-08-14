@@ -34,7 +34,7 @@ import json
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI, Form, Request, Response
+from fastapi import FastAPI, Form, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -223,6 +223,104 @@ def api_state():
         "mirror": _mirror_payload(s),
         "generated_at": s.generated_at.isoformat(),
     })
+
+
+def _relay_html(request: Request, t: Translator) -> str:
+    """The relay panel, rendered server-side for the socket to push.
+
+    Same template the full page uses, so the two can never drift into showing
+    different things -- which is the failure mode of every hand-written client
+    renderer, and it shows up as her being asked one question by the page and a
+    different one by the update.
+    """
+    return templates.get_template("_relay.html").render(
+        t=t, pending=queue.current(),
+        KIND_SIGNATURE=KIND_SIGNATURE, KIND_TOKEN=KIND_TOKEN,
+        KIND_CHOICE=KIND_CHOICE, KIND_OTP=KIND_OTP,
+    )
+
+
+def _live_state(request: Request, t: Translator) -> dict:
+    s = state_mod.collect()
+    pending = queue.current()
+    frame_path = state_mod.STATE_DIR / "frame.json"
+    try:
+        frame = json.loads(frame_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        frame = {"id": "", "img": "", "size": [0, 0], "elements": []}
+    return {
+        "frame": frame,
+        "mirror": _mirror_payload(s, t),
+        "relay_nonce": pending["nonce"] if pending else "",
+        "relay_html": _relay_html(request, t),
+        "paused": s.paused,
+    }
+
+
+@app.websocket("/ws")
+async def live(ws: WebSocket):
+    """One connection carrying frames down and taps up.
+
+    Replaces a 2-second poll for the screen and a full page reload for
+    everything else. The reload mattered more than it sounds: every form POST
+    used to answer with a redirect, so acknowledging a message or sending a code
+    threw away her scroll position and the screen she was looking at, mid-visit,
+    on a phone.
+
+    The HTTP routes all still work. A socket is an enhancement, not a
+    dependency -- she may be on whatever browser her phone has, standing in
+    someone's kitchen.
+    """
+    await ws.accept()
+    chosen = ws.cookies.get(LANGUAGE_COOKIE)
+    if chosen not in SUPPORTED:
+        chosen = normalise(ws.headers.get("accept-language"))
+    t = Translator(chosen)
+
+    last: dict | None = None
+    try:
+        while True:
+            state = _live_state(ws, t)
+            if state != last:
+                # Only the parts that changed, so a repainting screen does not
+                # re-send a relay panel she may be typing into.
+                delta = {k: v for k, v in state.items()
+                         if last is None or last.get(k) != v}
+                last = state
+                await ws.send_json({"type": "state", **delta})
+
+            try:
+                msg = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+            except (ValueError, TypeError):
+                continue
+
+            if msg.get("type") == "tap":
+                await ws.send_json(await _do_tap(msg))
+    except WebSocketDisconnect:
+        return
+    except RuntimeError:
+        # Socket closed underneath us mid-send; nothing to clean up.
+        return
+
+
+async def _do_tap(msg: dict) -> dict:
+    from apt_log.feed import NotOnScreen, StaleAim, tap
+
+    element = msg.get("element") or {}
+    frame = msg.get("frame") or ""
+    if not frame or not isinstance(element, dict):
+        return {"type": "tap_result", "ok": False, "reason": "malformed"}
+    try:
+        await asyncio.to_thread(tap, frame, element)
+    except StaleAim as exc:
+        log.info("tap refused: %s", exc)
+        return {"type": "tap_result", "ok": False, "reason": "stale"}
+    except NotOnScreen as exc:
+        log.warning("tap refused: %s", exc)
+        return {"type": "tap_result", "ok": False, "reason": "stale"}
+    return {"type": "tap_result", "ok": True}
 
 
 @app.get("/events")
