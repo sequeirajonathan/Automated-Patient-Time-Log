@@ -121,6 +121,18 @@ else
     echo "!! $ANDROID_SDK_HOME/platform-tools/adb missing — Appium cannot start a session" >&2
 fi
 
+# ------------------------------------------------------------------ config dir
+# Root-owned and not group- or world-writable, on purpose. REQ-5.4.1 justifies the
+# dev transport exception on the grounds that enabling it is "an act on the device,
+# by someone with root, who meant it" — but that is only true if the service user
+# cannot create /etc/aptlog/transport.conf itself. The agent runs as $SERVICE_USER;
+# a writable config dir would let it switch off its own containment.
+#
+# Individual secrets inside stay 0600 owned by the service user (REQ-3) so the agent
+# can still read them. 0755 on the directory permits that and forbids creation.
+log "creating config directory"
+install -d -o root -g root -m 0755 /etc/aptlog
+
 # --------------------------------------------------------------------- the app
 log "deploying application"
 if [[ ! -d "$APP_DIR/.git" ]]; then
