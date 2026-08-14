@@ -36,8 +36,10 @@ chown "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR"
 # ------------------------------------------------------------------- tailscale
 if ! tailscale status >/dev/null 2>&1; then
     if [[ -f "$KEYFILE" ]]; then
-        # First non-comment, non-blank line.
-        AUTHKEY="$(grep -vE '^\s*(#|$)' "$KEYFILE" | head -n1 | tr -d '[:space:]')"
+        # Match the key by its shape, anywhere in the file. Taking "the first
+        # non-blank line" breaks the moment someone types a label above the key,
+        # and that failure happens 1,000 miles away with no console.
+        AUTHKEY="$(grep -oE 'tskey-[a-zA-Z0-9]+-[a-zA-Z0-9]+' "$KEYFILE" | head -n1)"
     else
         AUTHKEY=""
     fi

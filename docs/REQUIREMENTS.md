@@ -370,7 +370,9 @@ will break them; the blast radius should be one file per screen.
 ## 6. Acceptance criteria
 
 - [ ] `probe` runs against the real app on a real device and emits a PASS/FAIL report
-- [ ] Login automates from a cold start, credentials sourced from the OS keychain
+- [ ] Login automates from a cold start, credentials sourced through `SecretProvider`
+      from `/etc/aptlog/secrets.env` (REQ-3) — **not** an OS keychain, which a headless
+      Pi cannot unlock unattended
 - [ ] One patient check-off completes and is verified in-UI
 - [ ] Re-running the same check-off does **not** create a duplicate
 - [ ] Gate **denies** on an out-of-range fixture and **allows** on an in-range one
