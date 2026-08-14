@@ -14,12 +14,14 @@ that, and the tests here cover the route not widening it on the way through.
 from __future__ import annotations
 
 from datetime import datetime
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from apt_log.ui.app import LANGUAGE_COOKIE, _mirror_payload, app, queue
 from apt_log.ui.i18n import Translator
+from apt_log.ui import mirror as mirror_mod
 from apt_log.ui.mirror import Mirror
 from apt_log.ui.relay import KIND_CHOICE, KIND_SIGNATURE, KIND_TOKEN
 from apt_log.ui.state import DashboardState
@@ -203,7 +205,16 @@ class TestRelayRoute:
 
 class TestMirrorPanel:
     def test_an_unpublished_mirror_says_it_does_not_know(self, client):
-        body = client.get("/").text
+        """Patched rather than assumed.
+
+        Reading the real /var/lib/aptlog/mirror.json made this pass on a laptop
+        and fail on any machine where the feed is running -- which is every
+        deployed one. It blocked a legitimate deploy on the Florida unit, and a
+        gate that rejects good revisions for environmental reasons is a gate
+        people learn to bypass.
+        """
+        with patch.object(mirror_mod, "read", return_value=Mirror()):
+            body = client.get("/").text
         assert "no ha informado" in body
 
     def test_the_stream_payload_carries_translated_text_not_keys(self):

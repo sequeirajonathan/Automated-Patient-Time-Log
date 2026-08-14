@@ -83,6 +83,12 @@ def _safe_id(patient_id: str) -> str:
     one that means well.
     """
     candidate = (patient_id or "").strip()
+    if candidate == UNKNOWN_ID:
+        # The sentinel is a valid answer, not a rejected value. It fails the id
+        # shape by design, and treating that as a refusal logged an error on
+        # every frame the feed published -- five seconds apart, forever, drowning
+        # the refusals that actually mean something.
+        return UNKNOWN_ID
     if not _ID_SHAPE.match(candidate):
         if candidate:
             log.error("mirror: refusing a patient identifier that is not id-shaped")
