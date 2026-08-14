@@ -75,10 +75,6 @@ class Resident:
         options.no_reset = True
         options.new_command_timeout = COMMAND_TIMEOUT
         options.set_capability("appium:skipDeviceInitialization", True)
-        # The portal reads screens that are animating or have a live timer on
-        # them. Waiting for idle on those blocks until the wait times out, which
-        # is exactly the stall this class exists to remove.
-        options.set_capability("appium:waitForIdleTimeout", 0)
         # No appPackage: the session attaches to whatever is in the foreground,
         # which is the point. She drives; this watches.
         log.info("opening a resident Appium session (about 11s)")
@@ -89,12 +85,26 @@ class Resident:
             # those beats an overlay that never returns.
             future = pool.submit(webdriver.Remote, self._server, options=options)
             try:
-                return future.result(timeout=CONNECT_BUDGET)
+                driver = future.result(timeout=CONNECT_BUDGET)
             except FuturesTimeout:
                 pool.shutdown(wait=False, cancel_futures=True)
                 raise TimeoutError(
                     f"Appium did not open a session within {CONNECT_BUDGET:.0f}s"
                 ) from None
+
+        # Applied as a setting, not a capability. As a capability the value 0 is
+        # rejected inside Settings.resetForNewSession and takes the whole session
+        # creation down with it -- which is what kept the overlay empty, and cost
+        # an hour because the failure names a settings class rather than the
+        # capability that caused it.
+        #
+        # It matters because the portal reads screens that animate or carry a
+        # live timer, and waiting for idle on those blocks until the wait expires.
+        try:
+            driver.update_settings({"waitForIdleTimeout": 100})
+        except Exception as exc:  # noqa: BLE001
+            log.info("could not lower waitForIdleTimeout (%s); continuing", exc)
+        return driver
 
     def _discard(self) -> None:
         driver, self._driver = self._driver, None
