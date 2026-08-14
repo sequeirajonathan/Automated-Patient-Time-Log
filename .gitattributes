@@ -1,0 +1,16 @@
+# Every shell script in this repo is executed on the Pi (Linux). A Windows
+# checkout that converts them to CRLF produces `$'\r': command not found` at
+# the first line, which is a confusing failure a long way from its cause.
+# This bit us once already with firstboot.sh staged onto the boot partition.
+*.sh    text eol=lf
+*.bash  text eol=lf
+
+# systemd refuses to parse unit files with CRLF line endings.
+*.service text eol=lf
+*.timer   text eol=lf
+
+# Config read by Linux tooling.
+*.toml  text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.json  text eol=lf
