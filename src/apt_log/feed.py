@@ -41,6 +41,7 @@ import logging
 import os
 import re
 import subprocess
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -256,36 +257,76 @@ def write_frame(path: Path, serial: str | None = None,
             f"{focus or '?':<46} {reason or 'captured'}")
 
 
+class _Hierarchy:
+    """The latest screen structure, refreshed on its own thread.
+
+    Separate thread rather than a slower clock, because the two are not the same
+    promise. A slower clock still puts the hierarchy read *in front of* the next
+    picture, so one bad read -- and a failed Appium connect takes 25 seconds --
+    freezes the thing she is actually looking at. On its own thread a bad read
+    costs nothing but a slightly staler overlay.
+    """
+
+    def __init__(self, serial: str | None, every: float):
+        self._serial = serial
+        self._every = every
+        self._xml: str | None = None
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    @property
+    def xml(self) -> str | None:
+        with self._lock:
+            return self._xml
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                fresh = read_hierarchy(self._serial)
+                if fresh is not None:
+                    with self._lock:
+                        self._xml = fresh
+            except Exception as exc:  # noqa: BLE001
+                log.warning("hierarchy read failed: %s", exc)
+            self._stop.wait(self._every)
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._loop, daemon=True,
+                                        name="aptlog-hierarchy")
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+
 def run(path: Path, interval: float = DEFAULT_INTERVAL,
         serial: str | None = None, iterations: int | None = None) -> None:
     """Loop until stopped. `iterations` bounds it for tests.
 
-    Two clocks, because the halves cost nothing alike. Measured on the Pi: a
-    screenshot is 865 ms and compressing it 49 ms, while reading the hierarchy
-    is 1.75 s through the resident session -- and was 12.7 s before it. On one
-    clock the picture could never update faster than the slowest thing it waited
-    on, which is what made the portal feel dead under the hand.
+    Measured on the Pi: a screenshot is 865 ms and compressing it 49 ms, while
+    reading the hierarchy is 664-796 ms through an established resident session
+    -- but 25 s when the session has to be rebuilt, and it does have to be
+    rebuilt sometimes. Averages are the wrong tool here; the worst case is what
+    she feels.
 
-    The picture is what she is looking at, so it gets the fast clock. The overlay
-    only has to be right when she taps, and a tap re-checks anyway.
+    So the picture runs here, unblocked, and the hierarchy runs beside it.
     """
+    watcher = _Hierarchy(serial, HIERARCHY_EVERY)
+    watcher.start()
     count = 0
-    tick = 0
-    hierarchy: str | None = None
-    every = max(1, round(HIERARCHY_EVERY / max(interval, 0.1)))
-
-    while iterations is None or count < iterations:
-        try:
-            if tick % every == 0:
-                hierarchy = read_hierarchy(serial)
-            log.info("%s", write_frame(path, serial, hierarchy))
-        except Exception as exc:  # noqa: BLE001
-            # A watcher that dies on one bad read stops being a watcher.
-            log.warning("frame failed: %s", exc)
-        count += 1
-        tick += 1
-        if iterations is None or count < iterations:
-            time.sleep(interval)
+    try:
+        while iterations is None or count < iterations:
+            try:
+                log.info("%s", write_frame(path, serial, watcher.xml))
+            except Exception as exc:  # noqa: BLE001
+                # A watcher that dies on one bad read stops being a watcher.
+                log.warning("frame failed: %s", exc)
+            count += 1
+            if iterations is None or count < iterations:
+                time.sleep(interval)
+    finally:
+        watcher.stop()
 
 
 def _attr(node: str, name: str) -> str:

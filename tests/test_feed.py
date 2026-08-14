@@ -7,6 +7,7 @@ this module needed writing at all is that it runs outside the process holding
 
 from __future__ import annotations
 
+import time
 from unittest.mock import patch
 
 import pytest
@@ -137,28 +138,35 @@ class TestRun:
             feed.run(tmp_path / "s.png", interval=0, iterations=3)
         assert len(calls) == 3
 
-    def test_the_hierarchy_is_read_far_less_often_than_the_picture(self, tmp_path):
-        """The whole point of two clocks. The picture is 0.9s of work and the
-        hierarchy 1.75s; on one clock the screen could never update faster than
-        the slowest thing it waited on."""
-        reads = []
-        with patch.object(feed, "write_frame", return_value="ok"), \
-             patch.object(feed, "read_hierarchy",
-                          side_effect=lambda *_: reads.append(1)), \
-             patch.object(feed.time, "sleep"):
-            feed.run(tmp_path / "s.png", interval=1.0, iterations=9)
-        assert len(reads) == 3          # 9 pictures, 3 hierarchies at every=3
+    def test_a_slow_hierarchy_never_delays_the_picture(self, tmp_path):
+        """The whole point of the separate thread. A failed Appium connect takes
+        25 seconds; on the picture's thread that freezes the thing she is
+        actually looking at."""
+        frames = []
 
-    def test_a_slow_interval_still_reads_the_hierarchy_every_frame(self, tmp_path):
-        """When a frame already costs more than HIERARCHY_EVERY, skipping reads
-        would leave the overlay staler than the picture for no saving at all."""
-        reads = []
-        with patch.object(feed, "write_frame", return_value="ok"), \
-             patch.object(feed, "read_hierarchy",
-                          side_effect=lambda *_: reads.append(1)), \
-             patch.object(feed.time, "sleep"):
-            feed.run(tmp_path / "s.png", interval=5.0, iterations=3)
-        assert len(reads) == 3
+        def glacial(*_a, **_k):
+            time.sleep(5)          # real sleep, on the other thread
+            return "<node/>"
+
+        with patch.object(feed, "write_frame",
+                          side_effect=lambda *a, **k: frames.append(1) or "ok"), \
+             patch.object(feed, "read_hierarchy", side_effect=glacial):
+            started = time.monotonic()
+            feed.run(tmp_path / "s.png", interval=0.01, iterations=5)
+            elapsed = time.monotonic() - started
+        assert len(frames) == 5
+        assert elapsed < 2.0, "the picture waited on the hierarchy"
+
+    def test_the_picture_uses_the_last_good_hierarchy(self, tmp_path):
+        """A read that fails leaves the previous overlay standing rather than
+        blanking it — stale boxes beat no boxes."""
+        h = feed._Hierarchy(None, every=0.01)
+        with patch.object(feed, "read_hierarchy",
+                          side_effect=["<node a=1/>", None, None]):
+            h.start()
+            time.sleep(0.15)
+            h.stop()
+        assert h.xml == "<node a=1/>"
 
 
 class TestElements:

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +31,16 @@ DEFAULT_SERVER = "http://127.0.0.1:4723"
 # Long enough that the session survives quiet stretches between her taps. The
 # portal is used in bursts: nothing for twenty minutes, then a flurry.
 COMMAND_TIMEOUT = 3600
+
+# Creating a session is flaky in a specific way: the first attempt after the
+# device has been left alone tends to fail with "the instrumentation process
+# cannot be initialized", and the next one succeeds. Measured: 50s of failed
+# attempts, then 11s to a working session, and 664-796ms per read thereafter.
+#
+# So a failure must not be retried immediately. Without this cooldown the feed
+# spent every cycle in a doomed 25-second connect, which is worse than having no
+# hierarchy at all -- it had no hierarchy AND no time left for anything else.
+RETRY_AFTER = 30.0
 
 
 class Resident:
@@ -43,6 +54,7 @@ class Resident:
         self._server = server
         self._driver = None
         self._lock = threading.Lock()
+        self._blocked_until = 0.0
 
     # ------------------------------------------------------------- lifecycle
     def _create(self):
@@ -89,13 +101,19 @@ class Resident:
         for attempt in (1, 2):
             with self._lock:
                 if self._driver is None:
+                    if time.monotonic() < self._blocked_until:
+                        return None
                     try:
                         self._driver = self._create()
                     except Exception as exc:  # noqa: BLE001
-                        log.warning("cannot open an Appium session: %s", exc)
+                        self._blocked_until = time.monotonic() + RETRY_AFTER
+                        log.warning("cannot open an Appium session (%s); "
+                                    "not retrying for %.0fs", exc, RETRY_AFTER)
                         return None
                 try:
-                    return self._driver.page_source
+                    source = self._driver.page_source
+                    self._blocked_until = 0.0
+                    return source
                 except Exception as exc:  # noqa: BLE001
                     log.info("resident session failed (%s); attempt %d", exc, attempt)
                     self._discard()
