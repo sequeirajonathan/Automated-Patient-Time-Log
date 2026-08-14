@@ -14,11 +14,16 @@ DEPLOY_REF="${DEPLOY_REF:-release}"
 SERVICE_USER="${SERVICE_USER:-apt}"
 STATE_DIR="/var/lib/aptlog"
 LAST_GOOD="$STATE_DIR/last-good-sha"
+# aptlog-feed was missing here, so every deploy updated the code on disk and left
+# the running feed on whatever revision it started with. It looked fine because
+# each deploy was followed by a hand-typed restart -- which is exactly the kind of
+# gap that survives until the person doing it by hand is not around.
+#
 # aptlog-agent is deliberately absent until REQ-6 exists: `apt-log run` is still
 # the placeholder that exits 2, so gating deploys on it would roll back every
 # revision forever now that the health check actually works. Put it back the
-# moment the agent has a main loop -- it is the service that matters most here.
-SERVICES=(aptlog-ui)
+# moment the agent has a main loop.
+SERVICES=(aptlog-ui aptlog-feed)
 HEALTH_URL="http://127.0.0.1:8080/healthz"
 
 mkdir -p "$STATE_DIR"
