@@ -40,6 +40,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from apt_log import __version__
+from apt_log import video as video_mod
 from apt_log.ui import state as state_mod
 from apt_log.ui.i18n import SUPPORTED, Translator, normalise
 from apt_log.ui.relay import (
@@ -61,6 +62,35 @@ app = FastAPI(title="APT Log", docs_url=None, redoc_url=None)
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 queue = RelayQueue()
+
+
+def _credential_screen_showing() -> bool:
+    """Whether the phone is somewhere a password can be typed.
+
+    The video stream has no per-frame decision point, so this is what stands in
+    for the JPEG path's per-frame refusal. Errs to True: if the focused window
+    cannot be read, the stream stops. A frozen picture costs her a moment; a
+    recording of her signing in cannot be taken back.
+    """
+    from apt_log.feed import current_focus, looks_like_a_login_screen
+
+    focus = current_focus()
+    if not focus:
+        return True
+    return looks_like_a_login_screen(focus)
+
+
+_video = video_mod.Streamer(on_data=lambda _b: None,
+                            unsafe=_credential_screen_showing)
+_video_sinks: set = set()
+
+
+def _fan_out(chunk: bytes) -> None:
+    for sink in list(_video_sinks):
+        sink(chunk)
+
+
+_video._on_data = _fan_out
 
 
 def _translator(request: Request) -> Translator:
@@ -235,6 +265,15 @@ def _read_json(path, fallback):
 EMPTY_FRAME = {"id": "", "img": "", "size": [0, 0], "elements": []}
 SLOW_EVERY = 10.0
 
+# From the SPS the device actually emits: profile_idc 0x64 (High), level 0x29
+# (4.1). Read off the stream rather than assumed, because a wrong codec string
+# makes VideoDecoder refuse to configure with no useful explanation.
+VIDEO_CODEC = "avc1.640029"
+
+# Chunks held for a socket that is not keeping up. Small on purpose -- see
+# queue_chunk.
+VIDEO_BACKLOG = 64
+
 
 @app.websocket("/ws")
 async def live(ws: WebSocket):
@@ -267,6 +306,22 @@ async def live(ws: WebSocket):
     frame_path = state_mod.STATE_DIR / "frame.json"
     last: dict = {}
     slow_at = 0.0
+    watching_video = False
+    sinks: list = []
+    pending: list[bytes] = []
+
+    def queue_chunk(chunk: bytes) -> None:
+        # Dropped rather than queued without bound: on a slow link the right
+        # thing for live video is to fall behind by losing frames, not by
+        # growing a backlog she will watch play out minutes late.
+        if len(pending) < VIDEO_BACKLOG:
+            pending.append(chunk)
+
+    def _release() -> None:
+        for sink in sinks:
+            _video_sinks.discard(sink)
+        sinks.clear()
+        pending.clear()
 
     try:
         while True:
@@ -302,6 +357,9 @@ async def live(ws: WebSocket):
             if payload:
                 await ws.send_json({"type": "state", **payload})
 
+            while pending:
+                await ws.send_bytes(pending.pop(0))
+
             try:
                 msg = await asyncio.wait_for(ws.receive_json(), timeout=1.0)
             except asyncio.TimeoutError:
@@ -311,11 +369,35 @@ async def live(ws: WebSocket):
 
             if msg.get("type") == "tap":
                 await ws.send_json(await _do_tap(msg))
+            elif msg.get("type") == "video":
+                want = bool(msg.get("on"))
+                if want and not watching_video:
+                    watching_video = True
+                    loop = asyncio.get_running_loop()
+
+                    def sink(chunk: bytes, _loop=loop) -> None:
+                        # Hops to the event loop thread: the encoder pumps on a
+                        # plain thread and websockets are not thread-safe.
+                        _loop.call_soon_threadsafe(queue_chunk, chunk)
+
+                    sinks.append(sink)
+                    _video_sinks.add(sink)
+                    await asyncio.to_thread(_video.attach)
+                    await ws.send_json({"type": "video", "on": True,
+                                        "codec": VIDEO_CODEC})
+                elif not want and watching_video:
+                    watching_video = False
+                    _release()
+                    await ws.send_json({"type": "video", "on": False})
     except WebSocketDisconnect:
         return
     except RuntimeError:
         # Socket closed underneath us mid-send; nothing to clean up.
         return
+    finally:
+        if watching_video:
+            _release()
+            await asyncio.to_thread(_video.detach)
 
 
 async def _do_tap(msg: dict) -> dict:

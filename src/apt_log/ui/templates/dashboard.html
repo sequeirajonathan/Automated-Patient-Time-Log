@@ -74,6 +74,10 @@
   .shot { max-width:100%; border-radius:8px; border:1px solid var(--line);
           display:block; }
   .shot.stale { opacity:.55; }
+  .shot.live { position:absolute; inset:0; width:100%; height:100%;
+               display:none; }
+  body.video-live .shot.live { display:block; }
+  body.video-live #shot { visibility:hidden; }
   .mirror-frame { position:relative; display:inline-block; max-width:100%; }
   .overlay { position:absolute; inset:0; pointer-events:none; }
   /* Boxes are buttons so a keyboard and a screen reader can reach them too. */
@@ -153,9 +157,14 @@
       <p class="muted" id="shot-taken">{{ t('phone.stale', time=t.time(s.screenshot_at)) }}</p>
       {# The picture and the hit boxes share one positioned container so the
          overlay stays in register when the image reflows. #}
+      {# Two surfaces, one at a time. The still is always there and always
+         correct; the canvas covers it once H.264 is decoding. Keeping the still
+         underneath rather than swapping it out means a decoder that fails has
+         something to fall back to that is already on screen. #}
       <div class="mirror-frame">
         <img id="shot" class="shot {% if s.mirror.stale %}stale{% endif %}"
              src="/screen.jpg" alt="">
+        <canvas id="screen-video" class="shot live"></canvas>
         <div id="overlay" class="overlay"></div>
       </div>
       <p class="muted">{{ t('portal.instruction') }}

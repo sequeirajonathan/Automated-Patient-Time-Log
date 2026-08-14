@@ -20,6 +20,98 @@
   const i18n = window.APTLOG_PORTAL || {};
   const status = document.getElementById('portal-status');
 
+  // ------------------------------------------------------------------ video
+  // H.264 straight from the phone's hardware encoder. Measured against the JPEG
+  // mirror: 34 KB for three seconds of a static screen, versus 77 KB for one
+  // still. A codec sends differences, and a screen that is not moving is nearly
+  // free — which is the whole reason this path exists.
+  //
+  // WebCodecs only. No software fallback is attempted: where it is missing the
+  // JPEG mirror is already there and already correct, and an H.264 decoder in
+  // JavaScript would be slower than the pictures it replaced.
+  const video = {
+    decoder: null, canvas: null, ctx: null,
+    ready: false, waitingForKey: true,
+    supported: typeof window.VideoDecoder === 'function'
+  };
+
+  function annexBNalType(bytes) {
+    // Start code is 3 or 4 bytes; the NAL header's low 5 bits are the type.
+    for (let i = 0; i + 4 < bytes.length && i < 64; i++) {
+      if (bytes[i] === 0 && bytes[i + 1] === 0) {
+        if (bytes[i + 2] === 1) return bytes[i + 3] & 0x1f;
+        if (bytes[i + 2] === 0 && bytes[i + 3] === 1) return bytes[i + 4] & 0x1f;
+      }
+    }
+    return -1;
+  }
+
+  function startVideo(codec) {
+    if (!video.supported) return;
+    video.canvas = document.getElementById('screen-video');
+    if (!video.canvas) return;
+    video.ctx = video.canvas.getContext('2d');
+
+    video.decoder = new VideoDecoder({
+      output: (frame) => {
+        if (video.canvas.width !== frame.displayWidth) {
+          video.canvas.width = frame.displayWidth;
+          video.canvas.height = frame.displayHeight;
+        }
+        video.ctx.drawImage(frame, 0, 0);
+        frame.close();
+        if (!video.ready) {
+          video.ready = true;
+          document.body.classList.add('video-live');
+          draw();
+        }
+      },
+      error: (e) => {
+        // Fall back rather than retry: the JPEG mirror underneath is still
+        // running and still correct.
+        console.warn('video decode failed', e);
+        stopVideo();
+      }
+    });
+    // annexb, so no description is supplied — SPS and PPS arrive inline.
+    video.decoder.configure({ codec: codec, optimizeForLatency: true });
+    video.waitingForKey = true;
+  }
+
+  function stopVideo() {
+    document.body.classList.remove('video-live');
+    video.ready = false;
+    if (video.decoder) {
+      try { video.decoder.close(); } catch (e) { /* already closed */ }
+      video.decoder = null;
+    }
+    draw();
+  }
+
+  function feedVideo(buffer) {
+    if (!video.decoder || video.decoder.state !== 'configured') return;
+    const bytes = new Uint8Array(buffer);
+    const nal = annexBNalType(bytes);
+
+    // A decoder cannot start mid-stream. Anything before the first SPS or
+    // keyframe is dropped rather than fed, because feeding it raises an error
+    // that closes the decoder for good.
+    if (video.waitingForKey) {
+      if (nal !== 7 && nal !== 5) return;
+      video.waitingForKey = false;
+    }
+    try {
+      video.decoder.decode(new EncodedVideoChunk({
+        type: (nal === 5 || nal === 7) ? 'key' : 'delta',
+        timestamp: performance.now() * 1000,
+        data: bytes
+      }));
+    } catch (e) {
+      console.warn('decode threw', e);
+      stopVideo();
+    }
+  }
+
   let socket = null;
   let frame = { id: '', img: '', size: [0, 0], elements: [] };
   let busy = false;
@@ -32,13 +124,17 @@
   function layer() { return document.getElementById('overlay'); }
 
   function draw() {
-    const img = shot(), over = layer();
-    if (!img || !over) return;
-    const k = (frame.size && frame.size[0]) ? img.clientWidth / frame.size[0] : 0;
+    const over = layer();
+    // The boxes sit over whichever surface is showing. The canvas replaces the
+    // still when video is live, and the coordinate space is identical either
+    // way because both render the device's own resolution.
+    const surface = (video.ready && video.canvas) ? video.canvas : shot();
+    if (!surface || !over) return;
+    const k = (frame.size && frame.size[0]) ? surface.clientWidth / frame.size[0] : 0;
     if (!k) return;
 
     over.textContent = '';
-    over.style.height = img.clientHeight + 'px';
+    over.style.height = surface.clientHeight + 'px';
     for (const el of frame.elements) {
       const [x1, y1, x2, y2] = el.b;
       const box = document.createElement('button');
@@ -80,11 +176,23 @@
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
     socket = new WebSocket(scheme + '://' + location.host + '/ws');
 
-    socket.addEventListener('open', () => { backoff = 1000; });
+    socket.binaryType = 'arraybuffer';
+
+    socket.addEventListener('open', () => {
+      backoff = 1000;
+      if (video.supported) socket.send(JSON.stringify({ type: 'video', on: true }));
+    });
 
     socket.addEventListener('message', (ev) => {
+      if (ev.data instanceof ArrayBuffer) { feedVideo(ev.data); return; }
+
       let msg;
       try { msg = JSON.parse(ev.data); } catch (e) { return; }
+
+      if (msg.type === 'video') {
+        if (msg.on) startVideo(msg.codec); else stopVideo();
+        return;
+      }
 
       if (msg.type === 'tap_result') {
         busy = false;
@@ -119,6 +227,7 @@
     });
 
     socket.addEventListener('close', () => {
+      stopVideo();
       // Reconnect with a ceiling. The page keeps showing its last state, which
       // is stale rather than wrong, and the mirror's own staleness marks say so.
       setTimeout(connect, backoff);
