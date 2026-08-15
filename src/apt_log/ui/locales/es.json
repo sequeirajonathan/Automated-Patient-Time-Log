@@ -189,5 +189,9 @@
   "sign.wrong_app": "El teléfono no está mostrando una de las aplicaciones de cuidado, así que no se dibujó nada.",
   "sign.replay_failed": "El dibujo no terminó. Mire la pantalla del teléfono; si quedó a medias, bórrelo en la aplicación y envíe de nuevo.",
   "papp.live": "En vivo",
-  "papp.syncing": "Sincronizando…"
+  "papp.syncing": "Sincronizando…",
+  "papp.nav.recents": "Recientes",
+  "papp.nav.wake": "Activar",
+  "papp.offline_short": "Sin conexión",
+  "sign.preview": "Así quedará en el recuadro de la aplicación:"
 }

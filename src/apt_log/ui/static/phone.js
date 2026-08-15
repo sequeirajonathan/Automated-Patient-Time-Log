@@ -56,6 +56,22 @@
   // ---------------------------------------------------------------- wireframe
   let tapTimer = 0;
   let blockedCode = '';
+  let isStale = false;
+
+  // One word beside the dot, whichever state wins: red "Disconnected", amber
+  // "Syncing…", green "Live". The connection story in a glance, never a
+  // paragraph — the paragraph was the complaint.
+  function statusLabel() {
+    const label = document.getElementById('live-label');
+    if (!label) return;
+    if (body.classList.contains('offline')) {
+      label.textContent = i18n.offlineShort || '';
+    } else if (isStale) {
+      label.textContent = i18n.syncing || '';
+    } else {
+      label.textContent = i18n.live || '';
+    }
+  }
 
   function tapping(on) {
     body.classList.toggle('tapping', on);
@@ -192,22 +208,56 @@
             (ev.clientY - rect.top) / rect.height];
   }
 
+  function drawStrokes(ctx, c, place) {
+    ctx.clearRect(0, 0, c.width, c.height);
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    // Ink follows the surface's own color, so a dark pad gets light ink —
+    // the invisible-signature-in-dark-mode bug was a hard-coded near-black.
+    ctx.strokeStyle = getComputedStyle(c).color;
+    for (const s of pad.strokes) {
+      ctx.beginPath();
+      s.forEach((p, i) => {
+        const [x, y] = place(p, c);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    }
+  }
+
   function padRedraw() {
     const c = padCanvas();
-    if (!c || !pad.ctx) return;
-    pad.ctx.clearRect(0, 0, c.width, c.height);
-    pad.ctx.lineWidth = 2.5;
-    pad.ctx.lineCap = 'round';
-    pad.ctx.lineJoin = 'round';
-    pad.ctx.strokeStyle = '#1c1c2e';
-    for (const s of pad.strokes) {
-      pad.ctx.beginPath();
-      s.forEach((p, i) => {
-        const x = p[0] * c.width, y = p[1] * c.height;
-        if (i === 0) pad.ctx.moveTo(x, y); else pad.ctx.lineTo(x, y);
-      });
-      pad.ctx.stroke();
+    if (c && pad.ctx) {
+      drawStrokes(pad.ctx, c, (p, cc) => [p[0] * cc.width, p[1] * cc.height]);
     }
+    previewRedraw();
+  }
+
+  // How the strokes will land in the app's own box: the same mapping the
+  // controller applies — a margin off the border, then the pad's rectangle
+  // fitted uniformly and centred, so the shape she drew is the shape that
+  // lands. This is the rehearsal for a screen there is no safe way to visit
+  // outside a real clock-out.
+  function previewRedraw() {
+    const c = document.getElementById('signpreview');
+    const padEl = padCanvas();
+    if (!c || !padEl) return;
+    const rect = c.getBoundingClientRect();
+    if (rect.width && c.width !== Math.round(rect.width)) {
+      c.width = Math.round(rect.width);
+      c.height = Math.round(rect.height);
+    }
+    const ctx = c.getContext('2d');
+    const inset = 0.06;
+    const left = c.width * inset, top = c.height * inset;
+    const w = c.width * (1 - 2 * inset), h = c.height * (1 - 2 * inset);
+    const padRect = padEl.getBoundingClientRect();
+    const aspect = padRect.height ? padRect.width / padRect.height : 2.2;
+    const k = Math.min(w / aspect, h);
+    const dw = k * aspect, dh = k;
+    const ox = left + (w - dw) / 2, oy = top + (h - dh) / 2;
+    drawStrokes(ctx, c, (p) => [ox + p[0] * dw, oy + p[1] * dh]);
   }
 
   function padWire() {
@@ -312,6 +362,7 @@
     socket.addEventListener('open', () => {
       backoff = 1000;
       body.classList.remove('offline');
+      statusLabel();
     });
 
     // The splash owns the moment until the first real state arrives; the
@@ -359,10 +410,9 @@
         // "Live" is a claim. When the document behind the sketch stops being
         // refreshed the page stops claiming it: the dot goes amber, the label
         // says syncing, and the sketch dims — stale, and saying so.
-        body.classList.toggle('stale', !!msg.screen_stale);
-        const label = document.getElementById('live-label');
-        if (label) label.textContent = msg.screen_stale
-          ? (i18n.syncing || '') : (i18n.live || '');
+        isStale = !!msg.screen_stale;
+        body.classList.toggle('stale', isStale);
+        statusLabel();
       }
       if (msg.frame) applyFrame(msg.frame);
       if (msg.macro) applyMacro(msg.macro);
@@ -374,6 +424,7 @@
 
     socket.addEventListener('close', () => {
       body.classList.add('offline');
+      statusLabel();
       unbusy();
       setTimeout(connect, backoff);
       backoff = Math.min(backoff * 2, 15000);
@@ -420,6 +471,8 @@
     }
     padWire();
     window.addEventListener('resize', padFit);
+    const scheme = window.matchMedia('(prefers-color-scheme: dark)');
+    if (scheme.addEventListener) scheme.addEventListener('change', padRedraw);
     const clear = document.getElementById('sign-clear');
     if (clear) clear.addEventListener('click', () => {
       pad.strokes = []; padRedraw();

@@ -189,5 +189,9 @@
   "sign.wrong_app": "The phone is not showing one of the care apps, so nothing was drawn.",
   "sign.replay_failed": "The drawing did not finish. Look at the phone screen — if it is half-drawn, clear it in the app and send again.",
   "papp.live": "Live",
-  "papp.syncing": "Syncing…"
+  "papp.syncing": "Syncing…",
+  "papp.nav.recents": "Recents",
+  "papp.nav.wake": "Wake",
+  "papp.offline_short": "Disconnected",
+  "sign.preview": "How it will land in the app's box:"
 }
