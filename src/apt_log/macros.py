@@ -219,6 +219,111 @@ def _hhax_legacy_login(driver, report) -> None:
             raise RuntimeError("still on the sign-in screen after signing in")
 
 
+def _hhax_uma_login(driver, report) -> None:
+    """HHAeXchange+ — sign in through its web form, only if it asks.
+
+    Profiled in the first discovery session: the app has no native login. Its
+    button opens a Chrome Custom Tab with an email/password form (web ids
+    `email` and `password`), and finishing returns to the app. Same contract
+    as the legacy macro: auth only, nothing else — if the app opens onto
+    anything but its sign-in screen, the session is alive and this is done.
+    """
+    from apt_log.secrets import UMA_PASSWORD, UMA_USERNAME, FileSecretProvider
+
+    report("macro.step.launching")
+    wake_display()
+    driver.activate_app("com.hhaexchange.uma")
+    wait_for(lambda: bool(driver.current_activity), timeout=15.0)
+
+    # Signed in already? Anything that is not the auth screen means yes.
+    def on_auth_screen():
+        return "auth" in (driver.current_activity or "").lower()
+
+    if not wait_for(on_auth_screen, timeout=4.0, poll=0.5):
+        report("macro.step.checking")
+        return
+
+    secrets = FileSecretProvider()
+    email = secrets.get(UMA_USERNAME)        # raises before any tap if unset
+    password = secrets.get(UMA_PASSWORD)
+
+    report("macro.step.signing_in")
+    buttons = driver.find_elements("id", "idp_login_button")
+    if not buttons:
+        raise RuntimeError("the sign-in button is not where discovery saw it")
+    buttons[0].click()
+
+    # The web form, in Chrome. The field ids are the page's own.
+    def field(web_id):
+        found = driver.find_elements("id", web_id)
+        return found[0] if found else None
+
+    if not wait_for(lambda: field("email") is not None, timeout=20.0):
+        raise RuntimeError("the web sign-in form did not appear")
+    field("email").send_keys(email)
+    field("password").send_keys(password)
+
+    # The submit control carries no id and no text in the accessibility tree.
+    # Discovery's recording: it is the one wide button below the password
+    # field — the eye toggle beside the field is narrow. Width is the
+    # discriminator, and wrong-guess damage is a tap inside a login form.
+    size = driver.get_window_size()
+    password_bottom = field("password").rect["y"]
+    candidates = [
+        b for b in driver.find_elements("class name", "android.widget.Button")
+        if b.rect["width"] > size["width"] * 0.5
+        and b.rect["y"] > password_bottom
+    ]
+    if not candidates:
+        raise RuntimeError("no submit-shaped button below the password field")
+    candidates[0].click()
+
+    wait_for(lambda: dismiss_autofill(driver), timeout=6.0, poll=0.5)
+
+    report("macro.step.checking")
+    # Done means Chrome handed control back to the app, signed in.
+    if not wait_for(lambda: driver.current_package == "com.hhaexchange.uma",
+                    timeout=30.0):
+        raise RuntimeError("did not return to the app after signing in")
+
+
+def _mobile_caregiver_pin(driver, report) -> None:
+    """Mobile Caregiver+ — type the passcode, only if the keypad is up.
+
+    Discovery: an existing session sits behind a PIN keypad ("Introduce un
+    código de acceso", digits 0-9). The keypad's buttons carry their digits
+    as text, so the PIN is typed by tapping them; the screen advances by
+    itself when the last digit lands.
+    """
+    from apt_log.secrets import MC_PIN, FileSecretProvider
+
+    report("macro.step.launching")
+    wake_display()
+    driver.activate_app("com.tellus.evv.v2")
+    wait_for(lambda: bool(driver.current_activity), timeout=15.0)
+
+    def on_pin_screen():
+        return "pin" in (driver.current_activity or "").lower()
+
+    if not wait_for(on_pin_screen, timeout=4.0, poll=0.5):
+        report("macro.step.checking")
+        return
+
+    pin = FileSecretProvider().get(MC_PIN)   # raises before any tap if unset
+
+    report("macro.step.signing_in")
+    for digit in pin:
+        keys = driver.find_elements(
+            "xpath", f'//android.widget.Button[@text="{digit}"]')
+        if not keys:
+            raise RuntimeError("the keypad is not where discovery saw it")
+        keys[0].click()
+
+    report("macro.step.checking")
+    if not wait_for(lambda: not on_pin_screen(), timeout=15.0):
+        raise RuntimeError("still on the passcode screen after typing the PIN")
+
+
 def _open_app(package: str):
     """Bring an app to the front and wait for it to settle. Nothing more.
 
@@ -243,6 +348,9 @@ def _open_app(package: str):
 MACROS: dict[str, Macro] = {
     m.name: m for m in (
         Macro("hhax_legacy_login", "macro.hhax_legacy_login", _hhax_legacy_login),
+        Macro("hhax_uma_login", "macro.hhax_uma_login", _hhax_uma_login),
+        Macro("mobile_caregiver_pin", "macro.mobile_caregiver_pin",
+              _mobile_caregiver_pin),
         Macro("open_hhax_legacy", "macro.open_hhax_legacy",
               _open_app("com.hhaexchange.caregiver")),
         Macro("open_hhax_uma", "macro.open_hhax_uma",
@@ -253,6 +361,38 @@ MACROS: dict[str, Macro] = {
               _open_app("com.inmyteam.inmyteam")),
     )
 }
+
+
+def auth_macro_for(app: str, provider=None) -> str | None:
+    """The auth macro for a foreground package — if its secrets exist.
+
+    An auth macro without its credentials fails on every auto-auth attempt,
+    ninety seconds apart, for as long as someone watches — so an app only
+    gets automatic sign-in once its secrets are actually on the device. The
+    tile still offers the macro either way; a manual press failing once with
+    a clear status is information, a background loop of failures is noise.
+    """
+    from apt_log import secrets as secrets_mod
+
+    provider = provider or secrets_mod.FileSecretProvider()
+
+    def have(*keys) -> bool:
+        try:
+            for key in keys:
+                provider.get(key)
+            return True
+        except (secrets_mod.SecretNotFound, PermissionError, OSError):
+            return False
+
+    if app == "com.hhaexchange.caregiver":
+        return AUTO_AUTH_MACRO if have(secrets_mod.APP_USERNAME,
+                                       secrets_mod.APP_PASSWORD) else None
+    if app == "com.hhaexchange.uma":
+        return "hhax_uma_login" if have(secrets_mod.UMA_USERNAME,
+                                        secrets_mod.UMA_PASSWORD) else None
+    if app == "com.tellus.evv.v2":
+        return "mobile_caregiver_pin" if have(secrets_mod.MC_PIN) else None
+    return None
 
 
 # -------------------------------------------------------------------- request
@@ -318,11 +458,13 @@ class Runner:
     def __init__(self, request_path: Path | None = None,
                  status_path: Path | None = None,
                  screen_path: Path | None = None,
-                 viewers_path: Path | None = None):
+                 viewers_path: Path | None = None,
+                 secrets=None):
         self._request_path = request_path
         self._status_path = status_path
         self._screen_path = screen_path
         self._viewers_path = viewers_path
+        self._secrets = secrets
         # None, not 0.0: the cooldown compares against time.monotonic(),
         # which starts near zero at boot — a zero sentinel made a machine
         # younger than the cooldown believe an auth had just fired, and
@@ -394,7 +536,10 @@ class Runner:
         except (OSError, json.JSONDecodeError):
             return False
 
-        if doc.get("app") != AUTO_AUTH_APP:
+        # Per-app: each agency app whose secrets are on the device gets
+        # automatic sign-in on its own credential screens.
+        macro_name = auth_macro_for(doc.get("app") or "", self._secrets)
+        if macro_name is None:
             return False
         # "Sign in when we see inputs for auth" — the owner's rule, taken
         # literally. The activity's name is not the signal: the flight
@@ -420,7 +565,7 @@ class Runner:
 
         self._auto_auth_at = time.monotonic()
         log.info("login screen is up — signing in without being asked")
-        self.execute(AUTO_AUTH_MACRO, f"auto-{uuid.uuid4().hex[:8]}")
+        self.execute(macro_name, f"auto-{uuid.uuid4().hex[:8]}")
         return True
 
     def execute(self, name: str, rid: str) -> Status:

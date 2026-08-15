@@ -197,5 +197,7 @@
   "papp.asleep": "La pantalla del teléfono está apagada.",
   "papp.asleep_hint": "Actívela para verla y usarla desde aquí.",
   "papp.photo_taken": "Foto de las {time}",
-  "papp.last_seen": "Lo último en pantalla antes de apagarse:"
+  "papp.last_seen": "Lo último en pantalla antes de apagarse:",
+  "macro.hhax_uma_login": "Iniciar sesión en HHAeXchange+",
+  "macro.mobile_caregiver_pin": "Desbloquear Mobile Caregiver+"
 }

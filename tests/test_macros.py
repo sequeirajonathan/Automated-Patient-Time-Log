@@ -388,10 +388,17 @@ class TestAutoAuth:
         path.write_text(json.dumps({"n": n}))
         return path
 
+    def _secrets(self):
+        from apt_log.secrets import (APP_PASSWORD, APP_USERNAME,
+                                     MemorySecretProvider)
+
+        return MemorySecretProvider(**{APP_USERNAME: "u", APP_PASSWORD: "p"})
+
     def _runner(self, tmp_path):
         return macros.Runner(tmp_path / "req.json", tmp_path / "status.json",
                              screen_path=tmp_path / "screen.json",
-                             viewers_path=self._watching(tmp_path))
+                             viewers_path=self._watching(tmp_path),
+                             secrets=self._secrets())
 
     def test_a_fresh_login_screen_triggers_sign_in(self, tmp_path):
         self._doc(tmp_path)
@@ -434,7 +441,8 @@ class TestAutoAuth:
         self._doc(tmp_path)
         runner = macros.Runner(tmp_path / "req.json", tmp_path / "status.json",
                                screen_path=tmp_path / "screen.json",
-                               viewers_path=self._watching(tmp_path, n=0))
+                               viewers_path=self._watching(tmp_path, n=0),
+                               secrets=self._secrets())
         with patch.object(runner, "execute") as execute:
             assert runner.maybe_auto_auth() is False
         execute.assert_not_called()
@@ -450,7 +458,7 @@ class TestAutoAuth:
         os.utime(viewers, (old, old))
         runner = macros.Runner(tmp_path / "req.json", tmp_path / "status.json",
                                screen_path=tmp_path / "screen.json",
-                               viewers_path=viewers)
+                               viewers_path=viewers, secrets=self._secrets())
         with patch.object(runner, "execute") as execute:
             assert runner.maybe_auto_auth() is False
         execute.assert_not_called()
@@ -489,7 +497,8 @@ class TestLaunchSteadiness:
                             tmp_path / "status.json")
         runner = macros.Runner(tmp_path / "req.json", tmp_path / "status.json",
                                screen_path=tmp_path / "screen.json",
-                               viewers_path=tmp_path / "viewers.json")
+                               viewers_path=tmp_path / "viewers.json",
+                               secrets=TestAutoAuth()._secrets())
         with patch.object(runner, "execute") as execute:
             assert runner.maybe_auto_auth() is False
         execute.assert_not_called()
@@ -508,7 +517,154 @@ class TestLaunchSteadiness:
                             tmp_path / "status.json")
         runner = macros.Runner(tmp_path / "req.json", tmp_path / "status.json",
                                screen_path=tmp_path / "screen.json",
-                               viewers_path=tmp_path / "viewers.json")
+                               viewers_path=tmp_path / "viewers.json",
+                               secrets=TestAutoAuth()._secrets())
         with patch.object(runner, "execute") as execute:
             assert runner.maybe_auto_auth() is False
         execute.assert_not_called()
+
+
+class TestAuthMacroFor:
+    """An app gets automatic sign-in only once its secrets are on the device.
+
+    An auth macro without its credentials fails on every auto-auth attempt,
+    ninety seconds apart, for as long as someone watches. Gating on secret
+    presence keeps an uncredentialed app's tile honest — the macro is still
+    offered for a manual press, but the background loop never starts.
+    """
+
+    def _full_provider(self):
+        from apt_log.secrets import (APP_PASSWORD, APP_USERNAME, MC_PIN,
+                                     UMA_PASSWORD, UMA_USERNAME,
+                                     MemorySecretProvider)
+
+        return MemorySecretProvider(**{
+            APP_USERNAME: "u", APP_PASSWORD: "p",
+            UMA_USERNAME: "e", UMA_PASSWORD: "w", MC_PIN: "1234"})
+
+    def test_each_credentialed_app_maps_to_its_own_macro(self):
+        provider = self._full_provider()
+        assert (macros.auth_macro_for("com.hhaexchange.caregiver", provider)
+                == "hhax_legacy_login")
+        assert (macros.auth_macro_for("com.hhaexchange.uma", provider)
+                == "hhax_uma_login")
+        assert (macros.auth_macro_for("com.tellus.evv.v2", provider)
+                == "mobile_caregiver_pin")
+
+    def test_a_missing_secret_withholds_the_macro(self):
+        """Only the legacy app is credentialed: the other two stay manual."""
+        from apt_log.secrets import (APP_PASSWORD, APP_USERNAME,
+                                     MemorySecretProvider)
+
+        provider = MemorySecretProvider(**{APP_USERNAME: "u",
+                                           APP_PASSWORD: "p"})
+        assert (macros.auth_macro_for("com.hhaexchange.caregiver", provider)
+                == "hhax_legacy_login")
+        assert macros.auth_macro_for("com.hhaexchange.uma", provider) is None
+        assert macros.auth_macro_for("com.tellus.evv.v2", provider) is None
+
+    def test_half_a_credential_pair_is_not_enough(self):
+        from apt_log.secrets import UMA_USERNAME, MemorySecretProvider
+
+        provider = MemorySecretProvider(**{UMA_USERNAME: "e"})
+        assert macros.auth_macro_for("com.hhaexchange.uma", provider) is None
+
+    def test_an_app_without_an_auth_flow_gets_none(self):
+        """inMyTeam keeps its session alive on its own; nothing is mapped."""
+        provider = self._full_provider()
+        assert macros.auth_macro_for("com.inmyteam.inmyteam", provider) is None
+        assert macros.auth_macro_for("", provider) is None
+
+
+class TestUmaLogin:
+    """HHAeXchange+ signs in through a web form — and only when asked to."""
+
+    def _driver(self, activity):
+        driver = MagicMock()
+        driver.current_activity = activity
+        driver.current_package = "com.hhaexchange.uma"
+        return driver
+
+    def test_an_alive_session_is_left_alone(self):
+        """Anything but the auth screen means signed in: no secrets read,
+        nothing tapped."""
+        import itertools
+
+        driver = self._driver("com.hhaexchange.uma.MainActivity")
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider") as provider_cls, \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            macros.MACROS["hhax_uma_login"].run(driver, lambda _k: None)
+        provider_cls.assert_not_called()
+        driver.find_elements.assert_not_called()
+
+    def test_missing_credentials_stop_the_macro_before_any_tap(self):
+        """The secrets are read before the first tap, so an uncredentialed
+        run fails cleanly on a screen it has not touched."""
+        import itertools
+
+        from apt_log.secrets import MemorySecretProvider, SecretNotFound
+
+        driver = self._driver("com.hhaexchange.uma.AuthActivity")
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider",
+                   return_value=MemorySecretProvider()), \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            with pytest.raises(SecretNotFound):
+                macros.MACROS["hhax_uma_login"].run(driver, lambda _k: None)
+        driver.find_elements.assert_not_called()
+
+
+class TestMobileCaregiverPin:
+    """Mobile Caregiver+ unlocks by tapping its own keypad."""
+
+    def test_the_pin_is_typed_digit_by_digit(self):
+        import itertools
+        from unittest.mock import PropertyMock
+
+        from apt_log.secrets import MC_PIN, MemorySecretProvider
+
+        state = {"activity": "com.tellus.evv.v2.PinActivity"}
+        pressed = []
+        driver = MagicMock()
+        type(driver).current_activity = PropertyMock(
+            side_effect=lambda: state["activity"])
+
+        def find_elements(_by, selector):
+            digit = selector.split('"')[1]
+            button = MagicMock()
+
+            def click(d=digit):
+                pressed.append(d)
+                if len(pressed) == 4:      # the screen advances by itself
+                    state["activity"] = "com.tellus.evv.v2.HomeActivity"
+            button.click.side_effect = click
+            return [button]
+
+        driver.find_elements.side_effect = find_elements
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider",
+                   return_value=MemorySecretProvider(**{MC_PIN: "2580"})), \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            macros.MACROS["mobile_caregiver_pin"].run(driver, lambda _k: None)
+        assert pressed == ["2", "5", "8", "0"]
+
+    def test_an_unlocked_app_is_left_alone(self):
+        import itertools
+
+        driver = MagicMock()
+        driver.current_activity = "com.tellus.evv.v2.HomeActivity"
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider") as provider_cls, \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            macros.MACROS["mobile_caregiver_pin"].run(driver, lambda _k: None)
+        provider_cls.assert_not_called()
+        driver.find_elements.assert_not_called()
