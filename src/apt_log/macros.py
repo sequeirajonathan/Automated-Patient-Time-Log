@@ -174,9 +174,37 @@ def _hhax_legacy_login(driver, report) -> None:
         raise RuntimeError("did not reach the home screen")
 
 
+def _open_app(package: str):
+    """Bring an app to the front and wait for it to settle. Nothing more.
+
+    Android keeps app state, so for an app she is already signed into this is
+    the whole of "switching to it". For the three apps whose sign-in flows have
+    never been walked, it is also the most a button may honestly do: opening a
+    screen nobody has mapped is safe exactly because it does nothing on it.
+    """
+    def run(driver, report) -> None:
+        report("macro.step.launching")
+        driver.activate_app(package)
+        wait_for(lambda: bool(driver.current_activity), timeout=15.0)
+        report("macro.step.checking")
+        # Settled means the foreground package is the one asked for — not a
+        # judgement about which of its screens it landed on.
+        if not wait_for(lambda: driver.current_package == package, timeout=10.0):
+            raise RuntimeError("the app did not come to the front")
+    return run
+
+
 MACROS: dict[str, Macro] = {
     m.name: m for m in (
         Macro("hhax_legacy_login", "macro.hhax_legacy_login", _hhax_legacy_login),
+        Macro("open_hhax_legacy", "macro.open_hhax_legacy",
+              _open_app("com.hhaexchange.caregiver")),
+        Macro("open_hhax_uma", "macro.open_hhax_uma",
+              _open_app("com.hhaexchange.uma")),
+        Macro("open_mobile_caregiver", "macro.open_mobile_caregiver",
+              _open_app("com.tellus.evv.v2")),
+        Macro("open_inmyteam", "macro.open_inmyteam",
+              _open_app("com.inmyteam.inmyteam")),
     )
 }
 

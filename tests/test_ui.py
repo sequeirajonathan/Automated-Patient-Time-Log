@@ -13,6 +13,7 @@ that, and the tests here cover the route not widening it on the way through.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -23,6 +24,7 @@ from fastapi.testclient import TestClient
 from apt_log.ui.app import LANGUAGE_COOKIE, _mirror_payload, app, queue
 from apt_log.ui.i18n import Translator
 from apt_log.ui import mirror as mirror_mod
+from apt_log.ui import state as state_mod
 from apt_log.ui.mirror import Mirror
 from apt_log.ui.relay import KIND_CHOICE, KIND_SIGNATURE, KIND_TOKEN
 from apt_log.ui.state import DashboardState
@@ -640,3 +642,118 @@ class TestPauseSurvivesItsOwnPress:
                   / "src/apt_log/ui/static/live.js").read_text(encoding="utf-8")
         assert "applyPaused" in source
         assert "msg.paused" in source
+
+
+class TestPhoneAppView:
+    """The full-screen view she bookmarks. A skin, not a capability.
+
+    Everything here rides machinery the dashboard already has — same socket,
+    same tap verification, same macro allow-list — so these tests are about the
+    skin keeping the rules, not about new rules.
+    """
+
+    def test_it_renders_in_her_language(self, client):
+        body = client.get("/app").text
+        assert "Elija una aplicación" in body
+
+    def test_all_four_apps_are_offered(self, client):
+        body = client.get("/app").text
+        for name in ("HHAeXchange", "HHAeXchange+", "Mobile Caregiver+",
+                     "inMyTeam"):
+            assert name in body
+
+    def test_every_tile_runs_an_allow_listed_macro(self, client):
+        """The tile posts a name; the name must be one macros.MACROS holds.
+        A tile that invented its own would be remote scripting with a nicer
+        icon."""
+        from apt_log.macros import MACROS
+        from apt_log.ui.app import PHONE_APPS
+
+        for entry in PHONE_APPS:
+            assert entry["macro"] in MACROS
+
+    def test_it_is_installable(self, client):
+        body = client.get("/app").text
+        assert "manifest.webmanifest" in body
+        assert "apple-mobile-web-app-capable" in body
+        r = client.get("/static/manifest.webmanifest")
+        assert r.status_code == 200
+        manifest = json.loads(r.text)
+        assert manifest["start_url"] == "/app"
+        assert client.get("/static/icons/icon-180.png").status_code == 200
+
+    def test_no_service_worker_anywhere(self, client):
+        """Offline caching would keep copies of what the phone's screen said on
+        her phone. This page is a window, not a document."""
+        body = client.get("/app").text
+        assert "serviceWorker" not in body
+        js = (Path(__file__).resolve().parents[1]
+              / "src/apt_log/ui/static/phone.js").read_text(encoding="utf-8")
+        assert "serviceWorker" not in js
+
+    def test_the_client_owns_no_action_sentences(self):
+        """phone.js may hold choreography, not prose: everything readable
+        arrives rendered from the catalog."""
+        js = (Path(__file__).resolve().parents[1]
+              / "src/apt_log/ui/static/phone.js").read_text(encoding="utf-8")
+        assert "getAttribute('action')" in js       # the shadowing trap, again
+
+
+class TestWireframeOverTheSocket:
+    def _screen_doc(self, tmp_path):
+        doc = {
+            "id": "abc123", "img": "", "at": "2026-08-15T10:00:00",
+            "size": [720, 1600], "screen": "login", "blocked": "login_activity",
+            "notice": "Debes de iniciar sesión.",
+            "elements": [{"rid": "btn_login", "cls": "Button",
+                          "b": [19, 744, 731, 804], "focused": False,
+                          "selected": False, "checked": False,
+                          "has_text": True, "txt": "Iniciar sesión"}],
+            "statics": [{"cls": "TextView", "b": [0, 100, 720, 160],
+                         "txt": "Bienvenida"}],
+        }
+        (tmp_path / "screen.json").write_text(json.dumps(doc))
+        return doc
+
+    def test_the_wireframe_is_pushed_as_rendered_html(self, client, tmp_path):
+        with patch.object(state_mod, "STATE_DIR", tmp_path):
+            self._screen_doc(tmp_path)
+            with client.websocket_connect("/ws") as ws:
+                msg = ws.receive_json()
+        assert "screen_html" in msg
+        assert "Iniciar sesión" in msg["screen_html"]
+        assert "Bienvenida" in msg["screen_html"]
+        assert msg["screen"]["blocked"] == "login_activity"
+
+    def test_a_wireframe_button_carries_the_same_aim_a_tap_posts(self, client, tmp_path):
+        """rid, class, bounds — the identity the server re-verifies. The
+        wireframe changes what she sees, not what a tap may do."""
+        with patch.object(state_mod, "STATE_DIR", tmp_path):
+            self._screen_doc(tmp_path)
+            with client.websocket_connect("/ws") as ws:
+                msg = ws.receive_json()
+        assert 'data-aim=' in msg["screen_html"]
+        assert '"rid": "btn_login"' in msg["screen_html"]
+        assert '[19, 744, 731, 804]' in msg["screen_html"]
+
+    def test_an_unchanged_screen_is_not_re_pushed(self, client, tmp_path):
+        """The timestamp moves on every write; the comparison must not follow
+        it, or "did the screen change" becomes "has a second passed".
+
+        A frame change carries the second message, because a tick with nothing
+        to say sends nothing — which is itself the behaviour under test.
+        """
+        with patch.object(state_mod, "STATE_DIR", tmp_path):
+            doc = self._screen_doc(tmp_path)
+            with client.websocket_connect("/ws") as ws:
+                ws.receive_json()
+                # Screen: timestamp only. Frame: a real change to ride on.
+                doc["at"] = "2026-08-15T10:00:05"
+                (tmp_path / "screen.json").write_text(json.dumps(doc))
+                (tmp_path / "frame.json").write_text(json.dumps(
+                    {"id": "different", "img": "", "size": [720, 1600],
+                     "elements": [], "blocked": "", "notice": ""}))
+                ws.send_json({"type": "noop"})
+                second = ws.receive_json()
+        assert "frame" in second
+        assert "screen_html" not in second

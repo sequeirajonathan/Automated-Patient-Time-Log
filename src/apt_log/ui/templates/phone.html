@@ -1,0 +1,248 @@
+<!doctype html>
+{# The full-screen phone view. She bookmarks this to her home screen and it
+   opens like an app: a launcher of the four agency apps, then a live wireframe
+   of whatever the phone is showing.
+
+   This is a skin over the same machinery as the dashboard — same socket, same
+   tap verification, same macro allow-list. Nothing is reachable from here that
+   is not reachable from /, and the dashboard keeps everything this view leaves
+   out (health, today, end of shift), one link away.
+
+   No service worker on purpose: offline caching would keep copies of what the
+   phone's screen said on her phone, and this page is useless offline anyway —
+   it is a window, not a document. #}
+<html lang="{{ lang }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="{{ t('app.title') }}">
+<meta name="theme-color" content="#1b3f8b">
+<link rel="manifest" href="/static/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/static/icons/icon-180.png">
+<title>{{ t('app.title') }}</title>
+<style>
+  :root { --brand:#1b3f8b; --ink:#1c1c1e; --muted:#6e6e73; --line:#d8dae0;
+          --bg:#f2f3f7; --bad:#b3261e; --ok:#137a3f;
+          /* Apple's own easing, near enough. The feel is in the curve. */
+          --spring: cubic-bezier(.32,.72,0,1); }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:16px/1.4 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+         overscroll-behavior:none;
+         padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+
+  .view { position:fixed; inset:0; display:flex; flex-direction:column;
+          padding: calc(10px + env(safe-area-inset-top)) 14px
+                   calc(10px + env(safe-area-inset-bottom));
+          transition: transform .38s var(--spring), opacity .3s ease;
+          will-change: transform, opacity; }
+
+  /* ------------------------------------------------------------- launcher */
+  #launcher h1 { font-size:22px; margin:14px 4px 2px; }
+  #launcher .sub { color:var(--muted); margin:0 4px 22px; font-size:14px; }
+  .tiles { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .tile { border:none; border-radius:24px; padding:20px 14px 16px; color:#fff;
+          display:flex; flex-direction:column; align-items:center; gap:12px;
+          font:inherit; cursor:pointer; box-shadow:0 8px 22px rgba(20,30,60,.16);
+          transition: transform .22s var(--spring), box-shadow .22s ease; }
+  .tile:active { transform:scale(.94); box-shadow:0 3px 10px rgba(20,30,60,.2); }
+  .tile .mark { width:58px; height:58px; border-radius:16px;
+                background:rgba(255,255,255,.22); display:flex;
+                align-items:center; justify-content:center;
+                font-weight:700; font-size:19px; letter-spacing:.02em; }
+  .tile .name { font-size:14px; font-weight:600; text-align:center; }
+  #launcher footer { margin-top:auto; text-align:center; padding:14px 0 4px; }
+  #launcher footer a { color:var(--muted); font-size:13px; }
+
+  /* --------------------------------------------------------------- screen */
+  body[data-view="launcher"] #screenview { transform:translateX(102%); opacity:0;
+                                           pointer-events:none; }
+  body[data-view="screen"] #launcher { transform:scale(.92); opacity:0;
+                                       pointer-events:none; }
+  #screenview { padding-left:0; padding-right:0; }
+  .topbar { display:flex; align-items:center; gap:8px; padding:0 12px 8px; }
+  .topbar .chip { border:none; background:#fff; border-radius:999px;
+                  padding:8px 14px; font:inherit; font-size:14px; font-weight:600;
+                  color:var(--brand); box-shadow:0 1px 4px rgba(20,30,60,.12);
+                  cursor:pointer; display:flex; align-items:center; gap:6px; }
+  .topbar .chip:active { transform:scale(.95); }
+  .topbar .where { margin-left:auto; color:var(--muted); font-size:13px;
+                   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  #stage { position:relative; flex:1; min-height:0; margin:0 12px;
+           border-radius:18px; overflow:auto; background:#fff;
+           box-shadow:0 10px 30px rgba(20,30,60,.14); }
+  #stage .banner { margin:10px; padding:10px 12px; border-radius:10px;
+                   font-size:14px; background:#fff5d6; border:1px solid #e3c766; }
+  #stage .banner.bad { background:rgba(179,38,30,.08); border-color:var(--bad); }
+  #notice { margin:10px; padding:10px 12px; border-radius:10px;
+            background:#eef2ff; border:1px solid #bcc6ee; }
+  #notice .said { font-size:16px; margin:4px 0 0; }
+
+  /* ------------------------------------------------------------ wireframe */
+  .wire { position:relative; width:100%; container-type:inline-size;
+          background:#fff; }
+  .wire > * { position:absolute; overflow:hidden; margin:0; }
+  .wire span.w-text { display:flex; align-items:center; color:var(--ink);
+                      pointer-events:none; }
+  .wire button { font:inherit; cursor:pointer;
+                 transition: filter .12s ease, transform .12s ease; }
+  .wire button:active { filter:brightness(.88); transform:scale(.98); }
+  .w-btn { background:var(--brand); color:#fff; border:none; border-radius:12px;
+           font-weight:600; display:flex; align-items:center;
+           justify-content:center; }
+  .w-field { background:#fff; border:1.5px solid #b9bdc9; border-radius:10px;
+             display:flex; align-items:center; padding-left:1.5cqw; }
+  .w-field.focus { border-color:var(--brand); box-shadow:0 0 0 2px
+                   rgba(27,63,139,.18); }
+  button.w-text { background:none; border:none; color:#1b6ed6; text-align:left;
+                  display:flex; align-items:center; }
+  .w-img { background:#eef0f4; border:none; border-radius:10px; }
+  .w-row { background:none; border:1.5px solid transparent; border-radius:12px; }
+  .w-row:active { border-color:var(--line); background:rgba(27,63,139,.05); }
+  .w-toggle { background:#d5d6db; border:none; border-radius:999px;
+              display:flex; align-items:center; padding:2px;
+              justify-content:flex-start; }
+  .w-toggle.on { background:var(--ok); justify-content:flex-end; }
+  .w-toggle .knob { height:100%; aspect-ratio:1; border-radius:50%;
+                    background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.25); }
+
+  /* The photograph, one toggle away. The wireframe is a sketch and says so —
+     when the sketch is not enough, the pixels are still there. */
+  #peek { position:absolute; inset:0; width:100%; display:none; z-index:4; }
+  body.peeking #peek { display:block; }
+
+  /* -------------------------------------------------------------- loading */
+  #busy { position:absolute; inset:0; z-index:6; display:none;
+          background:rgba(242,243,247,.82); backdrop-filter:blur(3px);
+          flex-direction:column; align-items:center; justify-content:center;
+          gap:14px; text-align:center; padding:20px; }
+  body.busy #busy { display:flex; }
+  .spinner { width:34px; height:34px; border-radius:50%;
+             border:3.5px solid rgba(27,63,139,.2);
+             border-top-color:var(--brand); animation:spin .8s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  #busy p { margin:0; color:var(--muted); font-size:15px; }
+
+  /* --------------------------------------------------------------- navbar */
+  .navbar { display:flex; justify-content:space-around; padding:10px 18px 2px; }
+  .navbar button { border:none; background:none; padding:10px; cursor:pointer;
+                   color:var(--ink); border-radius:14px;
+                   transition: transform .15s var(--spring); }
+  .navbar button:active { transform:scale(.82); background:rgba(27,63,139,.08); }
+  .navbar svg { width:24px; height:24px; display:block; }
+
+  /* ---------------------------------------------------------------- sheet */
+  #sheet { position:fixed; left:0; right:0; bottom:0; z-index:8;
+           background:#fff; border-radius:20px 20px 0 0; max-height:78%;
+           overflow:auto; box-shadow:0 -12px 40px rgba(20,30,60,.25);
+           transform:translateY(105%); transition:transform .4s var(--spring);
+           padding:18px 18px calc(18px + env(safe-area-inset-bottom)); }
+  body.asking #sheet { transform:translateY(0); }
+
+  #toast { position:fixed; left:50%; bottom:calc(86px +
+           env(safe-area-inset-bottom)); transform:translateX(-50%)
+           translateY(20px); z-index:9; background:rgba(28,28,30,.92);
+           color:#fff; padding:10px 18px; border-radius:999px; font-size:14px;
+           opacity:0; transition:.25s ease; pointer-events:none;
+           max-width:86vw; text-align:center; }
+  body.toasting #toast { opacity:1; transform:translateX(-50%); }
+
+  body.offline #stage { opacity:.45; pointer-events:none; }
+  #offline-note { display:none; margin:0 12px 8px; padding:10px 12px;
+                  border-radius:10px; font-size:13px; background:rgba(179,38,30,.08);
+                  border:1px solid var(--bad); }
+  body.offline #offline-note { display:block; }
+</style>
+</head>
+<body data-view="launcher">
+
+<div class="view" id="launcher">
+  <h1>{{ t('app.title') }}</h1>
+  <p class="sub">{{ t('papp.choose') }}</p>
+  <div class="tiles">
+    {% for a in apps %}
+    <button class="tile" style="background:{{ a.accent }}"
+            data-app="{{ a.id }}" data-macro="{{ a.macro }}"
+            data-name="{{ a.name }}">
+      <span class="mark">{{ a.mark }}</span>
+      <span class="name">{{ a.name }}</span>
+    </button>
+    {% endfor %}
+  </div>
+  <footer><a href="/">{{ t('papp.full_status') }}</a></footer>
+</div>
+
+<div class="view" id="screenview">
+  <div class="topbar">
+    <button class="chip" id="btn-apps">‹ {{ t('papp.apps') }}</button>
+    <button class="chip" id="btn-peek">{{ t('papp.peek') }}</button>
+    <span class="where" id="where"></span>
+  </div>
+  <div id="offline-note">{{ t('portal.offline') }}</div>
+  <div id="stage">
+    <div class="banner bad" id="blocked-note" hidden></div>
+    <div id="notice" hidden>
+      <span class="muted">{{ t('phone.app_says') }}</span>
+      <p class="said" id="notice-said"></p>
+    </div>
+    <div id="screenwrap">{% if m %}{% include '_screen.html' %}{% endif %}</div>
+    <img id="peek" alt="">
+    <div id="busy"><div class="spinner"></div><p id="busy-text"></p></div>
+  </div>
+  <div class="navbar">
+    {# Android's own three, in Android's own shapes — plus wake. Familiar in
+       action because they are the phone's real buttons, not new inventions. #}
+    <button data-act="back" aria-label="{{ t('phone.back') }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5 L8 12 L15 19"/></svg></button>
+    <button data-act="home" aria-label="{{ t('phone.home') }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/></svg></button>
+    <button data-act="recents" aria-label="{{ t('phone.recents') }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="5" width="14" height="14" rx="3"/></svg></button>
+    <button data-act="wake" aria-label="{{ t('phone.wake') }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v4M5.6 5.6l2.8 2.8M18.4 5.6l-2.8 2.8M12 11a5 5 0 0 1 5 5H7a5 5 0 0 1 5-5z"/></svg></button>
+  </div>
+</div>
+
+{# The relay, as a sheet. Same fragment the dashboard shows, pushed by the same
+   socket: when the controller stops and asks, the question slides up over
+   whichever view she is in. #}
+<div id="sheet"><div id="relay">
+  {% include '_relay.html' %}
+</div></div>
+
+<div id="toast"></div>
+
+<script>
+  window.APTLOG_APP = {
+    opening: {{ t('papp.opening')|tojson }},
+    waiting: {{ t('papp.waiting_screen')|tojson }},
+    moved:   {{ t('portal.moved')|tojson }},
+    failed:  {{ t('portal.failed')|tojson }},
+    sent:    {{ t('phone.sent')|tojson }},
+    devfail: {{ t('phone.failed')|tojson }},
+    screens: {
+      {% for s in ['startup','language','permissions','login','agency','home',
+                   'today','visit','verification','signature','unknown'] -%}
+      {{ s|tojson }}: {{ t('mirror.screen.' ~ s)|tojson }}{{ "," if not loop.last }}
+      {% endfor %}
+    },
+    blocked: {
+      "": "",
+      no_focus:       {{ t('phone.blocked.no_focus')|tojson }},
+      login_activity: {{ t('phone.blocked.login_activity')|tojson }},
+      password_field: {{ t('phone.blocked.password_field')|tojson }},
+      secure_screen:  {{ t('phone.blocked.secure_screen')|tojson }},
+      capture_failed: {{ t('phone.blocked.capture_failed')|tojson }}
+    },
+    blockedOther: {{ t('phone.blocked.other')|tojson }}
+  };
+</script>
+<script src="/static/signature.js" defer></script>
+<script src="/static/phone.js" defer></script>
+</body>
+</html>

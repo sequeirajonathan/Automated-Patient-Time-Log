@@ -219,3 +219,50 @@ class TestAutofillDialog:
         assert macros.AUTOFILL_DECLINE.endswith("autofill_save_no")
         import inspect
         assert "autofill_save_yes" not in inspect.getsource(macros)
+
+
+class TestOpenMacros:
+    """One per app, and they only bring the app to the front.
+
+    For an app she is already signed into, Android's own state keeping makes
+    this the whole of switching to it. For the three apps whose sign-in flows
+    have never been walked, it is also the most a button may honestly do:
+    opening a screen nobody has mapped is safe exactly because it does nothing
+    on it.
+    """
+
+    def test_all_four_apps_have_one(self):
+        from apt_log.macros import MACROS
+        for name in ("open_hhax_legacy", "open_hhax_uma",
+                     "open_mobile_caregiver", "open_inmyteam"):
+            assert name in MACROS
+
+    def test_it_activates_and_verifies_the_foreground_package(self):
+        from unittest.mock import MagicMock
+
+        from apt_log.macros import MACROS
+
+        driver = MagicMock()
+        driver.current_activity = ".Something"
+        driver.current_package = "com.hhaexchange.uma"
+        MACROS["open_hhax_uma"].run(driver, lambda _k: None)
+        driver.activate_app.assert_called_once_with("com.hhaexchange.uma")
+
+    def test_it_fails_rather_than_pretending(self):
+        """The wrong app in front must be a failure she can see, not a quiet
+        wireframe of something she did not ask for."""
+        from unittest.mock import MagicMock, patch as patch_mod
+
+        import pytest as pytest_mod
+
+        from apt_log import macros as macros_mod
+        from apt_log.macros import MACROS
+
+        driver = MagicMock()
+        driver.current_activity = ".Something"
+        driver.current_package = "com.wrong.app"
+        with patch_mod.object(macros_mod.time, "sleep"), \
+             patch_mod.object(macros_mod.time, "monotonic",
+                              side_effect=[i * 0.5 for i in range(200)]):
+            with pytest_mod.raises(RuntimeError):
+                MACROS["open_hhax_uma"].run(driver, lambda _k: None)

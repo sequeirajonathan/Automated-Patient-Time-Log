@@ -1,0 +1,24 @@
+{# The phone's current screen, drawn as components instead of photographed.
+
+   Every node is positioned by the device's own coordinates, as percentages, so
+   the fragment is correct at any width. Tappable nodes are buttons carrying the
+   same identity the overlay posts today — rid, class, bounds — and the server
+   re-verifies them against the published frame before anything touches the
+   phone. The wireframe changes what she sees, not what a tap is allowed to do.
+
+   Rendered server-side and pushed over the socket like every other sentence:
+   the client never assembles one. #}
+<div class="wire" data-frame="{{ m.id }}" style="aspect-ratio: {{ m.ratio }}">
+  {% for s in m.texts %}
+  <span class="w-text" style="left:{{ s.l }}%;top:{{ s.t }}%;width:{{ s.w }}%;height:{{ s.hh }}%;font-size:{{ s.fs }}cqw">{{ s.txt }}</span>
+  {% endfor %}
+  {% for e in m.els %}
+  <button type="button"
+          class="w-{{ e.kind }}{% if e.checked %} on{% endif %}{% if e.focused %} focus{% endif %}"
+          style="left:{{ e.l }}%;top:{{ e.t }}%;width:{{ e.w }}%;height:{{ e.hh }}%;font-size:{{ e.fs }}cqw"
+          data-aim='{{ e.aim | tojson }}'
+          {% if not e.txt %}aria-label="{{ e.aim.cls }}{% if e.aim.rid %} {{ e.aim.rid }}{% endif %}"{% endif %}
+  >{%- if e.kind == 'toggle' -%}<span class="knob"></span>
+   {%- elif e.txt -%}{{ e.txt }}{%- endif -%}</button>
+  {% endfor %}
+</div>

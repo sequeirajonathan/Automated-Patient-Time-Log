@@ -72,10 +72,16 @@ DEFAULT_INTERVAL = 1.0
 MIRROR_WIDTH = 480
 MIRROR_QUALITY = 65
 
-# How often the overlay is refreshed, in seconds. The picture rides the loop
-# interval; this rides a multiple of it, because reading the hierarchy costs
-# roughly twice what a compressed screenshot does.
-HIERARCHY_EVERY = 3.0
+# How often the overlay is refreshed, in seconds. It used to trail the picture
+# because it only decorated it; in the wireframe view the hierarchy *is* the
+# picture, so it now leads. A resident-session read costs ~0.7s, which this
+# cadence sustains without starving anything.
+HIERARCHY_EVERY = 1.2
+
+# Touched after a tap so the watcher re-reads immediately instead of waiting out
+# its interval. A tap is the one moment she is certainly watching for the screen
+# to move, and a fixed cadence puts the wait in exactly the wrong place.
+POKE_NAME = "hierarchy-poke"
 
 # Filled from `wm size` at first use; the overlay needs it to scale boxes onto a
 # phone-sized <img>. Cached because it does not change and the loop is hot.
@@ -287,6 +293,44 @@ def compress(shot: bytes) -> bytes:
 
 
 FRAME_NAME = "frame.json"
+SCREEN_NAME = "screen.json"
+
+
+def write_screen(target: Path, frame: dict, screen: str, reason: str,
+                 hierarchy: str | None) -> None:
+    """Publish the render feed for the wireframe view.
+
+    Two files on purpose, with two policies. `frame.json` is the one that can
+    be logged, cached, or pasted into a console: structural, textless outside
+    credential screens, unchanged. This one carries the screen's words —
+    labels, headings, list rows — because components need them as strings where
+    a photograph carries them as pixels.
+
+    Its exposure class is the screenshot's, and it is treated the same way: it
+    sits on the same disk beside `last-screen.jpg`, which holds the same words,
+    travels only over the tailnet to the same viewer, and is never written to a
+    log. Typed-field contents are withheld here exactly as everywhere else —
+    the one kind of on-screen text that is worse than what the picture shows,
+    because a password field's pixels are dots and its node is not.
+    """
+    doc = {
+        "id": frame["id"],
+        "img": frame["img"],
+        "at": frame["at"],
+        "size": frame["size"],
+        "screen": screen,
+        "blocked": reason,
+        "notice": frame.get("notice", ""),
+        "elements": elements(hierarchy, label=True) if hierarchy else [],
+        "statics": statics(hierarchy) if hierarchy else [],
+    }
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(".stmp")
+        tmp.write_text(json.dumps(doc), encoding="utf-8")
+        os.replace(tmp, target)
+    except OSError as exc:
+        log.warning("cannot publish the screen document (%s)", exc)
 
 # How stale the published frame may be and still be tapped against. Generous
 # against the overlay's own refresh cadence, tight enough that a dead feed
@@ -332,6 +376,8 @@ def write_frame(path: Path, serial: str | None = None,
     except OSError as exc:
         log.warning("cannot publish the frame map (%s)", exc)
 
+    write_screen(path.parent / SCREEN_NAME, frame, screen, reason, hierarchy)
+
     if png:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
@@ -363,9 +409,12 @@ class _Hierarchy:
     costs nothing but a slightly staler overlay.
     """
 
-    def __init__(self, serial: str | None, every: float):
+    def __init__(self, serial: str | None, every: float,
+                 poke_path: Path | None = None):
         self._serial = serial
         self._every = every
+        self._poke = poke_path
+        self._poked_at = 0.0
         self._xml: str | None = None
         self._focus = ""
         self._lock = threading.Lock()
@@ -407,7 +456,27 @@ class _Hierarchy:
                             self._focus = focus
             except Exception as exc:  # noqa: BLE001
                 log.warning("hierarchy read failed: %s", exc)
-            self._stop.wait(self._every)
+            self._wait()
+
+    def _wait(self) -> None:
+        """Sleep out the interval — unless a tap pokes us awake.
+
+        The poke crosses from the UI process as a file mtime, because the two
+        processes share a disk and nothing else. Slices rather than a single
+        wait so the poke is noticed within a fraction of a second, which is the
+        whole point of it: after a tap she is certainly watching.
+        """
+        deadline = time.monotonic() + self._every
+        while not self._stop.is_set() and time.monotonic() < deadline:
+            if self._poke is not None:
+                try:
+                    stamp = self._poke.stat().st_mtime
+                    if stamp > self._poked_at:
+                        self._poked_at = stamp
+                        return
+                except OSError:
+                    pass
+            self._stop.wait(0.15)
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._loop, daemon=True,
@@ -430,7 +499,7 @@ def run(path: Path, interval: float = DEFAULT_INTERVAL,
 
     So the picture runs here, unblocked, and the hierarchy runs beside it.
     """
-    watcher = _Hierarchy(serial, HIERARCHY_EVERY)
+    watcher = _Hierarchy(serial, HIERARCHY_EVERY, poke_path=path.parent / POKE_NAME)
     watcher.start()
 
     # Macros run here rather than in the web process, because this is where the
@@ -498,12 +567,51 @@ def elements(xml: str, label: bool = False) -> list[dict]:
             "b": [x1, y1, x2, y2],
             "focused": _attr(raw, "focused") == "true",
             "selected": _attr(raw, "selected") == "true",
+            # The wireframe draws a switch as a switch, so it has to know which
+            # way it is thrown. Not part of frame identity: flipping a checkbox
+            # must not invalidate her aim at the one next to it.
+            "checked": _attr(raw, "checked") == "true",
             "has_text": bool(_attr(raw, "text")),
         }
         if label and short not in EDITABLE:
             entry["txt"] = _clean(_attr(raw, "text"))
         found.append(entry)
     return found
+
+
+# The wireframe draws labels too, and an unbounded screen would make the pushed
+# fragment unbounded with it. A phone screen holds nowhere near this many.
+MAX_STATICS = 120
+
+
+def statics(xml: str) -> list[dict]:
+    """The non-tappable text of a screen — labels, headings, list rows.
+
+    This is what makes the wireframe readable rather than a field of grey
+    boxes. Editable fields are excluded here for the same reason they are
+    excluded from labels: their text is whatever has been typed into them,
+    and on a sign-in screen that is a credential.
+    """
+    out = []
+    for raw in _NODE.findall(xml or ""):
+        if _attr(raw, "clickable") == "true":
+            continue
+        cls = (_attr(raw, "class") or raw[1:].split()[0].rstrip("/>")).rsplit(".", 1)[-1]
+        if cls in EDITABLE:
+            continue
+        text = _clean(_attr(raw, "text"))
+        if not text:
+            continue
+        m = _BOUNDS.search(_attr(raw, "bounds"))
+        if not m:
+            continue
+        x1, y1, x2, y2 = (int(g) for g in m.groups())
+        if x2 <= x1 or y2 <= y1:
+            continue
+        out.append({"cls": cls, "b": [x1, y1, x2, y2], "txt": text})
+        if len(out) >= MAX_STATICS:
+            break
+    return out
 
 
 # ------------------------------------------------------------------- alerts
@@ -809,4 +917,13 @@ def tap(claimed_frame: str, element: dict, serial: str | None = None,
     # log line cannot name a patient however the screen is laid out.
     log.info("tapped %s/%s at (%d,%d) on frame %s",
              match["cls"], match["rid"] or "-", cx, cy, claimed_frame)
+
+    # Wake the hierarchy watcher in the feed process so the next wireframe
+    # arrives as soon as the screen settles, not an interval later.
+    try:
+        from apt_log.ui.state import STATE_DIR
+
+        (STATE_DIR / POKE_NAME).write_text(str(time.time()), encoding="utf-8")
+    except OSError:
+        pass
     return {"tapped": {"rid": match["rid"], "cls": match["cls"], "at": [cx, cy]}}

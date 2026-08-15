@@ -137,6 +137,38 @@ def dashboard(request: Request):
     )
 
 
+@app.get("/app", response_class=HTMLResponse)
+def phone_app(request: Request):
+    """The full-screen phone view — the one she bookmarks to her home screen.
+
+    A launcher of four tiles, then a live wireframe of whatever the phone
+    shows: the screen's real structure, rendered as components instead of
+    photographed. It rides the same socket, the same tap verification and the
+    same macro allow-list as the dashboard; this route adds a skin, not a
+    capability. The dashboard at / keeps everything else — health, today,
+    reconciliation — and is one link away.
+    """
+    t = _translator(request)
+    screen_doc = _read_json(state_mod.STATE_DIR / "screen.json", None)
+    model = _screen_model(screen_doc) if screen_doc else None
+    return templates.TemplateResponse(
+        request=request,
+        name="phone.html",
+        context={
+            "t": t,
+            "lang": t.language,
+            "apps": PHONE_APPS,
+            "m": model,
+            "screen_doc": screen_doc or {},
+            "pending": queue.current(),
+            "KIND_SIGNATURE": KIND_SIGNATURE,
+            "KIND_TOKEN": KIND_TOKEN,
+            "KIND_CHOICE": KIND_CHOICE,
+            "KIND_OTP": KIND_OTP,
+        },
+    )
+
+
 @app.get("/screen.jpg")
 def phone_screen():
     """The last capture of the phone screen.
@@ -269,9 +301,81 @@ def _read_json(path, fallback):
         return fallback
 
 
+def _sans_at(doc: dict) -> dict:
+    """The document minus its timestamp, for change comparison."""
+    return {k: v for k, v in doc.items() if k != "at"}
+
+
 EMPTY_FRAME = {"id": "", "img": "", "size": [0, 0], "elements": [],
                "blocked": "", "notice": ""}
 SLOW_EVERY = 10.0
+
+# The four apps her patients are spread across, verified against
+# `pm list packages` on the device. Names are the vendors' own brands, which is
+# why they are not in the catalog: a brand does not translate.
+#
+# `macro` is what the tile runs. Only the legacy app has a proven sign-in
+# sequence; the other three run their open-only macro, which brings the app to
+# the front and touches nothing — the most a button may honestly do on screens
+# nobody has mapped yet.
+PHONE_APPS = (
+    {"id": "hhax_legacy", "name": "HHAeXchange", "mark": "HX",
+     "macro": "hhax_legacy_login", "accent": "#1b6ed6"},
+    {"id": "hhax_uma", "name": "HHAeXchange+", "mark": "HX+",
+     "macro": "open_hhax_uma", "accent": "#7a3fd1"},
+    {"id": "mobile_caregiver", "name": "Mobile Caregiver+", "mark": "MC",
+     "macro": "open_mobile_caregiver", "accent": "#0c8f5a"},
+    {"id": "inmyteam", "name": "inMyTeam", "mark": "iMT",
+     "macro": "open_inmyteam", "accent": "#c2452e"},
+)
+
+# The wireframe's component vocabulary, keyed by trailing class name. Anything
+# unlisted renders as a plain tappable row — wrong in style, right in position
+# and behaviour, which is the useful way to be wrong about an unseen widget.
+_KINDS = {
+    "Button": "btn", "ImageButton": "btn",
+    "EditText": "field", "AutoCompleteTextView": "field", "SearchView": "field",
+    "CheckBox": "toggle", "Switch": "toggle", "CompoundButton": "toggle",
+    "ToggleButton": "toggle", "RadioButton": "toggle",
+    "ImageView": "img",
+    "TextView": "text",
+}
+
+
+def _screen_model(doc: dict) -> dict | None:
+    """Positioned render model for _screen.html. None when the size is unknown.
+
+    Percentages of the device's own resolution, so the fragment is correct at
+    any page width; font sizes in container-query units for the same reason.
+    Tap identity (`aim`) is exactly what the overlay posts today — rid, cls,
+    bounds — so the wireframe rides the same verification path as the boxes it
+    replaces.
+    """
+    w, h = (doc.get("size") or [0, 0])[:2]
+    if not w or not h:
+        return None
+
+    def place(b):
+        x1, y1, x2, y2 = b
+        return {
+            "l": round(x1 / w * 100, 2), "t": round(y1 / h * 100, 2),
+            "w": round((x2 - x1) / w * 100, 2),
+            "hh": round((y2 - y1) / h * 100, 2),
+            "fs": round(min((y2 - y1) * 0.52, 40) / w * 100, 2),
+        }
+
+    els = []
+    for e in doc.get("elements") or []:
+        els.append({**place(e["b"]), "kind": _KINDS.get(e["cls"], "row"),
+                    "txt": e.get("txt", ""),
+                    "checked": bool(e.get("checked")),
+                    "focused": bool(e.get("focused")),
+                    "aim": {"rid": e.get("rid", ""), "cls": e.get("cls", ""),
+                            "b": e.get("b")}})
+    texts = [{**place(s["b"]), "txt": s.get("txt", "")}
+             for s in doc.get("statics") or []]
+    return {"id": doc.get("id", ""), "ratio": f"{w} / {h}",
+            "els": els, "texts": texts}
 
 # From the SPS the device actually emits: profile_idc 0x64 (High), level 0x29
 # (4.1). Read off the stream rather than assumed, because a wrong codec string
@@ -312,6 +416,7 @@ async def live(ws: WebSocket):
     t = Translator(chosen)
 
     frame_path = state_mod.STATE_DIR / "frame.json"
+    screen_path = state_mod.STATE_DIR / "screen.json"
     last: dict = {}
     slow_at = 0.0
     watching_video = False
@@ -340,14 +445,39 @@ async def live(ws: WebSocket):
         while True:
             payload: dict = {}
 
+            # Compared without the timestamp, which moves on every write and
+            # would turn "did the screen change" into "has a second passed".
             frame = _read_json(frame_path, EMPTY_FRAME)
-            if frame != last.get("frame"):
-                payload["frame"] = last["frame"] = frame
+            if _sans_at(frame) != last.get("frame"):
+                last["frame"] = _sans_at(frame)
+                payload["frame"] = frame
+
+            # The wireframe rides the same tick as the frame, rendered
+            # server-side like every other sentence this socket sends. Compared
+            # whole rather than by id: a checkbox flipping changes no target
+            # and no id, and the wireframe still has to redraw it.
+            screen_doc = _read_json(screen_path, None)
+            if screen_doc is not None and _sans_at(screen_doc) != last.get("screen_doc"):
+                last["screen_doc"] = _sans_at(screen_doc)
+                model = _screen_model(screen_doc)
+                payload["screen"] = {
+                    "id": screen_doc.get("id", ""),
+                    "name": screen_doc.get("screen", "unknown"),
+                    "blocked": screen_doc.get("blocked", ""),
+                    "notice": screen_doc.get("notice", ""),
+                }
+                payload["screen_html"] = (
+                    "" if model is None
+                    else templates.get_template("_screen.html").render(m=model))
 
             pending = queue.current()
             macro = macros_mod.read_status()
             macro_state = {"state": macro.state, "step": macro.step,
-                           "name": macro.name, "error": macro.error}
+                           "name": macro.name, "error": macro.error,
+                           # Sentences rendered here, as everywhere on this
+                           # socket — the loading screen shows these verbatim.
+                           "text": t(macro.step) if macro.step else "",
+                           "state_text": t(f"macro.state.{macro.state}")}
             if macro_state != last.get("macro"):
                 payload["macro"] = last["macro"] = macro_state
 
@@ -462,6 +592,18 @@ async def _do_device(msg: dict) -> dict:
         log.warning("device action refused: %s", exc)
         return {"type": "device_result", "ok": False}
     log.info("device action %s sent over the socket", action)
+
+    # Back and Home change the screen; wake the hierarchy watcher so the
+    # wireframe follows without waiting out its interval.
+    try:
+        import time as _time
+
+        from apt_log.feed import POKE_NAME
+
+        (state_mod.STATE_DIR / POKE_NAME).write_text(str(_time.time()),
+                                                     encoding="utf-8")
+    except OSError:
+        pass
     return {"type": "device_result", "ok": True}
 
 

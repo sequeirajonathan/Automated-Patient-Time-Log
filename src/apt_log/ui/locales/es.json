@@ -165,5 +165,16 @@
   "phone.blocked.login_activity": "Esta es una pantalla de inicio de sesión, por eso no se muestra ninguna imagen. Los botones de abajo son los que hay en ella y siguen funcionando.",
   "phone.blocked.password_field": "Hay un campo de contraseña en esta pantalla, por eso no se muestra ninguna imagen. Los botones de abajo son los que hay en ella y siguen funcionando.",
   "phone.blocked.secure_screen": "La aplicación no permite tomar imágenes de esta pantalla. Los botones de abajo son los que hay en ella y siguen funcionando.",
-  "phone.blocked.capture_failed": "No se pudo tomar la imagen de esta pantalla. Los botones de abajo son los que hay en ella y siguen funcionando."
+  "phone.blocked.capture_failed": "No se pudo tomar la imagen de esta pantalla. Los botones de abajo son los que hay en ella y siguen funcionando.",
+  "macro.state.running": "Trabajando…",
+  "macro.open_hhax_legacy": "Abrir HHAeXchange",
+  "macro.open_hhax_uma": "Abrir HHAeXchange+",
+  "macro.open_mobile_caregiver": "Abrir Mobile Caregiver+",
+  "macro.open_inmyteam": "Abrir inMyTeam",
+  "papp.choose": "Elija una aplicación. Se abre en el teléfono en Florida y esta página se convierte en su pantalla.",
+  "papp.opening": "Abriendo {app}…",
+  "papp.waiting_screen": "Esperando el teléfono…",
+  "papp.apps": "Aplicaciones",
+  "papp.peek": "Foto",
+  "papp.full_status": "Página de estado completa"
 }

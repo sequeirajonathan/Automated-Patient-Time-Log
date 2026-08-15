@@ -165,5 +165,16 @@
   "phone.blocked.login_activity": "This is a sign-in screen, so no picture of it is shown. The buttons below are what is on it, and they still work.",
   "phone.blocked.password_field": "There is a password box on this screen, so no picture of it is shown. The buttons below are what is on it, and they still work.",
   "phone.blocked.secure_screen": "The app does not allow pictures of this screen. The buttons below are what is on it, and they still work.",
-  "phone.blocked.capture_failed": "The picture of this screen could not be taken. The buttons below are what is on it, and they still work."
+  "phone.blocked.capture_failed": "The picture of this screen could not be taken. The buttons below are what is on it, and they still work.",
+  "macro.state.running": "Working…",
+  "macro.open_hhax_legacy": "Open HHAeXchange",
+  "macro.open_hhax_uma": "Open HHAeXchange+",
+  "macro.open_mobile_caregiver": "Open Mobile Caregiver+",
+  "macro.open_inmyteam": "Open inMyTeam",
+  "papp.choose": "Choose an app. It opens on the phone in Florida, and this page becomes its screen.",
+  "papp.opening": "Opening {app}…",
+  "papp.waiting_screen": "Waiting for the phone…",
+  "papp.apps": "Apps",
+  "papp.peek": "Photo",
+  "papp.full_status": "Full status page"
 }

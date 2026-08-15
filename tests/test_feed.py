@@ -756,3 +756,111 @@ class TestTapUsesThePublishedFrame:
             with pytest.raises(feed.StaleAim, match="old"):
                 feed.tap(feed.frame_id(els), btn, frame_path=path)
             adb.assert_not_called()
+
+
+class TestScreenDocument:
+    """The wireframe's render feed, and its disclosure policy.
+
+    Two files, two policies. frame.json is the loggable one and its rules are
+    unchanged. screen.json carries the screen's words because components need
+    them as strings where a photograph carries them as pixels — it sits beside
+    last-screen.jpg, which holds the same words, and is treated with the same
+    care: never logged, and typed-field contents withheld everywhere.
+    """
+
+    XML = (
+        '<node class="android.widget.TextView" resource-id="com.x:id/heading"'
+        ' text="Visitas de hoy" clickable="false" bounds="[0,100][720,160]" />'
+        '<node class="android.widget.Button" resource-id="com.x:id/btn_go"'
+        ' text="Entrar" clickable="true" bounds="[19,744][731,804]" />'
+        '<node class="android.widget.EditText" resource-id="com.x:id/txt_pin"'
+        ' text="4321" clickable="true" bounds="[40,600][680,660]" />'
+        '<node class="android.widget.EditText" resource-id="com.x:id/txt_note"'
+        ' text="typed words" clickable="false" bounds="[40,300][680,360]" />'
+        '<node class="android.widget.CheckBox" resource-id="com.x:id/chk"'
+        ' text="" clickable="true" checked="true" bounds="[40,400][100,460]" />'
+    )
+
+    def _write(self, tmp_path, hierarchy=None, reason=feed.CAPTURED, png=PNG):
+        shot = tmp_path / "screen.png"
+        with patch.object(feed, "capture", return_value=(png, HOME, reason)), \
+             patch.object(feed, "screen_size", return_value=[720, 1600]), \
+             patch.object(feed.mirror_mod, "publish"):
+            feed.write_frame(shot, hierarchy=hierarchy or self.XML)
+        return (json.loads((tmp_path / "frame.json").read_text()),
+                json.loads((tmp_path / "screen.json").read_text()))
+
+    def test_statics_carry_the_screens_words(self, tmp_path):
+        _, screen = self._write(tmp_path)
+        assert any(s["txt"] == "Visitas de hoy" for s in screen["statics"])
+
+    def test_buttons_carry_their_labels(self, tmp_path):
+        _, screen = self._write(tmp_path)
+        btn = next(e for e in screen["elements"] if e["rid"] == "btn_go")
+        assert btn["txt"] == "Entrar"
+
+    def test_typed_text_is_withheld_from_both_files_everywhere(self, tmp_path):
+        """An EditText's text is whatever was typed into it — a PIN here. It
+        must not appear clickable or not, captured screen or not."""
+        frame, screen = self._write(tmp_path)
+        blob = json.dumps(frame) + json.dumps(screen)
+        assert "4321" not in blob
+        assert "typed words" not in blob
+
+    def test_frame_json_stays_textless_on_ordinary_screens(self, tmp_path):
+        """The loggable file's policy did not move."""
+        frame, _ = self._write(tmp_path)
+        assert all("txt" not in e for e in frame["elements"])
+        assert "statics" not in frame
+
+    def test_checked_state_is_carried(self, tmp_path):
+        """A wireframe switch has to know which way it is thrown — this is
+        also what a check-all-tasks macro will read back one day."""
+        _, screen = self._write(tmp_path)
+        box = next(e for e in screen["elements"] if e["rid"] == "chk")
+        assert box["checked"] is True
+
+    def test_checked_does_not_move_her_aim(self):
+        before = self.XML
+        after = self.XML.replace('checked="true"', 'checked="false"')
+        assert (feed.frame_id(feed.elements(before))
+                == feed.frame_id(feed.elements(after)))
+
+    def test_statics_are_bounded(self):
+        node = ('<node class="android.widget.TextView" text="x{i}"'
+                ' clickable="false" bounds="[0,{i}][10,{j}]" />')
+        xml = "".join(node.replace("{i}", str(i)).replace("{j}", str(i + 1))
+                      for i in range(0, 400))
+        assert len(feed.statics(xml)) == feed.MAX_STATICS
+
+
+class TestHierarchyPoke:
+    def test_a_poke_cuts_the_wait_short(self, tmp_path):
+        """After a tap she is certainly watching; the interval's job is to be
+        interrupted then."""
+        poke = tmp_path / "poke"
+        watcher = feed._Hierarchy(None, every=5.0, poke_path=poke)
+        poke.write_text("1")
+        start = time.monotonic()
+        watcher._wait()
+        assert time.monotonic() - start < 1.0
+
+    def test_one_poke_is_one_interruption(self, tmp_path):
+        poke = tmp_path / "poke"
+        watcher = feed._Hierarchy(None, every=0.6, poke_path=poke)
+        poke.write_text("1")
+        watcher._wait()                       # consumes the poke
+        start = time.monotonic()
+        watcher._wait()                       # must wait the interval out
+        assert time.monotonic() - start >= 0.5
+
+    def test_a_tap_pokes_the_watcher(self, tmp_path):
+        frame = {"at": __import__("datetime").datetime.now().isoformat(),
+                 "elements": [{"rid": "go", "cls": "Button", "b": [0, 0, 10, 10]}]}
+        (tmp_path / "frame.json").write_text(json.dumps(frame))
+        with patch.object(feed, "_adb") as adb, \
+             patch("apt_log.ui.state.STATE_DIR", tmp_path):
+            adb.return_value.returncode = 0
+            feed.tap("f", {"rid": "go", "cls": "Button", "b": [0, 0, 10, 10]},
+                     frame_path=tmp_path / "frame.json")
+        assert (tmp_path / feed.POKE_NAME).exists()
