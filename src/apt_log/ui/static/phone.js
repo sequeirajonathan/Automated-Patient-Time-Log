@@ -100,13 +100,14 @@
     }
     if (!meta) return;
 
-    // The screen names itself: the app's own nav-bar title when it has one,
-    // the classifier's sentence only as a fallback. Never a warning.
+    // The screen names itself with the app's own nav-bar title, or stays
+    // blank. The classifier's fallback sentences are sentences — "It is on a
+    // screen it did not recognise" squeezed into a title slot is exactly the
+    // alarm this view exists not to raise.
     const where = document.getElementById('where');
     if (where) {
       const own = wrap() && wrap().querySelector('.a-title');
-      const title = own && own.textContent.trim();
-      where.textContent = title || (i18n.screens || {})[meta.name] || '';
+      where.textContent = (own && own.textContent.trim()) || '';
     }
 
     // No photograph of this screen: a quiet lock in the toolbar, whose
