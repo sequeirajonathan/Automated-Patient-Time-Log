@@ -93,6 +93,32 @@
   body.offline .offline-note { display:block; }
   body.offline .mirror-frame { opacity:.4; }
   body.offline .hit { pointer-events:none; }
+
+  /* No picture allowed of this screen. The last capture is still on disk and
+     still served, and it belongs to a *different screen* -- so showing it under
+     boxes drawn from the current one is not a stale picture, it is a wrong one.
+     The image is hidden rather than removed: it is the only element that knows
+     the device's aspect ratio, and every box is positioned against its width. */
+  .blind-note { display:none; }
+  body.blind .blind-note { display:block; }
+  body.blind #shot { visibility:hidden; }
+  body.blind .shot.live { display:none; }
+  body.blind .mirror-frame { background:#e8eaee; border:1px dashed var(--line); }
+  /* The hidden picture is still what every box is measured against, so it has
+     to keep occupying the right rectangle. Width and ratio are set from the
+     device's own resolution, which also covers the case where no capture has
+     ever succeeded and the image has no intrinsic size to borrow. */
+  body.blind #shot { width:min(100%, 360px); height:auto; }
+  /* With no picture underneath, a box has to say what it is itself. */
+  body.blind .hit { background:#fff; border-color:var(--accent);
+                    display:flex; align-items:center; justify-content:center;
+                    font:inherit; font-size:13px; color:var(--ink);
+                    overflow:hidden; padding:2px 4px; text-align:center; }
+  .hit .label { display:none; }
+  body.blind .hit .label { display:block; pointer-events:none; }
+  #screen-notice { margin:6px 0; padding:10px 12px; border-radius:6px;
+                   background:#fff5d6; border:1px solid #e3c766; }
+  #screen-notice .said { font-size:16px; margin:2px 0 0; }
 </style>
 </head>
 {# The nonce is what the live stream compares against to notice that the request
@@ -186,14 +212,29 @@
 
     <h2 style="margin-top:14px">{{ t('phone.title') }}</h2>
     <div class="banner bad offline-note">{{ t('portal.offline') }}</div>
-    {% if s.screenshot_at %}
-      <p class="muted" id="shot-taken">{{ t('phone.stale', time=t.time(s.screenshot_at)) }}</p>
+    {# Rendered whether or not a picture has ever been taken. It used to be
+       conditional, which meant a controller sitting on a sign-in screen since
+       boot showed her "no recent picture" and nothing else — no boxes, no
+       reason, no way to act — on precisely the screen where she most needs a
+       way through. The overlay is the part that has to be there. #}
+      <p class="muted" id="shot-taken">
+        {%- if s.screenshot_at %}{{ t('phone.stale', time=t.time(s.screenshot_at)) }}
+        {%- else %}{{ t('phone.none') }}{% endif -%}
+      </p>
       {# The picture and the hit boxes share one positioned container so the
          overlay stays in register when the image reflows. #}
       {# Two surfaces, one at a time. The still is always there and always
          correct; the canvas covers it once H.264 is decoding. Keeping the still
          underneath rather than swapping it out means a decoder that fails has
          something to fall back to that is already on screen. #}
+      {# Why there is no picture, and — when the app has put a dialog in the way
+         — what it actually says. Both are filled by the live stream; empty and
+         hidden until it has something to put in them. #}
+      <div class="banner blind-note" id="blind-note"></div>
+      <div id="screen-notice" hidden>
+        <span class="muted">{{ t('phone.app_says') }}</span>
+        <p class="said" id="screen-said"></p>
+      </div>
       <div class="mirror-frame">
         <img id="shot" class="shot {% if s.mirror.stale %}stale{% endif %}"
              src="/screen.jpg" alt="">
@@ -206,12 +247,20 @@
         window.APTLOG_PORTAL = {
           sending: {{ t('portal.sending')|tojson }},
           moved:   {{ t('portal.moved')|tojson }},
-          failed:  {{ t('portal.failed')|tojson }}
+          failed:  {{ t('portal.failed')|tojson }},
+          {# Keyed by the feed's refusal codes. A code with no sentence here
+             falls back to the general one rather than showing her nothing. #}
+          blocked: {
+            "": "",
+            no_focus:       {{ t('phone.blocked.no_focus')|tojson }},
+            login_activity: {{ t('phone.blocked.login_activity')|tojson }},
+            password_field: {{ t('phone.blocked.password_field')|tojson }},
+            secure_screen:  {{ t('phone.blocked.secure_screen')|tojson }},
+            capture_failed: {{ t('phone.blocked.capture_failed')|tojson }}
+          },
+          blockedOther: {{ t('phone.blocked.other')|tojson }}
         };
       </script>
-    {% else %}
-      <p class="muted">{{ t('phone.none') }}</p>
-    {% endif %}
 
     {# Offered whether or not a picture exists: a black rectangle and a dead feed
        look identical from Texas, and this is how you tell them apart.

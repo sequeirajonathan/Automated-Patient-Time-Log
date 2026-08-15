@@ -447,3 +447,44 @@ class TestStaleIsVisible:
         s = DashboardState(screenshot_at=None, mirror=Mirror(at=datetime.now()))
         payload = _mirror_payload(s, Translator("es"))
         assert payload["taken_text"] == Translator("es")("phone.none")
+
+
+class TestBlindScreenIsUsable:
+    """A screen the mirror refuses to photograph still has to be operable.
+
+    The refusal was right and the consequence was not: she was left with one
+    unlabelled rectangle where the app had put a dialog, no words, and the
+    *previous* screen's capture still being served underneath it — so the boxes
+    of this screen sat over the picture of another one.
+    """
+
+    def test_the_page_can_name_every_refusal(self, client):
+        """The reason crosses as a code, so the sentence has to be on the page
+        already. A code with no sentence falls back rather than saying nothing.
+        """
+        body = client.get("/").text
+        for code in ("no_focus", "login_activity", "password_field",
+                     "secure_screen", "capture_failed"):
+            assert code + ":" in body
+        assert "blockedOther" in body
+
+    def test_the_wrong_picture_is_hidden_rather_than_shown(self, client):
+        body = client.get("/").text
+        assert "body.blind #shot { visibility:hidden; }" in body
+
+    def test_a_box_with_no_picture_under_it_carries_its_own_label(self, client):
+        body = client.get("/").text
+        assert "body.blind .hit .label" in body
+
+    def test_the_app_gets_to_say_what_it_said(self, client):
+        body = client.get("/").text
+        assert "screen-said" in body
+        assert "La aplicación muestra este mensaje" in body
+
+    def test_the_overlay_exists_before_any_picture_ever_has(self, client):
+        """A controller on a sign-in screen since boot has never written a
+        capture. That used to render "no recent picture" and nothing else — no
+        boxes and no way through, on the one screen that needs a way through."""
+        body = client.get("/").text          # no capture exists in a test run
+        assert 'id="overlay"' in body
+        assert "No hay ninguna imagen reciente" in body

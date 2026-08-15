@@ -158,5 +158,12 @@
   "macro.step.finished": "Finished.",
   "macro.started": "Started. Watch the phone screen below.",
   "macro.unknown": "That shortcut is not one this page offers.",
-  "portal.offline": "Not connected to the controller. This picture is frozen and tapping is turned off. It will reconnect on its own; pull down to reload if it does not."
+  "portal.offline": "Not connected to the controller. This picture is frozen and tapping is turned off. It will reconnect on its own; pull down to reload if it does not.",
+  "phone.app_says": "The app is showing this message:",
+  "phone.blocked.other": "There is no picture of this screen. The buttons below are what is on it, and they still work.",
+  "phone.blocked.no_focus": "The controller cannot tell what the phone is showing, so it is not showing you a picture.",
+  "phone.blocked.login_activity": "This is a sign-in screen, so no picture of it is shown. The buttons below are what is on it, and they still work.",
+  "phone.blocked.password_field": "There is a password box on this screen, so no picture of it is shown. The buttons below are what is on it, and they still work.",
+  "phone.blocked.secure_screen": "The app does not allow pictures of this screen. The buttons below are what is on it, and they still work.",
+  "phone.blocked.capture_failed": "The picture of this screen could not be taken. The buttons below are what is on it, and they still work."
 }

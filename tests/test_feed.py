@@ -45,13 +45,13 @@ class TestCaptureRefusals:
         with patch.object(feed, "current_focus", return_value=""):
             png, _, reason = feed.capture()
         assert png is None
-        assert "focused window" in reason
+        assert reason == feed.NO_FOCUS
 
     def test_refuses_on_a_login_screen(self):
         with patch.object(feed, "current_focus", return_value=SIGNIN):
             png, _, reason = feed.capture()
         assert png is None
-        assert "credential" in reason
+        assert reason == feed.LOGIN_ACTIVITY
 
     def test_refuses_when_a_password_field_is_anywhere_on_screen(self):
         """Anywhere, not merely focused. This runs on a timer with no idea what
@@ -60,7 +60,7 @@ class TestCaptureRefusals:
             png, _, reason = feed.capture(
                 hierarchy='<node password="true" bounds="[0,0][1,1]"/>')
         assert png is None
-        assert "password" in reason
+        assert reason == feed.PASSWORD_FIELD
 
     def test_captures_when_the_hierarchy_is_unreadable_but_activity_is_safe(self):
         """The documented weak point: UiAutomator2 holds the dump service during
@@ -70,7 +70,7 @@ class TestCaptureRefusals:
             adb.return_value.returncode = 0
             adb.return_value.stdout = PNG
             png, _, reason = feed.capture(hierarchy=None)
-        assert png == PNG and reason == ""
+        assert png == PNG and reason == feed.CAPTURED
 
     def test_a_refused_capture_is_reported_not_silent(self):
         with patch.object(feed, "current_focus", return_value=HOME), \
@@ -78,7 +78,7 @@ class TestCaptureRefusals:
             adb.return_value.returncode = 0
             adb.return_value.stdout = b""
             png, _, reason = feed.capture(hierarchy=None)
-        assert png is None and "does not allow capture" in reason
+        assert png is None and reason == feed.SECURE_SCREEN
 
 
 class TestScreenMapping:
@@ -109,7 +109,7 @@ class TestWriteFrame:
         screen, no picture available" is information."""
         shot = tmp_path / "screen.png"
         with patch.object(feed, "capture",
-                          return_value=(None, SIGNIN, "a credential can be typed")), \
+                          return_value=(None, SIGNIN, feed.LOGIN_ACTIVITY)), \
              patch.object(feed.mirror_mod, "publish") as publish:
             feed.write_frame(shot)
         assert not shot.exists()
@@ -238,6 +238,126 @@ class TestElements:
     def test_garbage_in_does_not_raise(self):
         assert feed.elements("") == []
         assert feed.elements("<node bounds='nonsense' clickable='true'/>") == []
+
+
+class TestBlindScreens:
+    """What she is shown when the picture is refused.
+
+    The refusal itself was never in doubt. What was missing is that a refusal
+    used to leave her with an unlabelled rectangle where a dialog was — and the
+    *previous* screen's capture still on disk underneath it.
+    """
+
+    # A sign-in screen with the app's alert on top of it. Both of the app's
+    # alert ids, a password field carrying what was typed into it, and a
+    # credential in an ordinary field: everything this rule has to sort out.
+    ALERT = (
+        '<node class="android.widget.TextView" resource-id="com.x:id/lbl_message"'
+        ' text="Debes de iniciar sesión." clickable="false"'
+        ' bounds="[40,800][680,900]" />'
+        '<node class="android.widget.Button" resource-id="com.x:id/btn_negative"'
+        ' text="DE ACUERDO" clickable="true" bounds="[28,940][692,1030]" />'
+        '<node class="android.widget.EditText" resource-id="com.x:id/txt_password"'
+        ' text="hunter2" password="true" clickable="true"'
+        ' bounds="[40,600][680,660]" />'
+    )
+
+    def test_a_credential_screen_may_speak(self):
+        assert feed.text_is_disclosable(feed.LOGIN_ACTIVITY) is True
+        assert feed.text_is_disclosable(feed.PASSWORD_FIELD) is True
+
+    def test_a_screen_the_app_sealed_may_not(self):
+        """FLAG_SECURE is the app's own choice and can land anywhere, including
+        on a patient. A credential screen is reached before any patient is."""
+        assert feed.text_is_disclosable(feed.SECURE_SCREEN) is False
+        assert feed.text_is_disclosable(feed.NO_FOCUS) is False
+
+    def test_a_captured_screen_may_not(self):
+        """Where there is a picture, the words are already in it, and a second
+        copy in a JSON file on disk buys nothing."""
+        assert feed.text_is_disclosable(feed.CAPTURED) is False
+
+    def test_the_dialog_message_comes_across(self):
+        assert feed.alert_message(self.ALERT) == "Debes de iniciar sesión."
+
+    def test_no_dialog_means_no_message(self):
+        """The fallback picks the longest text on screen, which is only sound
+        under a modal. Without one it must not volunteer anything at all."""
+        plain = ('<node class="android.widget.TextView" text="CARIDAD ROJAS"'
+                 ' clickable="false" bounds="[0,0][720,60]" />')
+        assert feed.alert_message(plain) == ""
+
+    def test_a_dialog_with_no_known_message_id_still_speaks(self):
+        """Four apps, four dialog layouts. Recognising the buttons is what makes
+        this work on the three that have never been opened."""
+        other = (
+            '<node class="android.widget.TextView" resource-id="com.y:id/blurb"'
+            ' text="Your session has ended. Please sign in again."'
+            ' clickable="false" bounds="[0,300][720,400]" />'
+            '<node class="android.widget.Button" resource-id="android:id/button1"'
+            ' text="OK" clickable="true" bounds="[400,500][700,560]" />'
+        )
+        assert "session has ended" in feed.alert_message(other)
+
+    def test_buttons_are_labelled_when_there_is_no_picture(self):
+        els = feed.elements(self.ALERT, label=True)
+        button = next(e for e in els if e["rid"] == "btn_negative")
+        assert button["txt"] == "DE ACUERDO"
+
+    def test_a_typed_field_is_never_disclosed(self):
+        """The whole reason the picture was refused. An EditText's own node
+        carries what has been typed into it, so labelling is not extended to
+        one under any rule."""
+        els = feed.elements(self.ALERT, label=True)
+        field = next(e for e in els if e["rid"] == "txt_password")
+        assert "txt" not in field
+        assert "hunter2" not in json.dumps(els)
+
+    def test_labelling_is_off_unless_asked_for(self):
+        assert all("txt" not in e for e in feed.elements(self.ALERT))
+
+    def test_the_frame_carries_the_reason_and_the_words(self, tmp_path):
+        shot = tmp_path / "screen.png"
+        with patch.object(feed, "current_focus", return_value=SIGNIN), \
+             patch.object(feed, "screen_size", return_value=[720, 1600]), \
+             patch.object(feed.mirror_mod, "publish"):
+            feed.write_frame(shot, hierarchy=self.ALERT)
+        frame = json.loads((tmp_path / "frame.json").read_text())
+        assert frame["blocked"] == feed.LOGIN_ACTIVITY
+        assert frame["notice"] == "Debes de iniciar sesión."
+        assert frame["captured"] is False
+
+    def test_a_sealed_screen_says_why_but_stays_quiet(self, tmp_path):
+        shot = tmp_path / "screen.png"
+        with patch.object(feed, "capture",
+                          return_value=(None, HOME, feed.SECURE_SCREEN)), \
+             patch.object(feed, "screen_size", return_value=[720, 1600]), \
+             patch.object(feed.mirror_mod, "publish"):
+            feed.write_frame(shot, hierarchy=self.ALERT)
+        frame = json.loads((tmp_path / "frame.json").read_text())
+        assert frame["blocked"] == feed.SECURE_SCREEN
+        assert frame["notice"] == ""
+        assert all("txt" not in e for e in frame["elements"])
+
+    def test_a_captured_frame_carries_no_words_at_all(self, tmp_path):
+        """The rule that was already there, pinned against the new field."""
+        shot = tmp_path / "screen.png"
+        with patch.object(feed, "capture", return_value=(PNG, HOME, feed.CAPTURED)), \
+             patch.object(feed, "screen_size", return_value=[720, 1600]), \
+             patch.object(feed.mirror_mod, "publish"):
+            feed.write_frame(shot, hierarchy=TestElements.XML)
+        frame = json.loads((tmp_path / "frame.json").read_text())
+        assert frame["blocked"] == ""
+        assert frame["notice"] == ""
+        blob = json.dumps(frame)
+        for secret in ("CARIDAD", "ROJAS", "Registrar"):
+            assert secret not in blob
+
+    def test_labels_do_not_move_her_aim(self, tmp_path):
+        """Frame identity is the tappable structure. If a label changed it, the
+        screen would look like it moved every time a countdown ticked."""
+        assert (feed.frame_id(feed.elements(self.ALERT, label=True))
+                == feed.frame_id(feed.elements(self.ALERT)))
 
 
 class TestFrameId:

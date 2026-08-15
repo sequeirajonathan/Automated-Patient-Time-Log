@@ -30,6 +30,16 @@ Appium session is live, which is exactly when the screen is most worth watching.
 Refusing there would make this useless during the only interesting moments, so it
 leans on the activity name alone — and that is why step 2 is broad rather than
 precise.
+
+**A refusal has to say something.** Refusing the picture used to be the whole
+answer, and it left her looking at an unlabelled rectangle where the app had put
+a dialog — no words, no button label, no way to know whether the thing under her
+thumb said "sign in again" or something that mattered. Meanwhile the *previous*
+screen's capture was still on disk and still being served, so the page drew this
+screen's boxes over that screen's picture. So a refusal now publishes its reason
+as a code, the page hides the picture rather than showing the wrong one, and on
+credential screens — and only there — the words come across so the boxes can
+label themselves. See `text_is_disclosable`.
 """
 
 from __future__ import annotations
@@ -91,6 +101,28 @@ LOGIN_ACTIVITY_MARKERS = (
 
 _FOCUS = re.compile(r"mCurrentFocus=Window\{[^}]*\s+(\S+)\}")
 _PASSWORD_NODE = re.compile(r'password="true"')
+
+# Why no picture was published, as a code rather than a sentence. The prose is
+# for the log; this is what the page has to reason about, and a page matching on
+# English prose would have broken the first time the wording was improved.
+CAPTURED = ""
+NO_FOCUS = "no_focus"
+LOGIN_ACTIVITY = "login_activity"
+PASSWORD_FIELD = "password_field"
+SECURE_SCREEN = "secure_screen"
+CAPTURE_FAILED = "capture_failed"
+
+# The two refusals that mean "a credential can be typed here" -- as opposed to
+# FLAG_SECURE, which is the app's own choice and can be any screen at all.
+CREDENTIAL_REFUSALS = (LOGIN_ACTIVITY, PASSWORD_FIELD)
+
+# Fields whose contents are whatever has been typed into them. Never disclosed,
+# on any screen, under any rule below: this is where a password lives.
+EDITABLE = ("EditText", "AutoCompleteTextView", "SearchView")
+
+# A label longer than this is not a label. Bounds the damage if some screen
+# turns out to put a paragraph where this expects a sentence.
+MAX_TEXT = 240
 
 # Activity suffix -> the mirror's fixed vocabulary. Anything unlisted is
 # published as "unknown", which is a real answer (see ui/mirror.py).
@@ -168,30 +200,36 @@ def capture(serial: str | None = None,
             hierarchy: str | None = None) -> tuple[bytes | None, str, str]:
     """Return (png_or_None, focus, reason).
 
-    `reason` is why nothing was captured, empty when something was. The
-    hierarchy is passed in rather than fetched: one dump serves both the
+    `reason` is one of the codes above — why nothing was captured, empty when
+    something was. A code rather than a sentence because the page acts on it:
+    what it may show her differs between "a password can be typed here" and
+    "the app forbids pictures of this screen", and matching that distinction on
+    English prose would break the first time the wording improved.
+
+    The hierarchy is passed in rather than fetched: one dump serves both the
     password check and the overlay, which halves the adb work and removes a
     race two callers of the old version had against each other.
     """
     focus = current_focus(serial)
     if not focus:
-        return None, "", "cannot read the focused window"
+        return None, "", NO_FOCUS
 
     if looks_like_a_login_screen(focus):
-        return None, focus, "a credential can be typed on this screen"
+        return None, focus, LOGIN_ACTIVITY
 
     if password_field_in(hierarchy) is True:
-        return None, focus, "a password field is on screen"
+        return None, focus, PASSWORD_FIELD
 
     try:
         shot = _adb(["exec-out", "screencap"], serial, timeout=30.0)
     except (OSError, subprocess.SubprocessError) as exc:
-        return None, focus, f"screencap failed: {exc}"
+        log.warning("screencap failed: %s", exc)
+        return None, focus, CAPTURE_FAILED
 
     if shot.returncode != 0 or not shot.stdout:
         # FLAG_SECURE screens refuse capture outright; that is a valid answer.
-        return None, focus, "the app does not allow capture of this screen"
-    return compress(shot.stdout), focus, ""
+        return None, focus, SECURE_SCREEN
+    return compress(shot.stdout), focus, CAPTURED
 
 
 def _decode(shot: bytes):
@@ -266,9 +304,16 @@ def write_frame(path: Path, serial: str | None = None,
     png, focus, reason = capture(serial, hierarchy)
     screen = screen_for(focus)
 
-    els = elements(hierarchy) if hierarchy else []
+    speak = text_is_disclosable(reason)
+    els = elements(hierarchy, label=speak) if hierarchy else []
     frame = {
         "id": frame_id(els),
+        # Why there is no picture, so the page can say something better than
+        # nothing. Empty when there is one.
+        "blocked": reason,
+        # The words of a dialog she would otherwise be facing blind. Empty
+        # unless this is a credential screen with an alert on it.
+        "notice": alert_message(hierarchy) if speak else "",
         # Separate from the structural id on purpose. Typing into a field moves
         # no targets at all, so a client refreshing only on structure change
         # would show her a picture with none of her own keystrokes in it.
@@ -413,7 +458,7 @@ def _attr(node: str, name: str) -> str:
     return m.group(1) if m else ""
 
 
-def elements(xml: str) -> list[dict]:
+def elements(xml: str, label: bool = False) -> list[dict]:
     """The tappable structure of a screen, carrying no text.
 
     This is what the page draws boxes from and what a tap posts back, so it is
@@ -423,6 +468,11 @@ def elements(xml: str) -> list[dict]:
 
     `has_text` is deliberately a boolean. Knowing a row has a label is enough to
     draw it; knowing the label is a patient name.
+
+    `label=True` adds `txt` — and is only ever passed when there is no
+    screenshot to read the words off, on a screen with no patient in it. See
+    `text_is_disclosable`, which is the only caller allowed to decide that.
+    Editable fields are excluded even then: their text is what has been typed.
     """
     found = []
     for raw in _NODE.findall(xml or ""):
@@ -437,15 +487,94 @@ def elements(xml: str) -> list[dict]:
         # Appium always sets class= as well as using it as the tag, but the
         # tag is the fallback so a dialect that only does one still works.
         cls = _attr(raw, "class") or raw[1:].split()[0].rstrip("/>")
-        found.append({
+        short = cls.rsplit(".", 1)[-1]
+        entry = {
             "rid": _attr(raw, "resource-id").split("/")[-1],
-            "cls": cls.rsplit(".", 1)[-1],
+            "cls": short,
             "b": [x1, y1, x2, y2],
             "focused": _attr(raw, "focused") == "true",
             "selected": _attr(raw, "selected") == "true",
             "has_text": bool(_attr(raw, "text")),
-        })
+        }
+        if label and short not in EDITABLE:
+            entry["txt"] = _clean(_attr(raw, "text"))
+        found.append(entry)
     return found
+
+
+# ------------------------------------------------------------------- alerts
+# Android's own alert ids, plus this app's. A dialog is recognised by its
+# buttons rather than by its message, because the buttons are the part that is
+# structural: `btn_negative` is what this app calls the single "DE ACUERDO" on
+# every alert it raises, and `button1`/`button2` are what the platform's
+# AlertDialog calls its own.
+ALERT_BUTTONS = ("btn_negative", "btn_positive", "button1", "button2", "button3")
+
+# Where an alert keeps its sentence, most specific first.
+ALERT_MESSAGES = ("lbl_message", "message", "alertTitle", "lbl_title")
+
+
+def text_is_disclosable(reason: str) -> bool:
+    """Whether the words on this screen may be sent to her page.
+
+    The element map carries no text, and that rule earns its keep on every
+    screen the mirror can photograph — because there the words are already in
+    the picture, and a second copy in a JSON file on disk is pure exposure with
+    no benefit.
+
+    On a screen the mirror *refuses* to photograph, the arithmetic inverts. She
+    is shown nothing at all: an unlabelled rectangle where a dialog is, and no
+    way to know whether the button under her thumb says "sign in again" or
+    "delete". That is how a caregiver ends up walking four floors to read one
+    sentence, and it is what this predicate exists to prevent.
+
+    So text is disclosed exactly where a picture is refused *for being a
+    credential screen* — a screen the app reaches before any patient is loaded,
+    where there is no name to leak. FLAG_SECURE refusals are excluded: that is
+    the app's own choice and can land on any screen, including a patient's.
+
+    Editable fields are never disclosed regardless (see `elements`), because a
+    password's own node carries what has been typed into it.
+    """
+    return reason in CREDENTIAL_REFUSALS
+
+
+def _clean(text: str) -> str:
+    return re.sub(r"\s+", " ", text or "").strip()[:MAX_TEXT]
+
+
+def alert_showing(xml: str | None) -> bool:
+    """True when a dialog's buttons are on screen."""
+    return any(e["rid"] in ALERT_BUTTONS for e in elements(xml or ""))
+
+
+def alert_message(xml: str | None) -> str:
+    """The sentence a dialog is showing, or empty.
+
+    Prefers the known message ids. Falls back to the longest static text on
+    screen, which is sound only because this is called when a dialog is up:
+    under a modal the labels behind it are short, and the longest thing on
+    screen is the thing being said.
+    """
+    if not alert_showing(xml):
+        return ""
+
+    static = []
+    for raw in _NODE.findall(xml or ""):
+        if _attr(raw, "clickable") == "true":
+            continue
+        cls = (_attr(raw, "class") or "").rsplit(".", 1)[-1]
+        if cls in EDITABLE:
+            continue
+        text = _clean(_attr(raw, "text"))
+        if text:
+            static.append((_attr(raw, "resource-id").split("/")[-1], text))
+
+    for wanted in ALERT_MESSAGES:
+        for rid, text in static:
+            if rid == wanted:
+                return text
+    return max((t for _, t in static), key=len, default="")
 
 
 def read_hierarchy(serial: str | None = None) -> str | None:

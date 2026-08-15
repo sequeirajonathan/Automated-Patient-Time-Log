@@ -113,7 +113,7 @@
   }
 
   let socket = null;
-  let frame = { id: '', img: '', size: [0, 0], elements: [] };
+  let frame = { id: '', img: '', size: [0, 0], elements: [], blocked: '', notice: '' };
   let busy = false;
   let backoff = 1000;
 
@@ -156,9 +156,59 @@
       box.style.height = ((y2 - y1) * k) + 'px';
       // Announces what a control is, never what it says — the element map
       // carries no text, and this is where that would otherwise leak back in.
-      box.setAttribute('aria-label', el.cls + (el.rid ? ' ' + el.rid : ''));
+      // Announces what a control is. On a screen with a picture that is all it
+      // may say — the element map carries no text and this is where it would
+      // otherwise leak back in. Where the picture is refused the server sends
+      // `txt` instead, because a box she cannot read is a box she cannot use.
+      box.setAttribute('aria-label', el.txt || (el.cls + (el.rid ? ' ' + el.rid : '')));
+      if (el.txt) {
+        const label = document.createElement('span');
+        label.className = 'label';
+        label.textContent = el.txt;
+        box.appendChild(label);
+      }
       box.addEventListener('click', (ev) => { ev.preventDefault(); sendTap(el); });
       over.appendChild(box);
+    }
+  }
+
+  // No picture of this screen. The last capture is still sitting on disk and is
+  // of some *earlier* screen, so leaving it visible under boxes drawn from this
+  // one shows her a control where there is none. Hide the picture, name the
+  // reason, and let the boxes carry their own labels.
+  // Set when /screen.jpg has no bytes to give — a controller that has been on a
+  // sign-in screen since boot has never written one. Same treatment as a
+  // refusal: hide the broken image, keep the boxes, say why.
+  let noPicture = false;
+
+  function applyBlind(code, notice) {
+    body.classList.toggle('blind', !!code || noPicture);
+
+    // The picture is hidden but still holds the rectangle the boxes are laid
+    // out in, so it needs the device's shape even when it has no bytes — which
+    // is the case on a controller that has been on a sign-in screen since boot.
+    const img = shot();
+    if (img && frame.size && frame.size[0] && frame.size[1]) {
+      img.style.aspectRatio = code ? (frame.size[0] + ' / ' + frame.size[1]) : '';
+    }
+
+    const note = document.getElementById('blind-note');
+    if (note) {
+      const table = i18n.blocked || {};
+      note.textContent = code ? (table[code] || i18n.blockedOther || '')
+                              : (noPicture ? (i18n.blockedOther || '') : '');
+      // An empty banner is a box with nothing in it, which reads as a fault.
+      note.hidden = !note.textContent;
+    }
+
+    // The app's own words, verbatim, in whatever language the phone runs. Set
+    // as text rather than markup: this is the one string on the page that comes
+    // off the device, and it is never trusted as HTML.
+    const panel = document.getElementById('screen-notice');
+    const said = document.getElementById('screen-said');
+    if (panel && said) {
+      said.textContent = notice || '';
+      panel.hidden = !notice;
     }
   }
 
@@ -167,9 +217,12 @@
     const repainted = next.img !== frame.img;
     frame = next;
     const img = shot();
-    if (img && (moved || repainted)) {
+    // Only ever refetch a picture that exists. Asking for one while capture is
+    // refused re-serves the previous screen, which is the thing being fixed.
+    if (img && !frame.blocked && (moved || repainted)) {
       img.src = '/screen.jpg?f=' + encodeURIComponent(frame.img || frame.id);
     }
+    applyBlind(frame.blocked || '', frame.notice || '');
     draw();
   }
 
@@ -280,14 +333,26 @@
     if (!document.hidden && (!socket || socket.readyState > 1)) connect();
   });
 
+  function watchPicture(img) {
+    if (!img || img.dataset.watched) return;
+    img.dataset.watched = '1';
+    img.addEventListener('load', () => {
+      noPicture = false;
+      draw();
+    });
+    img.addEventListener('error', () => {
+      noPicture = true;
+      applyBlind(frame.blocked || '', frame.notice || '');
+      draw();
+    });
+  }
+
   window.addEventListener('resize', draw);
   document.addEventListener('DOMContentLoaded', () => {
-    const img = shot();
-    if (img) img.addEventListener('load', draw);
+    watchPicture(shot());
     wireForms(document);
   });
-  const img0 = shot();
-  if (img0) img0.addEventListener('load', draw);
+  watchPicture(shot());
   wireForms(document);
   connect();
 })();

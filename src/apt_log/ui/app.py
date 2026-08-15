@@ -269,7 +269,8 @@ def _read_json(path, fallback):
         return fallback
 
 
-EMPTY_FRAME = {"id": "", "img": "", "size": [0, 0], "elements": []}
+EMPTY_FRAME = {"id": "", "img": "", "size": [0, 0], "elements": [],
+               "blocked": "", "notice": ""}
 SLOW_EVERY = 10.0
 
 # From the SPS the device actually emits: profile_idc 0x64 (High), level 0x29

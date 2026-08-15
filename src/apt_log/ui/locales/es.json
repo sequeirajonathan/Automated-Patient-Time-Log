@@ -158,5 +158,12 @@
   "macro.step.finished": "Terminado.",
   "macro.started": "Iniciado. Mire la pantalla del teléfono abajo.",
   "macro.unknown": "Ese atajo no es uno que esta página ofrezca.",
-  "portal.offline": "Sin conexión con el controlador. Esta imagen está congelada y los toques están desactivados. Se reconectará solo; deslice hacia abajo para recargar si no lo hace."
+  "portal.offline": "Sin conexión con el controlador. Esta imagen está congelada y los toques están desactivados. Se reconectará solo; deslice hacia abajo para recargar si no lo hace.",
+  "phone.app_says": "La aplicación muestra este mensaje:",
+  "phone.blocked.other": "No hay imagen de esta pantalla. Los botones de abajo son los que hay en ella y siguen funcionando.",
+  "phone.blocked.no_focus": "El controlador no puede saber qué muestra el teléfono, así que no le muestra ninguna imagen.",
+  "phone.blocked.login_activity": "Esta es una pantalla de inicio de sesión, por eso no se muestra ninguna imagen. Los botones de abajo son los que hay en ella y siguen funcionando.",
+  "phone.blocked.password_field": "Hay un campo de contraseña en esta pantalla, por eso no se muestra ninguna imagen. Los botones de abajo son los que hay en ella y siguen funcionando.",
+  "phone.blocked.secure_screen": "La aplicación no permite tomar imágenes de esta pantalla. Los botones de abajo son los que hay en ella y siguen funcionando.",
+  "phone.blocked.capture_failed": "No se pudo tomar la imagen de esta pantalla. Los botones de abajo son los que hay en ella y siguen funcionando."
 }
