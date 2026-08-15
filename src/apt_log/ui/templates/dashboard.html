@@ -142,9 +142,10 @@
 </header>
 
 <main>
-  {% if s.paused %}
-    <div class="banner bad">{{ t('control.paused_notice') }}</div>
-  {% endif %}
+  {# Hidden rather than absent, so the live stream can reveal it without having
+     to build the element — and without owning a copy of the sentence. #}
+  <div class="banner bad" id="paused-notice" {% if not s.paused %}hidden{% endif %}>
+    {{ t('control.paused_notice') }}</div>
   {% if s.transport_mode == 'dev' %}
     <div class="banner">{{ t('gate.dev_transport') }}</div>
   {% endif %}
@@ -404,9 +405,17 @@
   </section>
 
   <section>
-    <form method="post" action="/control">
-      <input type="hidden" name="action" value="{{ 'resume' if s.paused else 'pause' }}">
-      <button type="submit">{{ t('control.resume') if s.paused else t('control.pause') }}</button>
+    {# Both labels ship, and the live stream picks which one is showing. It used
+       to render only the current one, so after a Pause the button still said
+       "Pause" and still posted `pause` — pressing it again paused a second time
+       instead of resuming, and there was no way back from that page load. #}
+    <form method="post" action="/control" id="control">
+      <input type="hidden" name="action" value="{{ 'resume' if s.paused else 'pause' }}"
+             data-paused="resume" data-running="pause">
+      <button type="submit"
+              data-paused="{{ t('control.resume') }}"
+              data-running="{{ t('control.pause') }}"
+      >{{ t('control.resume') if s.paused else t('control.pause') }}</button>
     </form>
   </section>
 </main>

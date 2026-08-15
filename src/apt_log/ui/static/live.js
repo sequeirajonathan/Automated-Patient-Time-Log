@@ -213,6 +213,27 @@
     }
   }
 
+  // Pause and Resume are one button whose meaning inverts, and the server was
+  // already pushing the state — nothing was listening. So after a Pause the
+  // button still read "Pause" and still posted `pause`, and pressing it again
+  // paused a second time. There was no way to resume without reloading, which
+  // is the one thing this page is supposed to have stopped needing.
+  //
+  // Both labels are rendered server-side and sit on the element as data
+  // attributes; this only chooses between them. The client still never owns a
+  // sentence.
+  function applyPaused(paused) {
+    const which = paused ? 'paused' : 'running';
+    for (const el of document.querySelectorAll('#control [data-paused]')) {
+      const value = el.dataset[which];
+      if (value === undefined) continue;
+      if (el.tagName === 'BUTTON') el.textContent = value;
+      else el.value = value;
+    }
+    const notice = document.getElementById('paused-notice');
+    if (notice) notice.hidden = !paused;
+  }
+
   function applyFrame(next) {
     const moved = next.id !== frame.id;
     const repainted = next.img !== frame.img;
@@ -291,6 +312,7 @@
           }
         }
       }
+      if (msg.paused !== undefined) applyPaused(!!msg.paused);
       if (msg.mirror) {
         // The server renders this line once at page load and it would otherwise
         // sit there ageing, which is worse than showing nothing: a stale

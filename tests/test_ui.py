@@ -597,3 +597,46 @@ class TestFormsDoNotNavigate:
         # Four device buttons, and pause/resume — which renders one form whose
         # value flips, not two.
         assert body.count('name="action"') == 5
+
+
+class TestPauseSurvivesItsOwnPress:
+    """One button whose meaning inverts, and nothing was inverting it.
+
+    The server had been pushing `paused` over the socket the whole time and no
+    client code listened. So after a Pause the button still read "Pause" and
+    still posted `pause`: pressing it again paused a second time, and there was
+    no way to resume without reloading the page — the one thing this page is
+    supposed to have stopped needing. Verified against the live controller,
+    which is how it was found.
+    """
+
+    def test_the_socket_carries_the_paused_state(self, client):
+        with client.websocket_connect("/ws") as ws:
+            seen = None
+            for _ in range(4):
+                msg = ws.receive_json()
+                if msg.get("type") == "state" and "paused" in msg:
+                    seen = msg["paused"]
+                    break
+        assert seen is not None
+
+    def test_both_labels_ship_so_the_client_never_writes_one(self, client):
+        """The rule the whole live stream is built on: a page that renders in
+        Spanish until it updates itself into English is worse than one that
+        never updates. So the server sends both words and the client picks."""
+        body = client.get("/").text
+        assert 'data-paused="Reanudar"' in body
+        assert 'data-running="Pausar"' in body
+
+    def test_the_notice_is_hidden_rather_than_absent(self, client):
+        """It has to be revealable without the client building the element,
+        which would mean the client owning the sentence."""
+        body = client.get("/").text
+        assert 'id="paused-notice"' in body
+        assert "El programa está en pausa" in body
+
+    def test_the_client_listens_for_it(self):
+        source = (Path(__file__).resolve().parents[1]
+                  / "src/apt_log/ui/static/live.js").read_text(encoding="utf-8")
+        assert "applyPaused" in source
+        assert "msg.paused" in source
