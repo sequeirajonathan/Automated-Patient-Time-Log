@@ -270,6 +270,20 @@
   .a-line.sub { font-size:13px; color:var(--muted); }
   .a-chev { position:absolute; right:0; top:50%; transform:translateY(-50%);
             width:8px; height:14px; color:hsl(240 6% 47% / .35); }
+  /* A keypad reads as one when its keys are centred, not listed. */
+  .a-row.a-keys { justify-content:center; gap:18px; }
+  .a-row.a-keys .a-btn.sm, .a-row.a-keys .a-icon { min-width:64px;
+              min-height:52px; font-size:20px; border-radius:16px; }
+  /* The app's own tab bar: evenly spread, labels only, no chevrons. */
+  .a-row.a-tabs { justify-content:space-around; gap:2px; padding:6px 4px; }
+  .a-tab { flex:1; border:none; background:none; cursor:pointer;
+           font-size:12.5px; font-weight:500; color:var(--muted);
+           padding:10px 2px; border-radius:12px; overflow:hidden;
+           text-overflow:ellipsis; white-space:nowrap;
+           transition:transform .3s var(--spring); }
+  .a-tab:active { transform:scale(.9); color:var(--tint);
+                  background:var(--tint-soft); transition-duration:.06s; }
+
   /* Counts ride in bubbles, the way every native list draws them. */
   .a-badge { position:absolute; right:16px; top:50%;
              transform:translateY(-50%); background:hsl(0 72% 51%);

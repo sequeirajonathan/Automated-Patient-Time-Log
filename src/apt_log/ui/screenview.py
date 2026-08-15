@@ -222,9 +222,65 @@ def build(doc: dict) -> dict | None:
             }
             bands = bands[1:]
 
-    rows = [{"items": band} for band in bands]
+    rows = []
+    for band in bands:
+        shape = _band_shape(band, h)
+        if shape.get("tabs"):
+            band = _fold_tab_captions(band)
+        rows.append({"items": band, **shape})
     return {"id": doc.get("id", ""), "nav": nav, "rows": rows,
             "notice": doc.get("notice", ""), "blocked": doc.get("blocked", "")}
+
+
+def _fold_tab_captions(band: list[dict]) -> list[dict]:
+    """Give each tab the caption sitting over it, and drop the strays.
+
+    A tab's label often escapes the centre-containment fold — it hangs a few
+    pixels outside its container's box. In a recognised tab bar the x-overlap
+    is authority enough.
+    """
+    tabs = [i for i in band if i.get("aim")]
+    for loose in band:
+        if loose.get("aim") or not loose.get("txt"):
+            continue
+        cx = (loose["b"][0] + loose["b"][2]) / 2
+        for tab in tabs:
+            if tab["b"][0] <= cx <= tab["b"][2] and not tab.get("txt"):
+                tab["txt"] = loose["txt"]
+                break
+    return tabs
+
+
+# The bottom strip of a screen, where an app keeps its own tab bar.
+TAB_BAND_TOP = 0.88
+
+
+def _band_shape(band: list[dict], height: int) -> dict:
+    """Row-level shapes learned from the flight recorder's first session.
+
+    A keypad (Mobile Caregiver+ asks for its PIN on one) is bands of small
+    digit buttons — left-aligned list rows made it usable but not a keypad;
+    centring is what makes it read as one. A tab bar (inMyTeam keeps one at
+    the bottom) is a band of equal containers hugging the screen's bottom
+    edge — as list cells it crammed four labels and four chevrons into one
+    row.
+    """
+    interactive = [i for i in band if i.get("aim")]
+    if not interactive:
+        return {}
+    if (len(interactive) == len(band) and len(band) >= 2
+            and all(i.get("small") and i["kind"] in ("button", "toggle",
+                                                     "image")
+                    for i in band)):
+        return {"keys": True}
+    # A couple of loose captions ride along in a real tab bar — their labels
+    # hang outside the containers they belong to. More than that is a list.
+    if (len(interactive) >= 3
+            and len(band) - len(interactive) <= 2
+            and all(i["kind"] in ("row", "image") for i in interactive)
+            and all(i["b"][3] >= height * TAB_BAND_TOP for i in interactive)):
+        return {"tabs": True}
+    return {}
 
 
 def _pair_segments(band: list[dict], width: int) -> None:

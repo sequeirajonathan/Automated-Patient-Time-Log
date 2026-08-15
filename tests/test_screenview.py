@@ -184,3 +184,50 @@ class TestLayoutIntelligence:
             statics=[st([600, 520, 710, 580], "Hoy")],
         ))
         assert m["rows"][0]["items"][0]["lines"] == ["Hoy"]
+
+
+class TestBandShapes:
+    """Row shapes learned from the first flight-recorder discovery session."""
+
+    def test_a_band_of_small_buttons_is_a_keypad_row(self):
+        """Mobile Caregiver+ asks for its PIN on a digit grid; left-aligned
+        list rows made it usable but not a keypad."""
+        m = screenview.build(doc(
+            elements=[el("", "Button", [60, 800, 200, 900], "1"),
+                      el("", "Button", [280, 800, 420, 900], "2"),
+                      el("", "Button", [500, 800, 640, 900], "3")],
+            statics=[],
+        ))
+        assert m["rows"][0].get("keys") is True
+
+    def test_a_bottom_band_of_containers_is_a_tab_bar(self):
+        """inMyTeam keeps its own tabs at the bottom; as list cells they
+        crammed four labels and four chevrons into one row."""
+        m = screenview.build(doc(
+            elements=[el("assigned", "FrameLayout", [0, 1450, 180, 1580]),
+                      el("open", "FrameLayout", [180, 1450, 360, 1580]),
+                      el("chat", "FrameLayout", [360, 1450, 540, 1580]),
+                      el("trips", "FrameLayout", [540, 1450, 720, 1580])],
+            statics=[st([20, 1470, 160, 1520], "Visits")],
+        ))
+        tabs = [r for r in m["rows"] if r.get("tabs")]
+        assert len(tabs) == 1
+        assert len(tabs[0]["items"]) == 4
+
+    def test_an_ordinary_pair_of_wide_buttons_is_neither(self):
+        m = screenview.build(doc(
+            elements=[el("ok", "Button", [40, 800, 340, 900], "Aceptar"),
+                      el("no", "Button", [380, 800, 680, 900], "Cancelar")],
+            statics=[],
+        ))
+        assert not m["rows"][0].get("keys")
+        assert not m["rows"][0].get("tabs")
+
+    def test_a_mid_screen_row_of_containers_is_not_a_tab_bar(self):
+        m = screenview.build(doc(
+            elements=[el("a", "FrameLayout", [0, 500, 240, 620]),
+                      el("b", "FrameLayout", [240, 500, 480, 620]),
+                      el("c", "FrameLayout", [480, 500, 720, 620])],
+            statics=[],
+        ))
+        assert not any(r.get("tabs") for r in m["rows"])
