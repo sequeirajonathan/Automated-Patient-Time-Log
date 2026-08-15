@@ -187,5 +187,6 @@
   "sign.no_canvas": "Esta pantalla no tiene recuadro de firma. Abra primero la pantalla de firma de la aplicación y luego firme aquí.",
   "sign.ambiguous": "El controlador no pudo distinguir qué parte de esta pantalla es el recuadro de firma, así que no dibujó nada.",
   "sign.wrong_app": "El teléfono no está mostrando una de las aplicaciones de cuidado, así que no se dibujó nada.",
-  "sign.replay_failed": "El dibujo no terminó. Mire la pantalla del teléfono; si quedó a medias, bórrelo en la aplicación y envíe de nuevo."
+  "sign.replay_failed": "El dibujo no terminó. Mire la pantalla del teléfono; si quedó a medias, bórrelo en la aplicación y envíe de nuevo.",
+  "papp.live": "En vivo"
 }

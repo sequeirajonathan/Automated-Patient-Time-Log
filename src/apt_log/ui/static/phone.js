@@ -82,32 +82,39 @@
     }
   }
 
+  let lastApp = '';
+
   function applyScreen(meta, html) {
     if (html !== undefined) {
       const root = wrap();
       if (root) {
+        const previous = frameId;
         root.innerHTML = html;
         bindWire();
         const wire = root.querySelector('.wire');
         frameId = wire ? (wire.dataset.frame || '') : '';
-        // Soft entrance on every new screen — restart the animation.
+        // Entrance only when the screen actually changed — a checkbox flip
+        // re-renders the list and must not re-run the animation under her.
         root.classList.remove('enter');
-        void root.offsetWidth;
-        root.classList.add('enter');
+        if (frameId !== previous) {
+          void root.offsetWidth;
+          root.classList.add('enter');
+        }
       }
       tapping(false);
       unbusy();
     }
     if (!meta) return;
 
-    // The screen names itself with the app's own nav-bar title, or stays
-    // blank. The classifier's fallback sentences are sentences — "It is on a
-    // screen it did not recognise" squeezed into a title slot is exactly the
+    // The large title: the app's own nav-bar title, else the app she opened,
+    // else the portal's name. Never one of the classifier's sentences — "It
+    // is on a screen it did not recognise" in a title slot is exactly the
     // alarm this view exists not to raise.
     const where = document.getElementById('where');
     if (where) {
       const own = wrap() && wrap().querySelector('.a-title');
-      where.textContent = (own && own.textContent.trim()) || '';
+      where.textContent = (own && own.textContent.trim())
+        || lastApp || i18n.appTitle || '';
     }
 
     // No photograph of this screen: a quiet lock in the toolbar, whose
@@ -148,6 +155,7 @@
     const name = tile.dataset.macro;
     if (!name) return;
     awaitingMacro = true;
+    lastApp = tile.dataset.name || '';
     view('screen');
     busy((i18n.opening || '').replace('{app}', tile.dataset.name || ''));
     fetch('/macro', {
@@ -294,6 +302,12 @@
       body.classList.remove('offline');
     });
 
+    // The splash owns the moment until the first real state arrives; the
+    // failsafe below lifts it regardless, because a launch screen that can
+    // wedge is worse than none.
+    const arrived = () => body.classList.add('ready');
+    socket.addEventListener('message', arrived, { once: true });
+
     socket.addEventListener('message', (ev) => {
       if (ev.data instanceof ArrayBuffer) return;   // video is the other view's
       let msg;
@@ -406,9 +420,19 @@
       });
     }
 
+    // iOS large-title convention: the header's hairline appears only once
+    // content has scrolled beneath it.
+    const stage = document.getElementById('stage');
+    if (stage) stage.addEventListener('scroll', () => {
+      body.classList.toggle('scrolled', stage.scrollTop > 8);
+    }, { passive: true });
+
     bindWire();
     wireForms(document);
   });
+
+  // Failsafe for the splash: 2.8s and it lifts no matter what.
+  setTimeout(() => body.classList.add('ready'), 2800);
 
   document.addEventListener('visibilitychange', () => {
     // iOS suspends a backgrounded tab and its socket with it.

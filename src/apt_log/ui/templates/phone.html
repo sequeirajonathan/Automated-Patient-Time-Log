@@ -1,15 +1,18 @@
 <!doctype html>
-{# The full-screen phone view. She bookmarks this to her home screen and it
-   opens like an app: a launcher of the four agency apps, then the phone's
-   current screen reflowed into a native mobile layout (ui/screenview.py).
+{# The full-screen phone view, built to the standard of the owner's own iOS-web
+   app (budget-dashboard) and borrowing its specific techniques:
 
-   Design intent, learned from the first version: no reproduction of Android
-   geometry, no warning banners for ordinary states. The sketch is the primary
-   view, so "no photograph of this screen" is a quiet lock in the toolbar, not
-   an alarm. Screens change behind a soft transition; the skeleton shimmer
-   only appears when a tap is in flight.
+   - a locked body with one internal scroll surface, so iOS cannot rubber-band
+     the chrome; touch-action:manipulation so taps fire without the double-tap
+     wait; 16px inputs so focus never zooms the page
+   - iOS systemGroupedBackground tokens, light and dark, with cards separated
+     by depth rather than borders in the dark scheme
+   - a launch splash that owns the moment while the socket connects
+   - a large-title header whose hairline appears only once content scrolls
+   - a floating pill tab bar, inset from the edges, riding the safe area
+   - one spring curve for everything: cubic-bezier(.22,1,.36,1)
 
-   A skin over the same machinery as the dashboard — same socket, same tap
+   Same machinery as the dashboard underneath — same socket, same tap
    verification, same macro allow-list. No service worker on purpose: offline
    caching would keep copies of what the phone's screen said, and this page is
    a window, not a document. #}
@@ -21,20 +24,88 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="{{ t('app.title') }}">
-<meta name="theme-color" content="#f2f2f7">
+<meta name="theme-color" content="#f1f3f7">
 <link rel="manifest" href="/static/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/static/icons/icon-180.png">
 <title>{{ t('app.title') }}</title>
 <style>
-  :root { --tint:#0a63c9; --ink:#000; --muted:#8a8a8e; --bg:#f2f2f7;
-          --card:#fff; --line:rgba(60,60,67,.29); --ok:#34c759;
-          --bad:#ff3b30; --spring: cubic-bezier(.32,.72,0,1); }
-  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-  html, body { height:100%; }
+  :root {
+    --bg: hsl(220 23% 96%);
+    --card: hsl(0 0% 100%);
+    --ink: hsl(222 47% 11%);
+    --muted: hsl(215 16% 47%);
+    --line: hsl(214 32% 91%);
+    --tint: hsl(243 75% 59%);
+    --tint-soft: hsl(243 75% 59% / .1);
+    --ok: hsl(142 71% 40%);
+    --bad: hsl(0 72% 51%);
+    --track: hsl(240 6% 47% / .12);
+    --chrome: hsl(220 23% 96% / .85);
+    --shadow-card: 0 1px 2px 0 rgb(0 0 0 / .04), 0 8px 24px -12px rgb(0 0 0 / .12);
+    --shadow-pill: 0 8px 30px -8px rgb(0 0 0 / .35);
+    --spring: cubic-bezier(.22, 1, .36, 1);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: hsl(222 47% 4.5%);
+      --card: hsl(222 40% 11%);
+      --ink: hsl(210 40% 98%);
+      --muted: hsl(215 20% 65%);
+      --line: hsl(217 33% 19%);
+      --tint: hsl(243 75% 66%);
+      --tint-soft: hsl(243 75% 66% / .14);
+      --ok: hsl(142 69% 55%);
+      --bad: hsl(0 72% 62%);
+      --track: hsl(240 6% 60% / .18);
+      --chrome: hsl(222 47% 4.5% / .85);
+      --shadow-card: 0 1px 2px 0 rgb(0 0 0 / .3), 0 8px 24px -12px rgb(0 0 0 / .5);
+    }
+  }
+
+  * { box-sizing:border-box; border-color:var(--line);
+      -webkit-tap-highlight-color:transparent; }
+  html, body { height:100dvh; }
   body { margin:0; background:var(--bg); color:var(--ink);
-         font:17px/1.35 -apple-system, system-ui, "SF Pro Text", Roboto, sans-serif;
-         overscroll-behavior:none; }
+         font:17px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text",
+              system-ui, Roboto, sans-serif;
+         -webkit-font-smoothing:antialiased;
+         overflow:hidden; overscroll-behavior:none;
+         touch-action:manipulation; }
+  /* iOS zooms the page on focusing any input under 16px. Never. */
+  input, select, textarea { font-size:16px !important; }
   button { font:inherit; color:inherit; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration:.01ms !important;
+                             transition-duration:.01ms !important; }
+  }
+
+  /* --------------------------------------------------------------- splash */
+  #splash { position:fixed; inset:0; z-index:100; display:flex;
+            align-items:center; justify-content:center; background:var(--bg);
+            transition:opacity .45s ease-out; pointer-events:none; }
+  body.ready #splash { opacity:0; visibility:hidden;
+                       transition:opacity .45s ease-out, visibility 0s .5s; }
+  #splash .glow { position:absolute; width:280px; height:280px;
+                  border-radius:50%; background:var(--tint-soft);
+                  filter:blur(70px); }
+  #splash .mark { position:relative; width:88px; height:88px;
+                  border-radius:26px; display:flex; align-items:center;
+                  justify-content:center; color:#fff;
+                  background:linear-gradient(135deg, hsl(243 75% 58%),
+                             hsl(263 70% 55%) 55%, hsl(280 65% 52%));
+                  box-shadow:0 0 0 1px hsl(243 75% 59% / .25),
+                             0 12px 40px -12px hsl(243 75% 59% / .35);
+                  animation:splash-mark .6s var(--spring) both; }
+  #splash .ring { position:absolute; inset:0; border-radius:26px;
+                  border:2px solid hsl(243 75% 59% / .4);
+                  animation:splash-ring 1.8s ease-out infinite; }
+  #splash .ring.late { animation-delay:.6s; }
+  #splash svg { width:44px; height:44px; }
+  @keyframes splash-mark { from { opacity:0; transform:scale(.82); }
+                           to { opacity:1; transform:scale(1); } }
+  @keyframes splash-ring { 0% { opacity:.5; transform:scale(.72); }
+                           100% { opacity:0; transform:scale(2.1); } }
 
   .view { position:fixed; inset:0; display:flex; flex-direction:column;
           transition: transform .38s var(--spring), opacity .3s ease;
@@ -42,28 +113,33 @@
 
   /* ------------------------------------------------------------- launcher */
   #launcher { background:
-      radial-gradient(120% 90% at 20% 0%, #274b9f 0%, #17223f 55%, #0d1220 100%);
-      color:#fff; padding: calc(54px + env(safe-area-inset-top)) 26px
-                          calc(20px + env(safe-area-inset-bottom)); }
-  #launcher time { font-size:44px; font-weight:275; letter-spacing:.01em;
+      radial-gradient(120% 90% at 20% 0%, #2b3f86 0%, #161e3a 55%, #0b0f1d 100%);
+      color:#fff; padding: calc(52px + env(safe-area-inset-top)) 28px
+                          calc(22px + env(safe-area-inset-bottom)); }
+  #launcher time { font-size:46px; font-weight:250; letter-spacing:.01em;
                    display:block; text-align:center; }
-  #launcher .date { text-align:center; color:rgba(255,255,255,.75);
-                    font-size:15px; margin-top:2px; }
+  #launcher .date { text-align:center; color:rgba(255,255,255,.72);
+                    font-size:14px; font-weight:500; margin-top:2px; }
   .springboard { display:grid; grid-template-columns:repeat(2, 1fr);
-                 gap:26px 12px; margin-top:44px; justify-items:center; }
+                 gap:28px 12px; margin-top:46px; justify-items:center; }
   .tile { border:none; background:none; padding:0; cursor:pointer;
-          display:flex; flex-direction:column; align-items:center; gap:8px;
+          display:flex; flex-direction:column; align-items:center; gap:9px;
           color:#fff; width:100%;
           transition: transform .22s var(--spring); }
-  .tile:active { transform:scale(.9); }
-  .tile .mark { width:64px; height:64px; border-radius:15px;
+  .tile:active { transform:scale(.88); }
+  .tile .mark { width:66px; height:66px; border-radius:16px;
                 display:flex; align-items:center; justify-content:center;
-                font-weight:700; font-size:20px; color:#fff;
-                box-shadow:0 6px 18px rgba(0,0,0,.35); }
-  .tile .name { font-size:12.5px; font-weight:500;
-                color:rgba(255,255,255,.92); text-align:center; }
+                font-weight:700; font-size:20px; color:#fff; position:relative;
+                overflow:hidden;
+                box-shadow:0 10px 24px -8px rgb(0 0 0 / .55); }
+  /* The gradient every real app icon has and a flat swatch does not. */
+  .tile .mark::after { content:""; position:absolute; inset:0;
+      background:linear-gradient(160deg, rgba(255,255,255,.28), transparent 42%,
+                 rgba(0,0,0,.18)); }
+  .tile .name { font-size:12px; font-weight:500; letter-spacing:.01em;
+                color:rgba(255,255,255,.95); text-align:center; }
   #launcher footer { margin-top:auto; text-align:center; }
-  #launcher footer a { color:rgba(255,255,255,.55); font-size:13px;
+  #launcher footer a { color:rgba(255,255,255,.5); font-size:13px;
                        text-decoration:none; }
 
   /* ---------------------------------------------------------- screen view */
@@ -72,201 +148,251 @@
   body[data-view="screen"] #launcher { transform:scale(.92); opacity:0;
                                        pointer-events:none; }
 
-  /* The portal's own bar: iOS navigation anatomy, text buttons, no bubbles. */
-  .p-nav { display:flex; align-items:center; gap:4px; min-height:48px;
-           padding: calc(6px + env(safe-area-inset-top)) 10px 6px;
-           background:rgba(242,242,247,.86); backdrop-filter:blur(18px);
-           -webkit-backdrop-filter:blur(18px); position:relative; z-index:5; }
-  .p-nav button { border:none; background:none; color:var(--tint);
-                  padding:8px 8px; cursor:pointer; font-size:17px;
-                  display:flex; align-items:center; }
-  .p-nav button:active { opacity:.4; }
-  .p-nav .chev { width:12px; height:20px; margin-right:1px; }
-  .p-nav .title { flex:1; text-align:center; font-weight:600; font-size:16px;
-                  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-                  color:var(--ink); display:flex; align-items:center;
-                  justify-content:center; gap:6px; }
-  .p-nav .lock { display:none; width:14px; height:14px; color:var(--muted); }
-  body.blocked .p-nav .lock { display:inline-block; }
-  .p-nav .spin { display:none; width:16px; height:16px; border-radius:50%;
-                 border:2px solid rgba(10,99,201,.25);
-                 border-top-color:var(--tint);
-                 animation:spin .7s linear infinite; }
-  body.tapping .p-nav .spin { display:inline-block; }
+  /* iOS large-title header: action row, then the title; the hairline appears
+     only once content has scrolled beneath it. */
+  .hdr { padding: calc(6px + env(safe-area-inset-top)) 16px 8px;
+         background:var(--chrome); backdrop-filter:blur(18px);
+         -webkit-backdrop-filter:blur(18px); z-index:5; position:relative;
+         transition:box-shadow .2s ease; }
+  body.scrolled .hdr { box-shadow:0 1px 0 var(--line); }
+  .hdr-row { display:flex; align-items:center; min-height:34px; }
+  .hdr-row button { border:none; background:none; color:var(--tint);
+                    padding:6px 8px; cursor:pointer; font-size:17px;
+                    display:flex; align-items:center; gap:1px; }
+  .hdr-row button:active { opacity:.4; }
+  .hdr-row .chev { width:12px; height:20px; }
+  .hdr-row .spacer { flex:1; }
+  .hdr-row svg.tool { width:21px; height:21px; }
+  .hdr-title { display:flex; align-items:center; gap:8px; margin-top:2px; }
+  .hdr-title h1 { font-size:28px; font-weight:700; letter-spacing:-.02em;
+                  line-height:1.15; margin:0; overflow:hidden;
+                  text-overflow:ellipsis; white-space:nowrap; }
+  .hdr-title .lock { display:none; width:16px; height:16px;
+                     color:var(--muted); flex:none; }
+  body.blocked .hdr-title .lock { display:block; }
+  .hdr-sub { display:flex; align-items:center; gap:6px; margin-top:2px;
+             font-size:13px; font-weight:500; color:var(--muted); }
+  .hdr-sub .dot { position:relative; width:7px; height:7px; flex:none; }
+  .hdr-sub .dot::before { content:""; position:absolute; inset:0;
+      border-radius:50%; background:var(--ok); }
+  .hdr-sub .dot::after { content:""; position:absolute; inset:0;
+      border-radius:50%; background:var(--ok); opacity:.6;
+      animation:ping 1.8s ease-out infinite; }
+  @keyframes ping { 75%, 100% { transform:scale(2.4); opacity:0; } }
+  body.offline .hdr-sub .dot::before,
+  body.offline .hdr-sub .dot::after { background:var(--bad); }
+  .hdr-sub .spin { display:none; width:14px; height:14px; border-radius:50%;
+                   border:2px solid var(--tint-soft);
+                   border-top-color:var(--tint);
+                   animation:spin .7s linear infinite; }
+  body.tapping .hdr-sub .spin { display:inline-block; }
   @keyframes spin { to { transform:rotate(360deg); } }
 
   #offline-note { display:none; padding:8px 16px; font-size:13px;
-                  color:#8e4b10; background:#fdf3e3; }
+                  color:var(--bad); background:var(--card); }
   body.offline #offline-note { display:block; }
   body.offline #stage { opacity:.5; pointer-events:none; }
 
+  /* The one scroll surface. The body is locked, so nothing rubber-bands. */
   #stage { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden;
            -webkit-overflow-scrolling:touch; position:relative; }
   #screenwrap { min-height:100%; }
 
   /* ----------------------------------------------- the reflowed app screen */
-  .wire { padding:0 0 28px; }
-  /* The app's own navigation bar, rendered as one. */
-  .a-nav { display:flex; align-items:center; min-height:46px; gap:4px;
-           padding:4px 8px; background:rgba(255,255,255,.92);
-           border-bottom:.5px solid var(--line); position:sticky; top:0;
-           z-index:3; backdrop-filter:blur(14px);
-           -webkit-backdrop-filter:blur(14px); }
+  .wire { padding:2px 0 24px; }
+  .a-nav { display:flex; align-items:center; min-height:44px; gap:4px;
+           padding:2px 8px; margin-bottom:2px; }
   .a-back { border:none; background:none; color:var(--tint); cursor:pointer;
             display:flex; align-items:center; font-size:17px; padding:8px 6px; }
   .a-back svg { width:12px; height:20px; }
   .a-back:active { opacity:.4; }
-  .a-title { flex:1; text-align:center; font-weight:600; font-size:16.5px;
+  .a-title { flex:1; text-align:center; font-weight:600; font-size:16px;
              overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .a-trail { display:flex; gap:2px; }
   .a-navbtn { border:none; background:none; color:var(--tint); font-size:16px;
               padding:8px 8px; cursor:pointer; }
   .a-navbtn:active { opacity:.4; }
 
-  /* The app said something. Calm card, native alert anatomy, no colour. */
-  .a-alert { margin:14px 16px 0; padding:14px 16px; border-radius:14px;
-             background:var(--card); box-shadow:0 1px 2px rgba(0,0,0,.06);
+  .a-alert { margin:12px 16px 0; padding:14px 16px; border-radius:16px;
+             background:var(--card); box-shadow:var(--shadow-card);
              text-align:center; font-size:15.5px; }
 
-  .a-list { padding:10px 16px 0; }
+  .a-list { padding:8px 16px 0; }
   .a-row { display:flex; align-items:center; gap:10px; background:var(--card);
            padding:11px 14px; min-height:46px; position:relative; }
-  /* Inset-grouped card shape: first and last rows round, hairlines between. */
-  .a-row:first-child { border-radius:11px 11px 0 0; margin-top:0; }
+  .a-row:first-child { border-radius:16px 16px 0 0; }
   .a-row + .a-row { border-top:.5px solid var(--line); }
-  .a-row:last-child { border-radius:0 0 11px 11px; margin-bottom:14px; }
-  .a-row:first-child:last-child { border-radius:11px; }
+  .a-row:last-child { border-radius:0 0 16px 16px; margin-bottom:14px;
+                      box-shadow:var(--shadow-card); }
+  .a-row:first-child:last-child { border-radius:16px; }
+
+  /* Entrance: his fade-up, staggered a breath per row — and only when the
+     screen actually changed, so a checkbox flip does not re-run it. */
+  #screenwrap.enter .a-row, #screenwrap.enter .a-alert,
+  #screenwrap.enter .a-nav {
+    animation:fade-up .4s var(--spring) both; }
+  #screenwrap.enter .a-row:nth-child(2) { animation-delay:.03s; }
+  #screenwrap.enter .a-row:nth-child(3) { animation-delay:.06s; }
+  #screenwrap.enter .a-row:nth-child(4) { animation-delay:.09s; }
+  #screenwrap.enter .a-row:nth-child(5) { animation-delay:.12s; }
+  #screenwrap.enter .a-row:nth-child(n+6) { animation-delay:.15s; }
+  @keyframes fade-up { from { opacity:0; transform:translateY(8px); }
+                       to { opacity:1; transform:translateY(0); } }
 
   .a-label { color:var(--ink); font-size:16.5px; min-width:0;
              overflow-wrap:anywhere; }
-  .a-row.n1 > .a-label:only-child { color:var(--muted); font-size:14px;
-             text-transform:none; }
+  .a-row.n1 > .a-label:only-child { color:var(--muted); font-size:13px;
+             font-weight:600; text-transform:uppercase;
+             letter-spacing:.05em; }
+  .a-row:has(> .a-label:only-child) { background:none; box-shadow:none;
+             border:none; padding:4px 2px 6px; min-height:0; }
   .a-label:first-child { flex:1; }
 
   .a-cell { flex:1; border:none; background:none; text-align:left; padding:0;
             cursor:pointer; display:flex; flex-direction:column; gap:2px;
-            min-width:0; position:relative; padding-right:20px; }
-  .a-cell:active { opacity:.55; }
+            min-width:0; position:relative; padding-right:22px; }
+  .a-cell:active { opacity:.5; }
   .a-line { font-size:16.5px; overflow-wrap:anywhere; }
-  .a-line.sub { font-size:13.5px; color:var(--muted); }
+  .a-line.sub { font-size:13px; color:var(--muted); }
   .a-chev { position:absolute; right:0; top:50%; transform:translateY(-50%);
-            color:rgba(60,60,67,.3); font-size:21px; font-weight:600; }
+            width:8px; height:14px; color:hsl(240 6% 47% / .35); }
 
-  .a-btn { flex:1; border:none; border-radius:11px; background:var(--tint);
+  .a-btn { flex:1; border:none; border-radius:13px; background:var(--tint);
            color:#fff; font-weight:600; font-size:16.5px; padding:13px 16px;
-           cursor:pointer; min-height:48px; }
-  .a-btn:active { filter:brightness(.85); }
-  /* Utilities — badges, hamburgers, info dots. Quiet capsules, never CTAs. */
-  .a-btn.sm { flex:none; min-width:46px; padding:10px 13px;
-              background:rgba(118,118,128,.12); color:var(--tint); }
+           cursor:pointer; min-height:48px;
+           transition:transform .15s var(--spring), filter .15s ease; }
+  .a-btn:active { transform:scale(.97); filter:brightness(.88); }
+  .a-btn.sm { flex:none; min-width:44px; padding:9px 13px; min-height:38px;
+              background:var(--track); color:var(--tint); font-size:15px; }
 
-  .a-field { flex:1; border:none; border-radius:9px;
-             background:rgba(118,118,128,.12); color:var(--ink);
-             text-align:left; padding:12px 14px; min-height:44px;
-             cursor:text; font-size:16.5px; }
+  .a-field { flex:1; border:none; border-radius:11px; background:var(--track);
+             color:var(--ink); text-align:left; padding:12px 14px;
+             min-height:44px; cursor:text; font-size:16.5px; }
   .a-field.focus { outline:2px solid var(--tint); }
 
-  .a-seg { display:flex; border-radius:8px; overflow:hidden;
-           border:1px solid var(--tint); margin-left:auto; flex:none; }
-  .a-segbtn { border:none; background:var(--card); color:var(--tint);
-              min-width:52px; min-height:38px; padding:6px 12px;
-              cursor:pointer; font-size:16px; }
-  .a-segbtn + .a-segbtn { border-left:1px solid var(--tint); }
-  .a-segbtn:active, .a-segbtn.on { background:var(--tint); color:#fff; }
+  /* iOS segmented anatomy: grey track, the chosen part raised on a card. */
+  .a-seg { display:flex; border-radius:9px; background:var(--track);
+           padding:2px; margin-left:auto; flex:none; gap:2px; }
+  .a-segbtn { border:none; border-radius:7px; background:transparent;
+              color:var(--ink); min-width:46px; min-height:34px;
+              padding:5px 12px; cursor:pointer; font-size:15.5px;
+              transition:background .15s ease; }
+  .a-segbtn:active { background:hsl(240 6% 47% / .1); }
+  .a-segbtn.on { background:var(--card); color:var(--tint); font-weight:600;
+                 box-shadow:0 1px 4px rgb(0 0 0 / .12); }
 
   .a-switch { flex:none; margin-left:auto; width:51px; height:31px;
-              border:none; border-radius:999px; background:rgba(120,120,128,.32);
+              border:none; border-radius:999px; background:var(--track);
               padding:2px; display:flex; justify-content:flex-start;
               cursor:pointer; transition:background .2s ease; }
   .a-switch.on { background:var(--ok); justify-content:flex-end; }
   .a-switch .knob { width:27px; height:27px; border-radius:50%; background:#fff;
-                    box-shadow:0 2px 5px rgba(0,0,0,.25); }
+                    box-shadow:0 2px 5px rgb(0 0 0 / .25); }
 
-  .a-icon { flex:none; width:40px; height:40px; border:none; border-radius:10px;
-            background:rgba(118,118,128,.12); color:var(--tint);
-            cursor:pointer; font-size:17px; }
+  .a-icon { flex:none; width:38px; height:38px; border:none; border-radius:11px;
+            background:var(--track); color:var(--tint); cursor:pointer;
+            font-size:16px; }
   .a-icon:active { opacity:.5; }
   .a-link { border:none; background:none; color:var(--tint); cursor:pointer;
             text-align:left; padding:0; font-size:16.5px; }
   .a-link:active { opacity:.4; }
 
-  /* -------------------------------------------- transitions and skeletons */
-  #screenwrap.enter { animation:enter .3s var(--spring); }
-  @keyframes enter {
-    from { opacity:.35; transform:translateX(12px); }
-    to   { opacity:1; transform:none; } }
-  /* A tap is in flight: the current screen dims a touch and shimmers. No
-     spinner cards, no sentences — the state is visible, not alarming. */
+  /* A tap is in flight: dim and shimmer. A state, not an event. */
   body.tapping #screenwrap { opacity:.6; }
   body.tapping #stage::after { content:""; position:absolute; inset:0;
       background:linear-gradient(100deg, transparent 30%,
-                 rgba(255,255,255,.55) 50%, transparent 70%);
+                 hsl(0 0% 100% / .5) 50%, transparent 70%);
       background-size:220% 100%; animation:shimmer 1.1s ease infinite; }
+  @media (prefers-color-scheme: dark) {
+    body.tapping #stage::after {
+      background:linear-gradient(100deg, transparent 30%,
+                 hsl(0 0% 100% / .08) 50%, transparent 70%);
+      background-size:220% 100%; } }
   @keyframes shimmer { from { background-position:180% 0; }
                        to { background-position:-40% 0; } }
 
-  /* The photograph, one toggle away. */
-  #peek { position:absolute; inset:0; width:100%; height:auto; display:none;
+  #peek { position:absolute; inset:0; width:100%; height:100%; display:none;
           z-index:4; background:#000; object-fit:contain; }
   body.peeking #peek { display:block; }
 
-  /* Full overlay reserved for macros and signature replay — journeys, not
-     taps. */
   #busy { position:absolute; inset:0; z-index:6; display:none;
-          background:rgba(242,242,247,.82); backdrop-filter:blur(4px);
+          background:var(--chrome); backdrop-filter:blur(6px);
+          -webkit-backdrop-filter:blur(6px);
           flex-direction:column; align-items:center; justify-content:center;
           gap:14px; text-align:center; padding:20px; }
   body.busy #busy { display:flex; }
   .spinner { width:30px; height:30px; border-radius:50%;
-             border:3px solid rgba(10,99,201,.2);
+             border:3px solid var(--tint-soft);
              border-top-color:var(--tint); animation:spin .8s linear infinite; }
   #busy p { margin:0; color:var(--muted); font-size:15px; }
 
-  /* --------------------------------------------------------------- navbar */
-  .navbar { display:flex; justify-content:space-around; align-items:center;
-            padding:6px 18px calc(8px + env(safe-area-inset-bottom));
-            background:rgba(242,242,247,.86); backdrop-filter:blur(18px);
-            -webkit-backdrop-filter:blur(18px);
-            border-top:.5px solid var(--line); }
-  .navbar button { border:none; background:none; padding:10px 14px;
-                   cursor:pointer; color:var(--ink); border-radius:14px;
-                   transition: transform .15s var(--spring); }
-  .navbar button:active { transform:scale(.8); color:var(--tint); }
+  /* -------------------------------------- floating pill tab bar (his) */
+  .navbar { position:relative; z-index:7; pointer-events:none;
+            padding:0 12px calc(env(safe-area-inset-bottom) + 10px);
+            margin-top:-2px; }
+  .navbar .pill { pointer-events:auto; display:flex; align-items:stretch;
+                  gap:2px; border-radius:28px; border:.5px solid var(--line);
+                  background:var(--card); padding:6px;
+                  box-shadow:var(--shadow-pill); max-width:420px;
+                  margin:0 auto; }
+  .navbar button { flex:1; display:flex; flex-direction:column;
+                   align-items:center; gap:3px; border:none; background:none;
+                   border-radius:22px; padding:8px 0 6px; cursor:pointer;
+                   color:var(--muted);
+                   transition:background .15s ease, color .15s ease,
+                              transform .15s var(--spring); }
+  .navbar button:active { transform:scale(.92); background:var(--tint-soft);
+                          color:var(--tint); }
   .navbar svg { width:22px; height:22px; display:block; }
+  .navbar span { font-size:10px; font-weight:500; letter-spacing:-.01em;
+                 line-height:1; }
 
   /* ---------------------------------------------------------------- sheets */
   .sheet { position:fixed; left:0; right:0; bottom:0; z-index:8;
-           background:var(--card); border-radius:14px 14px 0 0; max-height:80%;
-           overflow:auto; box-shadow:0 -10px 40px rgba(0,0,0,.22);
+           background:var(--card); border-radius:20px 20px 0 0; max-height:80%;
+           overflow:auto; box-shadow:0 -10px 40px rgb(0 0 0 / .25);
            transform:translateY(105%); transition:transform .42s var(--spring);
            padding:10px 16px calc(18px + env(safe-area-inset-bottom)); }
   .sheet::before { content:""; display:block; width:36px; height:5px;
-                   border-radius:3px; background:rgba(60,60,67,.25);
+                   border-radius:3px; background:hsl(240 6% 47% / .25);
                    margin:2px auto 12px; }
   body.asking #sheet { transform:translateY(0); }
   body.signing #signsheet { transform:translateY(0); }
 
-  #signpad { width:100%; aspect-ratio:2.2/1; display:block; border-radius:12px;
-             border:1.5px dashed var(--line); background:#fbfbfd;
+  #signpad { width:100%; aspect-ratio:2.2/1; display:block; border-radius:14px;
+             border:1.5px dashed var(--line); background:var(--bg);
              touch-action:none; }
   .padrow { display:flex; gap:10px; margin-top:12px; }
-  .padrow button { flex:1; padding:12px; border-radius:11px;
-                   border:none; background:rgba(118,118,128,.12);
-                   cursor:pointer; font-size:16px; }
+  .padrow button { flex:1; padding:12px; border-radius:13px;
+                   border:none; background:var(--track);
+                   cursor:pointer; font-size:16px;
+                   transition:transform .15s var(--spring); }
   .padrow .primary { background:var(--tint); color:#fff; font-weight:600; }
-  .padrow button:active { opacity:.6; }
+  .padrow button:active { transform:scale(.96); opacity:.75; }
 
-  #toast { position:fixed; left:50%; bottom:calc(92px +
+  #toast { position:fixed; left:50%; bottom:calc(96px +
            env(safe-area-inset-bottom)); transform:translateX(-50%)
-           translateY(16px); z-index:9; background:rgba(28,28,30,.94);
-           color:#fff; padding:11px 18px; border-radius:14px; font-size:14.5px;
+           translateY(16px); z-index:9; background:hsl(222 20% 14% / .95);
+           color:#fff; padding:11px 18px; border-radius:16px; font-size:14.5px;
            opacity:0; transition:.28s var(--spring); pointer-events:none;
-           max-width:86vw; text-align:center; }
+           max-width:86vw; text-align:center;
+           box-shadow:0 8px 30px -8px rgb(0 0 0 / .4); }
   body.toasting #toast { opacity:1; transform:translateX(-50%); }
   .muted { color:var(--muted); }
 </style>
 </head>
 <body data-view="launcher" data-boot="{{ boot }}">
+
+{# Launch screen: paints with the first HTML, owns the moment while the socket
+   connects, then fades like an iOS launch image. #}
+<div id="splash" aria-hidden="true">
+  <div class="glow"></div>
+  <div class="mark">
+    <span class="ring"></span><span class="ring late"></span>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+      <circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>
+  </div>
+</div>
 
 <div class="view" id="launcher">
   <time id="clock"></time>
@@ -284,41 +410,56 @@
 </div>
 
 <div class="view" id="screenview">
-  <div class="p-nav">
-    <button id="btn-apps">
-      <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-           stroke-width="2.4"><path d="M15 5 L8 12 L15 19"/></svg>
-      {{ t('papp.apps') }}</button>
-    <span class="title">
+  <header class="hdr">
+    <div class="hdr-row">
+      <button id="btn-apps">
+        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.4"><path d="M15 5 L8 12 L15 19"/></svg>
+        {{ t('papp.apps') }}</button>
+      <span class="spacer"></span>
+      <button id="btn-sign" aria-label="{{ t('sign.button') }}">
+        <svg class="tool" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.9"><path d="M4 20c1.5-.5 2.5-1 3.5-2L19 6.5a2.1 2.1 0 0 0-3-3L4.5 15c-1 1-1.5 2-2 3.5z"/><path d="M13.5 6.5l3 3"/></svg>
+      </button>
+      <button id="btn-peek" aria-label="{{ t('papp.peek') }}">
+        <svg class="tool" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.9"><circle cx="12" cy="12" r="3.2"/><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/></svg>
+      </button>
+    </div>
+    <div class="hdr-title">
+      <h1 id="where">{{ t('app.title') }}</h1>
       <svg class="lock" viewBox="0 0 24 24" fill="none" stroke="currentColor"
            stroke-width="2"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
-      <span id="where"></span>
+    </div>
+    <div class="hdr-sub">
+      <span class="dot"></span><span id="live-label">{{ t('papp.live') }}</span>
       <span class="spin"></span>
-    </span>
-    <button id="btn-sign">{{ t('sign.button') }}</button>
-    <button id="btn-peek" aria-label="{{ t('papp.peek') }}">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
-           stroke-width="2" style="width:20px;height:20px"><circle cx="12" cy="12" r="3.2"/><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/></svg>
-    </button>
-  </div>
+    </div>
+  </header>
   <div id="offline-note">{{ t('portal.offline') }}</div>
   <div id="stage">
     <div id="screenwrap">{% if m %}{% include '_screen.html' %}{% endif %}</div>
     <img id="peek" alt="">
     <div id="busy"><div class="spinner"></div><p id="busy-text"></p></div>
   </div>
-  <div class="navbar">
-    {# The phone's own three, in Android's shapes — familiar in action because
-       they are the real buttons, not inventions. Plus wake. #}
-    <button data-act="back" aria-label="{{ t('phone.back') }}">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5 L8 12 L15 19"/></svg></button>
-    <button data-act="home" aria-label="{{ t('phone.home') }}">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/></svg></button>
-    <button data-act="recents" aria-label="{{ t('phone.recents') }}">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="5" width="14" height="14" rx="3"/></svg></button>
-    <button data-act="wake" aria-label="{{ t('phone.wake') }}">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v4M5.6 5.6l2.8 2.8M18.4 5.6l-2.8 2.8M12 11a5 5 0 0 1 5 5H7a5 5 0 0 1 5-5z"/></svg></button>
-  </div>
+  <nav class="navbar" aria-label="Phone">
+    {# The phone's own three, in Android's shapes, plus wake — riding a
+       floating pill so the chrome reads native instead of edge-to-edge web. #}
+    <div class="pill">
+      <button data-act="back">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5 L8 12 L15 19"/></svg>
+        <span>{{ t('phone.back') }}</span></button>
+      <button data-act="home">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/></svg>
+        <span>{{ t('phone.home') }}</span></button>
+      <button data-act="recents">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="5" width="14" height="14" rx="3"/></svg>
+        <span>{{ t('phone.recents') }}</span></button>
+      <button data-act="wake">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v4M5.6 5.6l2.8 2.8M18.4 5.6l-2.8 2.8M12 11a5 5 0 0 1 5 5H7a5 5 0 0 1 5-5z"/></svg>
+        <span>{{ t('phone.wake') }}</span></button>
+    </div>
+  </nav>
 </div>
 
 {# The signature pad. She draws here, on her own screen, where there is no
@@ -344,6 +485,7 @@
 
 <script>
   window.APTLOG_APP = {
+    appTitle: {{ t('app.title')|tojson }},
     opening: {{ t('papp.opening')|tojson }},
     waiting: {{ t('papp.waiting_screen')|tojson }},
     moved:   {{ t('portal.moved')|tojson }},
@@ -352,12 +494,6 @@
     devfail: {{ t('phone.failed')|tojson }},
     signSending: {{ t('sign.state.running')|tojson }},
     signEmpty:   {{ t('signature.empty')|tojson }},
-    screens: {
-      {% for s in ['startup','language','permissions','login','agency','home',
-                   'today','visit','verification','signature','unknown'] -%}
-      {{ s|tojson }}: {{ t('mirror.screen.' ~ s)|tojson }}{{ "," if not loop.last }}
-      {% endfor %}
-    },
     {# The lock's explanation, one tap away rather than a standing banner. #}
     blocked: {
       "": "",
@@ -370,8 +506,6 @@
     blockedOther: {{ t('phone.blocked.other')|tojson }}
   };
 </script>
-{# Stamped with the server's boot id: a fresh shell always fetches assets that
-   match it, whatever a cache thinks it knows. #}
 <script src="/static/signature.js?v={{ boot }}" defer></script>
 <script src="/static/phone.js?v={{ boot }}" defer></script>
 </body>

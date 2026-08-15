@@ -187,5 +187,6 @@
   "sign.no_canvas": "This screen has no signature box. Open the app's signature screen first, then sign here.",
   "sign.ambiguous": "The controller could not tell which part of this screen is the signature box, so it drew nothing.",
   "sign.wrong_app": "The phone is not showing one of the care apps, so nothing was drawn.",
-  "sign.replay_failed": "The drawing did not finish. Look at the phone screen — if it is half-drawn, clear it in the app and send again."
+  "sign.replay_failed": "The drawing did not finish. Look at the phone screen — if it is half-drawn, clear it in the app and send again.",
+  "papp.live": "Live"
 }
