@@ -155,17 +155,19 @@
   }
 
   // ------------------------------------------------------------------- macros
+  // Reflected whether or not this page started it: the controller signs in by
+  // itself when the app lands on its login screen, and she should watch that
+  // as "Signing in…" rather than wonder at a darkened page doing nothing.
   function applyMacro(m) {
-    if (!awaitingMacro) return;
     if (m.state === 'running') {
       busy(m.text || '');
+      awaitingMacro = true;
     } else if (m.state === 'done') {
+      if (awaitingMacro) unbusy();
       awaitingMacro = false;
-      unbusy();
     } else if (m.state === 'failed') {
+      if (awaitingMacro) { unbusy(); toast(m.state_text || ''); }
       awaitingMacro = false;
-      unbusy();
-      toast(m.state_text || '');
     }
   }
 

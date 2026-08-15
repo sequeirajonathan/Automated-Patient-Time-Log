@@ -50,6 +50,24 @@ REQUEST_MAX_AGE = 60.0
 
 POLL_EVERY = 1.0
 
+# ------------------------------------------------------------ auto sign-in
+# The app expires its session mid-use: the alert's only button lands on the
+# sign-in screen, which the portal (correctly) will not photograph and she
+# cannot fill. The owner's rule: nobody types credentials, anywhere, ever —
+# so landing on that screen IS the request to sign in, and the runner treats
+# it as one without waiting for a button.
+#
+# Only the app whose sign-in sequence is proven. The cooldown is what stands
+# between this and a retry storm on the day the credentials go bad: one quiet
+# failure per interval, visible in the macro status, not a loop.
+AUTO_AUTH_APP = "com.hhaexchange.caregiver"
+AUTO_AUTH_MACRO = "hhax_legacy_login"
+AUTO_AUTH_COOLDOWN = 90.0
+# Screens flash through login on their own during app startup; only a login
+# screen the feed has seen *recently and still* is a real landing.
+AUTO_AUTH_FRESH = 6.0
+SCREEN_PATH = STATE_DIR / "screen.json"
+
 
 @dataclass
 class Macro:
@@ -260,9 +278,12 @@ class Runner:
     """Polls for a request and runs it on the resident session."""
 
     def __init__(self, request_path: Path | None = None,
-                 status_path: Path | None = None):
+                 status_path: Path | None = None,
+                 screen_path: Path | None = None):
         self._request_path = request_path
         self._status_path = status_path
+        self._screen_path = screen_path
+        self._auto_auth_at = 0.0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -288,9 +309,41 @@ class Runner:
                 signature = sign.take_request()
                 if signature is not None:
                     sign.execute(signature)
+                self.maybe_auto_auth()
             except Exception as exc:  # noqa: BLE001
                 log.warning("macro runner: %s", exc)
             self._stop.wait(POLL_EVERY)
+
+    def maybe_auto_auth(self) -> bool:
+        """Sign in when the known app is sitting on its sign-in screen.
+
+        True when an auth run was started. See the constants above for the
+        whole argument; the conditions here are the guardrails in order —
+        right app, actually the login screen, seen fresh, and outside the
+        cooldown that keeps a bad-credential day from becoming a loop.
+        """
+        target = self._screen_path or SCREEN_PATH
+        try:
+            doc = json.loads(target.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+
+        if doc.get("app") != AUTO_AUTH_APP or doc.get("screen") != "login":
+            return False
+        try:
+            age = (datetime.now()
+                   - datetime.fromisoformat(doc["at"])).total_seconds()
+        except (KeyError, TypeError, ValueError):
+            return False
+        if age > AUTO_AUTH_FRESH:
+            return False
+        if time.monotonic() - self._auto_auth_at < AUTO_AUTH_COOLDOWN:
+            return False
+
+        self._auto_auth_at = time.monotonic()
+        log.info("login screen is up — signing in without being asked")
+        self.execute(AUTO_AUTH_MACRO, f"auto-{uuid.uuid4().hex[:8]}")
+        return True
 
     def execute(self, name: str, rid: str) -> Status:
         from apt_log import resident

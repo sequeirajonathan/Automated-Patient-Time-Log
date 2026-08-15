@@ -336,6 +336,15 @@ def write_screen(target: Path, frame: dict, screen: str, reason: str,
     except OSError as exc:
         log.warning("cannot publish the screen document (%s)", exc)
 
+    # Every distinct structure goes to the flight recorder — textless, so an
+    # unseen app's ugly screen can be replayed and tuned offline later.
+    try:
+        from apt_log import flight
+
+        flight.record(doc)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("flight recorder: %s", exc)
+
 # How stale the published frame may be and still be tapped against. Generous
 # against the overlay's own refresh cadence, tight enough that a dead feed
 # refuses rather than letting her aim at a screen from minutes ago.

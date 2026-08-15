@@ -361,3 +361,61 @@ class TestAuthOnlyMacro:
              patch_mod("apt_log.macros.time.sleep"):
             with pytest_mod.raises(RuntimeError, match="unrecognised"):
                 MACROS["hhax_legacy_login"].run(driver, lambda _k: None)
+
+
+class TestAutoAuth:
+    """Landing on the sign-in screen IS the request to sign in.
+
+    The app expires its session mid-use; the alert's only button lands on a
+    screen the portal will not photograph and nobody may type into. The
+    runner signs in without being asked — for the one app whose sequence is
+    proven, only on a fresh sighting, and behind a cooldown that keeps a
+    bad-credential day from becoming a loop.
+    """
+
+    def _doc(self, tmp_path, app="com.hhaexchange.caregiver", screen="login",
+             age=0.0):
+        import datetime as dt
+
+        path = tmp_path / "screen.json"
+        at = (dt.datetime.now() - dt.timedelta(seconds=age)).isoformat()
+        path.write_text(json.dumps({"app": app, "screen": screen, "at": at}))
+        return path
+
+    def _runner(self, tmp_path):
+        return macros.Runner(tmp_path / "req.json", tmp_path / "status.json",
+                             screen_path=tmp_path / "screen.json")
+
+    def test_a_fresh_login_screen_triggers_sign_in(self, tmp_path):
+        self._doc(tmp_path)
+        runner = self._runner(tmp_path)
+        with patch.object(runner, "execute") as execute:
+            assert runner.maybe_auto_auth() is True
+        assert execute.call_args.args[0] == "hhax_legacy_login"
+
+    def test_the_cooldown_prevents_a_retry_storm(self, tmp_path):
+        self._doc(tmp_path)
+        runner = self._runner(tmp_path)
+        with patch.object(runner, "execute"):
+            assert runner.maybe_auto_auth() is True
+            assert runner.maybe_auto_auth() is False
+
+    def test_a_stale_sighting_is_not_a_landing(self, tmp_path):
+        """Screens flash through login during startup, and an old document
+        may describe a screen long gone."""
+        self._doc(tmp_path, age=macros.AUTO_AUTH_FRESH + 5)
+        runner = self._runner(tmp_path)
+        with patch.object(runner, "execute") as execute:
+            assert runner.maybe_auto_auth() is False
+        execute.assert_not_called()
+
+    @pytest.mark.parametrize("app,screen", [
+        ("com.hhaexchange.uma", "login"),      # no proven sequence
+        ("com.hhaexchange.caregiver", "home"),  # not a login screen
+    ])
+    def test_only_the_proven_apps_login_screen(self, tmp_path, app, screen):
+        self._doc(tmp_path, app=app, screen=screen)
+        runner = self._runner(tmp_path)
+        with patch.object(runner, "execute") as execute:
+            assert runner.maybe_auto_auth() is False
+        execute.assert_not_called()
