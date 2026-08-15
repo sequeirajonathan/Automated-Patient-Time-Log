@@ -146,6 +146,20 @@ def _hhax_legacy_login(driver, report) -> None:
             # session module holds, and a macro is not an excuse to break it.
             raise RuntimeError("an unrecognised dialog is on screen")
         session_mod.dismiss(driver)
+
+    # Already signed in and sitting on home — the ordinary case for every
+    # press after the first. Walking the full ceremony from here is what made
+    # the button read as "it signs in every single time": fifteen seconds of
+    # overlay and screen churn over an app that was already there. Signed in
+    # is the goal, not the procedure; once the goal is met this is done.
+    #
+    # Strictly after the modal check: the expiry alert lands on top of
+    # HomeActivity, and home visible *underneath a modal* is not signed in.
+    home_now = home_mod.HomeScreen(driver)
+    if wait_for(home_now.is_displayed, timeout=3.0, poll=0.4):
+        report("macro.step.checking")
+        return
+
     for gate in advance_past_startup_gates(driver, language="es"):
         log.info("macro cleared startup gate: %s", gate)
 

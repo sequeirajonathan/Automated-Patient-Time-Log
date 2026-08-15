@@ -83,6 +83,7 @@
   }
 
   let lastApp = '';
+  let currentPackage = '';
 
   function applyScreen(meta, html) {
     if (html !== undefined) {
@@ -105,6 +106,7 @@
       unbusy();
     }
     if (!meta) return;
+    currentPackage = meta.app || '';
 
     // The large title: the app's own nav-bar title, else the app she opened,
     // else the portal's name. Never one of the classifier's sentences — "It
@@ -154,8 +156,18 @@
   function launch(tile) {
     const name = tile.dataset.macro;
     if (!name) return;
-    awaitingMacro = true;
     lastApp = tile.dataset.name || '';
+
+    // The tile of the app already in front is a switch, not a ceremony. The
+    // screen on the phone is signed in and live; running the sign-in walk
+    // over it is fifteen seconds of state churn she can only read as "why is
+    // it signing in again?"
+    if (tile.dataset.package && tile.dataset.package === currentPackage) {
+      view('screen');
+      return;
+    }
+
+    awaitingMacro = true;
     view('screen');
     busy((i18n.opening || '').replace('{app}', tile.dataset.name || ''));
     fetch('/macro', {

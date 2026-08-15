@@ -337,12 +337,16 @@ SLOW_EVERY = 10.0
 # nobody has mapped yet.
 PHONE_APPS = (
     {"id": "hhax_legacy", "name": "HHAeXchange", "mark": "HX",
+     "package": "com.hhaexchange.caregiver",
      "macro": "hhax_legacy_login", "accent": "#1b6ed6"},
     {"id": "hhax_uma", "name": "HHAeXchange+", "mark": "HX+",
+     "package": "com.hhaexchange.uma",
      "macro": "open_hhax_uma", "accent": "#7a3fd1"},
     {"id": "mobile_caregiver", "name": "Mobile Caregiver+", "mark": "MC",
+     "package": "com.tellus.evv.v2",
      "macro": "open_mobile_caregiver", "accent": "#0c8f5a"},
     {"id": "inmyteam", "name": "inMyTeam", "mark": "iMT",
+     "package": "com.inmyteam.inmyteam",
      "macro": "open_inmyteam", "accent": "#c2452e"},
 )
 
@@ -445,6 +449,7 @@ async def live(ws: WebSocket):
                 payload["screen"] = {
                     "id": screen_doc.get("id", ""),
                     "name": screen_doc.get("screen", "unknown"),
+                    "app": screen_doc.get("app", ""),
                     "blocked": screen_doc.get("blocked", ""),
                     "notice": screen_doc.get("notice", ""),
                 }

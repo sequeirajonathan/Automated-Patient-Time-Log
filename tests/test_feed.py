@@ -880,3 +880,16 @@ class TestEntitiesAreUnescaped:
                ' bounds="[0,0][300,80]" />')
         el = feed.elements(xml, label=True)[0]
         assert el["txt"] == "Care & Support"
+
+
+class TestScreenDocumentKnowsItsApp:
+    def test_the_foreground_package_is_published(self, tmp_path):
+        """So a launcher tile can be a switch instead of a ceremony: pressing
+        the tile of the app already in front must not run its sign-in walk."""
+        shot = tmp_path / "screen.png"
+        with patch.object(feed, "capture", return_value=(PNG, HOME, feed.CAPTURED)), \
+             patch.object(feed, "screen_size", return_value=[720, 1600]), \
+             patch.object(feed.mirror_mod, "publish"):
+            feed.write_frame(shot, hierarchy="<node/>")
+        screen = json.loads((tmp_path / "screen.json").read_text())
+        assert screen["app"] == "com.hhaexchange.caregiver"

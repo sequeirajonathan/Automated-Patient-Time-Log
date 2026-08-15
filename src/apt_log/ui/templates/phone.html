@@ -65,6 +65,11 @@
   * { box-sizing:border-box; border-color:var(--line);
       -webkit-tap-highlight-color:transparent; }
   html, body { height:100dvh; }
+  /* iOS paints the strip under the home indicator with the page background,
+     not with any fixed element covering it. So the page background follows
+     the visible surface: wallpaper-dark on the launcher, canvas on the screen
+     view — and the strip disappears into whichever is showing. */
+  body[data-view="launcher"] { background:#0b0f1d; }
   body { margin:0; background:var(--bg); color:var(--ink);
          font:17px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text",
               system-ui, Roboto, sans-serif;
@@ -143,6 +148,7 @@
                        text-decoration:none; }
 
   /* ---------------------------------------------------------- screen view */
+  #screenview { background:var(--bg); }
   body[data-view="launcher"] #screenview { transform:translateX(102%);
                                            opacity:0; pointer-events:none; }
   body[data-view="screen"] #launcher { transform:scale(.92); opacity:0;
@@ -193,13 +199,15 @@
   body.offline #offline-note { display:block; }
   body.offline #stage { opacity:.5; pointer-events:none; }
 
-  /* The one scroll surface. The body is locked, so nothing rubber-bands. */
+  /* The one scroll surface. The body is locked, so nothing rubber-bands —
+     and it runs to the very bottom edge, sliding under the floating pill,
+     so the canvas is continuous instead of ending twice. */
   #stage { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden;
            -webkit-overflow-scrolling:touch; position:relative; }
   #screenwrap { min-height:100%; }
 
   /* ----------------------------------------------- the reflowed app screen */
-  .wire { padding:2px 0 24px; }
+  .wire { padding:2px 0 calc(env(safe-area-inset-bottom) + 104px); }
   .a-nav { display:flex; align-items:center; min-height:44px; gap:4px;
            padding:2px 8px; margin-bottom:2px; }
   .a-back { border:none; background:none; color:var(--tint); cursor:pointer;
@@ -327,9 +335,14 @@
   #busy p { margin:0; color:var(--muted); font-size:15px; }
 
   /* -------------------------------------- floating pill tab bar (his) */
-  .navbar { position:relative; z-index:7; pointer-events:none;
-            padding:0 12px calc(env(safe-area-inset-bottom) + 10px);
-            margin-top:-2px; }
+  /* Absolute within the view rather than in the flex flow: the content
+     surface runs beneath it (its padding clears the pill), so the pill
+     floats over a continuous canvas the way his does — no dead strip. The
+     view is its containing block, which also means it rides the view's own
+     slide transition instead of being left behind. */
+  .navbar { position:absolute; left:0; right:0; bottom:0; z-index:7;
+            pointer-events:none;
+            padding:0 12px calc(env(safe-area-inset-bottom) + 10px); }
   .navbar .pill { pointer-events:auto; display:flex; align-items:stretch;
                   gap:2px; border-radius:28px; border:.5px solid var(--line);
                   background:var(--card); padding:6px;
@@ -400,7 +413,7 @@
   <div class="springboard">
     {% for a in apps %}
     <button class="tile" data-app="{{ a.id }}" data-macro="{{ a.macro }}"
-            data-name="{{ a.name }}">
+            data-package="{{ a.package }}" data-name="{{ a.name }}">
       <span class="mark" style="background:{{ a.accent }}">{{ a.mark }}</span>
       <span class="name">{{ a.name }}</span>
     </button>

@@ -266,3 +266,84 @@ class TestOpenMacros:
                               side_effect=[i * 0.5 for i in range(200)]):
             with pytest_mod.raises(RuntimeError):
                 MACROS["open_hhax_uma"].run(driver, lambda _k: None)
+
+
+class TestSignInShortCircuit:
+    """Signed in is the goal, not the procedure.
+
+    Every press after the first found the app already on its home screen, and
+    the macro walked the full ceremony anyway — fifteen seconds of overlay and
+    screen churn that read as "it signs in every single time". If the goal is
+    met when the app comes to the front, the macro is done.
+    """
+
+    def test_already_home_means_done(self):
+        from unittest.mock import MagicMock, patch as patch_mod
+
+        from apt_log.macros import MACROS
+
+        driver = MagicMock()
+        driver.current_activity = ".HomeActivity"
+        steps = []
+        with patch_mod("apt_log.screens.home.HomeScreen") as home_cls, \
+             patch_mod("apt_log.screens.session.modal_message",
+                       return_value=""), \
+             patch_mod("apt_log.screens.login.authenticate_if_needed") as auth, \
+             patch_mod("apt_log.macros.time.sleep"):
+            home_cls.return_value.is_displayed.return_value = True
+            MACROS["hhax_legacy_login"].run(driver, steps.append)
+        auth.assert_not_called()
+        assert steps[-1] == "macro.step.checking"
+
+    def test_home_under_a_modal_is_not_signed_in(self):
+        """The expiry alert lands on top of HomeActivity. Short-circuiting on
+        the home screen visible underneath it would report "done" with a
+        dialog blocking every tap."""
+        from unittest.mock import MagicMock, patch as patch_mod
+
+        import pytest as pytest_mod
+
+        from apt_log.macros import MACROS
+
+        driver = MagicMock()
+        with patch_mod("apt_log.screens.home.HomeScreen") as home_cls, \
+             patch_mod("apt_log.screens.session.modal_message",
+                       return_value="¿Seguro que desea salir?"), \
+             patch_mod("apt_log.screens.session.is_expired",
+                       return_value=False), \
+             patch_mod("apt_log.macros.time.sleep"):
+            home_cls.return_value.is_displayed.return_value = True
+            with pytest_mod.raises(RuntimeError, match="unrecognised"):
+                MACROS["hhax_legacy_login"].run(driver, lambda _k: None)
+
+    def test_not_home_still_walks_the_ceremony(self):
+        """The short-circuit must not eat the real flow: not on home means the
+        walk proceeds through sign-in. Time is a counter so every wait_for
+        expires deterministically."""
+        import itertools
+        from unittest.mock import MagicMock, patch as patch_mod
+
+        import pytest as pytest_mod
+
+        from apt_log.macros import MACROS
+
+        driver = MagicMock()
+        driver.current_activity = ".SignInActivity"
+        steps = []
+        with patch_mod("apt_log.screens.home.HomeScreen") as home_cls, \
+             patch_mod("apt_log.screens.agency.AgencyScreen") as agency_cls, \
+             patch_mod("apt_log.screens.session.modal_message",
+                       return_value=""), \
+             patch_mod("apt_log.screens.language.advance_past_startup_gates",
+                       return_value=[]), \
+             patch_mod("apt_log.screens.login.authenticate_if_needed") as auth, \
+             patch_mod("apt_log.macros.dismiss_autofill", return_value=True), \
+             patch_mod("apt_log.macros.time.sleep"), \
+             patch_mod("apt_log.macros.time.monotonic",
+                       side_effect=itertools.count(step=0.5)):
+            home_cls.return_value.is_displayed.return_value = False
+            agency_cls.return_value.is_displayed.return_value = False
+            with pytest_mod.raises(RuntimeError, match="neither"):
+                MACROS["hhax_legacy_login"].run(driver, steps.append)
+        auth.assert_called_once()
+        assert "macro.step.signing_in" in steps

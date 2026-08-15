@@ -297,7 +297,7 @@ SCREEN_NAME = "screen.json"
 
 
 def write_screen(target: Path, frame: dict, screen: str, reason: str,
-                 hierarchy: str | None) -> None:
+                 hierarchy: str | None, focus: str = "") -> None:
     """Publish the render feed for the wireframe view.
 
     Two files on purpose, with two policies. `frame.json` is the one that can
@@ -319,6 +319,10 @@ def write_screen(target: Path, frame: dict, screen: str, reason: str,
         "at": frame["at"],
         "size": frame["size"],
         "screen": screen,
+        # Which app is in front, so a launcher tile can be a switch instead of
+        # a ceremony: pressing the tile of the app already showing must not
+        # run its sign-in walk over a screen that is already signed in.
+        "app": (focus or "").split("/")[0],
         "blocked": reason,
         "notice": frame.get("notice", ""),
         "elements": elements(hierarchy, label=True) if hierarchy else [],
@@ -376,7 +380,8 @@ def write_frame(path: Path, serial: str | None = None,
     except OSError as exc:
         log.warning("cannot publish the frame map (%s)", exc)
 
-    write_screen(path.parent / SCREEN_NAME, frame, screen, reason, hierarchy)
+    write_screen(path.parent / SCREEN_NAME, frame, screen, reason, hierarchy,
+                 focus)
 
     if png:
         path.parent.mkdir(parents=True, exist_ok=True)
