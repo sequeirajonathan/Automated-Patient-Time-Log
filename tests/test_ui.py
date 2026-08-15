@@ -426,10 +426,24 @@ class TestStaleIsVisible:
 
     def test_the_taken_timestamp_is_pushed_not_only_rendered(self):
         """Left server-rendered it ages in place, and a stale timestamp reads as
-        a fresh one to anyone not doing the arithmetic."""
+        a fresh one to anyone not doing the arithmetic.
+
+        Asserted through the translator's own formatter rather than a literal:
+        the first version hard-coded "07:38" and failed because the Spanish
+        catalog renders a 24-hour clock. A test that assumes one locale's time
+        format is testing the catalog, not the behaviour.
+        """
         from datetime import datetime
-        s = DashboardState(screenshot_at=datetime(2026, 8, 14, 19, 38),
-                           mirror=Mirror(at=datetime.now()))
-        payload = _mirror_payload(s, Translator("es"))
+        taken = datetime(2026, 8, 14, 19, 38)
+        t = Translator("es")
+        s = DashboardState(screenshot_at=taken, mirror=Mirror(at=datetime.now()))
+        payload = _mirror_payload(s, t)
         assert "taken_text" in payload
-        assert "07:38" in payload["taken_text"]
+        assert t.time(taken) in payload["taken_text"]
+
+    def test_the_timestamp_is_absent_when_there_is_no_picture(self):
+        """"No recent picture" and "taken at some time" are different facts, and
+        collapsing them would date a photograph that does not exist."""
+        s = DashboardState(screenshot_at=None, mirror=Mirror(at=datetime.now()))
+        payload = _mirror_payload(s, Translator("es"))
+        assert payload["taken_text"] == Translator("es")("phone.none")

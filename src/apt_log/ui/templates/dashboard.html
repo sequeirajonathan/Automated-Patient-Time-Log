@@ -185,6 +185,7 @@
     {% endif %}
 
     <h2 style="margin-top:14px">{{ t('phone.title') }}</h2>
+    <div class="banner bad offline-note">{{ t('portal.offline') }}</div>
     {% if s.screenshot_at %}
       <p class="muted" id="shot-taken">{{ t('phone.stale', time=t.time(s.screenshot_at)) }}</p>
       {# The picture and the hit boxes share one positioned container so the
@@ -199,7 +200,6 @@
         <canvas id="screen-video" class="shot live"></canvas>
         <div id="overlay" class="overlay"></div>
       </div>
-      <div class="banner bad offline-note">{{ t('portal.offline') }}</div>
       <p class="muted">{{ t('portal.instruction') }}
         <span id="portal-status"></span></p>
       <script>
