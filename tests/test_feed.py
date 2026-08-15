@@ -893,3 +893,18 @@ class TestScreenDocumentKnowsItsApp:
             feed.write_frame(shot, hierarchy="<node/>")
         screen = json.loads((tmp_path / "screen.json").read_text())
         assert screen["app"] == "com.hhaexchange.caregiver"
+
+
+class TestSleepKeepsTheLastScreen:
+    def test_a_dark_display_does_not_wipe_the_sketch(self):
+        """The owner's ask, verbatim: it is nice to know what the last screen
+        was before it went black, so a dark phone does not read as broken. A
+        sleeping device returns a junk read with an empty focus, and the
+        focus "changing" to nothing used to count as a new screen."""
+        watcher = feed._Hierarchy(None, every=1.0)
+        good = ('<node class="android.widget.Button" resource-id="c:id/go"'
+                ' clickable="true" bounds="[0,0][100,50]" text="Entrar"/>')
+        junk = '<node class="android.view.View" bounds="[0,0][720,1600]"/>'
+        watcher._xml, watcher._focus = good, "com.x/.HomeActivity"
+        assert watcher._accept(junk, "") is False
+        assert watcher._accept(junk, "com.other/.RealScreen") is True

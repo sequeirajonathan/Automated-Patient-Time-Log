@@ -472,6 +472,14 @@ class _Hierarchy:
         Otherwise the previous boxes stay: they are stale, and if they are wrong
         she can see they are wrong, which is more than an empty overlay offers.
         """
+        if not focus:
+            # The display turned off. There is no screen now, so nothing can
+            # replace the last one — which is exactly what the page shows as
+            # "the last thing on screen before it went dark". The junk read a
+            # sleeping device returns (one stray node) used to be accepted
+            # here because the focus "changed", wiping the memory the owner
+            # asked to keep.
+            return False
         if elements(fresh):
             return True
         if focus != self._focus:

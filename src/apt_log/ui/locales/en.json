@@ -196,5 +196,6 @@
   "sign.preview": "How it will land in the app's box:",
   "papp.asleep": "The phone's screen is off.",
   "papp.asleep_hint": "Wake it to see and use it from here.",
-  "papp.photo_taken": "Photo from {time}"
+  "papp.photo_taken": "Photo from {time}",
+  "papp.last_seen": "Last on screen before it turned off:"
 }

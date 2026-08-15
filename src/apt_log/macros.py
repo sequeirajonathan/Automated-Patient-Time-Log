@@ -323,7 +323,13 @@ class Runner:
         self._status_path = status_path
         self._screen_path = screen_path
         self._viewers_path = viewers_path
-        self._auto_auth_at = 0.0
+        # None, not 0.0: the cooldown compares against time.monotonic(),
+        # which starts near zero at boot — a zero sentinel made a machine
+        # younger than the cooldown believe an auth had just fired, and
+        # auto-auth lay dormant for the rest of the window. Found when a
+        # freshly recycled container failed three tests a long-lived one had
+        # been passing all day.
+        self._auto_auth_at: float | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -408,7 +414,8 @@ class Runner:
             return False
         if age > AUTO_AUTH_FRESH:
             return False
-        if time.monotonic() - self._auto_auth_at < AUTO_AUTH_COOLDOWN:
+        if (self._auto_auth_at is not None
+                and time.monotonic() - self._auto_auth_at < AUTO_AUTH_COOLDOWN):
             return False
 
         self._auto_auth_at = time.monotonic()

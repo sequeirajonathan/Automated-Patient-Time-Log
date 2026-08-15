@@ -358,16 +358,24 @@
   body.peeking #peek-cap:not([hidden]) { display:block; }
   #peek-cap.old { background:hsl(38 92% 40% / .9); }
 
-  /* The display is off: the kept sketch describes a screen nobody is being
-     shown. Truth plus the one useful act. */
+  /* The display is off. The last screen stays visible below, dimmed and
+     desaturated and untappable — a memory, labelled as one — so a dark phone
+     reads as a phone that slept, not as something gone wrong. */
   #asleep { display:none; flex-direction:column; align-items:center;
-            justify-content:center; gap:10px; padding:60px 30px;
-            text-align:center; color:var(--muted); }
-  #asleep svg { width:42px; height:42px; opacity:.6; }
-  #asleep p { margin:0; font-size:16px; color:var(--ink); }
-  #asleep p.muted { font-size:13.5px; color:var(--muted); }
-  #asleep .a-btn { margin-top:8px; min-width:180px; }
-  body.asleep #screenwrap { display:none; }
+            gap:8px; margin:12px 16px; padding:18px 16px;
+            border-radius:16px; background:var(--card);
+            box-shadow:var(--shadow-card); text-align:center;
+            color:var(--muted); }
+  #asleep svg { width:30px; height:30px; opacity:.6; }
+  #asleep p { margin:0; font-size:15.5px; color:var(--ink); }
+  #asleep p.muted { font-size:13px; color:var(--muted); }
+  #asleep .a-btn { margin-top:6px; min-width:170px; }
+  #asleep .last-label { font-size:11.5px; font-weight:600;
+                        letter-spacing:.05em; text-transform:uppercase;
+                        color:var(--muted); margin-top:10px;
+                        align-self:flex-start; }
+  body.asleep #screenwrap { opacity:.4; filter:grayscale(.65);
+                            pointer-events:none; }
   body.asleep #asleep { display:flex; }
   body.asleep .hdr-title .lock { display:none; }
 
@@ -522,6 +530,7 @@
       <p class="muted">{{ t('papp.asleep_hint') }}</p>
       <button type="button" class="a-btn" data-act="wake"
               style="flex:none">{{ t('phone.wake') }}</button>
+      <span class="last-label">{{ t('papp.last_seen') }}</span>
     </div>
     <img id="peek" alt="">
     <div id="peek-cap" hidden></div>

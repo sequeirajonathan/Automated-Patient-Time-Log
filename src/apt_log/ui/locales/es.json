@@ -196,5 +196,6 @@
   "sign.preview": "Así quedará en el recuadro de la aplicación:",
   "papp.asleep": "La pantalla del teléfono está apagada.",
   "papp.asleep_hint": "Actívela para verla y usarla desde aquí.",
-  "papp.photo_taken": "Foto de las {time}"
+  "papp.photo_taken": "Foto de las {time}",
+  "papp.last_seen": "Lo último en pantalla antes de apagarse:"
 }
