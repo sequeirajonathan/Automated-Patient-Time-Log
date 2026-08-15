@@ -114,7 +114,18 @@ class TestWriteFrame:
             feed.write_frame(shot)
         assert not shot.exists()
         assert publish.call_args.kwargs["screen"] == "login"
-        assert publish.call_args.kwargs["step"] == "blocked"
+
+    def test_a_refused_picture_is_not_reported_as_a_stuck_controller(self, tmp_path):
+        """It published step "blocked" — "it has stopped and cannot continue on
+        its own" — directly above a sign-in screen the controller was walking
+        through perfectly well. Whether a picture may be taken says nothing
+        about whether anything is stuck."""
+        shot = tmp_path / "screen.png"
+        with patch.object(feed, "capture",
+                          return_value=(None, SIGNIN, feed.LOGIN_ACTIVITY)), \
+             patch.object(feed.mirror_mod, "publish") as publish:
+            feed.write_frame(shot)
+        assert publish.call_args.kwargs["step"] != "blocked"
 
     def test_no_partial_image_is_left_for_the_page_to_read(self, tmp_path):
         shot = tmp_path / "screen.png"

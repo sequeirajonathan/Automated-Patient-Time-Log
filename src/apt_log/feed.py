@@ -337,12 +337,16 @@ def write_frame(path: Path, serial: str | None = None,
         tmp = path.with_suffix(".tmp")
         tmp.write_bytes(png)
         tmp.replace(path)
-        step = "waiting" if screen == "unknown" else "working"
-    else:
-        # The frame is still published. "The controller is on the sign-in
-        # screen and no picture is available" is information; silence looks
-        # identical to the process being dead.
-        step = "blocked" if reason else "working"
+    # The frame is published either way. "On the sign-in screen, no picture
+    # available" is information; silence looks identical to the process being
+    # dead.
+    #
+    # A refusal used to publish step "blocked", which the page renders as "it
+    # has stopped and cannot continue on its own" — printed directly above a
+    # sign-in screen the controller was walking through perfectly well. Whether
+    # a picture may be taken says nothing about whether anything is stuck, and
+    # conflating the two turns a working system into an alarming one.
+    step = "waiting" if screen == "unknown" else "working"
 
     mirror_mod.publish(screen=screen, step=step)
     return (f"{screen:<10} {len(els):>3} tappable  "
