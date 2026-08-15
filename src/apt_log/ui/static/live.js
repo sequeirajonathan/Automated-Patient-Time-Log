@@ -117,6 +117,7 @@
   let busy = false;
   let backoff = 1000;
 
+  let fading = 0;
   function say(msg) { if (status) status.textContent = msg || ''; }
 
   // A dead socket used to look exactly like a quiet screen. She sat in front of
@@ -257,6 +258,17 @@
         return;
       }
 
+      if (msg.type === 'device_result') {
+        const said = msg.ok ? (i18n.deviceSent || '') : (i18n.deviceFailed || '');
+        say(said);
+        // Clears itself. "Sent to the phone" left standing for the rest of the
+        // shift describes a button she pressed twenty minutes ago.
+        clearTimeout(fading);
+        fading = setTimeout(() => { if (status && status.textContent === said) say(''); },
+                            4000);
+        return;
+      }
+
       if (msg.type === 'tap_result') {
         busy = false;
         // A refusal is "look again", not a failure she caused: the screen moved
@@ -309,21 +321,47 @@
     for (const form of root.querySelectorAll('form[method="post"]')) {
       if (form.dataset.live) continue;
       form.dataset.live = '1';
-      form.addEventListener('submit', async (ev) => {
+
+      // getAttribute, never form.action. A form control named "action" shadows
+      // the property, so on every /device form — each of which posts a hidden
+      // <input name="action"> — form.action returned that input element and
+      // form.action.endsWith threw. The listener died before preventDefault and
+      // the browser submitted normally, which is why Back, Home, Recents and
+      // Wake reloaded the whole page while everything else stayed live. Pause
+      // and Resume had it too.
+      const target = form.getAttribute('action') || '';
+
+      form.addEventListener('submit', (ev) => {
         // Language is a genuine navigation — the whole page changes language,
         // and re-rendering it server-side is exactly right.
-        if (form.action.endsWith('/language')) return;
+        if (target.endsWith('/language')) return;
         ev.preventDefault();
-        try {
-          await fetch(form.action, {
-            method: 'POST',
-            body: new URLSearchParams(new FormData(form)),
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            redirect: 'follow'
-          });
-        } catch (e) { /* the socket will show the real state either way */ }
+
+        // Device actions go over the socket, like taps: the connection is
+        // already open, and a POST that answers with a redirect is a page
+        // navigation waiting for one missing preventDefault.
+        if (target.endsWith('/device') && socket && socket.readyState === 1) {
+          const field = form.querySelector('[name="action"]');
+          say(i18n.sending || '');
+          socket.send(JSON.stringify({ type: 'device',
+                                       action: field ? field.value : '' }));
+          return;
+        }
+
+        post(target, form);
       });
     }
+  }
+
+  // The fallback, and the path for everything that is not a device action.
+  // Still no navigation: the socket reports whatever actually happened.
+  function post(target, form) {
+    fetch(target, {
+      method: 'POST',
+      body: new URLSearchParams(new FormData(form)),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      redirect: 'follow'
+    }).catch(() => { /* the socket will show the real state either way */ });
   }
 
   document.addEventListener('visibilitychange', () => {

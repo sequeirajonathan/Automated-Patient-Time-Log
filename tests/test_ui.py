@@ -498,3 +498,102 @@ class TestBlindScreenIsUsable:
             body = client.get("/").text
         assert 'id="overlay"' in body
         assert "No hay ninguna imagen reciente" in body
+
+
+class TestDeviceOverTheSocket:
+    """Back, Home, Recents and Wake, without reloading the page.
+
+    They were the last four controls still posting a form and taking a redirect
+    — which is a page navigation by construction. Everything else on this page
+    had been live for a while, so pressing Home threw away her scroll position
+    and the screen she was watching, mid-visit, four floors from the phone.
+    """
+
+    def test_an_allow_listed_action_reaches_the_device_layer(self, client):
+        from apt_log import device as device_mod
+
+        with patch.object(device_mod, "send_ui_action") as send:
+            with client.websocket_connect("/ws") as ws:
+                ws.receive_json()
+                ws.send_json({"type": "device", "action": "home"})
+                while True:
+                    msg = ws.receive_json()
+                    if msg.get("type") == "device_result":
+                        break
+        assert msg["ok"] is True
+        assert send.call_args.args[0] == "home"
+
+    def test_the_socket_is_a_second_door_not_a_second_policy(self, client):
+        """The allow-list is checked where it always was. A keycode arriving
+        over a socket must be refused by the same code that refuses one arriving
+        over a form, or there are two rules and one of them will rot."""
+        with client.websocket_connect("/ws") as ws:
+            ws.receive_json()
+            ws.send_json({"type": "device", "action": "KEYCODE_POWER"})
+            while True:
+                msg = ws.receive_json()
+                if msg.get("type") == "device_result":
+                    break
+        assert msg["ok"] is False
+
+    def test_a_missing_action_is_refused_rather_than_guessed(self, client):
+        with client.websocket_connect("/ws") as ws:
+            ws.receive_json()
+            ws.send_json({"type": "device"})
+            while True:
+                msg = ws.receive_json()
+                if msg.get("type") == "device_result":
+                    break
+        assert msg["ok"] is False
+
+    def test_the_form_post_still_works_without_a_socket(self, client):
+        """She may be on whatever browser her phone has. The form is the
+        fallback, not dead code."""
+        from apt_log import device as device_mod
+
+        with patch.object(device_mod, "send_ui_action"):
+            r = client.post("/device", data={"action": "wake"},
+                            follow_redirects=False)
+        assert r.status_code == 303
+
+
+class TestFormsDoNotNavigate:
+    """The bug that made this a bug report.
+
+    Every /device form carries a hidden <input name="action">, and a form
+    control named "action" shadows the form's own action property. So
+    `form.action` returned that input element, `form.action.endsWith` threw, the
+    submit listener died before preventDefault, and the browser posted the form
+    for real — reloading the page. Pause and Resume had it too, for the same
+    reason. Asserted against the shipped script because the failure was in the
+    one line of it that nothing else can reach.
+    """
+
+    SCRIPT = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/static/live.js")
+
+    def test_the_action_attribute_is_read_not_the_property(self):
+        source = self.SCRIPT.read_text(encoding="utf-8")
+        assert "getAttribute('action')" in source
+
+    def test_the_shadowed_property_is_never_dereferenced(self):
+        """`form.action` is a trap on precisely the forms that most need to be
+        intercepted, so it is not used at all.
+
+        Comments are stripped first — the one above the fix names the trap in
+        order to explain it, and a guard that cannot tell code from prose would
+        forbid describing the bug it exists to prevent.
+        """
+        code = [line for line in self.SCRIPT.read_text(encoding="utf-8").splitlines()
+                if not line.lstrip().startswith(("//", "*", "/*"))]
+        source = "\n".join(code)
+        for trap in ("form.action.", "form.action)", "form.action,"):
+            assert trap not in source
+
+    def test_every_form_that_names_a_field_action_is_covered(self, client):
+        """Names the forms this applies to, so a new one cannot quietly join
+        them. Any form posting a field called "action" hits the same trap."""
+        body = client.get("/").text
+        # Four device buttons, and pause/resume — which renders one form whose
+        # value flips, not two.
+        assert body.count('name="action"') == 5

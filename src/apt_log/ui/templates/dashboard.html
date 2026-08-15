@@ -251,6 +251,8 @@
           sending: {{ t('portal.sending')|tojson }},
           moved:   {{ t('portal.moved')|tojson }},
           failed:  {{ t('portal.failed')|tojson }},
+          deviceSent:   {{ t('phone.sent')|tojson }},
+          deviceFailed: {{ t('phone.failed')|tojson }},
           {# Keyed by the feed's refusal codes. A code with no sentence here
              falls back to the general one rather than showing her nothing. #}
           blocked: {

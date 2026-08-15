@@ -388,6 +388,8 @@ async def live(ws: WebSocket):
 
             if msg.get("type") == "tap":
                 await ws.send_json(await _do_tap(msg))
+            elif msg.get("type") == "device":
+                await ws.send_json(await _do_device(msg))
             elif msg.get("type") == "video":
                 want = bool(msg.get("on"))
                 if want and not watching_video:
@@ -437,6 +439,30 @@ async def _do_tap(msg: dict) -> dict:
         log.warning("tap refused: %s", exc)
         return {"type": "tap_result", "ok": False, "reason": "stale"}
     return {"type": "tap_result", "ok": True}
+
+
+async def _do_device(msg: dict) -> dict:
+    """Back, Home, Recents, Wake — over the socket rather than a form post.
+
+    Same allow-list as the POST route, checked in the same place: `send_ui_action`
+    refuses anything that is not a name in `device.UI_ACTIONS`. This is a second
+    door onto that function, not a second policy, which is the only way to add a
+    door to something whose safety argument lives in the routing.
+    """
+    from apt_log.device import DeviceUnavailable, send_ui_action
+
+    action = msg.get("action")
+    if not isinstance(action, str) or not action:
+        return {"type": "device_result", "ok": False}
+    try:
+        # adb round trip. On the event loop it would stall every viewer's
+        # frames, the same reason a tap does not run there.
+        await asyncio.to_thread(send_ui_action, action)
+    except DeviceUnavailable as exc:
+        log.warning("device action refused: %s", exc)
+        return {"type": "device_result", "ok": False}
+    log.info("device action %s sent over the socket", action)
+    return {"type": "device_result", "ok": True}
 
 
 @app.get("/events")
