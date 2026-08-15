@@ -119,17 +119,18 @@ def wait_for(predicate, timeout: float = 20.0, poll: float = 0.5) -> bool:
 
 # --------------------------------------------------------------------- macros
 def _hhax_legacy_login(driver, report) -> None:
-    """Cold app to the agency's home screen.
+    """Bring the app to the front and sign in only if it asks to be signed in.
 
-    Every step here was proven end to end against the real account before it was
-    ever a button: startup gates, credentials, agency selection, home.
+    This used to walk the whole ceremony — gates, credentials, agency
+    selection, a home-screen check — on every press, over an app that was
+    usually already signed in. The owner's correction was precise: the button
+    handles auth and nothing else. Sign in only when auth inputs are actually
+    on screen (authenticate_if_needed keys on the password field, which is
+    exactly that test), and never choose an agency — which agency to enter is
+    her tap, on the screen, like every other decision in this portal.
     """
-    from apt_log import config
-    from apt_log.screens import agency as agency_mod
-    from apt_log.screens import home as home_mod
     from apt_log.screens import login as login_mod
     from apt_log.screens import session as session_mod
-    from apt_log.screens.language import advance_past_startup_gates
     from apt_log.secrets import FileSecretProvider
 
     report("macro.step.launching")
@@ -147,45 +148,20 @@ def _hhax_legacy_login(driver, report) -> None:
             raise RuntimeError("an unrecognised dialog is on screen")
         session_mod.dismiss(driver)
 
-    # Already signed in and sitting on home — the ordinary case for every
-    # press after the first. Walking the full ceremony from here is what made
-    # the button read as "it signs in every single time": fifteen seconds of
-    # overlay and screen churn over an app that was already there. Signed in
-    # is the goal, not the procedure; once the goal is met this is done.
-    #
-    # Strictly after the modal check: the expiry alert lands on top of
-    # HomeActivity, and home visible *underneath a modal* is not signed in.
-    home_now = home_mod.HomeScreen(driver)
-    if wait_for(home_now.is_displayed, timeout=3.0, poll=0.4):
-        report("macro.step.checking")
-        return
-
-    for gate in advance_past_startup_gates(driver, language="es"):
-        log.info("macro cleared startup gate: %s", gate)
-
     report("macro.step.signing_in")
-    login_mod.authenticate_if_needed(driver, FileSecretProvider())
+    authed = login_mod.authenticate_if_needed(driver, FileSecretProvider())
 
-    # Before anything waits on the app: a system dialog on top means the app
-    # cannot advance, and every wait below would burn its full timeout.
-    wait_for(lambda: dismiss_autofill(driver), timeout=6.0, poll=0.5)
+    if authed:
+        # A system dialog on top means the app cannot advance; the credential
+        # submit is the moment Android offers to save the password.
+        wait_for(lambda: dismiss_autofill(driver), timeout=6.0, poll=0.5)
 
-    report("macro.step.agency")
-    screen = agency_mod.AgencyScreen(driver)
-    home = home_mod.HomeScreen(driver)
-
-    # Either screen is a legitimate landing place: one agency goes straight to
-    # home, several stop to ask. Waiting for "one of them" rather than for the
-    # agency picker specifically is what keeps this working on both.
-    if not wait_for(lambda: screen.is_displayed() or home.is_displayed()):
-        raise RuntimeError("neither the agency nor the home screen appeared")
-
-    if screen.is_displayed():
-        screen.select(config.get("AGENCY_NAME"))
-
-    report("macro.step.checking")
-    if not wait_for(home.is_displayed):
-        raise RuntimeError("did not reach the home screen")
+        # Done means the credentials took: the password field is gone.
+        # Wherever the app lands next — agency picker, home — is hers.
+        report("macro.step.checking")
+        screen = login_mod.LoginScreen(driver)
+        if not wait_for(lambda: not screen.is_displayed(), timeout=15.0):
+            raise RuntimeError("still on the sign-in screen after signing in")
 
 
 def _open_app(package: str):

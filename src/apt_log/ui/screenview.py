@@ -45,6 +45,41 @@ SEGMENT_MAX_GAP = 0.02
 NAV_BAND_BOTTOM = 0.12
 
 
+def _is_icon_text(txt: str) -> bool:
+    """Text that is an icon font's private glyph, not a word.
+
+    Android apps ship icon fonts whose characters live in Unicode's private
+    use area; the dump hands them over as text and rendering them raw shows a
+    tofu box or a stray hamburger where the app showed a drawn icon. Words are
+    words; glyphs are decoration.
+    """
+    return bool(txt) and all(
+        0xE000 <= ord(c) <= 0xF8FF or c.isspace() for c in txt)
+
+
+def _fold_label(cell_b: list[int], s: dict) -> tuple[str, str]:
+    """How a label folded into a cell should be carried: as a line, a badge,
+    or not at all.
+
+    A short number's meaning is its position, learned from the real agency
+    home screen: on the left it decorates an icon (the day inside the calendar
+    glyph — the date is already in the subtitle); on the right it is a count
+    riding in a bubble. Words are lines wherever they sit.
+    """
+    txt = s.get("txt", "")
+    if _is_icon_text(txt):
+        return "drop", ""
+    if len(txt) <= 3 and txt.strip().isdigit():
+        cx = (s["b"][0] + s["b"][2]) / 2
+        width = cell_b[2] - cell_b[0] or 1
+        share = (cx - cell_b[0]) / width
+        if share < 0.33:
+            return "drop", ""
+        if share > 0.6:
+            return "badge", txt.strip()
+    return "line", txt
+
+
 def _kind(cls: str) -> str:
     if cls in BUTTONS:
         return "button"
@@ -136,13 +171,23 @@ def build(doc: dict) -> dict | None:
         # and rendering it at full width promotes it to a call to action it
         # never was. Width relative to the screen is the only signal needed.
         item["small"] = (e["b"][2] - e["b"][0]) <= w * 0.22
+        if _is_icon_text(item["txt"]):
+            item["txt"] = ""       # a drawn icon, not a word; see _is_icon_text
         if kind == "row":
             own = sorted(labels.get(id(e), []),
                          key=lambda s: (s["b"][1], s["b"][0]))
-            item["lines"] = [s["txt"] for s in own if s.get("txt")]
+            lines, badge = [], ""
+            for s in own:
+                how, value = _fold_label(e["b"], s)
+                if how == "line" and value:
+                    lines.append(value)
+                elif how == "badge":
+                    badge = value
+            item["lines"] = lines
+            item["badge"] = badge
         items.append(item)
     for i, s in enumerate(statics):
-        if i not in folded and s.get("txt"):
+        if i not in folded and s.get("txt") and not _is_icon_text(s["txt"]):
             items.append(_item(s, "label"))
 
     items.sort(key=lambda n: (n["b"][1], n["b"][0]))

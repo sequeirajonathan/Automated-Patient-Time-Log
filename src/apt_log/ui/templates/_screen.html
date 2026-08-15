@@ -59,6 +59,7 @@
           {% for line in it.lines %}
           <span class="a-line{% if not loop.first or it.txt %} sub{% endif %}">{{ line }}</span>
           {% endfor %}
+          {% if it.badge %}<span class="a-badge">{{ it.badge }}</span>{% endif %}
           <svg class="a-chev" viewBox="0 0 10 16" fill="none"
                stroke="currentColor" stroke-width="2.2" stroke-linecap="round"
             ><path d="M2 2 L8 8 L2 14"/></svg>

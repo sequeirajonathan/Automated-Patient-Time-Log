@@ -323,6 +323,22 @@ def _sans_at(doc: dict) -> dict:
     return {k: v for k, v in doc.items() if k != "at"}
 
 
+# The feed writes every 1-2 seconds when alive; a document this old means
+# nobody is writing, whatever it says.
+SCREEN_STALE_AFTER = 8.0
+
+
+def _screen_age(doc: dict | None) -> float:
+    from datetime import datetime as _dt
+
+    if not doc:
+        return float("inf")
+    try:
+        return (_dt.now() - _dt.fromisoformat(doc["at"])).total_seconds()
+    except (KeyError, TypeError, ValueError):
+        return float("inf")
+
+
 EMPTY_FRAME = {"id": "", "img": "", "size": [0, 0], "elements": [],
                "blocked": "", "notice": ""}
 SLOW_EVERY = 10.0
@@ -456,6 +472,16 @@ async def live(ws: WebSocket):
                 payload["screen_html"] = (
                     "" if model is None
                     else templates.get_template("_screen.html").render(m=model))
+
+            # "Live" is a claim, and the page must not keep making it over a
+            # document nobody is refreshing. The feed restarting, the resident
+            # session rebuilding, the phone unplugged — all leave the last
+            # screen on disk looking current. Seen on the owner's phone as a
+            # sign-in screen labelled Live while the photograph showed home.
+            payload_stale = _screen_age(screen_doc) > SCREEN_STALE_AFTER
+            if payload_stale != last.get("screen_stale"):
+                last["screen_stale"] = payload_stale
+                payload["screen_stale"] = payload_stale
 
             pending = queue.current()
             macro = macros_mod.read_status()

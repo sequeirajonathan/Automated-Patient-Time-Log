@@ -188,5 +188,6 @@
   "sign.ambiguous": "The controller could not tell which part of this screen is the signature box, so it drew nothing.",
   "sign.wrong_app": "The phone is not showing one of the care apps, so nothing was drawn.",
   "sign.replay_failed": "The drawing did not finish. Look at the phone screen — if it is half-drawn, clear it in the app and send again.",
-  "papp.live": "Live"
+  "papp.live": "Live",
+  "papp.syncing": "Syncing…"
 }

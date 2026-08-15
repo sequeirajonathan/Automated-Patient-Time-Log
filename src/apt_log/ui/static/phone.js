@@ -355,6 +355,15 @@
       if (msg.screen_html !== undefined || msg.screen) {
         applyScreen(msg.screen, msg.screen_html);
       }
+      if (msg.screen_stale !== undefined) {
+        // "Live" is a claim. When the document behind the sketch stops being
+        // refreshed the page stops claiming it: the dot goes amber, the label
+        // says syncing, and the sketch dims — stale, and saying so.
+        body.classList.toggle('stale', !!msg.screen_stale);
+        const label = document.getElementById('live-label');
+        if (label) label.textContent = msg.screen_stale
+          ? (i18n.syncing || '') : (i18n.live || '');
+      }
       if (msg.frame) applyFrame(msg.frame);
       if (msg.macro) applyMacro(msg.macro);
       if (msg.sign) applySign(msg.sign);

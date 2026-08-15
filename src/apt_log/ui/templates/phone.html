@@ -187,6 +187,12 @@
   @keyframes ping { 75%, 100% { transform:scale(2.4); opacity:0; } }
   body.offline .hdr-sub .dot::before,
   body.offline .hdr-sub .dot::after { background:var(--bad); }
+  /* Nobody is refreshing the document behind the sketch: amber dot, dimmed
+     screen. Stale, and saying so — never Live over an old picture. */
+  body.stale .hdr-sub .dot::before,
+  body.stale .hdr-sub .dot::after { background:hsl(38 92% 50%); }
+  body.stale #screenwrap { opacity:.45; }
+  body.stale #screenwrap [data-aim] { pointer-events:none; }
   .hdr-sub .spin { display:none; width:14px; height:14px; border-radius:50%;
                    border:2px solid var(--tint-soft);
                    border-top-color:var(--tint);
@@ -264,6 +270,12 @@
   .a-line.sub { font-size:13px; color:var(--muted); }
   .a-chev { position:absolute; right:0; top:50%; transform:translateY(-50%);
             width:8px; height:14px; color:hsl(240 6% 47% / .35); }
+  /* Counts ride in bubbles, the way every native list draws them. */
+  .a-badge { position:absolute; right:16px; top:50%;
+             transform:translateY(-50%); background:hsl(0 72% 51%);
+             color:#fff; font-size:13px; font-weight:600; line-height:1;
+             min-width:22px; padding:4px 7px; border-radius:999px;
+             text-align:center; }
 
   .a-btn { flex:1; border:none; border-radius:13px; background:var(--tint);
            color:#fff; font-weight:600; font-size:16.5px; padding:13px 16px;
@@ -507,6 +519,8 @@
     devfail: {{ t('phone.failed')|tojson }},
     signSending: {{ t('sign.state.running')|tojson }},
     signEmpty:   {{ t('signature.empty')|tojson }},
+    live:    {{ t('papp.live')|tojson }},
+    syncing: {{ t('papp.syncing')|tojson }},
     {# The lock's explanation, one tap away rather than a standing banner. #}
     blocked: {
       "": "",

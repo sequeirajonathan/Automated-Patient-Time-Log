@@ -136,3 +136,51 @@ class TestUtilityButtons:
         items = {i["aim"]["rid"]: i for r in m["rows"] for i in r["items"]}
         assert items["btn_left"]["small"] is True
         assert items["btn_go"]["small"] is False
+
+
+class TestLayoutIntelligence:
+    """Learned from the real agency home screen the owner screenshotted."""
+
+    def test_icon_font_glyphs_are_not_words(self):
+        """A private-use glyph rendered raw is a tofu box or a stray hamburger
+        where the app drew an icon."""
+        m = screenview.build(doc(
+            elements=[el("btn_info", "TextView", [575, 300, 648, 380],
+                         "")],
+            statics=[st([100, 300, 200, 380], "")],
+        ))
+        items = [i for r in m["rows"] for i in r["items"]]
+        assert all(not i.get("txt") for i in items)
+        assert all(i["kind"] != "label" for i in items)
+
+    def test_a_count_on_the_right_is_a_badge(self):
+        """'Mensajes  54' — the count rides in a bubble, not a subtitle."""
+        m = screenview.build(doc(
+            elements=[el("", "RelativeLayout", [0, 500, 720, 700])],
+            statics=[st([60, 520, 400, 580], "Mensajes"),
+                     st([640, 530, 700, 590], "54")],
+        ))
+        cell = m["rows"][0]["items"][0]
+        assert cell["badge"] == "54"
+        assert "54" not in cell["lines"]
+
+    def test_a_number_inside_a_left_icon_is_decoration(self):
+        """The day inside the calendar glyph. The date is already in the
+        subtitle; repeating '14' as a text line was noise."""
+        m = screenview.build(doc(
+            elements=[el("", "RelativeLayout", [0, 500, 720, 740])],
+            statics=[st([23, 530, 131, 640], "14"),
+                     st([154, 510, 552, 580], "Horario para hoy"),
+                     st([154, 580, 700, 660], "Visitas para 08/14/2026"),
+                     st([640, 515, 700, 570], "2")],
+        ))
+        cell = m["rows"][0]["items"][0]
+        assert cell["lines"] == ["Horario para hoy", "Visitas para 08/14/2026"]
+        assert cell["badge"] == "2"
+
+    def test_words_are_lines_wherever_they_sit(self):
+        m = screenview.build(doc(
+            elements=[el("", "RelativeLayout", [0, 500, 720, 700])],
+            statics=[st([600, 520, 710, 580], "Hoy")],
+        ))
+        assert m["rows"][0]["items"][0]["lines"] == ["Hoy"]
