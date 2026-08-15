@@ -102,7 +102,7 @@ class TestExecution:
         exception type is the useful part and the message is where a credential
         or a patient name would ride along."""
         def boom(_driver, _report):
-            raise RuntimeError("password Hunter2 rejected for CARIDAD ROJAS")
+            raise RuntimeError("password Hunter2 rejected for PACIENTE FICTICIA")
 
         with patch.dict(macros.MACROS,
                         {"t": macros.Macro("t", "macro.t", boom)}), \
@@ -113,7 +113,7 @@ class TestExecution:
         assert status.state == "failed"
         assert status.error == "RuntimeError"
         blob = json.dumps(status.__dict__)
-        for secret in ("Hunter2", "CARIDAD", "ROJAS"):
+        for secret in ("Hunter2", "PACIENTE", "FICTICIA"):
             assert secret not in blob
 
     def test_no_session_is_a_failure_not_a_crash(self, tmp_path):

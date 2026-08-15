@@ -654,7 +654,12 @@ def text_is_disclosable(reason: str) -> bool:
 
 
 def _clean(text: str) -> str:
-    return re.sub(r"\s+", " ", text or "").strip()[:MAX_TEXT]
+    # Unescape first: attribute values arrive XML-escaped, and a title with a
+    # line break in it otherwise renders a literal "&#10;" — seen on the real
+    # visit screen the first time the wireframe drew one.
+    import html as html_mod
+
+    return re.sub(r"\s+", " ", html_mod.unescape(text or "")).strip()[:MAX_TEXT]
 
 
 def _nodes(xml: str | None) -> list[dict]:

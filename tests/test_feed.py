@@ -206,7 +206,7 @@ class TestElements:
         ' text="Registrar Entrada" clickable="true" focused="true"'
         ' selected="false" bounds="[19,744][731,804]" />'
         '<node class="android.widget.TextView" resource-id="com.x:id/lbl_patient_name"'
-        ' text="CARIDAD ROJAS" clickable="false" bounds="[0,100][720,160]" />'
+        ' text="PACIENTE FICTICIA" clickable="false" bounds="[0,100][720,160]" />'
         '<node class="android.view.ViewGroup" resource-id="" text=""'
         ' clickable="true" bounds="[0,200][720,400]" />'
         '<node class="android.widget.View" resource-id="com.x:id/zero"'
@@ -223,7 +223,7 @@ class TestElements:
         put it in a POST body and a log line."""
         import json
         blob = json.dumps(feed.elements(self.XML))
-        for secret in ("CARIDAD", "ROJAS", "Registrar", "Entrada"):
+        for secret in ("PACIENTE", "FICTICIA", "Registrar", "Entrada"):
             assert secret not in blob
 
     def test_text_presence_is_kept_as_a_boolean(self):
@@ -294,7 +294,7 @@ class TestBlindScreens:
     def test_no_dialog_means_no_message(self):
         """The fallback picks the longest text on screen, which is only sound
         under a modal. Without one it must not volunteer anything at all."""
-        plain = ('<node class="android.widget.TextView" text="CARIDAD ROJAS"'
+        plain = ('<node class="android.widget.TextView" text="PACIENTE FICTICIA"'
                  ' clickable="false" bounds="[0,0][720,60]" />')
         assert feed.alert_message(plain) == ""
 
@@ -384,7 +384,7 @@ class TestBlindScreens:
         assert frame["blocked"] == ""
         assert frame["notice"] == ""
         blob = json.dumps(frame)
-        for secret in ("CARIDAD", "ROJAS", "Registrar"):
+        for secret in ("PACIENTE", "FICTICIA", "Registrar"):
             assert secret not in blob
 
     def test_labels_do_not_move_her_aim(self, tmp_path):
@@ -864,3 +864,19 @@ class TestHierarchyPoke:
             feed.tap("f", {"rid": "go", "cls": "Button", "b": [0, 0, 10, 10]},
                      frame_path=tmp_path / "frame.json")
         assert (tmp_path / feed.POKE_NAME).exists()
+
+
+class TestEntitiesAreUnescaped:
+    def test_a_line_break_entity_does_not_render_literally(self):
+        """Seen on the real visit screen: a title carrying "&#10;" as text."""
+        xml = ('<node class="android.widget.TextView" resource-id="com.x:id/hdr"'
+               ' text="Detalle de Visita &#10;PACIENTE FICTICIA" clickable="false"'
+               ' bounds="[0,0][720,120]" />')
+        assert feed.statics(xml)[0]["txt"] == "Detalle de Visita PACIENTE FICTICIA"
+
+    def test_ampersands_come_back_as_themselves(self):
+        xml = ('<node class="android.widget.Button" resource-id="com.x:id/b"'
+               ' text="Care &amp; Support" clickable="true"'
+               ' bounds="[0,0][300,80]" />')
+        el = feed.elements(xml, label=True)[0]
+        assert el["txt"] == "Care & Support"

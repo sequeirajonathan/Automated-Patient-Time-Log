@@ -355,24 +355,32 @@ def _screen_model(doc: dict) -> dict | None:
     if not w or not h:
         return None
 
-    def place(b):
+    def place(b, txt=""):
         x1, y1, x2, y2 = b
+        # Sized to the box, then shrunk until the words fit its width. The box
+        # height alone was wrong twice on the first real screen: a two-line
+        # title box made a huge font that wrapped to four, and long task labels
+        # overflowed onto their neighbours.
+        fs = min((y2 - y1) * 0.55, 34)
+        if txt:
+            fs = max(min(fs, (x2 - x1) * 1.8 / len(txt)), 11)
         return {
             "l": round(x1 / w * 100, 2), "t": round(y1 / h * 100, 2),
             "w": round((x2 - x1) / w * 100, 2),
             "hh": round((y2 - y1) / h * 100, 2),
-            "fs": round(min((y2 - y1) * 0.52, 40) / w * 100, 2),
+            "fs": round(fs / w * 100, 2),
         }
 
     els = []
     for e in doc.get("elements") or []:
-        els.append({**place(e["b"]), "kind": _KINDS.get(e["cls"], "row"),
+        els.append({**place(e["b"], e.get("txt", "")),
+                    "kind": _KINDS.get(e["cls"], "row"),
                     "txt": e.get("txt", ""),
                     "checked": bool(e.get("checked")),
                     "focused": bool(e.get("focused")),
                     "aim": {"rid": e.get("rid", ""), "cls": e.get("cls", ""),
                             "b": e.get("b")}})
-    texts = [{**place(s["b"]), "txt": s.get("txt", "")}
+    texts = [{**place(s["b"], s.get("txt", "")), "txt": s.get("txt", "")}
              for s in doc.get("statics") or []]
     return {"id": doc.get("id", ""), "ratio": f"{w} / {h}",
             "els": els, "texts": texts}

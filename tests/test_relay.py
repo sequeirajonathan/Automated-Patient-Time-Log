@@ -99,7 +99,7 @@ class TestToken:
         with pytest.raises(RelayError):
             normalise_token(raw)
 
-    @pytest.mark.parametrize("raw", ["Alice Example", "CARIDAD ROJAS", "hello"])
+    @pytest.mark.parametrize("raw", ["Alice Example", "PACIENTE FICTICIA", "hello"])
     def test_a_name_does_not_pass_for_a_code(self, raw):
         """Stripping the space out of a two-word name leaves a run of letters
         the right length to look like a token. Requiring a digit is what tells
