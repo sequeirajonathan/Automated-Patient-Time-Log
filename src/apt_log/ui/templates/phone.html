@@ -144,6 +144,21 @@
            padding:18px 18px calc(18px + env(safe-area-inset-bottom)); }
   body.asking #sheet { transform:translateY(0); }
 
+  #signsheet { position:fixed; left:0; right:0; bottom:0; z-index:8;
+               background:#fff; border-radius:20px 20px 0 0;
+               box-shadow:0 -12px 40px rgba(20,30,60,.25);
+               transform:translateY(105%); transition:transform .4s var(--spring);
+               padding:16px 16px calc(16px + env(safe-area-inset-bottom)); }
+  body.signing #signsheet { transform:translateY(0); }
+  #signpad { width:100%; aspect-ratio:2.2/1; display:block; border-radius:12px;
+             border:1.5px dashed var(--line); background:#fbfbfd;
+             touch-action:none; }
+  .padrow { display:flex; gap:10px; margin-top:12px; }
+  .padrow button { flex:1; font:inherit; padding:12px; border-radius:10px;
+                   border:1px solid var(--line); background:#fff; cursor:pointer; }
+  .padrow .primary { background:var(--brand); color:#fff; border:none;
+                     font-weight:600; }
+
   #toast { position:fixed; left:50%; bottom:calc(86px +
            env(safe-area-inset-bottom)); transform:translateX(-50%)
            translateY(20px); z-index:9; background:rgba(28,28,30,.92);
@@ -181,6 +196,7 @@
   <div class="topbar">
     <button class="chip" id="btn-apps">‹ {{ t('papp.apps') }}</button>
     <button class="chip" id="btn-peek">{{ t('papp.peek') }}</button>
+    <button class="chip" id="btn-sign">{{ t('sign.button') }}</button>
     <span class="where" id="where"></span>
   </div>
   <div id="offline-note">{{ t('portal.offline') }}</div>
@@ -208,6 +224,21 @@
   </div>
 </div>
 
+{# The signature pad. She draws here, on her own screen, where there is no
+   latency at all; the strokes cross once and the controller replays them onto
+   the app's canvas. Drawing through the mirror was tried on a real clock-out
+   and is not drawable. The app's save button is never pressed by the replay —
+   after the ink lands she checks the screen and taps Salvar herself. #}
+<div id="signsheet">
+  <p class="muted" style="margin:0 0 10px">{{ t('sign.instruction') }}</p>
+  <canvas id="signpad" width="10" height="10"></canvas>
+  <div class="padrow">
+    <button type="button" id="sign-clear">{{ t('signature.clear') }}</button>
+    <button type="button" id="sign-undo">{{ t('signature.undo') }}</button>
+    <button type="button" id="sign-send" class="primary">{{ t('sign.send') }}</button>
+  </div>
+</div>
+
 {# The relay, as a sheet. Same fragment the dashboard shows, pushed by the same
    socket: when the controller stops and asks, the question slides up over
    whichever view she is in. #}
@@ -225,6 +256,8 @@
     failed:  {{ t('portal.failed')|tojson }},
     sent:    {{ t('phone.sent')|tojson }},
     devfail: {{ t('phone.failed')|tojson }},
+    signSending: {{ t('sign.state.running')|tojson }},
+    signEmpty:   {{ t('signature.empty')|tojson }},
     screens: {
       {% for s in ['startup','language','permissions','login','agency','home',
                    'today','visit','verification','signature','unknown'] -%}

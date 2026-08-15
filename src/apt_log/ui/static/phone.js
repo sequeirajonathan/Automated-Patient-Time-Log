@@ -144,6 +144,100 @@
     }).catch(() => { awaitingMacro = false; unbusy(); toast(i18n.failed || ''); });
   }
 
+  // ---------------------------------------------------------------- signature
+  // A small pad of its own rather than a reuse of signature.js: that pad is
+  // welded to the relay flow — it posts a nonce the controller issued. This
+  // one is hers to start, posts to /sign, and the feed process replays the
+  // strokes onto the app's canvas. The app's save button stays her tap.
+  const pad = { strokes: [], current: null, ctx: null, waitingId: '' };
+
+  function padCanvas() { return document.getElementById('signpad'); }
+
+  function padPoint(ev, rect) {
+    return [(ev.clientX - rect.left) / rect.width,
+            (ev.clientY - rect.top) / rect.height];
+  }
+
+  function padRedraw() {
+    const c = padCanvas();
+    if (!c || !pad.ctx) return;
+    pad.ctx.clearRect(0, 0, c.width, c.height);
+    pad.ctx.lineWidth = 2.5;
+    pad.ctx.lineCap = 'round';
+    pad.ctx.lineJoin = 'round';
+    pad.ctx.strokeStyle = '#1c1c2e';
+    for (const s of pad.strokes) {
+      pad.ctx.beginPath();
+      s.forEach((p, i) => {
+        const x = p[0] * c.width, y = p[1] * c.height;
+        if (i === 0) pad.ctx.moveTo(x, y); else pad.ctx.lineTo(x, y);
+      });
+      pad.ctx.stroke();
+    }
+  }
+
+  function padWire() {
+    const c = padCanvas();
+    if (!c) return;
+    pad.ctx = c.getContext('2d');
+    c.addEventListener('pointerdown', (ev) => {
+      ev.preventDefault();
+      c.setPointerCapture(ev.pointerId);
+      pad.current = [padPoint(ev, c.getBoundingClientRect())];
+      pad.strokes.push(pad.current);
+    });
+    c.addEventListener('pointermove', (ev) => {
+      if (!pad.current) return;
+      pad.current.push(padPoint(ev, c.getBoundingClientRect()));
+      padRedraw();
+    });
+    const up = () => { pad.current = null; };
+    c.addEventListener('pointerup', up);
+    c.addEventListener('pointercancel', up);
+  }
+
+  function padFit() {
+    // Backing store matches CSS pixels so strokes land where the finger is.
+    const c = padCanvas();
+    if (!c) return;
+    const rect = c.getBoundingClientRect();
+    if (rect.width && (c.width !== Math.round(rect.width))) {
+      c.width = Math.round(rect.width);
+      c.height = Math.round(rect.height);
+      padRedraw();
+    }
+  }
+
+  function padSend() {
+    if (!pad.strokes.length) { toast(i18n.signEmpty || ''); return; }
+    const c = padCanvas();
+    const rect = c.getBoundingClientRect();
+    body.classList.remove('signing');
+    busy(i18n.signSending || '');
+    fetch('/sign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ strokes: pad.strokes,
+                             aspect: rect.width / rect.height })
+    }).then(async (r) => {
+      const out = await r.json().catch(() => ({}));
+      if (!r.ok) { unbusy(); toast(i18n.failed || ''); return; }
+      pad.waitingId = out.id || '';
+      // Cleared on the status push; nothing reusable is left behind.
+      pad.strokes = []; padRedraw();
+    }).catch(() => { unbusy(); toast(i18n.failed || ''); });
+  }
+
+  function applySign(s) {
+    if (!pad.waitingId || s.id !== pad.waitingId) return;
+    if (s.state === 'running') { busy(s.text || ''); return; }
+    pad.waitingId = '';
+    unbusy();
+    // done or failed, the sentence arrives rendered; show it either way. On
+    // done it says to check the screen and press the app's own save.
+    toast(s.text || '');
+  }
+
   // -------------------------------------------------------------------- relay
   function applyRelay(html, nonce) {
     if (window.APTLOG_DRAWING) return;   // never yank a half-drawn signature
@@ -209,6 +303,7 @@
       }
       if (msg.frame) applyFrame(msg.frame);
       if (msg.macro) applyMacro(msg.macro);
+      if (msg.sign) applySign(msg.sign);
       if (msg.relay_html !== undefined || msg.relay_nonce !== undefined) {
         applyRelay(msg.relay_html, msg.relay_nonce);
       }
@@ -235,6 +330,24 @@
       body.classList.toggle('peeking');
       if (body.classList.contains('peeking')) refreshPeek();
     });
+
+    const sign = document.getElementById('btn-sign');
+    if (sign) sign.addEventListener('click', () => {
+      body.classList.toggle('signing');
+      padFit();
+    });
+    padWire();
+    window.addEventListener('resize', padFit);
+    const clear = document.getElementById('sign-clear');
+    if (clear) clear.addEventListener('click', () => {
+      pad.strokes = []; padRedraw();
+    });
+    const undo = document.getElementById('sign-undo');
+    if (undo) undo.addEventListener('click', () => {
+      pad.strokes.pop(); padRedraw();
+    });
+    const send = document.getElementById('sign-send');
+    if (send) send.addEventListener('click', padSend);
 
     for (const btn of document.querySelectorAll('.navbar [data-act]')) {
       btn.addEventListener('click', () => {

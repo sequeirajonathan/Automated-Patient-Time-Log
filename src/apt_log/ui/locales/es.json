@@ -176,5 +176,16 @@
   "papp.waiting_screen": "Esperando el teléfono…",
   "papp.apps": "Aplicaciones",
   "papp.peek": "Foto",
-  "papp.full_status": "Página de estado completa"
+  "papp.full_status": "Página de estado completa",
+  "sign.button": "Firmar",
+  "sign.instruction": "Firme aquí con el dedo. Se dibujará en el recuadro de firma del teléfono; después revise la pantalla y pulse el botón de guardar de la propia aplicación.",
+  "sign.send": "Enviar al teléfono",
+  "sign.state.idle": "No se está dibujando nada.",
+  "sign.state.running": "Dibujando su firma en el teléfono…",
+  "sign.state.done": "Dibujada. Revise la pantalla del teléfono y pulse el botón de guardar de la propia aplicación.",
+  "sign.state.failed": "Eso no llegó al teléfono.",
+  "sign.no_canvas": "Esta pantalla no tiene recuadro de firma. Abra primero la pantalla de firma de la aplicación y luego firme aquí.",
+  "sign.ambiguous": "El controlador no pudo distinguir qué parte de esta pantalla es el recuadro de firma, así que no dibujó nada.",
+  "sign.wrong_app": "El teléfono no está mostrando una de las aplicaciones de cuidado, así que no se dibujó nada.",
+  "sign.replay_failed": "El dibujo no terminó. Mire la pantalla del teléfono; si quedó a medias, bórrelo en la aplicación y envíe de nuevo."
 }

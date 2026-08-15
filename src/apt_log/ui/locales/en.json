@@ -176,5 +176,16 @@
   "papp.waiting_screen": "Waiting for the phone…",
   "papp.apps": "Apps",
   "papp.peek": "Photo",
-  "papp.full_status": "Full status page"
+  "papp.full_status": "Full status page",
+  "sign.button": "Sign",
+  "sign.instruction": "Sign here with your finger. It will be drawn onto the phone's signature box — then check the screen and press the app's own save button.",
+  "sign.send": "Send to the phone",
+  "sign.state.idle": "Nothing is being drawn.",
+  "sign.state.running": "Drawing your signature on the phone…",
+  "sign.state.done": "Drawn. Check the phone screen, then press the app's own save button.",
+  "sign.state.failed": "That did not reach the phone.",
+  "sign.no_canvas": "This screen has no signature box. Open the app's signature screen first, then sign here.",
+  "sign.ambiguous": "The controller could not tell which part of this screen is the signature box, so it drew nothing.",
+  "sign.wrong_app": "The phone is not showing one of the care apps, so nothing was drawn.",
+  "sign.replay_failed": "The drawing did not finish. Look at the phone screen — if it is half-drawn, clear it in the app and send again."
 }

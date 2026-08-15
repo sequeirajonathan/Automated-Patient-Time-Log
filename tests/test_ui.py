@@ -103,7 +103,7 @@ class TestWritePaths:
             if getattr(r, "methods", None) and "POST" in r.methods
         }
         assert posts == {"/language", "/signature", "/relay", "/device", "/tap",
-                         "/macro", "/acknowledge", "/control"}
+                         "/macro", "/acknowledge", "/control", "/sign"}
 
     def test_no_route_accepts_a_raw_coordinate_or_keycode(self, client):
         """/tap takes an element from a named frame; /device takes an action
@@ -757,3 +757,28 @@ class TestWireframeOverTheSocket:
                 second = ws.receive_json()
         assert "frame" in second
         assert "screen_html" not in second
+
+
+class TestSignRoute:
+    def test_strokes_are_queued_for_the_feed(self, client, tmp_path):
+        from apt_log import sign as sign_mod
+
+        with patch.object(sign_mod, "REQUEST_PATH", tmp_path / "req.json"):
+            r = client.post("/sign", json={
+                "strokes": [[[0.1, 0.2, 0], [0.5, 0.5, 40]]], "aspect": 2.2})
+        assert r.status_code == 200
+        assert (tmp_path / "req.json").exists()
+
+    def test_garbage_is_refused_at_the_door(self, client):
+        r = client.post("/sign", json={"strokes": [[[5, 5, 0]]]})
+        assert r.status_code == 400
+        r = client.post("/sign", json={"strokes": []})
+        assert r.status_code == 400
+
+    def test_the_page_offers_the_pad(self, client):
+        body = client.get("/app").text
+        assert 'id="signpad"' in body
+        assert "Firmar" in body
+        # The sentence that keeps the line where it is: the app's own save
+        # button is hers, not the replay's.
+        assert "guardar de la propia aplicación" in body

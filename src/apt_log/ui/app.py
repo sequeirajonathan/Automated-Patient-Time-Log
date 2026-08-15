@@ -355,6 +355,16 @@ def _screen_model(doc: dict) -> dict | None:
     if not w or not h:
         return None
 
+    # The app forces landscape on its signature screen; `wm size` keeps
+    # reporting portrait, so the hierarchy's coordinates overflow the claimed
+    # width. When they do, the screen is sideways: swap. Inferred from the
+    # bounds themselves rather than asked, because the bounds are what
+    # everything here is positioned by.
+    everything = ((doc.get("elements") or []) + (doc.get("statics") or []))
+    max_x = max((e["b"][2] for e in everything if e.get("b")), default=0)
+    if max_x > w and max_x <= max(w, h):
+        w, h = h, w
+
     def place(b, txt=""):
         x1, y1, x2, y2 = b
         # Sized to the box, then shrunk until the words fit its width. The box
@@ -486,6 +496,15 @@ async def live(ws: WebSocket):
                            # socket — the loading screen shows these verbatim.
                            "text": t(macro.step) if macro.step else "",
                            "state_text": t(f"macro.state.{macro.state}")}
+
+            from apt_log import sign as sign_mod
+
+            sig = sign_mod.read_status()
+            sig_state = {"id": sig.id, "state": sig.state,
+                         "text": (t(f"sign.{sig.reason}") if sig.reason
+                                  else t(f"sign.state.{sig.state}"))}
+            if sig_state != last.get("sign"):
+                payload["sign"] = last["sign"] = sig_state
             if macro_state != last.get("macro"):
                 payload["macro"] = last["macro"] = macro_state
 
@@ -681,6 +700,37 @@ async def submit_signature(request: Request):
 
     log.info("signature accepted for nonce %s (sha256 %s…)", nonce, digest[:8])
     return JSONResponse({"ok": True})
+
+
+@app.post("/sign")
+async def sign_current_screen(request: Request):
+    """Accept strokes drawn on the portal's pad, for replay onto the app.
+
+    The other half of the signature story. /signature answers a relay request
+    the controller opened; this one is hers to start — she has driven the app
+    to its own signature screen through the portal and needs ink to land on a
+    canvas she cannot physically touch. Drawing through the mirror was tried
+    on a real clock-out and is not drawable: every stroke crosses the network
+    twice before the ink appears.
+
+    The strokes are validated for shape here and handed to the feed process,
+    which replays them onto exactly one signature-canvas element or refuses
+    (see sign.py for the whole argument). Nothing here presses the app's save
+    button — that stays her tap.
+    """
+    from apt_log import sign as sign_mod
+
+    payload = await request.json()
+    strokes = payload.get("strokes")
+    if not sign_mod.validate(strokes):
+        return JSONResponse({"error": "empty"}, status_code=400)
+    try:
+        aspect = float(payload.get("aspect", 1.0))
+    except (TypeError, ValueError):
+        aspect = 1.0
+    rid = sign_mod.request(strokes, aspect=aspect)
+    log.info("signature replay queued (%s)", rid)
+    return JSONResponse({"ok": True, "id": rid})
 
 
 @app.post("/relay")

@@ -285,11 +285,19 @@ class Runner:
         self._stop.set()
 
     def _loop(self) -> None:
+        # Signature replays ride this loop too: both need the resident session,
+        # UiAutomator2 allows exactly one, and one thread claiming work is what
+        # keeps a macro and a replay from interleaving their gestures.
+        from apt_log import sign
+
         while not self._stop.is_set():
             try:
                 pending = take_request(self._request_path)
                 if pending is not None:
                     self.execute(pending["name"], pending["id"])
+                signature = sign.take_request()
+                if signature is not None:
+                    sign.execute(signature)
             except Exception as exc:  # noqa: BLE001
                 log.warning("macro runner: %s", exc)
             self._stop.wait(POLL_EVERY)
