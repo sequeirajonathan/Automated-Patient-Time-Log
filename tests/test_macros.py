@@ -374,12 +374,13 @@ class TestAutoAuth:
     """
 
     def _doc(self, tmp_path, app="com.hhaexchange.caregiver", screen="login",
-             age=0.0):
+             age=0.0, blocked=""):
         import datetime as dt
 
         path = tmp_path / "screen.json"
         at = (dt.datetime.now() - dt.timedelta(seconds=age)).isoformat()
-        path.write_text(json.dumps({"app": app, "screen": screen, "at": at}))
+        path.write_text(json.dumps({"app": app, "screen": screen,
+                                    "blocked": blocked, "at": at}))
         return path
 
     def _runner(self, tmp_path):
@@ -419,3 +420,13 @@ class TestAutoAuth:
         with patch.object(runner, "execute") as execute:
             assert runner.maybe_auto_auth() is False
         execute.assert_not_called()
+
+    def test_auth_inputs_are_the_signal_not_the_activity_name(self, tmp_path):
+        """The flight recorder's fourth-ever entry: this app hosts its login
+        form under an activity classified "startup". The capture refusal says
+        credentials are on screen; that is the owner's rule taken literally."""
+        self._doc(tmp_path, screen="startup", blocked="password_field")
+        runner = self._runner(tmp_path)
+        with patch.object(runner, "execute") as execute:
+            assert runner.maybe_auto_auth() is True
+        execute.assert_called_once()

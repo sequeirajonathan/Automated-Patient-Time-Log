@@ -328,7 +328,18 @@ class Runner:
         except (OSError, json.JSONDecodeError):
             return False
 
-        if doc.get("app") != AUTO_AUTH_APP or doc.get("screen") != "login":
+        if doc.get("app") != AUTO_AUTH_APP:
+            return False
+        # "Sign in when we see inputs for auth" — the owner's rule, taken
+        # literally. The activity's name is not the signal: the flight
+        # recorder's fourth-ever entry showed this app hosting its login form
+        # under an activity classified "startup", and the capture refusals
+        # (login-shaped activity, password field on screen) are the parts that
+        # actually mean credentials are being asked for.
+        from apt_log.feed import CREDENTIAL_REFUSALS
+
+        if (doc.get("screen") != "login"
+                and doc.get("blocked") not in CREDENTIAL_REFUSALS):
             return False
         try:
             age = (datetime.now()
