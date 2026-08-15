@@ -131,7 +131,7 @@
           display:flex; flex-direction:column; align-items:center; gap:9px;
           color:#fff; width:100%;
           transition: transform .22s var(--spring); }
-  .tile:active { transform:scale(.88); }
+  .tile:active { transform:scale(.88); transition-duration:.06s; }
   .tile .mark { width:66px; height:66px; border-radius:16px;
                 display:flex; align-items:center; justify-content:center;
                 font-weight:700; font-size:20px; color:#fff; position:relative;
@@ -165,7 +165,9 @@
   .hdr-row button { border:none; background:none; color:var(--tint);
                     padding:6px 8px; cursor:pointer; font-size:17px;
                     display:flex; align-items:center; gap:1px; }
-  .hdr-row button:active { opacity:.4; }
+  .hdr-row button { transition:opacity .25s ease, transform .3s var(--spring); }
+  .hdr-row button:active { opacity:.35; transform:scale(.92);
+                           transition-duration:.05s, .05s; }
   .hdr-row .chev { width:12px; height:20px; }
   .hdr-row .spacer { flex:1; }
   .hdr-row svg.tool { width:21px; height:21px; }
@@ -265,7 +267,8 @@
   .a-cell { flex:1; border:none; background:none; text-align:left; padding:0;
             cursor:pointer; display:flex; flex-direction:column; gap:2px;
             min-width:0; position:relative; padding-right:22px; }
-  .a-cell:active { opacity:.5; }
+  .a-cell { transition:opacity .25s ease; }
+  .a-cell:active { opacity:.45; transition-duration:.04s; }
   .a-line { font-size:16.5px; overflow-wrap:anywhere; }
   .a-line.sub { font-size:13px; color:var(--muted); }
   .a-chev { position:absolute; right:0; top:50%; transform:translateY(-50%);
@@ -281,7 +284,8 @@
            color:#fff; font-weight:600; font-size:16.5px; padding:13px 16px;
            cursor:pointer; min-height:48px;
            transition:transform .15s var(--spring), filter .15s ease; }
-  .a-btn:active { transform:scale(.97); filter:brightness(.88); }
+  .a-btn:active { transform:scale(.96); filter:brightness(.85);
+              transition-duration:.05s, .05s; }
   .a-btn.sm { flex:none; min-width:44px; padding:9px 13px; min-height:38px;
               background:var(--track); color:var(--tint); font-size:15px; }
 
@@ -297,10 +301,12 @@
               color:var(--ink); min-width:46px; min-height:34px;
               padding:5px 12px; cursor:pointer; font-size:15.5px;
               transition:background .15s ease; }
-  .a-segbtn:active { background:hsl(240 6% 47% / .1); }
+  .a-segbtn:active { background:hsl(240 6% 47% / .14);
+              transform:scale(.94); transition-duration:.05s; }
   .a-segbtn.on { background:var(--card); color:var(--tint); font-weight:600;
                  box-shadow:0 1px 4px rgb(0 0 0 / .12); }
 
+  .a-switch:active .knob { transform:scale(1.08); }
   .a-switch { flex:none; margin-left:auto; width:51px; height:31px;
               border:none; border-radius:999px; background:var(--track);
               padding:2px; display:flex; justify-content:flex-start;
@@ -360,14 +366,21 @@
                   background:var(--card); padding:6px;
                   box-shadow:var(--shadow-pill); max-width:420px;
                   margin:0 auto; }
+  /* Press feel, everywhere: snap in fast, spring out slow. A single
+     transition speed makes a press feel laggy going down and abrupt coming
+     up — the native asymmetry is most of what "alive" means. */
   .navbar button { flex:1; display:flex; flex-direction:column;
                    align-items:center; gap:3px; border:none; background:none;
                    border-radius:22px; padding:8px 0 6px; cursor:pointer;
                    color:var(--muted);
-                   transition:background .15s ease, color .15s ease,
-                              transform .15s var(--spring); }
-  .navbar button:active { transform:scale(.92); background:var(--tint-soft);
-                          color:var(--tint); }
+                   transition:background .3s ease, color .3s ease,
+                              transform .35s var(--spring); }
+  .navbar button:active { transform:scale(.8); background:var(--tint-soft);
+                          color:var(--tint);
+                          transition-duration:.06s, .06s, .06s; }
+  /* The command went: the icon answers with a quick pop. */
+  .navbar button.sent svg { animation:pop .4s var(--spring); }
+  @keyframes pop { 30% { transform:scale(1.3); } }
   .navbar svg { width:22px; height:22px; display:block; }
   .navbar span { font-size:10px; font-weight:500; letter-spacing:-.01em;
                  line-height:1; }
@@ -393,7 +406,8 @@
                    cursor:pointer; font-size:16px;
                    transition:transform .15s var(--spring); }
   .padrow .primary { background:var(--tint); color:#fff; font-weight:600; }
-  .padrow button:active { transform:scale(.96); opacity:.75; }
+  .padrow button:active { transform:scale(.95); opacity:.8;
+                          transition-duration:.05s; }
 
   #toast { position:fixed; left:50%; bottom:calc(96px +
            env(safe-area-inset-bottom)); transform:translateX(-50%)

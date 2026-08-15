@@ -434,10 +434,14 @@
     for (const btn of document.querySelectorAll('.navbar [data-act]')) {
       btn.addEventListener('click', () => {
         if (!socket || socket.readyState !== 1) return;
-        // No overlay for these: the wireframe follows within a second or two,
-        // and a spinner over every Back press would make the page feel slower
-        // than it is. Failures still surface as a toast.
         socket.send(JSON.stringify({ type: 'device', action: btn.dataset.act }));
+        // The command went: the icon pops, and for the three that change the
+        // screen, the sketch shows in-flight the same way a tap does — the
+        // press has a visible consequence instead of a silent wait.
+        btn.classList.remove('sent');
+        void btn.offsetWidth;
+        btn.classList.add('sent');
+        if (btn.dataset.act !== 'wake') tapping(true);
       });
     }
 
@@ -454,6 +458,11 @@
 
   // Failsafe for the splash: 2.8s and it lifts no matter what.
   setTimeout(() => body.classList.add('ready'), 2800);
+
+  // The ancient iOS incantation: without any touchstart listener on the
+  // document, Safari withholds :active states — every press style this page
+  // has would simply not fire under a finger.
+  document.addEventListener('touchstart', () => {}, { passive: true });
 
   document.addEventListener('visibilitychange', () => {
     // iOS suspends a backgrounded tab and its socket with it.
