@@ -14,6 +14,7 @@ that, and the tests here cover the route not widening it on the way through.
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -485,6 +486,15 @@ class TestBlindScreenIsUsable:
         """A controller on a sign-in screen since boot has never written a
         capture. That used to render "no recent picture" and nothing else — no
         boxes and no way through, on the one screen that needs a way through."""
-        body = client.get("/").text          # no capture exists in a test run
+        # Patched rather than assumed. The first version of this test relied on
+        # no capture existing, which is true on a build machine and false on the
+        # controller — where the suite also runs, as the deploy gate, and where
+        # it duly failed. A test that depends on the machine is testing the
+        # machine.
+        from apt_log.ui import state as state_mod
+
+        with patch.object(state_mod, "SCREENSHOT_PATH",
+                          Path("/nonexistent/never-captured.jpg")):
+            body = client.get("/").text
         assert 'id="overlay"' in body
         assert "No hay ninguna imagen reciente" in body
