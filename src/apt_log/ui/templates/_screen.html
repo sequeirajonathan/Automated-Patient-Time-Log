@@ -40,7 +40,9 @@
         {% endfor %}
         </span>
       {% elif it.kind == 'button' %}
-        <button type="button" class="a-btn" data-aim='{{ it.aim | tojson }}'
+        <button type="button" class="a-btn{% if it.small %} sm{% endif %}"
+                data-aim='{{ it.aim | tojson }}'
+                {% if not it.txt %}aria-label="{{ it.aim.cls }}{% if it.aim.rid %} {{ it.aim.rid }}{% endif %}"{% endif %}
           >{{ it.txt or '' }}</button>
       {% elif it.kind == 'field' %}
         <button type="button" class="a-field{% if it.focused %} focus{% endif %}"

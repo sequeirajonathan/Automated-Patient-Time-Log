@@ -121,3 +121,18 @@ class TestOrderAndOrientation:
 
     def test_no_size_is_no_model(self):
         assert screenview.build({"size": [0, 0]}) is None
+
+
+class TestUtilityButtons:
+    def test_a_narrow_button_is_marked_small(self):
+        """A badge rendered at full width is promoted to a call to action it
+        never was — seen on the real agency home screen, where a '2' badge
+        became the biggest button on the page."""
+        m = screenview.build(doc(
+            elements=[el("btn_left", "Button", [0, 300, 72, 380], "2"),
+                      el("btn_go", "Button", [60, 800, 660, 900], "Entrar")],
+            statics=[],
+        ))
+        items = {i["aim"]["rid"]: i for r in m["rows"] for i in r["items"]}
+        assert items["btn_left"]["small"] is True
+        assert items["btn_go"]["small"] is False

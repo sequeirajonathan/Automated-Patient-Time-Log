@@ -299,6 +299,17 @@
       }
       if (msg.type !== 'state') return;
 
+      // A shell from a previous server reloads itself once. See phone.js for
+      // the incident; the guard keeps a broken deploy from looping it.
+      if (msg.boot && body.dataset.boot && msg.boot !== body.dataset.boot) {
+        const last = Number(sessionStorage.getItem('aptlog-reloaded') || 0);
+        if (Date.now() - last > 30000) {
+          sessionStorage.setItem('aptlog-reloaded', String(Date.now()));
+          location.reload();
+        }
+        return;
+      }
+
       if (msg.frame) applyFrame(msg.frame);
       if (msg.relay_html !== undefined) {
         // Never swap the panel out from under a half-drawn signature.

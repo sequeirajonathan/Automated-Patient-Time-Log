@@ -156,6 +156,9 @@
            color:#fff; font-weight:600; font-size:16.5px; padding:13px 16px;
            cursor:pointer; min-height:48px; }
   .a-btn:active { filter:brightness(.85); }
+  /* Utilities — badges, hamburgers, info dots. Quiet capsules, never CTAs. */
+  .a-btn.sm { flex:none; min-width:46px; padding:10px 13px;
+              background:rgba(118,118,128,.12); color:var(--tint); }
 
   .a-field { flex:1; border:none; border-radius:9px;
              background:rgba(118,118,128,.12); color:var(--ink);
@@ -263,7 +266,7 @@
   .muted { color:var(--muted); }
 </style>
 </head>
-<body data-view="launcher">
+<body data-view="launcher" data-boot="{{ boot }}">
 
 <div class="view" id="launcher">
   <time id="clock"></time>
@@ -367,7 +370,9 @@
     blockedOther: {{ t('phone.blocked.other')|tojson }}
   };
 </script>
-<script src="/static/signature.js" defer></script>
-<script src="/static/phone.js" defer></script>
+{# Stamped with the server's boot id: a fresh shell always fetches assets that
+   match it, whatever a cache thinks it knows. #}
+<script src="/static/signature.js?v={{ boot }}" defer></script>
+<script src="/static/phone.js?v={{ boot }}" defer></script>
 </body>
 </html>

@@ -312,6 +312,20 @@
       }
       if (msg.type !== 'state') return;
 
+      // A shell from a previous server is a stale skin rendering fresh
+      // fragments — new markup, none of the new styles, and it reads as a
+      // broken design rather than a cache. Reload once and become current.
+      // The timestamp guard keeps a genuinely broken deploy from turning
+      // this into a reload loop.
+      if (msg.boot && body.dataset.boot && msg.boot !== body.dataset.boot) {
+        const last = Number(sessionStorage.getItem('aptlog-reloaded') || 0);
+        if (Date.now() - last > 30000) {
+          sessionStorage.setItem('aptlog-reloaded', String(Date.now()));
+          location.reload();
+        }
+        return;
+      }
+
       if (msg.screen_html !== undefined || msg.screen) {
         applyScreen(msg.screen, msg.screen_html);
       }

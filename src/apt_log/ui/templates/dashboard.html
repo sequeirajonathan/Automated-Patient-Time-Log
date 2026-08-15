@@ -126,7 +126,7 @@
 </head>
 {# The nonce is what the live stream compares against to notice that the request
    on this page is no longer the one the controller is waiting on. #}
-<body data-relay-nonce="{{ pending.nonce if pending else '' }}">
+<body data-relay-nonce="{{ pending.nonce if pending else '' }}" data-boot="{{ boot }}">
 <header>
   <h1>{{ t('app.title') }}</h1>
   <form method="post" action="/language">
@@ -420,7 +420,7 @@
   </section>
 </main>
 
-<script src="/static/signature.js" defer></script>
-<script src="/static/live.js" defer></script>
+<script src="/static/signature.js?v={{ boot }}" defer></script>
+<script src="/static/live.js?v={{ boot }}" defer></script>
 </body>
 </html>

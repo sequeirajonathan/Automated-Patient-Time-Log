@@ -132,6 +132,10 @@ def build(doc: dict) -> dict | None:
     for e in elements:
         kind = _kind(e.get("cls", ""))
         item = _item(e, kind)
+        # A narrow button is a utility — a badge, a hamburger, an info dot —
+        # and rendering it at full width promotes it to a call to action it
+        # never was. Width relative to the screen is the only signal needed.
+        item["small"] = (e["b"][2] - e["b"][0]) <= w * 0.22
         if kind == "row":
             own = sorted(labels.get(id(e), []),
                          key=lambda s: (s["b"][1], s["b"][0]))

@@ -60,6 +60,17 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 LANGUAGE_COOKIE = "aptlog_lang"
 
 app = FastAPI(title="APT Log", docs_url=None, redoc_url=None)
+
+# Identity of this running process, baked into every page shell and carried on
+# every socket message. A deploy restarts the server; a page whose shell came
+# from the previous one is a stale skin rendering fresh fragments — seen live
+# as the new markup arriving into a cached page with none of the new styles,
+# which reads as a broken design rather than a cache. When the client notices
+# the mismatch it reloads itself once, so every open page follows a deploy
+# instead of quietly rotting.
+import uuid as _uuid
+
+BOOT_ID = _uuid.uuid4().hex[:12]
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 queue = RelayQueue()
@@ -116,8 +127,12 @@ def dashboard(request: Request):
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
+        # no-store: a cached shell rendering a newer server's fragments is a
+        # broken-looking page nobody can explain from their armchair.
+        headers={"Cache-Control": "no-store"},
         context={
             "t": t,
+            "boot": BOOT_ID,
             "lang": t.language,
             "languages": SUPPORTED,
             "s": state_mod.collect(),
@@ -154,8 +169,10 @@ def phone_app(request: Request):
     return templates.TemplateResponse(
         request=request,
         name="phone.html",
+        headers={"Cache-Control": "no-store"},
         context={
             "t": t,
+            "boot": BOOT_ID,
             "lang": t.language,
             "apps": PHONE_APPS,
             "m": model,
@@ -478,7 +495,9 @@ async def live(ws: WebSocket):
                     payload["paused"] = last["paused"] = s.paused
 
             if payload:
-                await ws.send_json({"type": "state", **payload})
+                # `boot` rides every message so a shell from a previous server
+                # can notice it is stale and reload itself.
+                await ws.send_json({"type": "state", "boot": BOOT_ID, **payload})
 
             while outbox:
                 await ws.send_bytes(outbox.pop(0))

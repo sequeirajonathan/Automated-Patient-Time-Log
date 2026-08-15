@@ -783,3 +783,37 @@ class TestSignRoute:
         # The sentence that keeps the line where it is: the app's own save
         # button is hers, not the replay's.
         assert "guardar de la propia aplicación" in body
+
+
+class TestShellNeverGoesStale:
+    """Seen live on an iPhone: a cached page shell from one deploy rendering
+    the next deploy's fragments — new markup, none of the new styles, and it
+    reads as a broken design rather than a cache.
+    """
+
+    def test_the_pages_are_never_cached(self, client):
+        for path in ("/", "/app"):
+            assert client.get(path).headers.get("cache-control") == "no-store"
+
+    def test_the_shell_and_the_socket_share_a_boot_id(self, client, tmp_path):
+        from apt_log.ui.app import BOOT_ID
+
+        body = client.get("/app").text
+        assert f'data-boot="{BOOT_ID}"' in body
+        with patch.object(state_mod, "STATE_DIR", tmp_path):
+            with client.websocket_connect("/ws") as ws:
+                msg = ws.receive_json()
+        assert msg["boot"] == BOOT_ID
+
+    def test_assets_are_stamped_with_it(self, client):
+        from apt_log.ui.app import BOOT_ID
+
+        for path in ("/", "/app"):
+            assert f"?v={BOOT_ID}" in client.get(path).text
+
+    def test_the_clients_reload_on_a_mismatch(self):
+        for name in ("phone.js", "live.js"):
+            js = (Path(__file__).resolve().parents[1]
+                  / "src/apt_log/ui/static" / name).read_text(encoding="utf-8")
+            assert "location.reload()" in js
+            assert "aptlog-reloaded" in js     # and the loop guard with it
