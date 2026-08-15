@@ -817,3 +817,20 @@ class TestShellNeverGoesStale:
                   / "src/apt_log/ui/static" / name).read_text(encoding="utf-8")
             assert "location.reload()" in js
             assert "aptlog-reloaded" in js     # and the loop guard with it
+
+
+class TestPhoneBoundaries:
+    """Every page respects the device's own chrome.
+
+    Opened from the installed app the dashboard renders edge-to-edge, and its
+    header sat under the iOS status bar — the page title colliding with the
+    clock and battery. Safe-area insets are not an /app nicety; they are what
+    keeps any page out from under hardware it does not own.
+    """
+
+    def test_every_page_pads_for_the_status_bar(self, client):
+        for path in ("/", "/app"):
+            body = client.get(path).text
+            assert "env(safe-area-inset-top)" in body, path
+            assert "env(safe-area-inset-bottom)" in body, path
+            assert "viewport-fit=cover" in body, path

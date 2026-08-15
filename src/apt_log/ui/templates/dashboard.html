@@ -34,10 +34,17 @@
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--ink);
          font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
-  header { background:var(--accent); color:#fff; padding:14px 16px;
-           display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  /* The page renders edge-to-edge when opened from the installed app, so the
+     header owns the status-bar region: safe-area padding keeps the title out
+     from under the clock and battery, and sticky keeps that region
+     brand-coloured instead of whatever scrolled beneath it. */
+  header { background:var(--accent); color:#fff;
+           padding:calc(14px + env(safe-area-inset-top)) 16px 14px;
+           display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+           position:sticky; top:0; z-index:20; }
   header h1 { font-size:18px; margin:0; flex:1; }
-  main { padding:12px; max-width:900px; margin:0 auto; }
+  main { padding:12px 12px calc(12px + env(safe-area-inset-bottom));
+         max-width:900px; margin:0 auto; }
   section { background:var(--card); border:1px solid var(--line);
             border-radius:10px; padding:14px 16px; margin-bottom:12px; }
   h2 { font-size:15px; margin:0 0 10px; letter-spacing:.02em; }
