@@ -654,7 +654,8 @@ class TestPhoneAppView:
 
     def test_it_renders_in_her_language(self, client):
         body = client.get("/app").text
-        assert "Elija una aplicación" in body
+        assert "Registro de Horas de Pacientes" in body
+        assert "Aplicaciones" in body
 
     def test_all_four_apps_are_offered(self, client):
         body = client.get("/app").text

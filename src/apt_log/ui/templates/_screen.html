@@ -1,24 +1,78 @@
-{# The phone's current screen, drawn as components instead of photographed.
+{# The phone's current screen, reflowed into a native mobile layout.
 
-   Every node is positioned by the device's own coordinates, as percentages, so
-   the fragment is correct at any width. Tappable nodes are buttons carrying the
-   same identity the overlay posts today — rid, class, bounds — and the server
-   re-verifies them against the published frame before anything touches the
-   phone. The wireframe changes what she sees, not what a tap is allowed to do.
+   Semantic rows from screenview.build — the device's coordinates decided the
+   order and the grouping and are not used for placement. Every interactive
+   item carries the same rid/class/bounds identity the overlay always posted,
+   and the server re-verifies it against the published frame before anything
+   reaches the phone: the reflow changes where a control is drawn on her page,
+   never what tapping it means.
 
-   Rendered server-side and pushed over the socket like every other sentence:
-   the client never assembles one. #}
-<div class="wire" data-frame="{{ m.id }}" style="aspect-ratio: {{ m.ratio }}">
-  {% for s in m.texts %}
-  <span class="w-text" style="left:{{ s.l }}%;top:{{ s.t }}%;width:{{ s.w }}%;height:{{ s.hh }}%;font-size:{{ s.fs }}cqw">{{ s.txt }}</span>
+   Rendered server-side and pushed over the socket, like every sentence. #}
+<div class="wire" data-frame="{{ m.id }}">
+  {% if m.nav %}
+  <div class="a-nav">
+    <button type="button" class="a-back" data-aim='{{ m.nav.back.aim | tojson }}'
+      ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M14.5 5 L8 12 L14.5 19"/></svg
+      >{{ m.nav.back.txt }}</button>
+    <span class="a-title">{{ m.nav.title }}</span>
+    <span class="a-trail">
+      {% for b in m.nav.trailing %}
+      <button type="button" class="a-navbtn" data-aim='{{ b.aim | tojson }}'
+        >{{ b.txt or '···' }}</button>
+      {% endfor %}
+    </span>
+  </div>
+  {% endif %}
+
+  {% if m.notice %}
+  <div class="a-alert" role="alert">{{ m.notice }}</div>
+  {% endif %}
+
+  <div class="a-list">
+  {% for row in m.rows %}
+    <div class="a-row n{{ row['items'] | length }}">
+    {% for it in row['items'] %}
+      {% if it.kind == 'segment' %}
+        <span class="a-seg">
+        {% for part in it.parts %}
+          <button type="button" class="a-segbtn{% if part.checked %} on{% endif %}"
+                  data-aim='{{ part.aim | tojson }}'>{{ part.txt or '·' }}</button>
+        {% endfor %}
+        </span>
+      {% elif it.kind == 'button' %}
+        <button type="button" class="a-btn" data-aim='{{ it.aim | tojson }}'
+          >{{ it.txt or '' }}</button>
+      {% elif it.kind == 'field' %}
+        <button type="button" class="a-field{% if it.focused %} focus{% endif %}"
+                data-aim='{{ it.aim | tojson }}'
+          >{{ it.txt or '' }}</button>
+      {% elif it.kind == 'toggle' %}
+        <button type="button" class="a-switch{% if it.checked %} on{% endif %}"
+                data-aim='{{ it.aim | tojson }}'
+                aria-label="{{ it.aim.cls }}{% if it.aim.rid %} {{ it.aim.rid }}{% endif %}"
+          ><span class="knob"></span></button>
+      {% elif it.kind == 'row' %}
+        <button type="button" class="a-cell" data-aim='{{ it.aim | tojson }}'>
+          {% if it.txt %}<span class="a-line">{{ it.txt }}</span>{% endif %}
+          {% for line in it.lines %}
+          <span class="a-line{% if not loop.first or it.txt %} sub{% endif %}">{{ line }}</span>
+          {% endfor %}
+          <span class="a-chev">›</span>
+        </button>
+      {% elif it.kind == 'image' %}
+        {% if it.aim %}
+        <button type="button" class="a-icon" data-aim='{{ it.aim | tojson }}'
+                aria-label="{{ it.aim.cls }}{% if it.aim.rid %} {{ it.aim.rid }}{% endif %}"
+          >{{ it.txt or '' }}</button>
+        {% endif %}
+      {% elif it.kind == 'text' and it.aim %}
+        <button type="button" class="a-link" data-aim='{{ it.aim | tojson }}'
+          >{{ it.txt or '' }}</button>
+      {% else %}
+        <span class="a-label">{{ it.txt }}</span>
+      {% endif %}
+    {% endfor %}
+    </div>
   {% endfor %}
-  {% for e in m.els %}
-  <button type="button"
-          class="w-{{ e.kind }}{% if e.checked %} on{% endif %}{% if e.focused %} focus{% endif %}"
-          style="left:{{ e.l }}%;top:{{ e.t }}%;width:{{ e.w }}%;height:{{ e.hh }}%;font-size:{{ e.fs }}cqw"
-          data-aim='{{ e.aim | tojson }}'
-          {% if not e.txt %}aria-label="{{ e.aim.cls }}{% if e.aim.rid %} {{ e.aim.rid }}{% endif %}"{% endif %}
-  >{%- if e.kind == 'toggle' -%}<span class="knob"></span>
-   {%- elif e.txt -%}{{ e.txt }}{%- endif -%}</button>
-  {% endfor %}
+  </div>
 </div>

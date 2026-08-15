@@ -54,6 +54,16 @@
   }
 
   // ---------------------------------------------------------------- wireframe
+  let tapTimer = 0;
+  let blockedCode = '';
+
+  function tapping(on) {
+    body.classList.toggle('tapping', on);
+    clearTimeout(tapTimer);
+    // A stuck shimmer is worse than a missing one; the ceiling, not the plan.
+    if (on) tapTimer = setTimeout(() => tapping(false), 12000);
+  }
+
   function bindWire() {
     const root = wrap();
     if (!root) return;
@@ -63,7 +73,10 @@
         if (!socket || socket.readyState !== 1) return;
         let aim;
         try { aim = JSON.parse(el.dataset.aim); } catch (e) { return; }
-        busy(i18n.waiting || '');
+        // No overlays and no sentences for a tap: the screen dims and
+        // shimmers until its successor arrives, the way a native app treats
+        // a moment of work as a state rather than an event.
+        tapping(true);
         socket.send(JSON.stringify({ type: 'tap', frame: frameId, element: aim }));
       });
     }
@@ -77,30 +90,30 @@
         bindWire();
         const wire = root.querySelector('.wire');
         frameId = wire ? (wire.dataset.frame || '') : '';
+        // Soft entrance on every new screen — restart the animation.
+        root.classList.remove('enter');
+        void root.offsetWidth;
+        root.classList.add('enter');
       }
+      tapping(false);
       unbusy();
     }
     if (!meta) return;
 
+    // The screen names itself: the app's own nav-bar title when it has one,
+    // the classifier's sentence only as a fallback. Never a warning.
     const where = document.getElementById('where');
-    if (where) where.textContent = (i18n.screens || {})[meta.name] || '';
+    if (where) {
+      const own = wrap() && wrap().querySelector('.a-title');
+      const title = own && own.textContent.trim();
+      where.textContent = title || (i18n.screens || {})[meta.name] || '';
+    }
 
-    // Why there is no photograph, in her language — the wireframe itself is
-    // unaffected, which is most of the point of having it.
-    const note = document.getElementById('blocked-note');
-    if (note) {
-      const text = meta.blocked
-        ? ((i18n.blocked || {})[meta.blocked] || i18n.blockedOther || '') : '';
-      note.textContent = text;
-      note.hidden = !text;
-    }
-    const notice = document.getElementById('notice');
-    const said = document.getElementById('notice-said');
-    if (notice && said) {
-      said.textContent = meta.notice || '';
-      notice.hidden = !meta.notice;
-    }
-    if (meta.blocked) body.classList.remove('peeking');
+    // No photograph of this screen: a quiet lock in the toolbar, whose
+    // explanation is one tap away rather than a standing banner.
+    blockedCode = meta.blocked || '';
+    body.classList.toggle('blocked', !!blockedCode);
+    if (blockedCode) body.classList.remove('peeking');
   }
 
   function applyFrame(frame) {
@@ -287,7 +300,7 @@
 
       if (msg.type === 'tap_result') {
         if (!msg.ok) {
-          unbusy();
+          tapping(false);
           toast(msg.reason === 'stale' ? (i18n.moved || '') : (i18n.failed || ''));
         }
         return;
@@ -336,6 +349,25 @@
       body.classList.toggle('signing');
       padFit();
     });
+
+    // The lock explains itself when asked and stays quiet otherwise.
+    const title = document.querySelector('.p-nav .title');
+    if (title) title.addEventListener('click', () => {
+      if (!blockedCode) return;
+      toast((i18n.blocked || {})[blockedCode] || i18n.blockedOther || '');
+    });
+
+    // The launcher's clock — the one part of a home screen that makes it feel
+    // inhabited. Local time, hers.
+    const clock = document.getElementById('clock');
+    if (clock) {
+      const tick = () => {
+        clock.textContent = new Date().toLocaleTimeString([], {
+          hour: 'numeric', minute: '2-digit' });
+      };
+      tick();
+      setInterval(tick, 15000);
+    }
     padWire();
     window.addEventListener('resize', padFit);
     const clear = document.getElementById('sign-clear');

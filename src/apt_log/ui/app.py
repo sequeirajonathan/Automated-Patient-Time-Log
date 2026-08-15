@@ -329,71 +329,18 @@ PHONE_APPS = (
      "macro": "open_inmyteam", "accent": "#c2452e"},
 )
 
-# The wireframe's component vocabulary, keyed by trailing class name. Anything
-# unlisted renders as a plain tappable row — wrong in style, right in position
-# and behaviour, which is the useful way to be wrong about an unseen widget.
-_KINDS = {
-    "Button": "btn", "ImageButton": "btn",
-    "EditText": "field", "AutoCompleteTextView": "field", "SearchView": "field",
-    "CheckBox": "toggle", "Switch": "toggle", "CompoundButton": "toggle",
-    "ToggleButton": "toggle", "RadioButton": "toggle",
-    "ImageView": "img",
-    "TextView": "text",
-}
-
-
 def _screen_model(doc: dict) -> dict | None:
-    """Positioned render model for _screen.html. None when the size is unknown.
+    """Semantic render model for _screen.html — see ui/screenview.py.
 
-    Percentages of the device's own resolution, so the fragment is correct at
-    any page width; font sizes in container-query units for the same reason.
-    Tap identity (`aim`) is exactly what the overlay posts today — rid, cls,
-    bounds — so the wireframe rides the same verification path as the boxes it
-    replaces.
+    The first version reproduced the screen's geometry: absolute boxes at
+    device coordinates, fonts scaled to fit rectangles. Faithful, and it
+    looked broken. The reflow keeps what matters — controls, words, order,
+    grouping, tap identity — and hands layout to a design system built for
+    the width it is actually read at.
     """
-    w, h = (doc.get("size") or [0, 0])[:2]
-    if not w or not h:
-        return None
+    from apt_log.ui import screenview
 
-    # The app forces landscape on its signature screen; `wm size` keeps
-    # reporting portrait, so the hierarchy's coordinates overflow the claimed
-    # width. When they do, the screen is sideways: swap. Inferred from the
-    # bounds themselves rather than asked, because the bounds are what
-    # everything here is positioned by.
-    everything = ((doc.get("elements") or []) + (doc.get("statics") or []))
-    max_x = max((e["b"][2] for e in everything if e.get("b")), default=0)
-    if max_x > w and max_x <= max(w, h):
-        w, h = h, w
-
-    def place(b, txt=""):
-        x1, y1, x2, y2 = b
-        # Sized to the box, then shrunk until the words fit its width. The box
-        # height alone was wrong twice on the first real screen: a two-line
-        # title box made a huge font that wrapped to four, and long task labels
-        # overflowed onto their neighbours.
-        fs = min((y2 - y1) * 0.55, 34)
-        if txt:
-            fs = max(min(fs, (x2 - x1) * 1.8 / len(txt)), 11)
-        return {
-            "l": round(x1 / w * 100, 2), "t": round(y1 / h * 100, 2),
-            "w": round((x2 - x1) / w * 100, 2),
-            "hh": round((y2 - y1) / h * 100, 2),
-            "fs": round(fs / w * 100, 2),
-        }
-
-    els = []
-    for e in doc.get("elements") or []:
-        els.append({**place(e["b"], e.get("txt", "")),
-                    "kind": _KINDS.get(e["cls"], "row"),
-                    "txt": e.get("txt", ""),
-                    "checked": bool(e.get("checked")),
-                    "focused": bool(e.get("focused")),
-                    "aim": {"rid": e.get("rid", ""), "cls": e.get("cls", ""),
-                            "b": e.get("b")}})
-    texts = [{**place(s["b"], s.get("txt", "")), "txt": s.get("txt", "")}
-             for s in doc.get("statics") or []]
-    return {"id": doc.get("id", ""), "ratio": f"{w} / {h}",
-            "els": els, "texts": texts}
+    return screenview.build(doc)
 
 # From the SPS the device actually emits: profile_idc 0x64 (High), level 0x29
 # (4.1). Read off the stream rather than assumed, because a wrong codec string
