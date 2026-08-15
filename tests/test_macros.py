@@ -464,3 +464,51 @@ class TestAutoAuth:
         with patch.object(runner, "execute") as execute:
             assert runner.maybe_auto_auth() is True
         execute.assert_called_once()
+
+
+class TestLaunchSteadiness:
+    """What the owner reported as flicker, held at the source."""
+
+    def test_the_display_is_woken_before_the_app_is_driven(self):
+        """Appium happily drives an app with the display off — the sketch
+        showed a homepage while the physical phone was black."""
+        import inspect
+
+        for name in ("hhax_legacy_login", "open_hhax_uma"):
+            source = inspect.getsource(macros.MACROS[name].run)
+            assert "wake_display()" in source
+
+    def test_auto_auth_never_stacks_onto_a_running_macro(self, tmp_path):
+        import datetime as dt
+
+        (tmp_path / "screen.json").write_text(json.dumps({
+            "app": "com.hhaexchange.caregiver", "screen": "login",
+            "blocked": "", "at": dt.datetime.now().isoformat()}))
+        (tmp_path / "viewers.json").write_text(json.dumps({"n": 1}))
+        macros.write_status(macros.Status(state="running"),
+                            tmp_path / "status.json")
+        runner = macros.Runner(tmp_path / "req.json", tmp_path / "status.json",
+                               screen_path=tmp_path / "screen.json",
+                               viewers_path=tmp_path / "viewers.json")
+        with patch.object(runner, "execute") as execute:
+            assert runner.maybe_auto_auth() is False
+        execute.assert_not_called()
+
+    def test_nor_onto_one_that_just_finished(self, tmp_path):
+        """The tile's own walk leaves the login screen visible in the lagging
+        screen document for a beat after it finishes — a second auth on top
+        was the "why is it signing in twice"."""
+        import datetime as dt
+
+        (tmp_path / "screen.json").write_text(json.dumps({
+            "app": "com.hhaexchange.caregiver", "screen": "login",
+            "blocked": "", "at": dt.datetime.now().isoformat()}))
+        (tmp_path / "viewers.json").write_text(json.dumps({"n": 1}))
+        macros.write_status(macros.Status(state="done"),
+                            tmp_path / "status.json")
+        runner = macros.Runner(tmp_path / "req.json", tmp_path / "status.json",
+                               screen_path=tmp_path / "screen.json",
+                               viewers_path=tmp_path / "viewers.json")
+        with patch.object(runner, "execute") as execute:
+            assert runner.maybe_auto_auth() is False
+        execute.assert_not_called()

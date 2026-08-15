@@ -33,15 +33,16 @@
     toastTimer = setTimeout(() => body.classList.remove('toasting'), 2600);
   }
 
-  function busy(text) {
+  function busy(text, ceiling) {
     const label = document.getElementById('busy-text');
     if (label) label.textContent = text || '';
     body.classList.add('busy');
     // A stuck overlay is worse than a missing one: whatever happens, the
-    // screen underneath is still live and still hers. Cleared early by the
-    // next wireframe; this is the ceiling, not the plan.
+    // screen underneath is still live and still hers. This is the ceiling,
+    // not the plan — and a sign-in walk needs a taller one than a tap.
     clearTimeout(busyTimer);
-    busyTimer = setTimeout(unbusy, 12000);
+    busyTimer = setTimeout(() => { pendingApp = ''; unbusy(); },
+                           ceiling || 12000);
   }
 
   function unbusy() {
@@ -100,6 +101,10 @@
 
   let lastApp = '';
   let currentPackage = '';
+  // The app a launch is waiting on. While set, the overlay is a single solid
+  // state: sketch updates do not clear it, macro "done" does not clear it —
+  // only the target app actually being in front (or failure, or the ceiling).
+  let pendingApp = '';
 
   function applyScreen(meta, html) {
     if (html !== undefined) {
@@ -119,10 +124,18 @@
         }
       }
       tapping(false);
-      unbusy();
+      if (!pendingApp) unbusy();
     }
     if (!meta) return;
     currentPackage = meta.app || '';
+
+    // The moment a launch is truly over: the app she asked for is the app in
+    // front, awake, with a screen to show. Until then the overlay holds.
+    if (pendingApp && currentPackage === pendingApp
+        && meta.blocked !== 'no_focus') {
+      pendingApp = '';
+      unbusy();
+    }
 
     // The large title: the app's own nav-bar title, else the app she opened,
     // else the portal's name. Never one of the classifier's sentences — "It
@@ -165,14 +178,19 @@
   // as "Signing in…" rather than wonder at a darkened page doing nothing.
   function applyMacro(m) {
     if (m.state === 'running') {
-      busy(m.text || '');
+      busy(m.text || '', 45000);
       awaitingMacro = true;
     } else if (m.state === 'done') {
-      if (awaitingMacro) unbusy();
+      // The walk finished, but the launch is over only when the app is in
+      // front — until then the overlay holds with a quiet waiting line
+      // instead of dropping to a half-drawn sketch and coming back.
+      if (awaitingMacro && !pendingApp) unbusy();
+      else if (pendingApp) busy(i18n.waiting || '', 20000);
       awaitingMacro = false;
     } else if (m.state === 'failed') {
-      if (awaitingMacro) { unbusy(); toast(m.state_text || ''); }
+      if (awaitingMacro || pendingApp) { unbusy(); toast(m.state_text || ''); }
       awaitingMacro = false;
+      pendingApp = '';
     }
   }
 
@@ -191,8 +209,9 @@
     }
 
     awaitingMacro = true;
+    pendingApp = tile.dataset.package || '';
     view('screen');
-    busy((i18n.opening || '').replace('{app}', tile.dataset.name || ''));
+    busy((i18n.opening || '').replace('{app}', tile.dataset.name || ''), 45000);
     fetch('/macro', {
       method: 'POST',
       body: new URLSearchParams({ name: name }),

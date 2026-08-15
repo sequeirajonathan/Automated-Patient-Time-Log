@@ -131,6 +131,23 @@ def dismiss_autofill(driver) -> bool:
     return True
 
 
+def wake_display() -> None:
+    """Turn the screen on before driving the app.
+
+    Appium happily drives an app with the display off — the sketch showed a
+    homepage while the physical phone and its photograph were black, which
+    reads as a haunting, not a portal. The display is in a resident's room
+    and lighting it briefly is harmless; a screen that is on also behaves
+    like the screen the app was built for.
+    """
+    from apt_log.device import send_ui_action
+
+    try:
+        send_ui_action("wake")
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not wake the display (%s)", exc)
+
+
 def wait_for(predicate, timeout: float = 20.0, poll: float = 0.5) -> bool:
     """Poll until `predicate()` is true, or give up.
 
@@ -171,6 +188,7 @@ def _hhax_legacy_login(driver, report) -> None:
     from apt_log.secrets import FileSecretProvider
 
     report("macro.step.launching")
+    wake_display()
     driver.activate_app("com.hhaexchange.caregiver")
 
     # A cold launch shows a splash before anything is readable.
@@ -211,6 +229,7 @@ def _open_app(package: str):
     """
     def run(driver, report) -> None:
         report("macro.step.launching")
+        wake_display()
         driver.activate_app(package)
         wait_for(lambda: bool(driver.current_activity), timeout=15.0)
         report("macro.step.checking")
@@ -346,6 +365,23 @@ class Runner:
         """
         if not someone_is_watching(self._viewers_path):
             return False
+
+        # Never stack onto a run in flight or just done: a tile's own sign-in
+        # walk leaves the login screen visible in the (slightly lagging)
+        # screen document for a beat after it starts, and a second auth on
+        # top of the first is the "why is it signing in twice" the owner
+        # reported. The status file is the single record of runs either way.
+        status = read_status(self._status_path)
+        if status.state == "running":
+            return False
+        try:
+            since = (datetime.now()
+                     - datetime.fromisoformat(status.at)).total_seconds()
+            if status.state in ("done", "failed") and since < 10.0:
+                return False
+        except (TypeError, ValueError):
+            pass
+
         target = self._screen_path or SCREEN_PATH
         try:
             doc = json.loads(target.read_text(encoding="utf-8"))
