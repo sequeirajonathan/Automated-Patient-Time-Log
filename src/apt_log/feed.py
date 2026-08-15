@@ -508,10 +508,12 @@ def elements(xml: str, label: bool = False) -> list[dict]:
 # structural: `btn_negative` is what this app calls the single "DE ACUERDO" on
 # every alert it raises, and `button1`/`button2` are what the platform's
 # AlertDialog calls its own.
-ALERT_BUTTONS = ("btn_negative", "btn_positive", "button1", "button2", "button3")
+ALERT_BUTTONS = ("btn_negative", "btn_positive", "button1", "button2", "button3",
+                 "autofill_save_no", "autofill_save_yes")
 
 # Where an alert keeps its sentence, most specific first.
-ALERT_MESSAGES = ("lbl_message", "message", "alertTitle", "lbl_title")
+ALERT_MESSAGES = ("lbl_message", "message", "alertTitle", "lbl_title",
+                  "autofill_save_title")
 
 
 def text_is_disclosable(reason: str) -> bool:
@@ -543,38 +545,74 @@ def _clean(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip()[:MAX_TEXT]
 
 
+def _nodes(xml: str | None) -> list[dict]:
+    """Every node, with its resource-id kept whole.
+
+    `elements` throws the package away, and here it is the discriminator: a
+    dialog raised by the platform is `android:id/...` sitting on top of a screen
+    that is `com.somebody:id/...`, and telling those apart is what stops the
+    sentence behind a modal being read out as the modal's own.
+    """
+    out = []
+    for raw in _NODE.findall(xml or ""):
+        rid = _attr(raw, "resource-id")
+        package, _, name = rid.rpartition("/")
+        m = _BOUNDS.search(_attr(raw, "bounds"))
+        out.append({
+            # removesuffix, not rstrip: rstrip takes a character set, and
+            # "android:id".rstrip(":id") is "andro".
+            "package": package.removesuffix(":id"),
+            "name": name,
+            "clickable": _attr(raw, "clickable") == "true",
+            "cls": (_attr(raw, "class") or "").rsplit(".", 1)[-1],
+            "text": _clean(_attr(raw, "text")),
+            "b": [int(g) for g in m.groups()] if m else None,
+        })
+    return out
+
+
 def alert_showing(xml: str | None) -> bool:
     """True when a dialog's buttons are on screen."""
-    return any(e["rid"] in ALERT_BUTTONS for e in elements(xml or ""))
+    return any(n["clickable"] and n["name"] in ALERT_BUTTONS for n in _nodes(xml))
 
 
 def alert_message(xml: str | None) -> str:
     """The sentence a dialog is showing, or empty.
 
-    Prefers the known message ids. Falls back to the longest static text on
-    screen, which is sound only because this is called when a dialog is up:
-    under a modal the labels behind it are short, and the longest thing on
-    screen is the thing being said.
+    Prefers the known message ids. Where the layout is one nobody has seen — and
+    three of the four apps are — it falls back to the static text sitting
+    directly above the dialog's buttons, which is where every dialog on this
+    platform puts its message.
+
+    Both paths are confined to the dialog's own package. The first version took
+    the longest text anywhere on screen, which on a real sign-in screen behind
+    the system's save-password prompt would have read out the device
+    registration id instead of the question being asked.
     """
-    if not alert_showing(xml):
+    nodes = _nodes(xml)
+    buttons = [n for n in nodes
+               if n["clickable"] and n["name"] in ALERT_BUTTONS and n["b"]]
+    if not buttons:
         return ""
 
-    static = []
-    for raw in _NODE.findall(xml or ""):
-        if _attr(raw, "clickable") == "true":
-            continue
-        cls = (_attr(raw, "class") or "").rsplit(".", 1)[-1]
-        if cls in EDITABLE:
-            continue
-        text = _clean(_attr(raw, "text"))
-        if text:
-            static.append((_attr(raw, "resource-id").split("/")[-1], text))
+    packages = {n["package"] for n in buttons}
+    top = min(b["b"][1] for b in buttons)
+
+    static = [n for n in nodes
+              if not n["clickable"] and n["text"] and n["cls"] not in EDITABLE
+              and n["package"] in packages]
 
     for wanted in ALERT_MESSAGES:
-        for rid, text in static:
-            if rid == wanted:
-                return text
-    return max((t for _, t in static), key=len, default="")
+        for node in static:
+            if node["name"] == wanted:
+                return node["text"]
+
+    # Nearest above the buttons; longest breaks a tie, since a title and its
+    # message often share a baseline and the message is the useful half.
+    above = [n for n in static if n["b"] and n["b"][3] <= top]
+    if not above:
+        return ""
+    return max(above, key=lambda n: (n["b"][3], len(n["text"])))["text"]
 
 
 def read_hierarchy(serial: str | None = None) -> str | None:

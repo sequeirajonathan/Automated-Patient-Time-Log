@@ -287,6 +287,26 @@ class TestBlindScreens:
                  ' clickable="false" bounds="[0,0][720,60]" />')
         assert feed.alert_message(plain) == ""
 
+    def test_the_screen_behind_a_system_dialog_is_not_read_out(self):
+        """The save-password prompt is `android:id/...` sitting on top of a
+        sign-in screen. Taking the longest text anywhere — the first version of
+        this — would have read out the device registration id instead of the
+        question actually being asked."""
+        behind = (
+            '<node class="android.widget.TextView"'
+            ' resource-id="com.x:id/text_view_mobile_device_id"'
+            ' text="ID del dispostivo movil: 67F6DEB4E22DEB87" clickable="false"'
+            ' bounds="[40,1500][680,1560]" />'
+            '<node class="android.widget.TextView"'
+            ' resource-id="android:id/autofill_save_title"'
+            ' text="Guardar contraseña?" clickable="false"'
+            ' bounds="[40,1280][680,1340]" />'
+            '<node class="android.widget.Button"'
+            ' resource-id="android:id/autofill_save_no" text="No, gracias"'
+            ' clickable="true" bounds="[54,1357][252,1438]" />'
+        )
+        assert feed.alert_message(behind) == "Guardar contraseña?"
+
     def test_a_dialog_with_no_known_message_id_still_speaks(self):
         """Four apps, four dialog layouts. Recognising the buttons is what makes
         this work on the three that have never been opened."""
@@ -294,7 +314,10 @@ class TestBlindScreens:
             '<node class="android.widget.TextView" resource-id="com.y:id/blurb"'
             ' text="Your session has ended. Please sign in again."'
             ' clickable="false" bounds="[0,300][720,400]" />'
-            '<node class="android.widget.Button" resource-id="android:id/button1"'
+            '<node class="android.widget.TextView" resource-id="com.y:id/footer"'
+            ' text="Below the buttons, so not the message." clickable="false"'
+            ' bounds="[0,600][720,660]" />'
+            '<node class="android.widget.Button" resource-id="com.y:id/button1"'
             ' text="OK" clickable="true" bounds="[400,500][700,560]" />'
         )
         assert "session has ended" in feed.alert_message(other)
