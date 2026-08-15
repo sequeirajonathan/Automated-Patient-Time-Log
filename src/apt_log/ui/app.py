@@ -71,6 +71,27 @@ app = FastAPI(title="APT Log", docs_url=None, redoc_url=None)
 import uuid as _uuid
 
 BOOT_ID = _uuid.uuid4().hex[:12]
+
+# How many sockets are watching, published for the feed process. Auto sign-in
+# reads it: a phone signing itself in at 3 AM with nobody watching is not a
+# service, it is churn — the app's inactivity timer signs it back out and the
+# two of them loop until morning. The file's mtime doubles as a liveness
+# signal, refreshed on the slow tick, so a crashed UI cannot leave a stale
+# "someone is watching" on disk.
+VIEWERS_PATH = state_mod.STATE_DIR / "viewers.json"
+_viewers = 0
+
+
+def _publish_viewers() -> None:
+    try:
+        VIEWERS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = VIEWERS_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"n": _viewers}), encoding="utf-8")
+        tmp.replace(VIEWERS_PATH)
+    except OSError as exc:
+        log.warning("cannot publish viewer count (%s)", exc)
+
+
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 queue = RelayQueue()
@@ -327,6 +348,12 @@ def _sans_at(doc: dict) -> dict:
 # nobody is writing, whatever it says.
 SCREEN_STALE_AFTER = 8.0
 
+# The document can be stamped fresh every second while the hierarchy inside it
+# is a kept copy from minutes ago — seen live as a dismissed modal rendered
+# under a green "Live" while the resident session was down. The sketch's age
+# is the hierarchy's age, not the file's.
+HIERARCHY_STALE_AFTER = 25.0
+
 
 def _screen_age(doc: dict | None) -> float:
     from datetime import datetime as _dt
@@ -337,6 +364,19 @@ def _screen_age(doc: dict | None) -> float:
         return (_dt.now() - _dt.fromisoformat(doc["at"])).total_seconds()
     except (KeyError, TypeError, ValueError):
         return float("inf")
+
+
+def _screen_is_stale(doc: dict | None) -> bool:
+    import time as _time
+
+    if _screen_age(doc) > SCREEN_STALE_AFTER:
+        return True
+    h_at = (doc or {}).get("h_at") or 0
+    # Docs from before the field existed carry 0; treat that as unknown
+    # rather than ancient, or every deploy would open on amber.
+    if h_at and _time.time() - h_at > HIERARCHY_STALE_AFTER:
+        return True
+    return False
 
 
 EMPTY_FRAME = {"id": "", "img": "", "size": [0, 0], "elements": [],
@@ -412,6 +452,9 @@ async def live(ws: WebSocket):
     someone's kitchen.
     """
     await ws.accept()
+    global _viewers
+    _viewers += 1
+    _publish_viewers()
     chosen = ws.cookies.get(LANGUAGE_COOKIE)
     if chosen not in SUPPORTED:
         chosen = normalise(ws.headers.get("accept-language"))
@@ -478,7 +521,7 @@ async def live(ws: WebSocket):
             # session rebuilding, the phone unplugged — all leave the last
             # screen on disk looking current. Seen on the owner's phone as a
             # sign-in screen labelled Live while the photograph showed home.
-            payload_stale = _screen_age(screen_doc) > SCREEN_STALE_AFTER
+            payload_stale = _screen_is_stale(screen_doc)
             if payload_stale != last.get("screen_stale"):
                 last["screen_stale"] = payload_stale
                 payload["screen_stale"] = payload_stale
@@ -518,6 +561,9 @@ async def live(ws: WebSocket):
             now = asyncio.get_event_loop().time()
             if now - slow_at >= SLOW_EVERY:
                 slow_at = now
+                # Refreshes the mtime, which is the liveness half of the
+                # viewer signal the feed reads.
+                _publish_viewers()
                 s = await asyncio.to_thread(state_mod.collect)
                 mirror = _mirror_payload(s, t)
                 if mirror != last.get("mirror"):
@@ -570,6 +616,8 @@ async def live(ws: WebSocket):
         # Socket closed underneath us mid-send; nothing to clean up.
         return
     finally:
+        _viewers = max(0, _viewers - 1)
+        _publish_viewers()
         if watching_video:
             _release()
             await asyncio.to_thread(_video.detach)

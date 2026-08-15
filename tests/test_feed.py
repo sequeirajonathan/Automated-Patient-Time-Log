@@ -139,7 +139,7 @@ class TestRun:
     def test_one_bad_frame_does_not_stop_the_watcher(self, tmp_path):
         calls = []
 
-        def flaky(_path, _serial=None, _hierarchy=None):
+        def flaky(_path, _serial=None, _hierarchy=None, _h_at=0.0):
             calls.append(1)
             if len(calls) == 1:
                 raise RuntimeError("adb hiccup")

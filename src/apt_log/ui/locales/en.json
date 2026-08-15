@@ -193,5 +193,8 @@
   "papp.nav.recents": "Recents",
   "papp.nav.wake": "Wake",
   "papp.offline_short": "Disconnected",
-  "sign.preview": "How it will land in the app's box:"
+  "sign.preview": "How it will land in the app's box:",
+  "papp.asleep": "The phone's screen is off.",
+  "papp.asleep_hint": "Wake it to see and use it from here.",
+  "papp.photo_taken": "Photo from {time}"
 }

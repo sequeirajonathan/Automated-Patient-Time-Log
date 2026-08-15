@@ -297,7 +297,8 @@ SCREEN_NAME = "screen.json"
 
 
 def write_screen(target: Path, frame: dict, screen: str, reason: str,
-                 hierarchy: str | None, focus: str = "") -> None:
+                 hierarchy: str | None, focus: str = "",
+                 hierarchy_at: float = 0.0) -> None:
     """Publish the render feed for the wireframe view.
 
     Two files on purpose, with two policies. `frame.json` is the one that can
@@ -323,6 +324,10 @@ def write_screen(target: Path, frame: dict, screen: str, reason: str,
         # a ceremony: pressing the tile of the app already showing must not
         # run its sign-in walk over a screen that is already signed in.
         "app": (focus or "").split("/")[0],
+        # When the hierarchy behind this document was last actually read from
+        # the device. The document is written every second regardless; this is
+        # the number that stops a kept sketch passing as a current one.
+        "h_at": hierarchy_at,
         "blocked": reason,
         "notice": frame.get("notice", ""),
         "elements": elements(hierarchy, label=True) if hierarchy else [],
@@ -352,7 +357,8 @@ TAP_FRAME_MAX_AGE = 15.0
 
 
 def write_frame(path: Path, serial: str | None = None,
-                hierarchy: str | None = None) -> str:
+                hierarchy: str | None = None,
+                hierarchy_at: float = 0.0) -> str:
     """Capture once and publish the mirror frame. Returns a one-line status.
 
     The hierarchy is handed in rather than fetched, so the caller decides how
@@ -390,7 +396,7 @@ def write_frame(path: Path, serial: str | None = None,
         log.warning("cannot publish the frame map (%s)", exc)
 
     write_screen(path.parent / SCREEN_NAME, frame, screen, reason, hierarchy,
-                 focus)
+                 focus, hierarchy_at)
 
     if png:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -430,6 +436,7 @@ class _Hierarchy:
         self._poke = poke_path
         self._poked_at = 0.0
         self._xml: str | None = None
+        self._read_at = 0.0
         self._focus = ""
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -439,6 +446,19 @@ class _Hierarchy:
     def xml(self) -> str | None:
         with self._lock:
             return self._xml
+
+    @property
+    def read_at(self) -> float:
+        """When a read last *succeeded* — kept xml can be much older.
+
+        The published sketch was once minutes old while the document carrying
+        it was stamped fresh every second: the resident session was down, the
+        fallback dumps were failing, and the watcher was serving its last good
+        hierarchy — a modal that had long since been dismissed — under a green
+        "Live". The sketch's honesty has to travel with the sketch's age.
+        """
+        with self._lock:
+            return self._read_at
 
     def _accept(self, fresh: str, focus: str) -> bool:
         """Whether a fresh read should replace what we are showing.
@@ -465,6 +485,7 @@ class _Hierarchy:
                 if fresh is not None:
                     focus = current_focus(self._serial)
                     with self._lock:
+                        self._read_at = time.time()
                         if self._accept(fresh, focus):
                             self._xml = fresh
                             self._focus = focus
@@ -528,7 +549,8 @@ def run(path: Path, interval: float = DEFAULT_INTERVAL,
     try:
         while iterations is None or count < iterations:
             try:
-                log.info("%s", write_frame(path, serial, watcher.xml))
+                log.info("%s", write_frame(path, serial, watcher.xml,
+                                            watcher.read_at))
             except Exception as exc:  # noqa: BLE001
                 # A watcher that dies on one bad read stops being a watcher.
                 log.warning("frame failed: %s", exc)

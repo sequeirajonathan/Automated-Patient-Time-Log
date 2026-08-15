@@ -383,9 +383,15 @@ class TestAutoAuth:
                                     "blocked": blocked, "at": at}))
         return path
 
+    def _watching(self, tmp_path, n=1):
+        path = tmp_path / "viewers.json"
+        path.write_text(json.dumps({"n": n}))
+        return path
+
     def _runner(self, tmp_path):
         return macros.Runner(tmp_path / "req.json", tmp_path / "status.json",
-                             screen_path=tmp_path / "screen.json")
+                             screen_path=tmp_path / "screen.json",
+                             viewers_path=self._watching(tmp_path))
 
     def test_a_fresh_login_screen_triggers_sign_in(self, tmp_path):
         self._doc(tmp_path)
@@ -417,6 +423,34 @@ class TestAutoAuth:
     def test_only_the_proven_apps_login_screen(self, tmp_path, app, screen):
         self._doc(tmp_path, app=app, screen=screen)
         runner = self._runner(tmp_path)
+        with patch.object(runner, "execute") as execute:
+            assert runner.maybe_auto_auth() is False
+        execute.assert_not_called()
+
+    def test_nobody_watching_means_nothing_fires(self, tmp_path):
+        """Unwatched, the app's inactivity timer signs the session back out
+        and the two loop all night. Signing in is a service to a viewer, not
+        a state the phone owes the void."""
+        self._doc(tmp_path)
+        runner = macros.Runner(tmp_path / "req.json", tmp_path / "status.json",
+                               screen_path=tmp_path / "screen.json",
+                               viewers_path=self._watching(tmp_path, n=0))
+        with patch.object(runner, "execute") as execute:
+            assert runner.maybe_auto_auth() is False
+        execute.assert_not_called()
+
+    def test_a_dead_uis_stale_claim_counts_as_nobody(self, tmp_path):
+        """The file says someone is watching, but its mtime is old — the UI
+        that wrote it is gone. A crashed process must not hold the gate open."""
+        import os
+
+        self._doc(tmp_path)
+        viewers = self._watching(tmp_path, n=2)
+        old = __import__("time").time() - macros.VIEWERS_FRESH - 10
+        os.utime(viewers, (old, old))
+        runner = macros.Runner(tmp_path / "req.json", tmp_path / "status.json",
+                               screen_path=tmp_path / "screen.json",
+                               viewers_path=viewers)
         with patch.object(runner, "execute") as execute:
             assert runner.maybe_auto_auth() is False
         execute.assert_not_called()

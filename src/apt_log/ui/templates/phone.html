@@ -351,6 +351,25 @@
   #peek { position:absolute; inset:0; width:100%; height:100%; display:none;
           z-index:4; background:#000; object-fit:contain; }
   body.peeking #peek { display:block; }
+  #peek-cap { position:absolute; left:50%; transform:translateX(-50%);
+              bottom:14px; z-index:5; display:none; background:rgb(0 0 0/.65);
+              color:#fff; font-size:12.5px; padding:6px 12px;
+              border-radius:999px; }
+  body.peeking #peek-cap:not([hidden]) { display:block; }
+  #peek-cap.old { background:hsl(38 92% 40% / .9); }
+
+  /* The display is off: the kept sketch describes a screen nobody is being
+     shown. Truth plus the one useful act. */
+  #asleep { display:none; flex-direction:column; align-items:center;
+            justify-content:center; gap:10px; padding:60px 30px;
+            text-align:center; color:var(--muted); }
+  #asleep svg { width:42px; height:42px; opacity:.6; }
+  #asleep p { margin:0; font-size:16px; color:var(--ink); }
+  #asleep p.muted { font-size:13.5px; color:var(--muted); }
+  #asleep .a-btn { margin-top:8px; min-width:180px; }
+  body.asleep #screenwrap { display:none; }
+  body.asleep #asleep { display:flex; }
+  body.asleep .hdr-title .lock { display:none; }
 
   #busy { position:absolute; inset:0; z-index:6; display:none;
           background:var(--chrome); backdrop-filter:blur(6px);
@@ -493,7 +512,19 @@
   </header>
   <div id="stage">
     <div id="screenwrap">{% if m %}{% include '_screen.html' %}{% endif %}</div>
+    {# The phone's display is off. The sketch on file describes a screen that
+       is not being shown to anyone; rendering it as current is a lie with
+       boxes. Say the true thing and offer the one useful act. #}
+    <div id="asleep">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.6"><path d="M20.3 14.6A8.5 8.5 0 0 1 9.4 3.7a8.5 8.5 0 1 0 10.9 10.9z"/></svg>
+      <p>{{ t('papp.asleep') }}</p>
+      <p class="muted">{{ t('papp.asleep_hint') }}</p>
+      <button type="button" class="a-btn" data-act="wake"
+              style="flex:none">{{ t('phone.wake') }}</button>
+    </div>
     <img id="peek" alt="">
+    <div id="peek-cap" hidden></div>
     <div id="busy"><div class="spinner"></div><p id="busy-text"></p></div>
   </div>
   <nav class="navbar" aria-label="Phone">

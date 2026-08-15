@@ -68,6 +68,25 @@ AUTO_AUTH_COOLDOWN = 90.0
 AUTO_AUTH_FRESH = 6.0
 SCREEN_PATH = STATE_DIR / "screen.json"
 
+# Sign in only while someone is actually watching. Unwatched, the app's own
+# inactivity timer signs the session back out and the two loop all night —
+# observed as sign-in / agency picker / "due to inactivity" / sign-out on
+# repeat. The UI publishes its socket count and refreshes the file's mtime on
+# its slow tick, so a crashed UI reads as nobody watching, not somebody.
+VIEWERS_PATH = STATE_DIR / "viewers.json"
+VIEWERS_FRESH = 40.0
+
+
+def someone_is_watching(path: Path | None = None) -> bool:
+    target = path or VIEWERS_PATH
+    try:
+        if time.time() - target.stat().st_mtime > VIEWERS_FRESH:
+            return False
+        return int(json.loads(target.read_text(encoding="utf-8"))
+                   .get("n", 0)) > 0
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return False
+
 
 @dataclass
 class Macro:
@@ -279,10 +298,12 @@ class Runner:
 
     def __init__(self, request_path: Path | None = None,
                  status_path: Path | None = None,
-                 screen_path: Path | None = None):
+                 screen_path: Path | None = None,
+                 viewers_path: Path | None = None):
         self._request_path = request_path
         self._status_path = status_path
         self._screen_path = screen_path
+        self._viewers_path = viewers_path
         self._auto_auth_at = 0.0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -319,9 +340,12 @@ class Runner:
 
         True when an auth run was started. See the constants above for the
         whole argument; the conditions here are the guardrails in order —
-        right app, actually the login screen, seen fresh, and outside the
-        cooldown that keeps a bad-credential day from becoming a loop.
+        someone watching, right app, actually the login screen, seen fresh,
+        and outside the cooldown that keeps a bad-credential day from
+        becoming a loop.
         """
+        if not someone_is_watching(self._viewers_path):
+            return False
         target = self._screen_path or SCREEN_PATH
         try:
             doc = json.loads(target.read_text(encoding="utf-8"))

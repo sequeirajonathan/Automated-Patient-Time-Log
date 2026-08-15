@@ -53,6 +53,14 @@ EXPIRED_WORDINGS = (
     "sign in",
     "sesión ha expirado",
     "session has expired",
+    # The inactivity countdown: "due to inactivity, you will be signed out in
+    # 2 minutes". Same lifecycle family, and its DE ACUERDO acknowledges a
+    # warning rather than agreeing to anything — dismissing it is safe and
+    # leaving it up blocks every tap under it.
+    "inactividad",
+    "cerrará la sesión",
+    "cerrara la sesion",
+    "inactivity",
 )
 
 

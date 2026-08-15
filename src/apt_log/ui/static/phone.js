@@ -136,9 +136,14 @@
     }
 
     // No photograph of this screen: a quiet lock in the toolbar, whose
-    // explanation is one tap away rather than a standing banner.
+    // explanation is one tap away rather than a standing banner. no_focus is
+    // different in kind — the display is off, the kept sketch describes a
+    // screen nobody is being shown, and rendering it as current is a lie
+    // with boxes. Truth plus the one useful act: Wake.
     blockedCode = meta.blocked || '';
-    body.classList.toggle('blocked', !!blockedCode);
+    const asleep = blockedCode === 'no_focus';
+    body.classList.toggle('asleep', asleep);
+    body.classList.toggle('blocked', !!blockedCode && !asleep);
     if (blockedCode) body.classList.remove('peeking');
   }
 
@@ -417,6 +422,16 @@
         statusLabel();
       }
       if (msg.frame) applyFrame(msg.frame);
+      if (msg.mirror) {
+        // The photo carries its own age while she is peeking at it — a
+        // 40-minute-old photograph passing as current was the incident.
+        const cap = document.getElementById('peek-cap');
+        if (cap) {
+          cap.textContent = msg.mirror.taken_text || '';
+          cap.hidden = !msg.mirror.taken_text;
+          cap.classList.toggle('old', !!msg.mirror.stale);
+        }
+      }
       if (msg.macro) applyMacro(msg.macro);
       if (msg.sign) applySign(msg.sign);
       if (msg.relay_html !== undefined || msg.relay_nonce !== undefined) {
@@ -486,7 +501,7 @@
     const send = document.getElementById('sign-send');
     if (send) send.addEventListener('click', padSend);
 
-    for (const btn of document.querySelectorAll('.navbar [data-act]')) {
+    for (const btn of document.querySelectorAll('[data-act]')) {
       btn.addEventListener('click', () => {
         if (!socket || socket.readyState !== 1) return;
         socket.send(JSON.stringify({ type: 'device', action: btn.dataset.act }));
