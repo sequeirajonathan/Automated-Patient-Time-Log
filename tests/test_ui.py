@@ -403,3 +403,33 @@ class TestMacroRoute:
         """The line, stated where she reads it rather than only in a docstring."""
         body = client.get("/").text
         assert "registran la entrada" in body
+
+
+class TestStaleIsVisible:
+    """A page that has stopped listening must not look like a quiet one.
+
+    She sat in front of a page frozen at load time with no way to tell: the
+    picture was two minutes old and the "Taken" line beside it, rendered once by
+    the server, said so without meaning to.
+    """
+
+    def test_the_page_carries_an_offline_notice(self, client):
+        body = client.get("/").text
+        assert "offline-note" in body
+        assert "Sin conexión con el controlador" in body
+
+    def test_tapping_is_disabled_while_offline(self, client):
+        """Aiming at a frozen picture is how a tap lands somewhere she did not
+        choose. The overlay stops accepting clicks rather than trusting it."""
+        body = client.get("/").text
+        assert "body.offline .hit { pointer-events:none; }" in body
+
+    def test_the_taken_timestamp_is_pushed_not_only_rendered(self):
+        """Left server-rendered it ages in place, and a stale timestamp reads as
+        a fresh one to anyone not doing the arithmetic."""
+        from datetime import datetime
+        s = DashboardState(screenshot_at=datetime(2026, 8, 14, 19, 38),
+                           mirror=Mirror(at=datetime.now()))
+        payload = _mirror_payload(s, Translator("es"))
+        assert "taken_text" in payload
+        assert "07:38" in payload["taken_text"]

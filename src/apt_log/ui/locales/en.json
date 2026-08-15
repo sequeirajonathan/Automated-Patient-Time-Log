@@ -157,5 +157,6 @@
   "macro.step.checking": "Checking it worked…",
   "macro.step.finished": "Finished.",
   "macro.started": "Started. Watch the phone screen below.",
-  "macro.unknown": "That shortcut is not one this page offers."
+  "macro.unknown": "That shortcut is not one this page offers.",
+  "portal.offline": "Not connected to the controller. This picture is frozen and tapping is turned off. It will reconnect on its own; pull down to reload if it does not."
 }

@@ -233,6 +233,10 @@ def _mirror_payload(s, t: Translator | None = None) -> dict:
             else t(f"mirror.screen.{m.screen}")
         )
         payload["text_step"] = t(f"mirror.step.{m.step}")
+        payload["taken_text"] = (
+            t("phone.stale", time=t.time(s.screenshot_at))
+            if s.screenshot_at else t("phone.none")
+        )
     return payload
 
 

@@ -119,6 +119,15 @@
 
   function say(msg) { if (status) status.textContent = msg || ''; }
 
+  // A dead socket used to look exactly like a quiet screen. She sat in front of
+  // a page frozen at load time with no way to tell — the picture was two minutes
+  // old and the "Taken" line beside it, rendered once by the server, said so
+  // without meaning to. Silence that looks like success is the failure mode this
+  // whole project keeps rediscovering.
+  function connectionState(live) {
+    body.classList.toggle('offline', !live);
+  }
+
   // ------------------------------------------------------------------ overlay
   function shot() { return document.getElementById('shot'); }
   function layer() { return document.getElementById('overlay'); }
@@ -180,6 +189,7 @@
 
     socket.addEventListener('open', () => {
       backoff = 1000;
+      connectionState(true);
       if (video.supported) socket.send(JSON.stringify({ type: 'video', on: true }));
     });
 
@@ -217,6 +227,11 @@
         }
       }
       if (msg.mirror) {
+        // The server renders this line once at page load and it would otherwise
+        // sit there ageing, which is worse than showing nothing: a stale
+        // timestamp reads as a fresh one to anyone not doing the arithmetic.
+        const taken = document.getElementById('shot-taken');
+        if (taken && msg.mirror.taken_text) taken.textContent = msg.mirror.taken_text;
         const where = document.getElementById('mirror-where');
         const step = document.getElementById('mirror-step');
         if (where && msg.mirror.text_where) where.textContent = msg.mirror.text_where;
@@ -227,6 +242,7 @@
     });
 
     socket.addEventListener('close', () => {
+      connectionState(false);
       stopVideo();
       // Reconnect with a ceiling. The page keeps showing its last state, which
       // is stale rather than wrong, and the mirror's own staleness marks say so.
@@ -256,6 +272,13 @@
       });
     }
   }
+
+  document.addEventListener('visibilitychange', () => {
+    // iOS suspends a backgrounded tab and its socket with it. Returning to the
+    // page should reconnect immediately rather than wait out a backoff she has
+    // no way of knowing about.
+    if (!document.hidden && (!socket || socket.readyState > 1)) connect();
+  });
 
   window.addEventListener('resize', draw);
   document.addEventListener('DOMContentLoaded', () => {

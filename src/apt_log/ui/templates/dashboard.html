@@ -88,6 +88,11 @@
                            border-color:var(--accent); outline:none; }
   .hit.focused { border-color:var(--ok); border-width:2px; }
   .hit.selected { background:rgba(19,122,63,.16); }
+  /* A page that has stopped listening must not look like a quiet one. */
+  .offline-note { display:none; }
+  body.offline .offline-note { display:block; }
+  body.offline .mirror-frame { opacity:.4; }
+  body.offline .hit { pointer-events:none; }
 </style>
 </head>
 {# The nonce is what the live stream compares against to notice that the request
@@ -194,6 +199,7 @@
         <canvas id="screen-video" class="shot live"></canvas>
         <div id="overlay" class="overlay"></div>
       </div>
+      <div class="banner bad offline-note">{{ t('portal.offline') }}</div>
       <p class="muted">{{ t('portal.instruction') }}
         <span id="portal-status"></span></p>
       <script>

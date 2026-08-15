@@ -157,5 +157,6 @@
   "macro.step.checking": "Comprobando que funcionó…",
   "macro.step.finished": "Terminado.",
   "macro.started": "Iniciado. Mire la pantalla del teléfono abajo.",
-  "macro.unknown": "Ese atajo no es uno que esta página ofrezca."
+  "macro.unknown": "Ese atajo no es uno que esta página ofrezca.",
+  "portal.offline": "Sin conexión con el controlador. Esta imagen está congelada y los toques están desactivados. Se reconectará solo; deslice hacia abajo para recargar si no lo hace."
 }
