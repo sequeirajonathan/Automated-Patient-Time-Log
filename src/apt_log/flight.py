@@ -55,6 +55,9 @@ def strip(doc: dict) -> dict:
     return {
         "at": doc.get("at", ""),
         "app": doc.get("app", ""),
+        # An activity class name is app code, not anything anyone typed —
+        # and it is the key a future atlas row needs.
+        "activity": doc.get("activity", ""),
         "screen": doc.get("screen", ""),
         "blocked": doc.get("blocked", ""),
         "id": doc.get("id", ""),
@@ -140,6 +143,7 @@ def replay(entry: dict) -> dict:
         "id": entry.get("id", ""),
         "at": entry.get("at", ""),
         "app": entry.get("app", ""),
+        "activity": entry.get("activity", ""),
         "screen": entry.get("screen", ""),
         "blocked": entry.get("blocked", ""),
         "notice": "",

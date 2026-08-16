@@ -199,5 +199,8 @@
   "papp.photo_taken": "Photo from {time}",
   "papp.last_seen": "Last on screen before it turned off:",
   "macro.hhax_uma_login": "Sign in to HHAeXchange+",
-  "macro.mobile_caregiver_pin": "Unlock Mobile Caregiver+"
+  "macro.mobile_caregiver_pin": "Unlock Mobile Caregiver+",
+  "papp.on_launcher": "The phone is on its home screen.",
+  "papp.on_launcher_hint": "Choose an app to open it from here.",
+  "papp.web": "Web sign-in"
 }

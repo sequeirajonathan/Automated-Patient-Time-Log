@@ -99,8 +99,11 @@
     }
   }
 
-  let lastApp = '';
   let currentPackage = '';
+  // Package -> display name, read off the tiles at bind time so this file
+  // still owns no catalog of its own. Chrome is the one extra: it hosts
+  // HHAeXchange+'s web sign-in form.
+  const appNames = {};
   // The app a launch is waiting on. While set, the overlay is a single solid
   // state: sketch updates do not clear it, macro "done" does not clear it —
   // only the target app actually being in front (or failure, or the ceiling).
@@ -137,15 +140,23 @@
       unbusy();
     }
 
-    // The large title: the app's own nav-bar title, else the app she opened,
-    // else the portal's name. Never one of the classifier's sentences — "It
-    // is on a screen it did not recognise" in a title slot is exactly the
-    // alarm this view exists not to raise.
+    // The phone is on its own home screen: a card saying so, never a reflow
+    // of the icon grid — and never under a care app's title.
+    const onLauncher = meta.name === 'launcher';
+    body.classList.toggle('offapp', onLauncher);
+
+    // The large title names what is actually in front: the screen's own
+    // nav-bar title, else the app the *phone* is showing — never the last
+    // tile pressed, which is how the launcher got rendered under a header
+    // still claiming HHAeXchange. Never one of the classifier's sentences
+    // either — "a screen it did not recognise" in a title slot is exactly
+    // the alarm this view exists not to raise.
     const where = document.getElementById('where');
     if (where) {
-      const own = wrap() && wrap().querySelector('.a-title');
+      const own = !onLauncher && wrap() && wrap().querySelector('.a-title');
       where.textContent = (own && own.textContent.trim())
-        || lastApp || i18n.appTitle || '';
+        || (!onLauncher && appNames[currentPackage])
+        || i18n.appTitle || '';
     }
 
     // No photograph of this screen: a quiet lock in the toolbar, whose
@@ -197,7 +208,6 @@
   function launch(tile) {
     const name = tile.dataset.macro;
     if (!name) return;
-    lastApp = tile.dataset.name || '';
 
     // The tile of the app already in front is a switch, not a ceremony. The
     // screen on the phone is signed in and live; running the sign-in walk
@@ -471,9 +481,18 @@
   document.addEventListener('DOMContentLoaded', () => {
     for (const tile of document.querySelectorAll('.tile')) {
       tile.addEventListener('click', () => launch(tile));
+      if (tile.dataset.package) {
+        appNames[tile.dataset.package] = tile.dataset.name || '';
+      }
     }
+    if (i18n.webTitle) appNames['com.android.chrome'] = i18n.webTitle;
     const apps = document.getElementById('btn-apps');
     if (apps) apps.addEventListener('click', () => view('launcher'));
+    // Home is her home: the picker view, plain navigation, works offline.
+    const home = document.getElementById('btn-home');
+    if (home) home.addEventListener('click', () => view('launcher'));
+    const offapp = document.getElementById('offapp-apps');
+    if (offapp) offapp.addEventListener('click', () => view('launcher'));
 
     const peek = document.getElementById('btn-peek');
     if (peek) peek.addEventListener('click', () => {

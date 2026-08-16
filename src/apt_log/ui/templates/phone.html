@@ -379,6 +379,23 @@
   body.asleep #asleep { display:flex; }
   body.asleep .hdr-title .lock { display:none; }
 
+  /* The phone drifted onto its own home screen. Its reflow is a grid of
+     icon glyphs — worthless, and rendering it under a care app's title was
+     the lie. A plain card says where the phone is and offers the one useful
+     act; the sketch is hidden outright, not dimmed, because unlike a slept
+     screen it is not a memory worth keeping in view. */
+  #offapp { display:none; flex-direction:column; align-items:center;
+            gap:8px; margin:12px 16px; padding:18px 16px;
+            border-radius:16px; background:var(--card);
+            box-shadow:var(--shadow-card); text-align:center;
+            color:var(--muted); }
+  #offapp svg { width:30px; height:30px; opacity:.6; }
+  #offapp p { margin:0; font-size:15.5px; color:var(--ink); }
+  #offapp p.muted { font-size:13px; color:var(--muted); }
+  #offapp .a-btn { margin-top:6px; min-width:170px; }
+  body.offapp #screenwrap { display:none; }
+  body.offapp #offapp { display:flex; }
+
   #busy { position:absolute; inset:0; z-index:6; display:none;
           background:var(--chrome); backdrop-filter:blur(6px);
           -webkit-backdrop-filter:blur(6px);
@@ -532,6 +549,14 @@
               style="flex:none">{{ t('phone.wake') }}</button>
       <span class="last-label">{{ t('papp.last_seen') }}</span>
     </div>
+    <div id="offapp">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.6"><path d="M4 11 12 4l8 7"/><path d="M6 9.5V20h12V9.5"/></svg>
+      <p>{{ t('papp.on_launcher') }}</p>
+      <p class="muted">{{ t('papp.on_launcher_hint') }}</p>
+      <button type="button" class="a-btn" id="offapp-apps"
+              style="flex:none">{{ t('papp.apps') }}</button>
+    </div>
     <img id="peek" alt="">
     <div id="peek-cap" hidden></div>
     <div id="busy"><div class="spinner"></div><p id="busy-text"></p></div>
@@ -543,7 +568,11 @@
       <button data-act="back">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5 L8 12 L15 19"/></svg>
         <span>{{ t('phone.back') }}</span></button>
-      <button data-act="home">
+      {# Home is HER home — the app picker this portal opens on — not the
+         phone's Android launcher. Sending KEYCODE_HOME parked the phone on
+         an icon grid the reflow rendered as noise, under a title still
+         naming the last app. Pure navigation, no socket, works offline. #}
+      <button id="btn-home">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/></svg>
         <span>{{ t('phone.home') }}</span></button>
       <button data-act="recents" aria-label="{{ t('phone.recents') }}">
@@ -592,6 +621,7 @@
     signEmpty:   {{ t('signature.empty')|tojson }},
     live:    {{ t('papp.live')|tojson }},
     syncing: {{ t('papp.syncing')|tojson }},
+    webTitle: {{ t('papp.web')|tojson }},
     {# The lock's explanation, one tap away rather than a standing banner. #}
     blocked: {
       "": "",

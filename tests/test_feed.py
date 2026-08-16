@@ -82,17 +82,42 @@ class TestCaptureRefusals:
 
 
 class TestScreenMapping:
+    LEGACY = "com.hhaexchange.caregiver"
+
     @pytest.mark.parametrize("focus,expected", [
         (HOME, "home"),
         (SIGNIN, "login"),
-        ("x/.TodayScheduleActivity", "today"),
-        ("x/.VisitDetailActivity", "visit"),
-        ("x/.AppLaunchActivity", "startup"),
-        ("x/.SomethingNew", "unknown"),
+        (f"{LEGACY}/.TodayScheduleActivity", "today"),
+        (f"{LEGACY}/.VisitDetailActivity", "visit"),
+        (f"{LEGACY}/.AppLaunchActivity", "startup"),
+        (f"{LEGACY}/.SomethingNew", "unknown"),
         ("", "unknown"),
     ])
     def test_maps_into_the_mirror_vocabulary(self, focus, expected):
         assert feed.screen_for(focus) == expected
+
+    def test_the_atlas_is_per_package_not_a_flat_table(self):
+        """Another app's HomeActivity is not the legacy app's home page —
+        page names belong to the app that owns them."""
+        assert feed.screen_for("com.example.other/.HomeActivity") == "unknown"
+
+    @pytest.mark.parametrize("focus,expected", [
+        # The login markers answer for care apps the atlas has not mapped:
+        # HHAeXchange+ hosts its form under an "auth" activity, Mobile
+        # Caregiver+ parks behind a "pin" one. This is what lets landing on
+        # them auto-trigger their sign-in macros.
+        ("com.hhaexchange.uma/.AuthenticationActivity", "login"),
+        ("com.tellus.evv.v2/.PinCodeActivity", "login"),
+        # ...but a random app's "auth"-named screen is not a care login.
+        ("com.example.other/.AuthActivity", "unknown"),
+    ])
+    def test_unmapped_care_login_screens_are_still_called_logins(
+            self, focus, expected):
+        assert feed.screen_for(focus) == expected
+
+    def test_the_phone_home_screen_is_a_launcher_not_a_page(self):
+        assert feed.screen_for(
+            "com.android.launcher3/.uioverrides.QuickstepLauncher") == "launcher"
 
 
 class TestWriteFrame:

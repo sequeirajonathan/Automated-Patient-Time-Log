@@ -130,16 +130,44 @@ EDITABLE = ("EditText", "AutoCompleteTextView", "SearchView")
 # turns out to put a paragraph where this expects a sentence.
 MAX_TEXT = 240
 
-# Activity suffix -> the mirror's fixed vocabulary. Anything unlisted is
-# published as "unknown", which is a real answer (see ui/mirror.py).
+# The four apps the portal exists for. Everything else in front is either
+# supporting cast (Chrome hosting HHAeXchange+'s web sign-in, a permission
+# dialog) or noise (the launcher, whatever the phone drifted onto).
+CARE_APPS = (
+    "com.hhaexchange.caregiver",
+    "com.hhaexchange.uma",
+    "com.tellus.evv.v2",
+    "com.inmyteam.inmyteam",
+)
+
+# The phone's own home screen. Its reflow is a grid of icon glyphs — noise
+# wearing a care app's clothes. The page shows a plain card for it instead.
+LAUNCHER_APPS = (
+    "com.android.launcher3",
+    "com.google.android.apps.nexuslauncher",
+    "com.sec.android.app.launcher",
+    "com.miui.home",
+)
+
+# Activity suffix -> the mirror's fixed vocabulary, per package: an atlas of
+# which pages belong to which app. Anything unlisted is published as
+# "unknown", which is a real answer (see ui/mirror.py) — and lands in the
+# flight recorder with its activity name, which is how this table grows.
+# Only the legacy app's pages have been walked; the other maps fill in as
+# recordings come back.
 ACTIVITY_SCREENS = {
-    "applaunchactivity": "startup",
-    "languageactivity": "language",
-    "signinactivity": "login",
-    "agencyactivity": "agency",
-    "homeactivity": "home",
-    "todayscheduleactivity": "today",
-    "visitdetailactivity": "visit",
+    "com.hhaexchange.caregiver": {
+        "applaunchactivity": "startup",
+        "languageactivity": "language",
+        "signinactivity": "login",
+        "agencyactivity": "agency",
+        "homeactivity": "home",
+        "todayscheduleactivity": "today",
+        "visitdetailactivity": "visit",
+    },
+    "com.hhaexchange.uma": {},
+    "com.tellus.evv.v2": {},
+    "com.inmyteam.inmyteam": {},
 }
 
 
@@ -190,16 +218,36 @@ def password_field_in(xml: str | None) -> bool | None:
     return bool(_PASSWORD_NODE.search(xml))
 
 
-def screen_for(focus: str) -> str:
-    """Map a focused window to the mirror's vocabulary.
+def activity_of(focus: str) -> str:
+    """The focused window's bare activity class name, lowercased.
 
     dumpsys reports the activity fully qualified on some screens and
     dot-prefixed on others -- `.../com.vendor.app.HomeActivity` next to
     `.../.HomeActivity` -- so the last dot-separated component is the only part
     that is reliably the class name.
     """
-    activity = (focus or "").split("/")[-1].split(".")[-1].lower()
-    return ACTIVITY_SCREENS.get(activity, "unknown")
+    return (focus or "").split("/")[-1].split(".")[-1].lower()
+
+
+def screen_for(focus: str) -> str:
+    """Map a focused window to the mirror's vocabulary, package by package.
+
+    The atlas answers first. For a care app whose page is not in it yet, the
+    login markers still answer — the same substrings that refuse the picture
+    mean the same thing here (HHAeXchange+ hosts its form under an "auth"
+    activity, Mobile Caregiver+ parks behind a "pin" one), so a sign-in
+    screen is called one even before anyone has mapped that app's pages.
+    """
+    package = (focus or "").split("/")[0]
+    if package in LAUNCHER_APPS:
+        return "launcher"
+    activity = activity_of(focus)
+    named = ACTIVITY_SCREENS.get(package, {}).get(activity)
+    if named:
+        return named
+    if package in CARE_APPS and looks_like_a_login_screen(activity):
+        return "login"
+    return "unknown"
 
 
 def capture(serial: str | None = None,
@@ -324,6 +372,10 @@ def write_screen(target: Path, frame: dict, screen: str, reason: str,
         # a ceremony: pressing the tile of the app already showing must not
         # run its sign-in walk over a screen that is already signed in.
         "app": (focus or "").split("/")[0],
+        # The bare activity class. A page the atlas cannot name goes into the
+        # flight recorder with this attached, which is exactly the datum a
+        # future ACTIVITY_SCREENS row is made of.
+        "activity": activity_of(focus),
         # When the hierarchy behind this document was last actually read from
         # the device. The document is written every second regardless; this is
         # the number that stops a kept sketch passing as a current one.
