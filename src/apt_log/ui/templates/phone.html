@@ -166,7 +166,6 @@
   body.stale .hdr-sub .dot::after { background:hsl(38 92% 50%); }
   body.stale:not(.asleep):not(.offapp) #screenwrap { display:none; }
   body.stale:not(.asleep):not(.offapp) #syncing { display:block; }
-  body.stale #phone-scroll { display:none; }
 
   /* The skeleton: the native loading language — placeholder rows breathing
      where content is about to be, never a spinner over old data. */
@@ -391,11 +390,14 @@
   body.offapp #screenwrap { display:none; }
   body.offapp #offapp { display:flex; }
 
-  /* The phone-scroll pair: floating, translucent, above the pill. Hidden
-     whenever there is no live screen to move. */
-  #phone-scroll { position:absolute; right:10px; z-index:5;
+  /* The phone-scroll pair lives in the photo view only — the owner's
+     spec: the reflow already lists everything in the phone's viewport, so
+     arrows there are noise; the photo IS the phone's screen, and moving
+     it is exactly what arrows mean on it. */
+  #phone-scroll { position:absolute; right:10px; z-index:6;
                   bottom:calc(102px + env(safe-area-inset-bottom));
-                  display:flex; flex-direction:column; gap:8px; }
+                  display:none; flex-direction:column; gap:8px; }
+  body.peeking:not(.asleep) #phone-scroll { display:flex; }
   #phone-scroll button { width:42px; height:42px; border-radius:50%;
                   border:none; cursor:pointer; color:var(--tint);
                   background:var(--chrome); backdrop-filter:blur(12px);
@@ -406,8 +408,6 @@
   #phone-scroll button:active { transform:scale(.82);
                                 transition-duration:.05s; }
   #phone-scroll svg { width:20px; height:20px; }
-  body.asleep #phone-scroll, body.offapp #phone-scroll,
-  body.peeking #phone-scroll, body.busy #phone-scroll { display:none; }
 
   #busy { position:absolute; inset:0; z-index:6; display:none;
           background:var(--chrome); backdrop-filter:blur(6px);
