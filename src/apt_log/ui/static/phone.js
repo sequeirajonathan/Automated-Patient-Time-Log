@@ -107,6 +107,9 @@
   }
 
   let currentPackage = '';
+  // The atlas's name for the page in front — 'home' marks an app's root,
+  // where one more Back would exit to the Android launcher.
+  let currentScreen = '';
   // Package -> display name, read off the tiles at bind time so this file
   // still owns no catalog of its own. Chrome is the one extra: it hosts
   // HHAeXchange+'s web sign-in form.
@@ -145,6 +148,7 @@
     }
     if (!meta) return;
     currentPackage = meta.app || '';
+    currentScreen = meta.name || '';
 
     // The moment a launch is truly over: the app she asked for is the app in
     // front, awake, with *its own screen* rendered — h_app is whose sketch
@@ -511,9 +515,16 @@
     if (i18n.webTitle) appNames['com.android.chrome'] = i18n.webTitle;
     const apps = document.getElementById('btn-apps');
     if (apps) apps.addEventListener('click', () => view('launcher'));
-    // Home is her home: the picker view, plain navigation, works offline.
+    // Home moves both worlds at once — the owner's spec: the phone goes to
+    // its own home screen AND the front end to the picker. The view change
+    // never waits on the socket, so Home still works offline.
     const home = document.getElementById('btn-home');
-    if (home) home.addEventListener('click', () => view('launcher'));
+    if (home) home.addEventListener('click', () => {
+      view('launcher');
+      if (socket && socket.readyState === 1) {
+        socket.send(JSON.stringify({ type: 'device', action: 'home' }));
+      }
+    });
     const offapp = document.getElementById('offapp-apps');
     if (offapp) offapp.addEventListener('click', () => view('launcher'));
 
@@ -565,6 +576,16 @@
     for (const btn of document.querySelectorAll('[data-act]')) {
       btn.addEventListener('click', () => {
         if (!socket || socket.readyState !== 1) return;
+        // Back at a care app's root screen is the overshoot press: the only
+        // place left to go is the Android launcher, which she reached by
+        // "clicking back too many times". Absorb it — the phone stays
+        // parked inside the app, sessions stay warm, and the front end
+        // hands her the picker, which is what leaving an app means here.
+        if (btn.dataset.act === 'back' && currentScreen === 'home'
+            && appNames[currentPackage]) {
+          view('launcher');
+          return;
+        }
         socket.send(JSON.stringify({ type: 'device', action: btn.dataset.act }));
         // The command went: the icon pops, and for the three that change the
         // screen, the sketch shows in-flight the same way a tap does — the
