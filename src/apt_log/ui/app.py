@@ -344,6 +344,19 @@ def _sans_at(doc: dict) -> dict:
     return {k: v for k, v in doc.items() if k != "at"}
 
 
+def _render_key(doc: dict) -> dict:
+    """What the rendered wireframe actually depends on — nothing that churns.
+
+    `h_at` moves on every hierarchy read and `img` on any repainted pixel
+    (the phone's own clock is enough), so comparing the raw document re-sent
+    the HTML and swapped the DOM every second over an unchanged screen —
+    watched live as a steady shimmer, and on a scrolled page as the scroll
+    snapping back to the top. Staleness rides its own flag; the photograph
+    rides the frame payload; neither belongs in this comparison.
+    """
+    return {k: v for k, v in doc.items() if k not in ("at", "h_at", "img")}
+
+
 # The feed writes every 1-2 seconds when alive; a document this old means
 # nobody is writing, whatever it says.
 SCREEN_STALE_AFTER = 8.0
@@ -510,8 +523,8 @@ async def live(ws: WebSocket):
             # whole rather than by id: a checkbox flipping changes no target
             # and no id, and the wireframe still has to redraw it.
             screen_doc = _read_json(screen_path, None)
-            if screen_doc is not None and _sans_at(screen_doc) != last.get("screen_doc"):
-                last["screen_doc"] = _sans_at(screen_doc)
+            if screen_doc is not None and _render_key(screen_doc) != last.get("screen_doc"):
+                last["screen_doc"] = _render_key(screen_doc)
                 model = _screen_model(screen_doc)
                 payload["screen"] = {
                     "id": screen_doc.get("id", ""),

@@ -19,6 +19,7 @@
   let backoff = 1000;
   let frameId = '';
   let frameImg = '';
+  let lastScreenHtml = '';
   let awaitingMacro = false;
   let busyTimer = 0;
   let toastTimer = 0;
@@ -116,7 +117,14 @@
   let pendingApp = '';
 
   function applyScreen(meta, html) {
+    // Belt to the server's braces: identical markup must never re-swap the
+    // DOM — a swap costs a repaint she can see and the scroll position she
+    // had. The server already de-duplicates; this holds if it ever slips.
+    if (html !== undefined && html === lastScreenHtml) {
+      html = undefined;
+    }
     if (html !== undefined) {
+      lastScreenHtml = html;
       const root = wrap();
       if (root) {
         const previous = frameId;

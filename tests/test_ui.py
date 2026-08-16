@@ -866,3 +866,32 @@ class TestSketchMismatchIsStale:
         first minute after every deploy would open on amber."""
         from apt_log.ui.app import _screen_is_stale
         assert _screen_is_stale(self._doc(h_app="")) is False
+
+
+class TestScreenChurnDoesNotRepaint:
+    """h_at moves on every hierarchy read and img on any repainted pixel —
+    the phone's own clock is enough. Comparing the raw document re-sent the
+    wireframe every second over an unchanged screen: a steady shimmer, and
+    a scrolled page snapping back to the top."""
+
+    def _doc(self, **over):
+        doc = {"id": "abc", "at": "2026-08-16T00:00:00", "h_at": 1.0,
+               "img": "aaa", "app": "com.hhaexchange.uma",
+               "h_app": "com.hhaexchange.uma", "screen": "home",
+               "blocked": "", "notice": "", "elements": [], "statics": []}
+        doc.update(over)
+        return doc
+
+    def test_churn_alone_does_not_change_the_render_key(self):
+        from apt_log.ui.app import _render_key
+        a = self._doc()
+        b = self._doc(at="2026-08-16T00:00:02", h_at=3.4, img="bbb")
+        assert _render_key(a) == _render_key(b)
+
+    def test_a_real_change_does(self):
+        from apt_log.ui.app import _render_key
+        a = self._doc()
+        for changed in (self._doc(blocked="password_field"),
+                        self._doc(h_app="com.android.chrome"),
+                        self._doc(elements=[{"rid": "x"}])):
+            assert _render_key(a) != _render_key(changed)
