@@ -424,7 +424,7 @@ class TestAutoAuth:
         execute.assert_not_called()
 
     @pytest.mark.parametrize("app,screen", [
-        ("com.hhaexchange.uma", "login"),      # no proven sequence
+        ("com.inmyteam.inmyteam", "login"),     # no auth flow mapped
         ("com.hhaexchange.caregiver", "home"),  # not a login screen
     ])
     def test_only_the_proven_apps_login_screen(self, tmp_path, app, screen):
@@ -433,6 +433,15 @@ class TestAutoAuth:
         with patch.object(runner, "execute") as execute:
             assert runner.maybe_auto_auth() is False
         execute.assert_not_called()
+
+    def test_the_uma_login_screen_fires_its_own_macro(self, tmp_path):
+        """The legacy credentials serve both HHAeXchange apps, so landing on
+        HHAeXchange+'s auth screen signs in with nothing extra configured."""
+        self._doc(tmp_path, app="com.hhaexchange.uma", screen="login")
+        runner = self._runner(tmp_path)
+        with patch.object(runner, "execute") as execute:
+            assert runner.maybe_auto_auth() is True
+        assert execute.call_args.args[0] == "hhax_uma_login"
 
     def test_nobody_watching_means_nothing_fires(self, tmp_path):
         """Unwatched, the app's inactivity timer signs the session back out
@@ -552,7 +561,7 @@ class TestAuthMacroFor:
                 == "mobile_caregiver_pin")
 
     def test_a_missing_secret_withholds_the_macro(self):
-        """Only the legacy app is credentialed: the other two stay manual."""
+        """Only the legacy credentials exist: the PIN app stays manual."""
         from apt_log.secrets import (APP_PASSWORD, APP_USERNAME,
                                      MemorySecretProvider)
 
@@ -560,8 +569,19 @@ class TestAuthMacroFor:
                                            APP_PASSWORD: "p"})
         assert (macros.auth_macro_for("com.hhaexchange.caregiver", provider)
                 == "hhax_legacy_login")
-        assert macros.auth_macro_for("com.hhaexchange.uma", provider) is None
         assert macros.auth_macro_for("com.tellus.evv.v2", provider) is None
+
+    def test_the_legacy_credentials_serve_both_hhaexchange_apps(self):
+        """One account fronts both apps — the owner's word. The legacy
+        credentials already on the device credential HHAeXchange+ too, so
+        it auto-signs-in with nothing more configured."""
+        from apt_log.secrets import (APP_PASSWORD, APP_USERNAME,
+                                     MemorySecretProvider)
+
+        provider = MemorySecretProvider(**{APP_USERNAME: "u",
+                                           APP_PASSWORD: "p"})
+        assert (macros.auth_macro_for("com.hhaexchange.uma", provider)
+                == "hhax_uma_login")
 
     def test_half_a_credential_pair_is_not_enough(self):
         from apt_log.secrets import UMA_USERNAME, MemorySecretProvider
@@ -617,6 +637,31 @@ class TestUmaLogin:
             with pytest.raises(SecretNotFound):
                 macros.MACROS["hhax_uma_login"].run(driver, lambda _k: None)
         driver.find_elements.assert_not_called()
+
+    def test_the_legacy_credentials_are_the_fallback(self):
+        """One account fronts both HHAeXchange apps: with only the legacy
+        credentials on the device, the walk still begins — it does not stop
+        at a missing-secret error."""
+        import itertools
+
+        from apt_log.secrets import (APP_PASSWORD, APP_USERNAME,
+                                     MemorySecretProvider)
+
+        driver = self._driver("com.hhaexchange.uma.AuthActivity")
+        provider = MemorySecretProvider(**{APP_USERNAME: "u",
+                                           APP_PASSWORD: "p"})
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider",
+                   return_value=provider), \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            try:
+                macros.MACROS["hhax_uma_login"].run(driver, lambda _k: None)
+            except RuntimeError:
+                pass    # the mock driver's form is shallow; that is fine —
+                        # what matters is the secrets were satisfied
+        driver.find_elements.assert_called()
 
 
 class TestMobileCaregiverPin:

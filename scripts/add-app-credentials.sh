@@ -27,6 +27,10 @@ echo "Adding credentials for the other agency apps. Enter skips a prompt and"
 echo "keeps whatever is already stored. Stored in plaintext on this device —"
 echo "if the SD card is ever lost, rotate these."
 echo
+echo "HHAeXchange+ uses the SAME account as the legacy HHAeXchange app, and"
+echo "the sign-in falls back to those credentials by itself — press Enter"
+echo "here unless the vendor ever gives it a separate login."
+echo
 
 read -rp  "HHAeXchange+ email          : " UMA_USER || true
 UMA_PASS=""

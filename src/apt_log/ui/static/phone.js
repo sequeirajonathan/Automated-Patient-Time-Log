@@ -52,6 +52,12 @@
 
   function view(name) {
     body.dataset.view = name;
+    // Remembered across reloads: the shell reloads itself once after every
+    // deploy (and the browser reloads a discarded tab whenever it likes),
+    // and the page always boots on the picker — so mid-sign-in she was
+    // kicked from the phone view back to the front page by an update she
+    // never asked for. The view she chose survives the reload.
+    try { sessionStorage.setItem('aptlog-view', name); } catch (e) { /* private mode */ }
   }
 
   // ---------------------------------------------------------------- wireframe
@@ -483,6 +489,11 @@
 
   // -------------------------------------------------------------------- wire
   document.addEventListener('DOMContentLoaded', () => {
+    // Back where she was, if a reload interrupted her mid-screen.
+    try {
+      if (sessionStorage.getItem('aptlog-view') === 'screen') view('screen');
+    } catch (e) { /* private mode */ }
+
     for (const tile of document.querySelectorAll('.tile')) {
       tile.addEventListener('click', () => launch(tile));
       if (tile.dataset.package) {

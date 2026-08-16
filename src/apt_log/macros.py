@@ -228,7 +228,9 @@ def _hhax_uma_login(driver, report) -> None:
     as the legacy macro: auth only, nothing else — if the app opens onto
     anything but its sign-in screen, the session is alive and this is done.
     """
-    from apt_log.secrets import UMA_PASSWORD, UMA_USERNAME, FileSecretProvider
+    from apt_log.secrets import (APP_PASSWORD, APP_USERNAME, UMA_PASSWORD,
+                                 UMA_USERNAME, FileSecretProvider,
+                                 SecretNotFound)
 
     report("macro.step.launching")
     wake_display()
@@ -243,9 +245,18 @@ def _hhax_uma_login(driver, report) -> None:
         report("macro.step.checking")
         return
 
+    # Both HHAeXchange apps front the same account, so the legacy
+    # credentials answer here too. UMA_* keys exist only for the day the
+    # vendor splits the accounts — set them and they win; unset, nothing
+    # more needs configuring than the legacy app already had. Either way
+    # the read raises before any tap if nothing is configured.
     secrets = FileSecretProvider()
-    email = secrets.get(UMA_USERNAME)        # raises before any tap if unset
-    password = secrets.get(UMA_PASSWORD)
+    try:
+        email = secrets.get(UMA_USERNAME)
+        password = secrets.get(UMA_PASSWORD)
+    except SecretNotFound:
+        email = secrets.get(APP_USERNAME)
+        password = secrets.get(APP_PASSWORD)
 
     report("macro.step.signing_in")
     buttons = driver.find_elements("id", "idp_login_button")
@@ -388,8 +399,13 @@ def auth_macro_for(app: str, provider=None) -> str | None:
         return AUTO_AUTH_MACRO if have(secrets_mod.APP_USERNAME,
                                        secrets_mod.APP_PASSWORD) else None
     if app == "com.hhaexchange.uma":
-        return "hhax_uma_login" if have(secrets_mod.UMA_USERNAME,
-                                        secrets_mod.UMA_PASSWORD) else None
+        # One account fronts both HHAeXchange apps: the legacy credentials
+        # satisfy this one too, and UMA_* only exists to override them.
+        credentialed = (have(secrets_mod.UMA_USERNAME,
+                             secrets_mod.UMA_PASSWORD)
+                        or have(secrets_mod.APP_USERNAME,
+                                secrets_mod.APP_PASSWORD))
+        return "hhax_uma_login" if credentialed else None
     if app == "com.tellus.evv.v2":
         return "mobile_caregiver_pin" if have(secrets_mod.MC_PIN) else None
     return None
