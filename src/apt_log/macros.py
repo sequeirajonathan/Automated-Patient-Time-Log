@@ -268,8 +268,23 @@ def _hhax_uma_login(driver, report) -> None:
         except Exception:  # noqa: BLE001
             return False
 
-    if not wait_for(lambda: on_auth_screen() or on_web_form(),
-                    timeout=4.0, poll=0.5):
+    # The app's own expiry dialog ("Desconectado — se ha cerrado la sesión")
+    # parks over the home activity; its only exit is the button back to the
+    # login screen. Recognised by its wording, like every dialog this
+    # project is allowed to touch.
+    expiry_exit = ('//*[@clickable="true"]'
+                   '[contains(@text,"Regresar al inicio")'
+                   ' or .//android.widget.TextView['
+                   'contains(@text,"Regresar al inicio")'
+                   ' or contains(@text,"Return to login")'
+                   ' or contains(@text,"Back to login")]]')
+
+    def on_expiry_dialog():
+        return bool(driver.find_elements("xpath", expiry_exit))
+
+    if not wait_for(
+            lambda: on_auth_screen() or on_web_form() or on_expiry_dialog(),
+            timeout=4.0, poll=0.5):
         report("macro.step.checking")
         return
 
@@ -309,6 +324,7 @@ def _hhax_uma_login(driver, report) -> None:
                                      f'//*[@resource-id="{web_id}"]')
         return found[0] if found else None
 
+    clicked_expiry = False
     clicked_sign_in = False
     nudged_back = False
     covered_since = 0.0
@@ -316,6 +332,13 @@ def _hhax_uma_login(driver, report) -> None:
     while time.monotonic() < deadline:
         if field("email") is not None:
             break
+        if not clicked_expiry:
+            exits = driver.find_elements("xpath", expiry_exit)
+            if exits:
+                exits[0].click()             # the dialog's way out is login
+                clicked_expiry = True
+                time.sleep(1.0)
+                continue
         if not clicked_sign_in:
             controls = driver.find_elements("xpath", sign_in)
             if controls:
@@ -435,6 +458,43 @@ MACROS: dict[str, Macro] = {
               _open_app("com.inmyteam.inmyteam")),
     )
 }
+
+
+# Session-expiry dialogs, per app. A dialog whose wording is recognised as
+# "your session ended" is itself the request to sign back in: its only
+# meaningful exit leads to the login screen, each app's auth macro already
+# knows how to walk from there, and waiting instead leaves the phone parked
+# on the dialog until a human taps — the owner's screenshot, every morning.
+# Wordings only; an unrecognised dialog stays untouched, as everywhere.
+#
+# The legacy list is deliberately narrower than session.EXPIRED_WORDINGS:
+# that list matches the text of a modal already known to be up, where
+# "iniciar sesión" is safe. Here the match runs against a whole screen's
+# words, and the login page itself says "iniciar sesión".
+EXPIRY_MARKERS = {
+    "com.hhaexchange.caregiver": (
+        "sesión ha expirado", "sesion ha expirado", "session has expired",
+        "inactividad", "inactivity",
+        "cerrará la sesión", "cerrara la sesion",
+    ),
+    "com.hhaexchange.uma": (
+        "se ha cerrado la sesión", "se ha cerrado la sesion",
+        "regresar al inicio de sesión", "regresar al inicio de sesion",
+        "logged out due to", "return to login", "back to login",
+    ),
+}
+
+
+def expiry_on_screen(doc: dict) -> bool:
+    """Whether the screen document shows a recognised session-expiry dialog."""
+    markers = EXPIRY_MARKERS.get(doc.get("app") or "")
+    if not markers:
+        return False
+    words = " ".join(
+        n.get("txt") or ""
+        for n in (doc.get("statics") or []) + (doc.get("elements") or [])
+    ).lower()
+    return any(m in words for m in markers)
 
 
 def auth_macro_for(app: str, provider=None, doc: dict | None = None) -> str | None:
@@ -643,7 +703,8 @@ class Runner:
         from apt_log.feed import CREDENTIAL_REFUSALS
 
         if (doc.get("screen") != "login"
-                and doc.get("blocked") not in CREDENTIAL_REFUSALS):
+                and doc.get("blocked") not in CREDENTIAL_REFUSALS
+                and not expiry_on_screen(doc)):
             return False
         try:
             age = (datetime.now()

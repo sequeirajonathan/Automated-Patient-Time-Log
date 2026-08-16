@@ -606,11 +606,12 @@ class TestUmaLogin:
         return driver
 
     def test_an_alive_session_is_left_alone(self):
-        """Anything but the auth screen means signed in: no secrets read,
-        nothing tapped."""
+        """Anything but the auth screen, the web form, or the expiry dialog
+        means signed in: no secrets read, nothing tapped."""
         import itertools
 
         driver = self._driver("com.hhaexchange.uma.MainActivity")
+        driver.find_elements.return_value = []      # no expiry dialog either
         with patch("apt_log.macros.wake_display"), \
              patch("apt_log.secrets.FileSecretProvider") as provider_cls, \
              patch("apt_log.macros.time.sleep"), \
@@ -618,7 +619,46 @@ class TestUmaLogin:
                    side_effect=itertools.count(step=0.5)):
             macros.MACROS["hhax_uma_login"].run(driver, lambda _k: None)
         provider_cls.assert_not_called()
-        driver.find_elements.assert_not_called()
+
+    def test_the_expiry_dialog_is_walked_through_to_the_form(self):
+        """'Desconectado — se ha cerrado la sesión': the dialog's only exit
+        leads to login, so the macro takes it and carries on to the form."""
+        import itertools
+
+        from apt_log.secrets import (APP_PASSWORD, APP_USERNAME,
+                                     MemorySecretProvider)
+
+        driver = self._driver("com.hhaexchange.uma.HomeActivity")
+        state = {"dismissed": False}
+        exit_btn = MagicMock()
+
+        def dismiss():
+            state["dismissed"] = True
+        exit_btn.click.side_effect = dismiss
+
+        def find_elements(_by, selector):
+            if "Regresar al inicio" in selector:
+                return [] if state["dismissed"] else [exit_btn]
+            if 'resource-id=' in selector and state["dismissed"]:
+                return [MagicMock()]
+            if "Iniciar sesi" in selector and state["dismissed"]:
+                return [MagicMock()]
+            return []
+        driver.find_elements.side_effect = find_elements
+
+        provider = MemorySecretProvider(**{APP_USERNAME: "u",
+                                           APP_PASSWORD: "p"})
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider",
+                   return_value=provider), \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            try:
+                macros.MACROS["hhax_uma_login"].run(driver, lambda _k: None)
+            except RuntimeError:
+                pass    # the mock form is shallow past the fields
+        exit_btn.click.assert_called_once()
 
     def test_missing_credentials_stop_the_macro_before_any_tap(self):
         """The secrets are read before the first tap, so an uncredentialed
@@ -793,3 +833,63 @@ class TestChromeIsTheUmaFormSometimes:
         with patch.object(runner, "execute") as execute:
             assert runner.maybe_auto_auth() is True
         assert execute.call_args.args[0] == "hhax_uma_login"
+
+
+class TestExpiryDialogsAreTheAsk:
+    """The phone parks on 'your session ended' until a human taps — the
+    owner's screenshot, every morning. A dialog whose wording is recognised
+    as expiry is itself the request to sign back in; its only meaningful
+    exit leads to the login screen, and the app's auth macro knows the way
+    from there. Unrecognised dialogs stay untouched, as everywhere."""
+
+    def _provider(self):
+        from apt_log.secrets import (APP_PASSWORD, APP_USERNAME,
+                                     MemorySecretProvider)
+        return MemorySecretProvider(**{APP_USERNAME: "u", APP_PASSWORD: "p"})
+
+    def _runner(self, tmp_path, doc):
+        import datetime as dt
+
+        doc.setdefault("at", dt.datetime.now().isoformat())
+        (tmp_path / "screen.json").write_text(json.dumps(doc))
+        (tmp_path / "viewers.json").write_text(json.dumps({"n": 1}))
+        return macros.Runner(tmp_path / "req.json", tmp_path / "status.json",
+                             screen_path=tmp_path / "screen.json",
+                             viewers_path=tmp_path / "viewers.json",
+                             secrets=self._provider())
+
+    def test_the_uma_expiry_dialog_fires_its_auth_macro(self, tmp_path):
+        runner = self._runner(tmp_path, {
+            "app": "com.hhaexchange.uma", "screen": "home", "blocked": "",
+            "statics": [{"txt": "Desconectado"},
+                        {"txt": "Se ha cerrado la sesión debido a 15 minutos"},
+                        {"txt": "Regresar al inicio de sesión"}],
+            "elements": []})
+        with patch.object(runner, "execute") as execute:
+            assert runner.maybe_auto_auth() is True
+        assert execute.call_args.args[0] == "hhax_uma_login"
+
+    def test_the_legacy_expiry_alert_fires_its_auth_macro(self, tmp_path):
+        runner = self._runner(tmp_path, {
+            "app": "com.hhaexchange.caregiver", "screen": "home",
+            "blocked": "",
+            "statics": [{"txt": "Su sesión ha expirado"}], "elements": []})
+        with patch.object(runner, "execute") as execute:
+            assert runner.maybe_auto_auth() is True
+        assert execute.call_args.args[0] == "hhax_legacy_login"
+
+    def test_an_unrecognised_dialog_fires_nothing(self, tmp_path):
+        runner = self._runner(tmp_path, {
+            "app": "com.hhaexchange.uma", "screen": "home", "blocked": "",
+            "statics": [{"txt": "¿Seguro que desea borrar todo?"}],
+            "elements": []})
+        with patch.object(runner, "execute") as execute:
+            assert runner.maybe_auto_auth() is False
+        execute.assert_not_called()
+
+    def test_the_login_page_itself_is_not_an_expiry_dialog(self):
+        """'Iniciar sesión' appears on the login screen; the legacy marker
+        list must not treat a whole login page as a dialog."""
+        doc = {"app": "com.hhaexchange.caregiver",
+               "statics": [{"txt": "Iniciar sesión"}], "elements": []}
+        assert macros.expiry_on_screen(doc) is False
