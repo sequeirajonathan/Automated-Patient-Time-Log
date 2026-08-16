@@ -204,5 +204,8 @@
   "papp.on_launcher_hint": "Elija una aplicación para abrirla desde aquí.",
   "papp.web": "Inicio de sesión web",
   "papp.scroll_up": "Desplazar el teléfono hacia arriba",
-  "papp.scroll_down": "Desplazar el teléfono hacia abajo"
+  "papp.scroll_down": "Desplazar el teléfono hacia abajo",
+  "papp.explain.live": "Verde: esta página coincide con el teléfono en Florida en este momento.",
+  "papp.explain.syncing": "Amarillo: la pantalla del teléfono está cambiando — se muestra la página de carga hasta que llegue la pantalla nueva.",
+  "papp.explain.offline": "Rojo: sin conexión con el controlador. Se reconecta solo; nada de lo que toque aquí llegará al teléfono hasta entonces."
 }

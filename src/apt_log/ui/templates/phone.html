@@ -157,12 +157,35 @@
   @keyframes ping { 75%, 100% { transform:scale(2.4); opacity:0; } }
   body.offline .hdr-sub .dot::before,
   body.offline .hdr-sub .dot::after { background:var(--bad); }
-  /* Nobody is refreshing the document behind the sketch: amber dot, dimmed
-     screen. Stale, and saying so — never Live over an old picture. */
+  /* The sketch and the phone disagree: amber dot, and the old sketch is
+     NOT shown at all — the owner's rule: better to wait behind a loading
+     page than to look at stale data. A skeleton stands in until the fresh
+     screen arrives; the asleep card and the launcher card outrank it,
+     because each of those states says something truer than "loading". */
   body.stale .hdr-sub .dot::before,
   body.stale .hdr-sub .dot::after { background:hsl(38 92% 50%); }
-  body.stale #screenwrap { opacity:.45; }
-  body.stale #screenwrap [data-aim] { pointer-events:none; }
+  body.stale:not(.asleep):not(.offapp) #screenwrap { display:none; }
+  body.stale:not(.asleep):not(.offapp) #syncing { display:block; }
+  body.stale #phone-scroll { display:none; }
+
+  /* The skeleton: the native loading language — placeholder rows breathing
+     where content is about to be, never a spinner over old data. */
+  #syncing { display:none; padding:8px 16px; }
+  .sk-card { background:var(--card); border-radius:16px; padding:4px 14px;
+             box-shadow:var(--shadow-card); margin-bottom:14px;
+             animation:fade-up .45s var(--spring) both; }
+  .sk-card:nth-child(2) { animation-delay:.08s; }
+  .sk-card:nth-child(3) { animation-delay:.16s; }
+  .sk-row { padding:13px 0; }
+  .sk-row + .sk-row { border-top:.5px solid var(--line); }
+  .sk-line { height:14px; border-radius:7px;
+             background:linear-gradient(100deg, var(--track) 40%,
+                        var(--tint-soft) 50%, var(--track) 60%);
+             background-size:220% 100%;
+             animation:shimmer 1.6s linear infinite; }
+  .sk-line.sub { height:10px; margin-top:8px; opacity:.6; }
+  .sk-line.w80 { width:80%; } .sk-line.w60 { width:60%; }
+  .sk-line.w45 { width:45%; } .sk-line.w30 { width:30%; }
   .hdr-sub .spin { display:none; width:14px; height:14px; border-radius:50%;
                    border:2px solid var(--tint-soft);
                    border-top-color:var(--tint);
@@ -528,6 +551,25 @@
   </header>
   <div id="stage">
     <div id="screenwrap">{% if m %}{% include '_screen.html' %}{% endif %}</div>
+    {# The loading page: shown whole while the sketch and the phone
+       disagree, so nobody ever reads stale rows as current ones. #}
+    <div id="syncing" aria-hidden="true">
+      <div class="sk-card">
+        <div class="sk-row"><div class="sk-line w60"></div>
+          <div class="sk-line sub w45"></div></div>
+        <div class="sk-row"><div class="sk-line w80"></div>
+          <div class="sk-line sub w30"></div></div>
+        <div class="sk-row"><div class="sk-line w45"></div></div>
+      </div>
+      <div class="sk-card">
+        <div class="sk-row"><div class="sk-line w80"></div>
+          <div class="sk-line sub w60"></div></div>
+        <div class="sk-row"><div class="sk-line w30"></div></div>
+      </div>
+      <div class="sk-card">
+        <div class="sk-row"><div class="sk-line w60"></div></div>
+      </div>
+    </div>
     {# The phone's display is off. The sketch on file describes a screen that
        is not being shown to anyone; rendering it as current is a lie with
        boxes. Say the true thing and offer the one useful act. #}
@@ -622,6 +664,11 @@
     live:    {{ t('papp.live')|tojson }},
     syncing: {{ t('papp.syncing')|tojson }},
     webTitle: {{ t('papp.web')|tojson }},
+    {# The dot, explained on demand: tap the status and the current colour
+       says what it means in a sentence. #}
+    explainLive:    {{ t('papp.explain.live')|tojson }},
+    explainSyncing: {{ t('papp.explain.syncing')|tojson }},
+    explainOffline: {{ t('papp.explain.offline')|tojson }},
     {# The lock's explanation, one tap away rather than a standing banner. #}
     blocked: {
       "": "",

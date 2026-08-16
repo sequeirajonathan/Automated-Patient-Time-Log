@@ -503,6 +503,16 @@
         // says syncing, and the sketch dims — stale, and saying so.
         isStale = !!msg.screen_stale;
         body.classList.toggle('stale', isStale);
+        // No stale references anywhere: while the loading page stands in,
+        // the old sketch's own page title must not stay in the header. The
+        // app the phone is on is current truth; the page name is not.
+        if (isStale) {
+          const where = document.getElementById('where');
+          if (where) {
+            where.textContent = appNames[currentPackage]
+              || i18n.appTitle || '';
+          }
+        }
         statusLabel();
       }
       if (msg.frame) applyFrame(msg.frame);
@@ -561,6 +571,19 @@
     });
     const offapp = document.getElementById('offapp-apps');
     if (offapp) offapp.addEventListener('click', () => view('launcher'));
+
+    // The dot, explained on demand: tap the status row and the current
+    // colour says what it means — green/yellow/red each get a sentence.
+    const sub = document.querySelector('.hdr-sub');
+    if (sub) sub.addEventListener('click', () => {
+      if (body.classList.contains('offline')) {
+        toast(i18n.explainOffline || '');
+      } else if (isStale) {
+        toast(i18n.explainSyncing || '');
+      } else {
+        toast(i18n.explainLive || '');
+      }
+    });
 
     const peek = document.getElementById('btn-peek');
     if (peek) peek.addEventListener('click', () => {
