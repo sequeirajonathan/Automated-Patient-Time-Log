@@ -231,3 +231,62 @@ class TestBandShapes:
             statics=[],
         ))
         assert not any(r.get("tabs") for r in m["rows"])
+
+
+class TestCurtains:
+    """The patient-details page, as reported: a slide-over panel leaves a
+    tall sliver of the underlying screen tappable at the left edge. Banding
+    goes by vertical overlap, so that one curtain overlapped every real row
+    and magnetized the whole page into a single band — rendered as sixteen
+    strips of vertically crushed letters. Structure taken from the live
+    capture; the text here is fictional."""
+
+    def _model(self):
+        return screenview.build(doc(
+            elements=[
+                el("", "View", [0, 64, 144, 1492]),        # the curtain
+                el("", "View", [587, 98, 695, 206]),       # close button
+                el("", "View", [198, 848, 684, 986]),      # phone row
+                el("", "View", [198, 1196, 684, 1334]),    # address row
+            ],
+            statics=[
+                st([203, 115, 573, 189], "PACIENTE FICTICIA"),
+                st([198, 240, 720, 378], "Identificación de admisión"),
+                st([198, 378, 476, 447], "XOR-000000"),
+                st([198, 476, 371, 545], "Oficina"),
+                st([198, 545, 720, 683], "Agencia Ficticia LLC"),
+                st([198, 743, 705, 812], "Números de teléfono"),
+                st([258, 848, 684, 986], "Teléfono principal"),
+                st([198, 1082, 476, 1151], "Direcciones"),
+                st([258, 1196, 684, 1334], "Dirección principal"),
+            ],
+        ))
+
+    def test_a_curtain_does_not_magnetize_the_page_into_one_band(self):
+        rows = self._model()["rows"]
+        assert len(rows) >= 6
+
+    def test_the_curtain_itself_is_not_drawn(self):
+        all_items = [i for r in self._model()["rows"] for i in r["items"]]
+        assert not any(i["b"] == [0, 64, 144, 1492] for i in all_items)
+
+    def test_the_real_rows_survive_with_their_labels(self):
+        all_items = [i for r in self._model()["rows"] for i in r["items"]]
+        texts = []
+        for i in all_items:
+            texts.extend(i.get("lines") or [])
+            if i.get("txt"):
+                texts.append(i["txt"])
+        assert "Teléfono principal" in texts
+        assert "Identificación de admisión" in texts
+
+    def test_a_content_card_with_its_labels_is_not_a_curtain(self):
+        """A tall container that actually holds the page's text is content;
+        dropping it would drop the page."""
+        m = screenview.build(doc(
+            elements=[el("", "RelativeLayout", [0, 100, 720, 1500])],
+            statics=[st([40, 200, 680, 260], "Visita no programada"),
+                     st([40, 300, 680, 360], "08:00 PM - 09:00 PM")],
+        ))
+        all_items = [i for r in m["rows"] for i in r["items"]]
+        assert any(i.get("lines") for i in all_items)

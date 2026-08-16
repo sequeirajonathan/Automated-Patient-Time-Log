@@ -44,6 +44,10 @@ SEGMENT_MAX_GAP = 0.02
 # The top of the screen, where an app keeps its own navigation bar.
 NAV_BAND_BOTTOM = 0.12
 
+# An anonymous container spanning at least this share of the screen's height
+# is a curtain — a slide-over's scrim, a drawer edge — not a row.
+CURTAIN_MIN_HEIGHT = 0.55
+
 
 def _is_icon_text(txt: str) -> bool:
     """Text that is an icon font's private glyph, not a word.
@@ -189,6 +193,19 @@ def build(doc: dict) -> dict | None:
     for i, s in enumerate(statics):
         if i not in folded and s.get("txt") and not _is_icon_text(s["txt"]):
             items.append(_item(s, "label"))
+
+    # A curtain — an anonymous, label-less container spanning most of the
+    # screen's height (the sliver of dimmed screen beside a slide-over
+    # panel, a drawer's edge) — is a surface, not a row. Banding goes by
+    # vertical overlap, so one curtain overlaps every real row on the
+    # screen and magnetizes them all into a single band — seen live as the
+    # patient-details page rendered as sixteen strips of vertically
+    # crushed letters. It says nothing, folds nothing, and is dropped.
+    items = [n for n in items
+             if not (n["kind"] == "row"
+                     and not n.get("lines")
+                     and not n.get("txt")
+                     and (n["b"][3] - n["b"][1]) >= h * CURTAIN_MIN_HEIGHT)]
 
     items.sort(key=lambda n: (n["b"][1], n["b"][0]))
 
