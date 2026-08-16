@@ -287,28 +287,51 @@ def _hhax_uma_login(driver, report) -> None:
         password = secrets.get(APP_PASSWORD)
 
     report("macro.step.signing_in")
-    if not on_web_form():
-        # The Compose auth screen: an id-less clickable View, findable only
-        # through the text inside it. Both locales, because the phone's
-        # language is hers to change and this macro must not care.
-        sign_in = ('//android.view.View[@clickable="true"]'
-                   '[.//android.widget.TextView['
-                   'contains(@text,"Iniciar sesi") or contains(@text,"Sign in")]]')
-        if not wait_for(
-                lambda: bool(driver.find_elements("xpath", sign_in)),
-                timeout=15.0):
-            raise RuntimeError("the sign-in control never appeared")
-        driver.find_elements("xpath", sign_in)[0].click()
 
-    # The web form, in Chrome. XPath on the literal resource-id: the "id"
-    # strategy silently prefixes the app package and never matches web ids.
+    # The app's Compose auth screen and the Chrome form race each other: a
+    # cold start draws its ProgressBar for longer than any fixed guess, or
+    # the app skips straight to the pending Chrome tab — the first version
+    # chose a branch in its first four seconds and failed overnight on
+    # exactly that ("the sign-in control never appeared", 06:20). One loop
+    # now watches for whichever appears. The Compose control is clicked at
+    # most once; and if Chrome is in front but the form stays unreachable,
+    # something is covering it (the page-info sheet, seen live) — one BACK
+    # closes a sheet, and if there was none it closes the tab and hands
+    # back to the app's own screen, which this same loop handles.
+    sign_in = ('//android.view.View[@clickable="true"]'
+               '[.//android.widget.TextView['
+               'contains(@text,"Iniciar sesi") or contains(@text,"Sign in")]]')
+
+    # XPath on the literal resource-id: the "id" strategy silently prefixes
+    # the app package and never matches web ids.
     def field(web_id):
         found = driver.find_elements("xpath",
                                      f'//*[@resource-id="{web_id}"]')
         return found[0] if found else None
 
-    if not wait_for(lambda: field("email") is not None, timeout=25.0):
-        raise RuntimeError("the web sign-in form did not appear")
+    clicked_sign_in = False
+    nudged_back = False
+    covered_since = 0.0
+    deadline = time.monotonic() + 60.0
+    while time.monotonic() < deadline:
+        if field("email") is not None:
+            break
+        if not clicked_sign_in:
+            controls = driver.find_elements("xpath", sign_in)
+            if controls:
+                controls[0].click()
+                clicked_sign_in = True
+                time.sleep(1.0)
+                continue
+        if on_web_form():
+            covered_since = covered_since or time.monotonic()
+            if not nudged_back and time.monotonic() - covered_since > 8.0:
+                driver.press_keycode(4)      # BACK, once
+                nudged_back = True
+        time.sleep(1.0)
+    else:
+        raise RuntimeError(
+            "neither the sign-in control nor the web form appeared")
     box = field("email")
     box.clear()                # arrives prefilled with the remembered account
     box.send_keys(email)
@@ -414,7 +437,7 @@ MACROS: dict[str, Macro] = {
 }
 
 
-def auth_macro_for(app: str, provider=None) -> str | None:
+def auth_macro_for(app: str, provider=None, doc: dict | None = None) -> str | None:
     """The auth macro for a foreground package — if its secrets exist.
 
     An auth macro without its credentials fails on every auto-auth attempt,
@@ -422,6 +445,12 @@ def auth_macro_for(app: str, provider=None) -> str | None:
     gets automatic sign-in once its secrets are actually on the device. The
     tile still offers the macro either way; a manual press failing once with
     a clear status is information, a background loop of failures is noise.
+
+    `doc` is the screen document, consulted only for Chrome: HHAeXchange+'s
+    session expires into a Chrome Custom Tab, and a login screen sitting in
+    Chrome is invisible to a package-only rule — the session died overnight
+    and nobody was signed back in until a human tapped. The document's own
+    words say whose form it is.
     """
     from apt_log import secrets as secrets_mod
 
@@ -435,17 +464,24 @@ def auth_macro_for(app: str, provider=None) -> str | None:
         except (secrets_mod.SecretNotFound, PermissionError, OSError):
             return False
 
+    def uma_credentialed() -> bool:
+        # One account fronts both HHAeXchange apps: the legacy credentials
+        # satisfy this one too, and UMA_* only exists to override them.
+        return (have(secrets_mod.UMA_USERNAME, secrets_mod.UMA_PASSWORD)
+                or have(secrets_mod.APP_USERNAME, secrets_mod.APP_PASSWORD))
+
     if app == "com.hhaexchange.caregiver":
         return AUTO_AUTH_MACRO if have(secrets_mod.APP_USERNAME,
                                        secrets_mod.APP_PASSWORD) else None
     if app == "com.hhaexchange.uma":
-        # One account fronts both HHAeXchange apps: the legacy credentials
-        # satisfy this one too, and UMA_* only exists to override them.
-        credentialed = (have(secrets_mod.UMA_USERNAME,
-                             secrets_mod.UMA_PASSWORD)
-                        or have(secrets_mod.APP_USERNAME,
-                                secrets_mod.APP_PASSWORD))
-        return "hhax_uma_login" if credentialed else None
+        return "hhax_uma_login" if uma_credentialed() else None
+    if app == "com.android.chrome" and doc:
+        words = " ".join(
+            n.get("txt") or ""
+            for n in (doc.get("statics") or []) + (doc.get("elements") or []))
+        if "hhaexchange" in words.lower():
+            return "hhax_uma_login" if uma_credentialed() else None
+        return None
     if app == "com.tellus.evv.v2":
         return "mobile_caregiver_pin" if have(secrets_mod.MC_PIN) else None
     return None
@@ -594,7 +630,8 @@ class Runner:
 
         # Per-app: each agency app whose secrets are on the device gets
         # automatic sign-in on its own credential screens.
-        macro_name = auth_macro_for(doc.get("app") or "", self._secrets)
+        macro_name = auth_macro_for(doc.get("app") or "", self._secrets,
+                                    doc=doc)
         if macro_name is None:
             return False
         # "Sign in when we see inputs for auth" — the owner's rule, taken

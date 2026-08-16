@@ -748,3 +748,48 @@ class TestUmaWebFormIsTheAsk:
         # app's sign-in control inside Chrome, which is not there to find.
         assert any('resource-id="email"' in s for s in selectors)
         assert not any("Iniciar sesi" in s for s in selectors)
+
+
+class TestChromeIsTheUmaFormSometimes:
+    """HHAeXchange+'s session expires into a Chrome Custom Tab. A login
+    screen sitting in Chrome is invisible to a package-only rule — the
+    session died overnight and nobody was signed back in until a human
+    tapped. The screen document's own words say whose form it is."""
+
+    def _provider(self):
+        from apt_log.secrets import (APP_PASSWORD, APP_USERNAME,
+                                     MemorySecretProvider)
+        return MemorySecretProvider(**{APP_USERNAME: "u", APP_PASSWORD: "p"})
+
+    def test_chrome_on_the_hhaexchange_form_arms_the_uma_macro(self):
+        doc = {"statics": [{"txt": "secure.hhaexchange.com"}],
+               "elements": []}
+        assert macros.auth_macro_for("com.android.chrome", self._provider(),
+                                     doc=doc) == "hhax_uma_login"
+
+    def test_chrome_anywhere_else_is_nobody(self):
+        doc = {"statics": [{"txt": "accounts.example.com"}], "elements": []}
+        assert macros.auth_macro_for("com.android.chrome", self._provider(),
+                                     doc=doc) is None
+
+    def test_chrome_without_a_document_is_nobody(self):
+        assert macros.auth_macro_for("com.android.chrome",
+                                     self._provider()) is None
+
+    def test_the_expired_session_in_chrome_fires_auto_auth(self, tmp_path):
+        import datetime as dt
+
+        (tmp_path / "screen.json").write_text(json.dumps({
+            "app": "com.android.chrome", "screen": "unknown",
+            "blocked": "password_field",
+            "at": dt.datetime.now().isoformat(),
+            "statics": [{"txt": "secure.hhaexchange.com"}],
+            "elements": []}))
+        (tmp_path / "viewers.json").write_text(json.dumps({"n": 1}))
+        runner = macros.Runner(tmp_path / "req.json", tmp_path / "status.json",
+                               screen_path=tmp_path / "screen.json",
+                               viewers_path=tmp_path / "viewers.json",
+                               secrets=self._provider())
+        with patch.object(runner, "execute") as execute:
+            assert runner.maybe_auto_auth() is True
+        assert execute.call_args.args[0] == "hhax_uma_login"
