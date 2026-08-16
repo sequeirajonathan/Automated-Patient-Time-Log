@@ -195,13 +195,26 @@ def _hhax_legacy_login(driver, report) -> None:
     wait_for(lambda: bool(driver.current_activity), timeout=15.0)
 
     report("macro.step.clearing")
-    message = session_mod.modal_message(driver)
-    if message:
-        if not session_mod.is_expired(driver):
-            # Refusing to dismiss what nothing has read is the same rule the
-            # session module holds, and a macro is not an excuse to break it.
-            raise RuntimeError("an unrecognised dialog is on screen")
-        session_mod.dismiss(driver)
+    from selenium.common.exceptions import StaleElementReferenceException
+
+    # Two attempts, because the expiry dialog dismisses ITSELF: the
+    # inactivity countdown runs out and the app swaps the screen between
+    # this macro reading the dialog and tapping it — seen live as a
+    # StaleElementReferenceException at exactly this step. A dialog that
+    # left on its own needed no dismissing; read again and move on.
+    for _attempt in range(2):
+        try:
+            message = session_mod.modal_message(driver)
+            if message:
+                if not session_mod.is_expired(driver):
+                    # Refusing to dismiss what nothing has read is the same
+                    # rule the session module holds, and a macro is not an
+                    # excuse to break it.
+                    raise RuntimeError("an unrecognised dialog is on screen")
+                session_mod.dismiss(driver)
+            break
+        except StaleElementReferenceException:
+            time.sleep(1.0)
 
     report("macro.step.signing_in")
     authed = login_mod.authenticate_if_needed(driver, FileSecretProvider())

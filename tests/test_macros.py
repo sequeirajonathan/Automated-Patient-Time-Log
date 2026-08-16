@@ -1009,3 +1009,33 @@ class TestAliveSessionSurvivesTheColdResume:
                    side_effect=itertools.count(step=0.5)):
             with pytest.raises(RuntimeError):
                 macros.MACROS["hhax_uma_login"].run(driver, lambda _k: None)
+
+
+class TestTheDialogThatDismissesItself:
+    """The inactivity countdown dialog runs out and swaps the screen
+    between the macro reading it and tapping it — seen live as a
+    StaleElementReferenceException at the clearing step, which failed the
+    whole sign-in. A dialog that left on its own needed no dismissing."""
+
+    def test_a_stale_dialog_is_read_again_not_fatal(self):
+        from selenium.common.exceptions import StaleElementReferenceException
+
+        from apt_log.screens import login as login_mod
+        from apt_log.screens import session as session_mod
+
+        class Reached(Exception):
+            pass
+
+        driver = MagicMock()
+        with patch.object(session_mod, "modal_message",
+                          side_effect=["Se cerrará la sesión por inactividad",
+                                       ""]), \
+             patch.object(session_mod, "is_expired", return_value=True), \
+             patch.object(session_mod, "dismiss",
+                          side_effect=StaleElementReferenceException("gone")), \
+             patch.object(login_mod, "authenticate_if_needed",
+                          side_effect=Reached), \
+             patch("apt_log.macros.wake_display"), \
+             patch("apt_log.macros.time.sleep"):
+            with pytest.raises(Reached):
+                macros._hhax_legacy_login(driver, lambda _k: None)
