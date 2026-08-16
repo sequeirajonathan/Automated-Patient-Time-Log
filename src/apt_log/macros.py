@@ -222,11 +222,27 @@ def _hhax_legacy_login(driver, report) -> None:
 def _hhax_uma_login(driver, report) -> None:
     """HHAeXchange+ — sign in through its web form, only if it asks.
 
-    Profiled in the first discovery session: the app has no native login. Its
-    button opens a Chrome Custom Tab with an email/password form (web ids
-    `email` and `password`), and finishing returns to the app. Same contract
-    as the legacy macro: auth only, nothing else — if the app opens onto
-    anything but its sign-in screen *or that pending Chrome form*, the
+    Walked end-to-end in the second discovery session (the first one's notes
+    were wrong in every particular that mattered):
+
+    - The auth screen is Jetpack Compose behind a ProgressBar: it exposes
+      NOTHING for its first seconds, then id-less Views. The sign-in control
+      is found by its inner text ("Iniciar sesión…" / "Sign in…" — both
+      locales matched, since text is all Compose gives us here).
+    - The form is a Chrome Custom Tab (secure.hhaexchange.com). Its fields
+      carry literal web ids `email`/`password` — which `find_elements("id")`
+      can NEVER match, because UiAutomator2 prefixes bare ids with the app
+      package. XPath on the attribute is the only locator that works.
+    - The email field arrives PREFILLED with the remembered account; typing
+      without clearing appends to it.
+    - The submit is an id-less, text-less wide button below the password
+      field; the narrow eye-toggle inside the field is the trap the width
+      test exists for.
+    - Success: Chrome hands back to the app, OnboardingActivity flashes
+      past, HomeActivity settles. No OTP, no second factor.
+
+    Same contract as the legacy macro: auth only — if the app opens onto
+    anything but its sign-in screen or that pending Chrome form, the
     session is alive and this is done.
     """
     from apt_log.secrets import (APP_PASSWORD, APP_USERNAME, UMA_PASSWORD,
@@ -272,20 +288,30 @@ def _hhax_uma_login(driver, report) -> None:
 
     report("macro.step.signing_in")
     if not on_web_form():
-        # The app's own auth screen: its button opens the web form.
-        buttons = driver.find_elements("id", "idp_login_button")
-        if not buttons:
-            raise RuntimeError("the sign-in button is not where discovery saw it")
-        buttons[0].click()
+        # The Compose auth screen: an id-less clickable View, findable only
+        # through the text inside it. Both locales, because the phone's
+        # language is hers to change and this macro must not care.
+        sign_in = ('//android.view.View[@clickable="true"]'
+                   '[.//android.widget.TextView['
+                   'contains(@text,"Iniciar sesi") or contains(@text,"Sign in")]]')
+        if not wait_for(
+                lambda: bool(driver.find_elements("xpath", sign_in)),
+                timeout=15.0):
+            raise RuntimeError("the sign-in control never appeared")
+        driver.find_elements("xpath", sign_in)[0].click()
 
-    # The web form, in Chrome. The field ids are the page's own.
+    # The web form, in Chrome. XPath on the literal resource-id: the "id"
+    # strategy silently prefixes the app package and never matches web ids.
     def field(web_id):
-        found = driver.find_elements("id", web_id)
+        found = driver.find_elements("xpath",
+                                     f'//*[@resource-id="{web_id}"]')
         return found[0] if found else None
 
-    if not wait_for(lambda: field("email") is not None, timeout=20.0):
+    if not wait_for(lambda: field("email") is not None, timeout=25.0):
         raise RuntimeError("the web sign-in form did not appear")
-    field("email").send_keys(email)
+    box = field("email")
+    box.clear()                # arrives prefilled with the remembered account
+    box.send_keys(email)
     field("password").send_keys(password)
 
     # The submit control carries no id and no text in the accessibility tree.

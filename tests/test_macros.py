@@ -743,8 +743,8 @@ class TestUmaWebFormIsTheAsk:
             except RuntimeError:
                 pass    # the mock form is shallow past the fields
 
-        calls = [c.args for c in driver.find_elements.call_args_list]
+        selectors = [c.args[1] for c in driver.find_elements.call_args_list]
         # It went for the form's fields directly — and never hunted for the
-        # app's sign-in button inside Chrome, which is not there to find.
-        assert ("id", "email") in calls
-        assert ("id", "idp_login_button") not in calls
+        # app's sign-in control inside Chrome, which is not there to find.
+        assert any('resource-id="email"' in s for s in selectors)
+        assert not any("Iniciar sesi" in s for s in selectors)

@@ -169,7 +169,12 @@ ACTIVITY_SCREENS = {
         "todayscheduleactivity": "today",
         "visitdetailactivity": "visit",
     },
-    "com.hhaexchange.uma": {},
+    # Walked in the second discovery session: sign-in end to end.
+    "com.hhaexchange.uma": {
+        "authenticationactivity": "login",
+        "onboardingactivity": "startup",   # flashes past after sign-in
+        "homeactivity": "home",
+    },
     "com.tellus.evv.v2": {},
     "com.inmyteam.inmyteam": {},
 }
