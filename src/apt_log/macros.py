@@ -361,7 +361,16 @@ def _hhax_uma_login(driver, report) -> None:
         if not clicked_expiry:
             exits = driver.find_elements("xpath", expiry_exit)
             if exits:
-                exits[0].click()             # the dialog's way out is login
+                # NOT clicked. The dialog's exit is literally log_out_button:
+                # walking through it tears down session state and leaves a
+                # stale activity stack that swallows the sign-in redirect —
+                # watched live: the full walk ran, Chrome submitted, and the
+                # app resurfaced the same dialog, not signed in. A clean
+                # restart lands on a fresh auth screen, and the ordinary
+                # walk from there is the one proven to work.
+                driver.terminate_app("com.hhaexchange.uma")
+                time.sleep(1.0)
+                driver.activate_app("com.hhaexchange.uma")
                 clicked_expiry = True
                 time.sleep(1.0)
                 continue
@@ -410,10 +419,21 @@ def _hhax_uma_login(driver, report) -> None:
     wait_for(lambda: dismiss_autofill(driver), timeout=6.0, poll=0.5)
 
     report("macro.step.checking")
-    # Done means Chrome handed control back to the app, signed in.
-    if not wait_for(lambda: driver.current_package == "com.hhaexchange.uma",
-                    timeout=30.0):
-        raise RuntimeError("did not return to the app after signing in")
+    # Done means the app is back AND actually signed in — a substantive
+    # screen that is neither the auth activity nor the expiry dialog.
+    # "The package returned" once passed as success while the app sat on
+    # its auth screen with the sign-in silently failed behind it.
+    def signed_in():
+        try:
+            return (driver.current_package == "com.hhaexchange.uma"
+                    and not on_auth_screen()
+                    and not on_expiry_dialog()
+                    and tree_has_substance())
+        except Exception:  # noqa: BLE001
+            return False
+
+    if not wait_for(signed_in, timeout=30.0):
+        raise RuntimeError("the app came back but did not land signed in")
 
 
 def _mobile_caregiver_pin(driver, report) -> None:

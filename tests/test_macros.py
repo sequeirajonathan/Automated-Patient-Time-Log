@@ -630,9 +630,13 @@ class TestUmaLogin:
         assert not any(
             c for c in driver.method_calls if c[0].endswith(".click"))
 
-    def test_the_expiry_dialog_is_walked_through_to_the_form(self):
-        """'Desconectado — se ha cerrado la sesión': the dialog's only exit
-        leads to login, so the macro takes it and carries on to the form."""
+    def test_the_expiry_dialog_is_restarted_around_not_clicked_through(self):
+        """'Desconectado — se ha cerrado la sesión': the dialog's exit is
+        literally log_out_button, and walking through it left a stale
+        activity stack that swallowed the sign-in redirect — the full walk
+        ran and the app resurfaced the same dialog, not signed in. The
+        macro restarts the app clean instead; the dialog's button is never
+        pressed."""
         import itertools
 
         from apt_log.secrets import (APP_PASSWORD, APP_USERNAME,
@@ -641,10 +645,8 @@ class TestUmaLogin:
         driver = self._driver("com.hhaexchange.uma.HomeActivity")
         state = {"dismissed": False}
         exit_btn = MagicMock()
-
-        def dismiss():
-            state["dismissed"] = True
-        exit_btn.click.side_effect = dismiss
+        driver.terminate_app.side_effect = \
+            lambda _pkg: state.__setitem__("dismissed", True)
 
         def find_elements(_by, selector):
             if "Regresar al inicio" in selector:
@@ -668,7 +670,8 @@ class TestUmaLogin:
                 macros.MACROS["hhax_uma_login"].run(driver, lambda _k: None)
             except RuntimeError:
                 pass    # the mock form is shallow past the fields
-        exit_btn.click.assert_called_once()
+        driver.terminate_app.assert_called_once_with("com.hhaexchange.uma")
+        exit_btn.click.assert_not_called()
 
     def test_missing_credentials_stop_the_macro_before_any_tap(self):
         """The secrets are read before the first tap, so an uncredentialed
