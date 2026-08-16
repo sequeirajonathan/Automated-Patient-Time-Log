@@ -21,6 +21,7 @@
   let frameImg = '';
   let lastScreenHtml = '';
   let awaitingMacro = false;
+  let macroEndedAt = 0;
   let busyTimer = 0;
   let toastTimer = 0;
 
@@ -176,7 +177,14 @@
     // the app, and leaving an app here means the picker: flip to it once,
     // on the transition, so she is never stranded staring at a dead end.
     const onLauncher = meta.name === 'launcher';
-    if (onLauncher && wasScreen && wasScreen !== 'launcher' && !pendingApp) {
+    // While a macro is working — and for a grace period after it ends —
+    // the launcher is not a destination, it is scenery: the sign-in path
+    // restarts the app, and the phone crosses its home screen for a second
+    // on the way. Ejecting her to the picker mid-"Signing in…" was watched
+    // live. The flip only means something when nothing is in flight.
+    const macroQuiet = !awaitingMacro && !pendingApp
+      && Date.now() - macroEndedAt > 8000;
+    if (onLauncher && wasScreen && wasScreen !== 'launcher' && macroQuiet) {
       // A launcher right after a Back means Back exited the app — mid-flow,
       // reported as "a bug for sure as an experience". Android kept the
       // app's state, so bounce it straight back: to her, that Back simply
@@ -253,9 +261,11 @@
       if (awaitingMacro && !pendingApp) unbusy();
       else if (pendingApp) busy(i18n.waiting || '', 20000);
       awaitingMacro = false;
+      macroEndedAt = Date.now();
     } else if (m.state === 'failed') {
       if (awaitingMacro || pendingApp) { unbusy(); toast(m.state_text || ''); }
       awaitingMacro = false;
+      macroEndedAt = Date.now();
       pendingApp = '';
     }
   }
