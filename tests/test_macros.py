@@ -893,3 +893,78 @@ class TestExpiryDialogsAreTheAsk:
         doc = {"app": "com.hhaexchange.caregiver",
                "statics": [{"txt": "Iniciar sesión"}], "elements": []}
         assert macros.expiry_on_screen(doc) is False
+
+
+class TestAliveSessionSurvivesTheColdResume:
+    """HHAeXchange+ passes THROUGH its auth activity on every cold resume
+    while it checks the stored session. The first version read that flash
+    as 'asked to sign in' and opened the web form over a live session —
+    the owner's report: 'I just left the app, it should still have an
+    active session.'"""
+
+    def test_settling_on_home_ends_the_macro_without_a_tap(self):
+        import itertools
+
+        from apt_log.secrets import (APP_PASSWORD, APP_USERNAME,
+                                     MemorySecretProvider)
+
+        driver = MagicMock()
+        driver.current_package = "com.hhaexchange.uma"
+        # The resume arc: auth flashes past, then home settles.
+        acts = itertools.chain(
+            ["com.hhaexchange.uma.AuthenticationActivity"] * 4,
+            itertools.repeat("com.hhaexchange.uma.HomeActivity"))
+        from unittest.mock import PropertyMock
+        type(driver).current_activity = PropertyMock(
+            side_effect=lambda: next(acts))
+        driver.find_elements.return_value = []   # no dialog, no form, no button
+        provider = MemorySecretProvider(**{APP_USERNAME: "u",
+                                           APP_PASSWORD: "p"})
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider",
+                   return_value=provider), \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            macros.MACROS["hhax_uma_login"].run(driver, lambda _k: None)
+        # Nothing was ever clicked: the walk ended at "already signed in".
+        for call in driver.find_elements.call_args_list:
+            pass
+        assert not any(
+            c for c in driver.method_calls if c[0].endswith(".click"))
+
+    def test_a_single_flash_of_the_sign_in_control_is_not_believed(self):
+        """One sighting is a transition frame; two is an offer."""
+        import itertools
+
+        from apt_log.secrets import (APP_PASSWORD, APP_USERNAME,
+                                     MemorySecretProvider)
+
+        driver = MagicMock()
+        driver.current_package = "com.hhaexchange.uma"
+        acts = itertools.chain(
+            ["com.hhaexchange.uma.AuthenticationActivity"] * 6,
+            itertools.repeat("com.hhaexchange.uma.HomeActivity"))
+        from unittest.mock import PropertyMock
+        type(driver).current_activity = PropertyMock(
+            side_effect=lambda: next(acts))
+
+        flash = MagicMock()
+        shown = {"n": 0}
+
+        def find_elements(_by, selector):
+            if "Iniciar sesi" in selector:
+                shown["n"] += 1
+                return [flash] if shown["n"] == 1 else []   # one frame only
+            return []
+        driver.find_elements.side_effect = find_elements
+        provider = MemorySecretProvider(**{APP_USERNAME: "u",
+                                           APP_PASSWORD: "p"})
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider",
+                   return_value=provider), \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            macros.MACROS["hhax_uma_login"].run(driver, lambda _k: None)
+        flash.click.assert_not_called()

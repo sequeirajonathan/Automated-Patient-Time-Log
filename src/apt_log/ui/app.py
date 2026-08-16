@@ -413,18 +413,25 @@ SLOW_EVERY = 10.0
 # the front and touches nothing — the most a button may honestly do on screens
 # nobody has mapped yet.
 PHONE_APPS = (
+    # `open` is the app's open-only macro — activate and wait, touch
+    # nothing. The client uses it to bounce an app back when a Back press
+    # turns out to have exited it to the launcher.
     {"id": "hhax_legacy", "name": "HHAeXchange", "mark": "HX",
      "package": "com.hhaexchange.caregiver",
-     "macro": "hhax_legacy_login", "accent": "#1b6ed6"},
+     "macro": "hhax_legacy_login", "open": "open_hhax_legacy",
+     "accent": "#1b6ed6"},
     {"id": "hhax_uma", "name": "HHAeXchange+", "mark": "HX+",
      "package": "com.hhaexchange.uma",
-     "macro": "hhax_uma_login", "accent": "#7a3fd1"},
+     "macro": "hhax_uma_login", "open": "open_hhax_uma",
+     "accent": "#7a3fd1"},
     {"id": "mobile_caregiver", "name": "Mobile Caregiver+", "mark": "MC",
      "package": "com.tellus.evv.v2",
-     "macro": "mobile_caregiver_pin", "accent": "#0c8f5a"},
+     "macro": "mobile_caregiver_pin", "open": "open_mobile_caregiver",
+     "accent": "#0c8f5a"},
     {"id": "inmyteam", "name": "inMyTeam", "mark": "iMT",
      "package": "com.inmyteam.inmyteam",
-     "macro": "open_inmyteam", "accent": "#c2452e"},
+     "macro": "open_inmyteam", "open": "open_inmyteam",
+     "accent": "#c2452e"},
 )
 
 def _screen_model(doc: dict) -> dict | None:

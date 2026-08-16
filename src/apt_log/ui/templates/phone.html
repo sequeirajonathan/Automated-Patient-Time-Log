@@ -368,6 +368,24 @@
   body.offapp #screenwrap { display:none; }
   body.offapp #offapp { display:flex; }
 
+  /* The phone-scroll pair: floating, translucent, above the pill. Hidden
+     whenever there is no live screen to move. */
+  #phone-scroll { position:absolute; right:10px; z-index:5;
+                  bottom:calc(102px + env(safe-area-inset-bottom));
+                  display:flex; flex-direction:column; gap:8px; }
+  #phone-scroll button { width:42px; height:42px; border-radius:50%;
+                  border:none; cursor:pointer; color:var(--tint);
+                  background:var(--chrome); backdrop-filter:blur(12px);
+                  -webkit-backdrop-filter:blur(12px);
+                  box-shadow:var(--shadow-card);
+                  display:flex; align-items:center; justify-content:center;
+                  transition:transform .25s var(--spring); }
+  #phone-scroll button:active { transform:scale(.82);
+                                transition-duration:.05s; }
+  #phone-scroll svg { width:20px; height:20px; }
+  body.asleep #phone-scroll, body.offapp #phone-scroll,
+  body.peeking #phone-scroll, body.busy #phone-scroll { display:none; }
+
   #busy { position:absolute; inset:0; z-index:6; display:none;
           background:var(--chrome); backdrop-filter:blur(6px);
           -webkit-backdrop-filter:blur(6px);
@@ -471,6 +489,7 @@
   <div class="springboard">
     {% for a in apps %}
     <button class="tile" data-app="{{ a.id }}" data-macro="{{ a.macro }}"
+            data-open="{{ a.open }}"
             data-package="{{ a.package }}" data-name="{{ a.name }}">
       <span class="mark" style="background:{{ a.accent }}">{{ a.mark }}</span>
       <span class="name">{{ a.name }}</span>
@@ -532,6 +551,16 @@
     <div id="peekwrap"><img id="peek" alt=""></div>
     <div id="peek-cap" hidden></div>
     <div id="busy"><div class="spinner"></div><p id="busy-text"></p></div>
+  </div>
+  {# Scroll the physical phone: the reflow can only draw what the phone's
+     viewport shows, so content below the fold needs the page itself moved.
+     A swipe in the middle of the screen, as an arrow pair — it moves the
+     page and cannot press anything. #}
+  <div id="phone-scroll">
+    <button data-act="scroll_up" aria-label="{{ t('papp.scroll_up') }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 14.5 L12 8.5 L18 14.5"/></svg></button>
+    <button data-act="scroll_down" aria-label="{{ t('papp.scroll_down') }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 9.5 L12 15.5 L18 9.5"/></svg></button>
   </div>
   <nav class="navbar" aria-label="Phone">
     {# The phone's own three, in Android's shapes, plus wake — riding a

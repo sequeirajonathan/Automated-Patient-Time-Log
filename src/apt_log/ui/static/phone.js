@@ -114,6 +114,12 @@
   // still owns no catalog of its own. Chrome is the one extra: it hosts
   // HHAeXchange+'s web sign-in form.
   const appNames = {};
+  // Package -> its open-only macro, for bouncing an app back when a Back
+  // press turns out to have exited it (see applyScreen).
+  const appOpen = {};
+  // When the last Back was sent: a launcher arriving right after one means
+  // Back exited the app, which is never what leaving-by-Back should do.
+  let backSentAt = 0;
   // The app a launch is waiting on. While set, the overlay is a single solid
   // state: sketch updates do not clear it, macro "done" does not clear it —
   // only the target app actually being in front (or failure, or the ceiling).
@@ -148,6 +154,7 @@
     }
     if (!meta) return;
     const wasScreen = currentScreen;
+    const wasPackage = currentPackage;
     currentPackage = meta.app || '';
     currentScreen = meta.name || '';
 
@@ -169,9 +176,27 @@
     // the app, and leaving an app here means the picker: flip to it once,
     // on the transition, so she is never stranded staring at a dead end.
     const onLauncher = meta.name === 'launcher';
-    if (onLauncher && wasScreen && wasScreen !== 'launcher'
-        && !pendingApp && body.dataset.view === 'screen') {
-      view('launcher');
+    if (onLauncher && wasScreen && wasScreen !== 'launcher' && !pendingApp) {
+      // A launcher right after a Back means Back exited the app — mid-flow,
+      // reported as "a bug for sure as an experience". Android kept the
+      // app's state, so bounce it straight back: to her, that Back simply
+      // did nothing, which beats being teleported to the picker. Any other
+      // arrival (the Home button, the phone's own drift) means she left
+      // the app, and leaving means the picker.
+      const bounce = Date.now() - backSentAt < 3500 && appOpen[wasPackage];
+      if (bounce && body.dataset.view === 'screen') {
+        pendingApp = wasPackage;
+        busy((i18n.opening || '').replace('{app}',
+          appNames[wasPackage] || ''), 30000);
+        fetch('/macro', {
+          method: 'POST',
+          body: new URLSearchParams({ name: appOpen[wasPackage] }),
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          redirect: 'follow'
+        }).catch(() => { pendingApp = ''; unbusy(); });
+      } else if (body.dataset.view === 'screen') {
+        view('launcher');
+      }
     }
     body.classList.toggle('offapp', onLauncher);
 
@@ -518,6 +543,7 @@
       tile.addEventListener('click', () => launch(tile));
       if (tile.dataset.package) {
         appNames[tile.dataset.package] = tile.dataset.name || '';
+        appOpen[tile.dataset.package] = tile.dataset.open || '';
       }
     }
     if (i18n.webTitle) appNames['com.android.chrome'] = i18n.webTitle;
@@ -588,8 +614,9 @@
         // backs out of pages, and guessing which press is the last one
         // proved impossible (HHAeXchange+ keeps its whole app under one
         // activity, so an activity-level guard swallowed every press).
-        // The overshoot is handled at the destination instead: landing on
-        // the launcher flips the front end to the picker. See applyScreen.
+        // The overshoot is handled at the destination instead: a launcher
+        // arriving right after a Back bounces the app back. See applyScreen.
+        if (btn.dataset.act === 'back') backSentAt = Date.now();
         socket.send(JSON.stringify({ type: 'device', action: btn.dataset.act }));
         // The command went: the icon pops, and for the three that change the
         // screen, the sketch shows in-flight the same way a tap does — the

@@ -202,5 +202,7 @@
   "macro.mobile_caregiver_pin": "Desbloquear Mobile Caregiver+",
   "papp.on_launcher": "El teléfono está en su pantalla de inicio.",
   "papp.on_launcher_hint": "Elija una aplicación para abrirla desde aquí.",
-  "papp.web": "Inicio de sesión web"
+  "papp.web": "Inicio de sesión web",
+  "papp.scroll_up": "Desplazar el teléfono hacia arriba",
+  "papp.scroll_down": "Desplazar el teléfono hacia abajo"
 }

@@ -326,12 +326,31 @@ def _hhax_uma_login(driver, report) -> None:
 
     clicked_expiry = False
     clicked_sign_in = False
+    sign_in_sightings = 0
+    settled_sightings = 0
     nudged_back = False
     covered_since = 0.0
     deadline = time.monotonic() + 60.0
     while time.monotonic() < deadline:
         if field("email") is not None:
             break
+        # The app passes THROUGH its auth activity on every cold resume
+        # while it checks the stored session — an alive session settles on
+        # home a few seconds later. Settling anywhere that is not the auth
+        # screen, before this macro has touched anything, means signed in:
+        # walk away quietly instead of signing in over a live session
+        # (watched happen: a tile press opened the web form the owner
+        # never needed). Two consecutive sightings, same as the click —
+        # a transition frame must not read as a verdict.
+        if (not clicked_expiry and not clicked_sign_in
+                and not on_web_form() and not on_auth_screen()
+                and not on_expiry_dialog()):
+            settled_sightings += 1
+            if settled_sightings >= 2:
+                report("macro.step.checking")
+                return
+        else:
+            settled_sightings = 0
         if not clicked_expiry:
             exits = driver.find_elements("xpath", expiry_exit)
             if exits:
@@ -341,7 +360,13 @@ def _hhax_uma_login(driver, report) -> None:
                 continue
         if not clicked_sign_in:
             controls = driver.find_elements("xpath", sign_in)
-            if controls:
+            # Two consecutive sightings before believing it: the session
+            # check can flash the sign-in control for a frame on its way
+            # to home, and clicking that frame starts an auth nobody asked
+            # for. A control that is really being offered is still there a
+            # second later.
+            sign_in_sightings = sign_in_sightings + 1 if controls else 0
+            if controls and sign_in_sightings >= 2:
                 controls[0].click()
                 clicked_sign_in = True
                 time.sleep(1.0)
