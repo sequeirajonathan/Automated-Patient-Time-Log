@@ -63,7 +63,11 @@ def strip(doc: dict) -> dict:
         "id": doc.get("id", ""),
         "size": doc.get("size", [0, 0]),
         "elements": [element(e) for e in doc.get("elements") or []],
+        # rid survives for statics too: a named state image (the visits
+        # list's drawable checks) has no text at all, and its resource-id
+        # IS its meaning — without it a replay loses the marks.
         "statics": [{"cls": s.get("cls", ""), "b": s.get("b"),
+                     "rid": s.get("rid", ""),
                      "len": len(s.get("txt", "") or "")}
                     for s in doc.get("statics") or []],
     }

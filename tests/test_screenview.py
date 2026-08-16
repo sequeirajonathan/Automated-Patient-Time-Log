@@ -327,3 +327,32 @@ class TestStateMarks:
         ))
         cell = m["rows"][0]["items"][0]
         assert cell["lines"] == ["Detalles"]
+
+
+class TestImageMarks:
+    """The legacy visits list draws its EVV checks as ImageViews — no text
+    at all, identity in the resource-id (imgStartTime/imgEndTime), present
+    only on rows whose record is confirmed. Verified against the live
+    hierarchy after the glyph fix alone changed nothing on this screen."""
+
+    def test_named_check_images_become_marks(self):
+        m = screenview.build(doc(
+            elements=[el("", "RelativeLayout", [0, 200, 720, 640])],
+            statics=[st([20, 240, 400, 300], "PACIENTE FICTICIA"),
+                     {"cls": "ImageView", "b": [469, 304, 503, 338],
+                      "txt": "", "rid": "imgStartTime"},
+                     {"cls": "ImageView", "b": [639, 304, 673, 338],
+                      "txt": "", "rid": "imgEndTime"}],
+        ))
+        cell = m["rows"][0]["items"][0]
+        assert "✓ ✓" in cell["lines"]
+
+    def test_an_anonymous_image_is_still_decoration(self):
+        m = screenview.build(doc(
+            elements=[el("", "RelativeLayout", [0, 200, 720, 640])],
+            statics=[st([20, 240, 400, 300], "Detalles"),
+                     {"cls": "ImageView", "b": [469, 304, 503, 338],
+                      "txt": "", "rid": "ivDecorativeLogo"}],
+        ))
+        cell = m["rows"][0]["items"][0]
+        assert cell["lines"] == ["Detalles"]

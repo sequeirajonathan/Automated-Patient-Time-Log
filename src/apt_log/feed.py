@@ -733,6 +733,11 @@ def statics(xml: str) -> list[dict]:
     boxes. Editable fields are excluded here for the same reason they are
     excluded from labels: their text is whatever has been typed into them,
     and on a sign-in screen that is a credential.
+
+    Named ImageViews ride along with no text: the visits list marks each
+    verified EVV record with a drawable check (imgStartTime/imgEndTime),
+    and an image's identity is its resource-id — the renderer decides
+    which ids mean something. Anonymous decoration stays out.
     """
     out = []
     for raw in _NODE.findall(xml or ""):
@@ -742,7 +747,8 @@ def statics(xml: str) -> list[dict]:
         if cls in EDITABLE:
             continue
         text = _clean(_attr(raw, "text"))
-        if not text:
+        rid = _attr(raw, "resource-id").split("/")[-1]
+        if not text and not (cls == "ImageView" and rid):
             continue
         m = _BOUNDS.search(_attr(raw, "bounds"))
         if not m:
@@ -750,7 +756,10 @@ def statics(xml: str) -> list[dict]:
         x1, y1, x2, y2 = (int(g) for g in m.groups())
         if x2 <= x1 or y2 <= y1:
             continue
-        out.append({"cls": cls, "b": [x1, y1, x2, y2], "txt": text})
+        entry = {"cls": cls, "b": [x1, y1, x2, y2], "txt": text}
+        if not text:
+            entry["rid"] = rid
+        out.append(entry)
         if len(out) >= MAX_STATICS:
             break
     return out

@@ -74,6 +74,24 @@ ICON_MARKS = {
     "\uf071": "\u26a0",   # warning triangle
 }
 
+# Some apps draw their state marks as ImageViews instead \u2014 no text at all,
+# identity carried by the resource-id alone. The legacy visits list shows a
+# drawable check per verified EVV record under exactly these ids; the image
+# only exists on rows where the record is confirmed.
+IMAGE_MARKS = {
+    "imgstarttime": "\u2713",
+    "imgendtime": "\u2713",
+}
+
+
+def _mark_for(s: dict) -> str:
+    """The state symbol a static stands for, or ''. Text glyphs and named
+    state images are the two shapes marks arrive in."""
+    txt = (s.get("txt") or "").strip()
+    if txt:
+        return ICON_MARKS.get(txt, "")
+    return IMAGE_MARKS.get((s.get("rid") or "").lower(), "")
+
 
 def _fold_label(cell_b: list[int], s: dict) -> tuple[str, str]:
     """How a label folded into a cell should be carried: as a line, a badge,
@@ -85,8 +103,11 @@ def _fold_label(cell_b: list[int], s: dict) -> tuple[str, str]:
     riding in a bubble. Words are lines wherever they sit.
     """
     txt = s.get("txt", "")
-    if txt.strip() in ICON_MARKS:
-        return "mark", ICON_MARKS[txt.strip()]
+    mark = _mark_for(s)
+    if mark:
+        return "mark", mark
+    if not txt:
+        return "drop", ""      # an unrecognised image: decoration
     if _is_icon_text(txt):
         return "drop", ""
     if len(txt) <= 3 and txt.strip().isdigit():
@@ -214,12 +235,12 @@ def build(doc: dict) -> dict | None:
             item["badge"] = badge
         items.append(item)
     for i, s in enumerate(statics):
-        if i in folded or not s.get("txt"):
+        if i in folded:
             continue
-        mark = ICON_MARKS.get(s["txt"].strip())
+        mark = _mark_for(s)
         if mark:
             items.append(_item({**s, "txt": mark}, "label"))
-        elif not _is_icon_text(s["txt"]):
+        elif s.get("txt") and not _is_icon_text(s["txt"]):
             items.append(_item(s, "label"))
 
     # A curtain — an anonymous, label-less container spanning most of the
