@@ -271,22 +271,27 @@ def _hhax_uma_login(driver, report) -> None:
     # The app's own expiry dialog ("Desconectado — se ha cerrado la sesión")
     # parks over the home activity; its only exit is the button back to the
     # login screen. Recognised by its wording, like every dialog this
-    # project is allowed to touch.
+    # project is allowed to touch. Text on any descendant: Compose hangs
+    # the words on plain Views as often as on TextViews.
     expiry_exit = ('//*[@clickable="true"]'
                    '[contains(@text,"Regresar al inicio")'
-                   ' or .//android.widget.TextView['
-                   'contains(@text,"Regresar al inicio")'
+                   ' or .//*[contains(@text,"Regresar al inicio")'
                    ' or contains(@text,"Return to login")'
                    ' or contains(@text,"Back to login")]]')
 
     def on_expiry_dialog():
         return bool(driver.find_elements("xpath", expiry_exit))
 
-    if not wait_for(
-            lambda: on_auth_screen() or on_web_form() or on_expiry_dialog(),
-            timeout=4.0, poll=0.5):
-        report("macro.step.checking")
-        return
+    # A freshly woken Compose UI exposes an almost-empty accessibility tree
+    # for several seconds. "I see nothing" must never read as "signed in" —
+    # it read exactly that way once, reporting done over a still-open
+    # expiry dialog. A screen with real content has several tappable
+    # nodes; an unready tree has none.
+    def tree_has_substance():
+        try:
+            return (driver.page_source or "").count('clickable="true"') >= 3
+        except Exception:  # noqa: BLE001
+            return False
 
     # Both HHAeXchange apps front the same account, so the legacy
     # credentials answer here too. UMA_* keys exist only for the day the
@@ -336,15 +341,17 @@ def _hhax_uma_login(driver, report) -> None:
             break
         # The app passes THROUGH its auth activity on every cold resume
         # while it checks the stored session — an alive session settles on
-        # home a few seconds later. Settling anywhere that is not the auth
-        # screen, before this macro has touched anything, means signed in:
-        # walk away quietly instead of signing in over a live session
-        # (watched happen: a tile press opened the web form the owner
-        # never needed). Two consecutive sightings, same as the click —
-        # a transition frame must not read as a verdict.
+        # home a few seconds later. Settling on a SUBSTANTIVE screen that
+        # is not the auth screen, before this macro has touched anything,
+        # means signed in: walk away quietly instead of signing in over a
+        # live session (watched happen: a tile press opened the web form
+        # the owner never needed). Two consecutive sightings, same as the
+        # click — a transition frame must not read as a verdict — and the
+        # tree must actually show content: an unready Compose tree shows
+        # nothing at all, and nothing is not a home screen.
         if (not clicked_expiry and not clicked_sign_in
                 and not on_web_form() and not on_auth_screen()
-                and not on_expiry_dialog()):
+                and not on_expiry_dialog() and tree_has_substance()):
             settled_sightings += 1
             if settled_sightings >= 2:
                 report("macro.step.checking")

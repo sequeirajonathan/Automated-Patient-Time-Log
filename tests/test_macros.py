@@ -606,19 +606,29 @@ class TestUmaLogin:
         return driver
 
     def test_an_alive_session_is_left_alone(self):
-        """Anything but the auth screen, the web form, or the expiry dialog
-        means signed in: no secrets read, nothing tapped."""
+        """A substantive screen with no auth ask on it means signed in:
+        nothing is ever tapped. (The credentials are read up front — before
+        any tap, which is the doctrine — but reading a file is not an
+        action on the phone.)"""
         import itertools
+
+        from apt_log.secrets import (APP_PASSWORD, APP_USERNAME,
+                                     MemorySecretProvider)
 
         driver = self._driver("com.hhaexchange.uma.MainActivity")
         driver.find_elements.return_value = []      # no expiry dialog either
+        driver.page_source = '<a clickable="true"/>' * 5   # a real screen
+        provider = MemorySecretProvider(**{APP_USERNAME: "u",
+                                           APP_PASSWORD: "p"})
         with patch("apt_log.macros.wake_display"), \
-             patch("apt_log.secrets.FileSecretProvider") as provider_cls, \
+             patch("apt_log.secrets.FileSecretProvider",
+                   return_value=provider), \
              patch("apt_log.macros.time.sleep"), \
              patch("apt_log.macros.time.monotonic",
                    side_effect=itertools.count(step=0.5)):
             macros.MACROS["hhax_uma_login"].run(driver, lambda _k: None)
-        provider_cls.assert_not_called()
+        assert not any(
+            c for c in driver.method_calls if c[0].endswith(".click"))
 
     def test_the_expiry_dialog_is_walked_through_to_the_form(self):
         """'Desconectado — se ha cerrado la sesión': the dialog's only exit
@@ -918,6 +928,7 @@ class TestAliveSessionSurvivesTheColdResume:
         type(driver).current_activity = PropertyMock(
             side_effect=lambda: next(acts))
         driver.find_elements.return_value = []   # no dialog, no form, no button
+        driver.page_source = '<a clickable="true"/>' * 5   # home has content
         provider = MemorySecretProvider(**{APP_USERNAME: "u",
                                            APP_PASSWORD: "p"})
         with patch("apt_log.macros.wake_display"), \
@@ -958,6 +969,7 @@ class TestAliveSessionSurvivesTheColdResume:
                 return [flash] if shown["n"] == 1 else []   # one frame only
             return []
         driver.find_elements.side_effect = find_elements
+        driver.page_source = '<a clickable="true"/>' * 5
         provider = MemorySecretProvider(**{APP_USERNAME: "u",
                                            APP_PASSWORD: "p"})
         with patch("apt_log.macros.wake_display"), \
@@ -968,3 +980,29 @@ class TestAliveSessionSurvivesTheColdResume:
                    side_effect=itertools.count(step=0.5)):
             macros.MACROS["hhax_uma_login"].run(driver, lambda _k: None)
         flash.click.assert_not_called()
+
+    def test_an_empty_tree_is_never_a_signed_in_verdict(self):
+        """A freshly woken Compose UI exposes nothing for seconds; the macro
+        once read that silence as 'signed in' and reported done over a
+        still-open expiry dialog. Nothing on screen is not a verdict — the
+        macro must keep watching and fail loudly, never quietly succeed."""
+        import itertools
+
+        from apt_log.secrets import (APP_PASSWORD, APP_USERNAME,
+                                     MemorySecretProvider)
+
+        driver = MagicMock()
+        driver.current_package = "com.hhaexchange.uma"
+        driver.current_activity = "com.hhaexchange.uma.HomeActivity"
+        driver.find_elements.return_value = []
+        driver.page_source = "<hierarchy/>"          # the unready tree
+        provider = MemorySecretProvider(**{APP_USERNAME: "u",
+                                           APP_PASSWORD: "p"})
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider",
+                   return_value=provider), \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            with pytest.raises(RuntimeError):
+                macros.MACROS["hhax_uma_login"].run(driver, lambda _k: None)
