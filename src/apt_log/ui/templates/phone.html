@@ -28,40 +28,8 @@
 <link rel="manifest" href="/static/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/static/icons/icon-180.png">
 <title>{{ t('app.title') }}</title>
+<link rel="stylesheet" href="/static/design.css?v={{ boot }}">
 <style>
-  :root {
-    --bg: hsl(220 23% 96%);
-    --card: hsl(0 0% 100%);
-    --ink: hsl(222 47% 11%);
-    --muted: hsl(215 16% 47%);
-    --line: hsl(214 32% 91%);
-    --tint: hsl(243 75% 59%);
-    --tint-soft: hsl(243 75% 59% / .1);
-    --ok: hsl(142 71% 40%);
-    --bad: hsl(0 72% 51%);
-    --track: hsl(240 6% 47% / .12);
-    --chrome: hsl(220 23% 96% / .85);
-    --shadow-card: 0 1px 2px 0 rgb(0 0 0 / .04), 0 8px 24px -12px rgb(0 0 0 / .12);
-    --shadow-pill: 0 8px 30px -8px rgb(0 0 0 / .35);
-    --spring: cubic-bezier(.22, 1, .36, 1);
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: hsl(222 47% 4.5%);
-      --card: hsl(222 40% 11%);
-      --ink: hsl(210 40% 98%);
-      --muted: hsl(215 20% 65%);
-      --line: hsl(217 33% 19%);
-      --tint: hsl(243 75% 66%);
-      --tint-soft: hsl(243 75% 66% / .14);
-      --ok: hsl(142 69% 55%);
-      --bad: hsl(0 72% 62%);
-      --track: hsl(240 6% 60% / .18);
-      --chrome: hsl(222 47% 4.5% / .85);
-      --shadow-card: 0 1px 2px 0 rgb(0 0 0 / .3), 0 8px 24px -12px rgb(0 0 0 / .5);
-    }
-  }
-
   * { box-sizing:border-box; border-color:var(--line);
       -webkit-tap-highlight-color:transparent; }
   html, body { height:100dvh; }
@@ -214,12 +182,8 @@
   /* ----------------------------------------------- the reflowed app screen */
   .wire { padding:2px 0 calc(env(safe-area-inset-bottom) + 104px); }
   .a-nav { display:flex; align-items:center; min-height:44px; gap:4px;
-           padding:2px 8px; margin-bottom:2px; }
-  .a-back { border:none; background:none; color:var(--tint); cursor:pointer;
-            display:flex; align-items:center; font-size:17px; padding:8px 6px; }
-  .a-back svg { width:12px; height:20px; }
-  .a-back:active { opacity:.4; }
-  .a-title { flex:1; text-align:center; font-weight:600; font-size:16px;
+           padding:2px 8px 2px 14px; margin-bottom:2px; }
+  .a-title { flex:1; text-align:left; font-weight:600; font-size:16px;
              overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .a-trail { display:flex; gap:2px; }
   .a-navbtn { border:none; background:none; color:var(--tint); font-size:16px;
@@ -352,9 +316,13 @@
   @keyframes shimmer { from { background-position:180% 0; }
                        to { background-position:-40% 0; } }
 
-  #peek { position:absolute; inset:0; width:100%; height:100%; display:none;
-          z-index:4; background:#000; object-fit:contain; }
-  body.peeking #peek { display:block; }
+  /* The photo, inspectable: full width at its natural height, scrolling
+     vertically — the whole capture is reachable, not a shrunken fit. */
+  #peekwrap { position:absolute; inset:0; display:none; z-index:4;
+              background:#000; overflow-y:auto;
+              -webkit-overflow-scrolling:touch; }
+  body.peeking #peekwrap { display:block; }
+  #peek { width:100%; height:auto; display:block; }
   #peek-cap { position:absolute; left:50%; transform:translateX(-50%);
               bottom:14px; z-index:5; display:none; background:rgb(0 0 0/.65);
               color:#fff; font-size:12.5px; padding:6px 12px;
@@ -561,7 +529,7 @@
       <button type="button" class="a-btn" id="offapp-apps"
               style="flex:none">{{ t('papp.apps') }}</button>
     </div>
-    <img id="peek" alt="">
+    <div id="peekwrap"><img id="peek" alt=""></div>
     <div id="peek-cap" hidden></div>
     <div id="busy"><div class="spinner"></div><p id="busy-text"></p></div>
   </div>
@@ -579,12 +547,11 @@
       <button id="btn-home">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/></svg>
         <span>{{ t('phone.home') }}</span></button>
-      <button data-act="recents" aria-label="{{ t('phone.recents') }}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="5" width="14" height="14" rx="3"/></svg>
-        <span>{{ t('papp.nav.recents') }}</span></button>
-      <button data-act="wake" aria-label="{{ t('phone.wake') }}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v4M5.6 5.6l2.8 2.8M18.4 5.6l-2.8 2.8M12 11a5 5 0 0 1 5 5H7a5 5 0 0 1 5-5z"/></svg>
-        <span>{{ t('papp.nav.wake') }}</span></button>
+      {# No Recents, no Wake: for someone who is not technical, fewer
+         controls IS the feature. The picker is the app switcher, waking is
+         automatic (macros wake the display; the asleep card offers its own
+         Wake button exactly when it applies), and two big targets are
+         harder to mispress than four small ones. #}
     </div>
   </nav>
 </div>

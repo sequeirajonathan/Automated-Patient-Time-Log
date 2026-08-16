@@ -10,13 +10,16 @@
    Rendered server-side and pushed over the socket, like every sentence. #}
 <div class="wire" data-frame="{{ m.id }}">
   {% if m.nav %}
+  {# The top band's first button is NOT rendered as a back arrow — it is
+     whatever the app put top-left, and on HHAeXchange+ that was the help
+     button: drawn with a chevron, it read as "back" and took the owner to a
+     documentation site. Navigation is the pill's Back, always. The app's
+     own top-band buttons ride as plain trailing controls, labelled by
+     their text or nothing they can masquerade as. #}
   <div class="a-nav">
-    <button type="button" class="a-back" data-aim='{{ m.nav.back.aim | tojson }}'
-      ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M14.5 5 L8 12 L14.5 19"/></svg
-      >{{ m.nav.back.txt }}</button>
     <span class="a-title">{{ m.nav.title }}</span>
     <span class="a-trail">
-      {% for b in m.nav.trailing %}
+      {% for b in [m.nav.back] + m.nav.trailing %}
       <button type="button" class="a-navbtn" data-aim='{{ b.aim | tojson }}'
         >{{ b.txt or '···' }}</button>
       {% endfor %}

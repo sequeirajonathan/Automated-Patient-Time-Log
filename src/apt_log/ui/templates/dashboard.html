@@ -22,15 +22,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{{ t('app.title') }}</title>
+{# One token vocabulary for both pages — design.css is the single source of
+   truth the phone view runs on; this page's --accent aliases to the same
+   tint, so the two stop looking like different products. #}
+<link rel="stylesheet" href="/static/design.css?v={{ boot }}">
 <style>
-  :root {
-    --bg:#f6f7f9; --card:#fff; --ink:#16202c; --muted:#5b6875; --line:#dfe4ea;
-    --ok:#137a3f; --bad:#b3261e; --unknown:#8a6d1f; --accent:#1b3f8b;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#11151a; --card:#182029; --ink:#e8edf2; --muted:#9aa7b4;
-            --line:#2a3543; --ok:#4ac07a; --bad:#ff6b60; --unknown:#e3b341; }
-  }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--ink);
          font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
@@ -89,9 +85,9 @@
   .overlay { position:absolute; inset:0; pointer-events:none; }
   /* Boxes are buttons so a keyboard and a screen reader can reach them too. */
   .hit { position:absolute; pointer-events:auto; padding:0; margin:0;
-         background:transparent; border:1px solid rgba(27,63,139,.45);
-         border-radius:3px; cursor:pointer; }
-  .hit:hover, .hit:focus { background:rgba(27,63,139,.18);
+         background:transparent; border-radius:3px; cursor:pointer;
+         border:1px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+  .hit:hover, .hit:focus { background:var(--tint-soft);
                            border-color:var(--accent); outline:none; }
   .hit.focused { border-color:var(--ok); border-width:2px; }
   .hit.selected { background:rgba(19,122,63,.16); }
