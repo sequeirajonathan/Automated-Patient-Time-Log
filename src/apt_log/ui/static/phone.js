@@ -147,6 +147,7 @@
       if (!pendingApp) unbusy();
     }
     if (!meta) return;
+    const wasScreen = currentScreen;
     currentPackage = meta.app || '';
     currentScreen = meta.name || '';
 
@@ -163,8 +164,15 @@
     }
 
     // The phone is on its own home screen: a card saying so, never a reflow
-    // of the icon grid — and never under a care app's title.
+    // of the icon grid — and never under a care app's title. Arriving there
+    // from an app (one Back too many, or the Home button) means she left
+    // the app, and leaving an app here means the picker: flip to it once,
+    // on the transition, so she is never stranded staring at a dead end.
     const onLauncher = meta.name === 'launcher';
+    if (onLauncher && wasScreen && wasScreen !== 'launcher'
+        && !pendingApp && body.dataset.view === 'screen') {
+      view('launcher');
+    }
     body.classList.toggle('offapp', onLauncher);
 
     // The large title names what is actually in front: the screen's own
@@ -576,16 +584,12 @@
     for (const btn of document.querySelectorAll('[data-act]')) {
       btn.addEventListener('click', () => {
         if (!socket || socket.readyState !== 1) return;
-        // Back at a care app's root screen is the overshoot press: the only
-        // place left to go is the Android launcher, which she reached by
-        // "clicking back too many times". Absorb it — the phone stays
-        // parked inside the app, sessions stay warm, and the front end
-        // hands her the picker, which is what leaving an app means here.
-        if (btn.dataset.act === 'back' && currentScreen === 'home'
-            && appNames[currentPackage]) {
-          view('launcher');
-          return;
-        }
+        // Back is always the phone's own Back — it closes slide-overs and
+        // backs out of pages, and guessing which press is the last one
+        // proved impossible (HHAeXchange+ keeps its whole app under one
+        // activity, so an activity-level guard swallowed every press).
+        // The overshoot is handled at the destination instead: landing on
+        // the launcher flips the front end to the picker. See applyScreen.
         socket.send(JSON.stringify({ type: 'device', action: btn.dataset.act }));
         // The command went: the icon pops, and for the three that change the
         // screen, the sketch shows in-flight the same way a tap does — the

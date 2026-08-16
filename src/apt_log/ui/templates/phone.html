@@ -231,8 +231,12 @@
              text-align:center; font-size:15.5px; }
 
   .a-list { padding:8px 16px 0; }
+  /* Wrap, never crush: a band with more text than width used to shrink each
+     label to a one-character column (the docs page's breadcrumb, rendered as
+     vertical strips of letters). Items keep a readable width and wrap. */
   .a-row { display:flex; align-items:center; gap:10px; background:var(--card);
-           padding:11px 14px; min-height:46px; position:relative; }
+           padding:11px 14px; min-height:46px; position:relative;
+           flex-wrap:wrap; }
   .a-row:first-child { border-radius:16px 16px 0 0; }
   .a-row + .a-row { border-top:.5px solid var(--line); }
   .a-row:last-child { border-radius:0 0 16px 16px; margin-bottom:14px;
@@ -252,8 +256,8 @@
   @keyframes fade-up { from { opacity:0; transform:translateY(8px); }
                        to { opacity:1; transform:translateY(0); } }
 
-  .a-label { color:var(--ink); font-size:16.5px; min-width:0;
-             overflow-wrap:anywhere; }
+  .a-label { color:var(--ink); font-size:16.5px;
+             min-width:min(10ch, 100%); overflow-wrap:anywhere; }
   .a-row.n1 > .a-label:only-child { color:var(--muted); font-size:13px;
              font-weight:600; text-transform:uppercase;
              letter-spacing:.05em; }
