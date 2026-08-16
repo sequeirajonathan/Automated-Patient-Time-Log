@@ -376,6 +376,14 @@ def _screen_is_stale(doc: dict | None) -> bool:
     # rather than ancient, or every deploy would open on amber.
     if h_at and _time.time() - h_at > HIERARCHY_STALE_AFTER:
         return True
+    # The sketch belongs to a different app than the one in front: an app
+    # switch is in progress and the elements on the page are the *old*
+    # screen's. Amber, dimmed, untappable — never the launcher's rows under
+    # the new app's name with a green Live beside them.
+    app = (doc or {}).get("app") or ""
+    h_app = (doc or {}).get("h_app") or ""
+    if app and h_app and app != h_app:
+        return True
     return False
 
 
@@ -509,6 +517,10 @@ async def live(ws: WebSocket):
                     "id": screen_doc.get("id", ""),
                     "name": screen_doc.get("screen", "unknown"),
                     "app": screen_doc.get("app", ""),
+                    # Whose screen the rendered sketch is — the launch
+                    # overlay must hold until the *content* is the asked-for
+                    # app's, not merely the focus.
+                    "h_app": screen_doc.get("h_app", ""),
                     "blocked": screen_doc.get("blocked", ""),
                     "notice": screen_doc.get("notice", ""),
                 }

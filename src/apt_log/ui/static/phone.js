@@ -133,8 +133,12 @@
     currentPackage = meta.app || '';
 
     // The moment a launch is truly over: the app she asked for is the app in
-    // front, awake, with a screen to show. Until then the overlay holds.
+    // front, awake, with *its own screen* rendered — h_app is whose sketch
+    // the page is showing, and until it catches up the content on screen is
+    // the previous app's. Dropping the overlay on focus alone showed the
+    // launcher's rows under the new app's title, "finished loading".
     if (pendingApp && currentPackage === pendingApp
+        && (!meta.h_app || meta.h_app === pendingApp)
         && meta.blocked !== 'no_focus') {
       pendingApp = '';
       unbusy();

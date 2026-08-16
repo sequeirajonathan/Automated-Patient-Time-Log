@@ -42,13 +42,13 @@ class TestLoginDetection:
 class TestCaptureRefusals:
     def test_refuses_when_the_focus_cannot_be_read(self):
         """Knowing nothing is not permission."""
-        with patch.object(feed, "current_focus", return_value=""):
+        with patch.object(feed, "window_state", return_value=("", True)):
             png, _, reason = feed.capture()
         assert png is None
         assert reason == feed.NO_FOCUS
 
     def test_refuses_on_a_login_screen(self):
-        with patch.object(feed, "current_focus", return_value=SIGNIN):
+        with patch.object(feed, "window_state", return_value=(SIGNIN, True)):
             png, _, reason = feed.capture()
         assert png is None
         assert reason == feed.LOGIN_ACTIVITY
@@ -56,7 +56,7 @@ class TestCaptureRefusals:
     def test_refuses_when_a_password_field_is_anywhere_on_screen(self):
         """Anywhere, not merely focused. This runs on a timer with no idea what
         is about to happen, and the picture ends up on a web page."""
-        with patch.object(feed, "current_focus", return_value=HOME):
+        with patch.object(feed, "window_state", return_value=(HOME, True)):
             png, _, reason = feed.capture(
                 hierarchy='<node password="true" bounds="[0,0][1,1]"/>')
         assert png is None
@@ -65,7 +65,7 @@ class TestCaptureRefusals:
     def test_captures_when_the_hierarchy_is_unreadable_but_activity_is_safe(self):
         """The documented weak point: UiAutomator2 holds the dump service during
         an Appium session, which is exactly when watching matters most."""
-        with patch.object(feed, "current_focus", return_value=HOME), \
+        with patch.object(feed, "window_state", return_value=(HOME, True)), \
              patch.object(feed, "_adb") as adb:
             adb.return_value.returncode = 0
             adb.return_value.stdout = PNG
@@ -73,7 +73,7 @@ class TestCaptureRefusals:
         assert png == PNG and reason == feed.CAPTURED
 
     def test_a_refused_capture_is_reported_not_silent(self):
-        with patch.object(feed, "current_focus", return_value=HOME), \
+        with patch.object(feed, "window_state", return_value=(HOME, True)), \
              patch.object(feed, "_adb") as adb:
             adb.return_value.returncode = 0
             adb.return_value.stdout = b""
@@ -164,7 +164,8 @@ class TestRun:
     def test_one_bad_frame_does_not_stop_the_watcher(self, tmp_path):
         calls = []
 
-        def flaky(_path, _serial=None, _hierarchy=None, _h_at=0.0):
+        def flaky(_path, _serial=None, _hierarchy=None, _h_at=0.0,
+                  _h_focus=""):
             calls.append(1)
             if len(calls) == 1:
                 raise RuntimeError("adb hiccup")
@@ -209,7 +210,7 @@ class TestRun:
         h = feed._Hierarchy(None, every=0.01)
         with patch.object(feed, "read_hierarchy",
                           side_effect=[good] + [None] * 50), \
-             patch.object(feed, "current_focus", return_value="com.x/.Home"):
+             patch.object(feed, "window_state", return_value=("com.x/.Home", True)):
             h.start()
             deadline = time.monotonic() + 5
             while h.xml is None and time.monotonic() < deadline:
@@ -377,7 +378,7 @@ class TestBlindScreens:
 
     def test_the_frame_carries_the_reason_and_the_words(self, tmp_path):
         shot = tmp_path / "screen.png"
-        with patch.object(feed, "current_focus", return_value=SIGNIN), \
+        with patch.object(feed, "window_state", return_value=(SIGNIN, True)), \
              patch.object(feed, "screen_size", return_value=[720, 1600]), \
              patch.object(feed.mirror_mod, "publish"):
             feed.write_frame(shot, hierarchy=self.ALERT)
@@ -933,3 +934,57 @@ class TestSleepKeepsTheLastScreen:
         watcher._xml, watcher._focus = good, "com.x/.HomeActivity"
         assert watcher._accept(junk, "") is False
         assert watcher._accept(junk, "com.other/.RealScreen") is True
+
+
+class TestSleepIsNotLive:
+    """A sleeping phone keeps its focused window, so focus alone misses most
+    sleeps — seen on the owner's phone as a green Live over a photograph of
+    a black screen. The display's own state travels with the focus."""
+
+    def test_window_state_reads_the_display_state(self):
+        out = f"  mCurrentFocus=Window{{abc u0 {HOME}}}\n  mAwake=false\n"
+        with patch.object(feed, "_adb") as adb:
+            adb.return_value.stdout = out.encode()
+            focus, awake = feed.window_state()
+        assert focus == HOME and awake is False
+
+    def test_capture_refuses_while_the_display_is_off(self):
+        """The focused app of a black screen is not what anyone is seeing."""
+        with patch.object(feed, "window_state", return_value=(HOME, False)):
+            png, focus, reason = feed.capture()
+        assert png is None and reason == feed.NO_FOCUS
+
+    def test_the_kept_sketch_survives_a_sleeping_read(self):
+        """The junk a sleeping device returns must not wipe the memory the
+        page shows as 'last on screen before it turned off'."""
+        w = feed._Hierarchy(None, 1.0)
+        good = '<node clickable="true" bounds="[0,0][10,10]"/>'
+        assert w._accept(good, HOME, awake=False) is False
+
+
+class TestSketchOwnership:
+    """screen.json carries two apps on purpose: `app` is the focus of this
+    moment, `h_app` is whose screen the elements were read under. During an
+    app switch they disagree, and the page must say syncing rather than
+    dress the old app's rows in the new app's name."""
+
+    def _frame(self):
+        import datetime as dt
+        return {"id": "f1", "img": "", "at": dt.datetime.now().isoformat(),
+                "size": [720, 1600], "notice": ""}
+
+    def test_the_doc_says_whose_sketch_it_carries(self, tmp_path):
+        target = tmp_path / "screen.json"
+        feed.write_screen(
+            target, self._frame(), "home", "", None, focus=HOME,
+            hierarchy_focus="com.android.launcher3/.QuickstepLauncher")
+        doc = json.loads(target.read_text())
+        assert doc["app"] == "com.hhaexchange.caregiver"
+        assert doc["h_app"] == "com.android.launcher3"
+
+    def test_agreement_is_the_ordinary_case(self, tmp_path):
+        target = tmp_path / "screen.json"
+        feed.write_screen(target, self._frame(), "home", "", None,
+                          focus=HOME, hierarchy_focus=HOME)
+        doc = json.loads(target.read_text())
+        assert doc["app"] == doc["h_app"]

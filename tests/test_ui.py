@@ -834,3 +834,35 @@ class TestPhoneBoundaries:
             assert "env(safe-area-inset-top)" in body, path
             assert "env(safe-area-inset-bottom)" in body, path
             assert "viewport-fit=cover" in body, path
+
+
+class TestSketchMismatchIsStale:
+    """`app` is the focus of this moment; `h_app` is whose screen the
+    rendered elements were read under. When they disagree an app switch is
+    in progress and the sketch on the page is the old app's — amber and
+    dimmed, never a green Live with the launcher's rows dressed in the new
+    app's name."""
+
+    def _doc(self, **over):
+        import time as _t
+        from datetime import datetime as _dt
+        doc = {"at": _dt.now().isoformat(), "h_at": _t.time(),
+               "app": "com.hhaexchange.caregiver",
+               "h_app": "com.hhaexchange.caregiver"}
+        doc.update(over)
+        return doc
+
+    def test_a_sketch_of_another_app_is_never_live(self):
+        from apt_log.ui.app import _screen_is_stale
+        assert _screen_is_stale(
+            self._doc(h_app="com.android.launcher3")) is True
+
+    def test_agreement_is_live(self):
+        from apt_log.ui.app import _screen_is_stale
+        assert _screen_is_stale(self._doc()) is False
+
+    def test_a_doc_from_before_the_field_is_not_condemned(self):
+        """Old documents carry no h_app; unknown is not a mismatch, or the
+        first minute after every deploy would open on amber."""
+        from apt_log.ui.app import _screen_is_stale
+        assert _screen_is_stale(self._doc(h_app="")) is False

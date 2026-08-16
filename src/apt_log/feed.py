@@ -106,6 +106,10 @@ LOGIN_ACTIVITY_MARKERS = (
 )
 
 _FOCUS = re.compile(r"mCurrentFocus=Window\{[^}]*\s+(\S+)\}")
+# The display's own state, from the same dump. Android keeps mCurrentFocus
+# while the screen is off, so "no focus" catches only some sleeps — observed
+# on the owner's phone as a green Live over a photograph of a black screen.
+_AWAKE = re.compile(r"mAwake=(true|false)")
 _PASSWORD_NODE = re.compile(r'password="true"')
 
 # Why no picture was published, as a code rather than a sentence. The prose is
@@ -190,16 +194,29 @@ def _adb(args: list[str], serial: str | None = None, timeout: float = 15.0):
     return subprocess.run(cmd, capture_output=True, timeout=timeout)
 
 
-def current_focus(serial: str | None = None) -> str:
-    """The focused window's `package/activity`, or empty if it cannot be read."""
+def window_state(serial: str | None = None) -> tuple[str, bool]:
+    """(focused window `package/activity`, display awake) — one dumpsys read.
+
+    Both from the same dump because they answer the same question — "what is
+    on the screen right now?" — and the second half is not optional: a
+    sleeping phone keeps its focused window, so focus alone reports an app on
+    a screen that is showing nobody anything.
+    """
     try:
         out = _adb(["shell", "dumpsys", "window"], serial).stdout.decode(
             "utf-8", "replace")
     except (OSError, subprocess.SubprocessError) as exc:
         log.warning("cannot read the focused window (%s)", exc)
-        return ""
+        return "", True
     m = _FOCUS.search(out)
-    return m.group(1) if m else ""
+    awake = _AWAKE.search(out)
+    return (m.group(1) if m else "",
+            awake.group(1) == "true" if awake else True)
+
+
+def current_focus(serial: str | None = None) -> str:
+    """The focused window's `package/activity`, or empty if it cannot be read."""
+    return window_state(serial)[0]
 
 
 def looks_like_a_login_screen(focus: str) -> bool:
@@ -264,8 +281,11 @@ def capture(serial: str | None = None,
     password check and the overlay, which halves the adb work and removes a
     race two callers of the old version had against each other.
     """
-    focus = current_focus(serial)
-    if not focus:
+    focus, awake = window_state(serial)
+    if not focus or not awake:
+        # A dark display and a missing focus are the same fact for the page:
+        # the phone is not showing anyone anything. Publishing the focused
+        # app of a black screen is how "Live" ended up over darkness.
         return None, "", NO_FOCUS
 
     if looks_like_a_login_screen(focus):
@@ -346,7 +366,7 @@ SCREEN_NAME = "screen.json"
 
 def write_screen(target: Path, frame: dict, screen: str, reason: str,
                  hierarchy: str | None, focus: str = "",
-                 hierarchy_at: float = 0.0) -> None:
+                 hierarchy_at: float = 0.0, hierarchy_focus: str = "") -> None:
     """Publish the render feed for the wireframe view.
 
     Two files on purpose, with two policies. `frame.json` is the one that can
@@ -380,6 +400,13 @@ def write_screen(target: Path, frame: dict, screen: str, reason: str,
         # the device. The document is written every second regardless; this is
         # the number that stops a kept sketch passing as a current one.
         "h_at": hierarchy_at,
+        # Whose screen the sketch actually is. `app` above is the focus of
+        # this moment; the elements below were read earlier, possibly under a
+        # different app. During every app switch the two disagree, and the
+        # page must say "syncing", not dress the old app's rows in the new
+        # app's name — seen live as the launcher's search row rendered under
+        # a title saying HHAeXchange, "finished loading".
+        "h_app": (hierarchy_focus or "").split("/")[0],
         "blocked": reason,
         "notice": frame.get("notice", ""),
         "elements": elements(hierarchy, label=True) if hierarchy else [],
@@ -410,7 +437,8 @@ TAP_FRAME_MAX_AGE = 15.0
 
 def write_frame(path: Path, serial: str | None = None,
                 hierarchy: str | None = None,
-                hierarchy_at: float = 0.0) -> str:
+                hierarchy_at: float = 0.0,
+                hierarchy_focus: str = "") -> str:
     """Capture once and publish the mirror frame. Returns a one-line status.
 
     The hierarchy is handed in rather than fetched, so the caller decides how
@@ -448,7 +476,7 @@ def write_frame(path: Path, serial: str | None = None,
         log.warning("cannot publish the frame map (%s)", exc)
 
     write_screen(path.parent / SCREEN_NAME, frame, screen, reason, hierarchy,
-                 focus, hierarchy_at)
+                 focus, hierarchy_at, hierarchy_focus)
 
     if png:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -512,7 +540,19 @@ class _Hierarchy:
         with self._lock:
             return self._read_at
 
-    def _accept(self, fresh: str, focus: str) -> bool:
+    @property
+    def focus(self) -> str:
+        """The focused window that came with the kept hierarchy.
+
+        Not the focus of this moment — the focus of the sketch. The two
+        diverge during every app switch, and publishing the sketch under the
+        new app's name was how the launcher's rows appeared under a title
+        saying HHAeXchange the instant the loading overlay dropped.
+        """
+        with self._lock:
+            return self._focus
+
+    def _accept(self, fresh: str, focus: str, awake: bool = True) -> bool:
         """Whether a fresh read should replace what we are showing.
 
         Guarding against None was not enough. A read can succeed and come back
@@ -524,13 +564,14 @@ class _Hierarchy:
         Otherwise the previous boxes stay: they are stale, and if they are wrong
         she can see they are wrong, which is more than an empty overlay offers.
         """
-        if not focus:
+        if not focus or not awake:
             # The display turned off. There is no screen now, so nothing can
             # replace the last one — which is exactly what the page shows as
             # "the last thing on screen before it went dark". The junk read a
             # sleeping device returns (one stray node) used to be accepted
             # here because the focus "changed", wiping the memory the owner
-            # asked to keep.
+            # asked to keep. `awake` matters separately: a sleeping phone
+            # keeps its focused window, so focus alone misses most sleeps.
             return False
         if elements(fresh):
             return True
@@ -543,10 +584,10 @@ class _Hierarchy:
             try:
                 fresh = read_hierarchy(self._serial)
                 if fresh is not None:
-                    focus = current_focus(self._serial)
+                    focus, awake = window_state(self._serial)
                     with self._lock:
                         self._read_at = time.time()
-                        if self._accept(fresh, focus):
+                        if self._accept(fresh, focus, awake):
                             self._xml = fresh
                             self._focus = focus
             except Exception as exc:  # noqa: BLE001
@@ -610,7 +651,7 @@ def run(path: Path, interval: float = DEFAULT_INTERVAL,
         while iterations is None or count < iterations:
             try:
                 log.info("%s", write_frame(path, serial, watcher.xml,
-                                            watcher.read_at))
+                                            watcher.read_at, watcher.focus))
             except Exception as exc:  # noqa: BLE001
                 # A watcher that dies on one bad read stops being a watcher.
                 log.warning("frame failed: %s", exc)
