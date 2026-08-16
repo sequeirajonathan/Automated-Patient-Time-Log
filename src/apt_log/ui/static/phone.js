@@ -598,7 +598,14 @@
     const peek = document.getElementById('btn-peek');
     if (peek) peek.addEventListener('click', () => {
       body.classList.toggle('peeking');
-      if (body.classList.contains('peeking')) refreshPeek();
+      if (body.classList.contains('peeking')) {
+        // The overlay anchors to the top of the stage's content: a list
+        // scrolled before opening the photo left the overlay half
+        // off-screen, reflow bleeding through beneath it.
+        const stage = document.getElementById('stage');
+        if (stage) stage.scrollTop = 0;
+        refreshPeek();
+      }
     });
 
     const sign = document.getElementById('btn-sign');

@@ -339,11 +339,15 @@
                        to { background-position:-40% 0; } }
 
   /* The photo, inspectable: full width at its natural height, scrolling
-     vertically — the whole capture is reachable, not a shrunken fit. */
+     vertically — the whole capture is reachable, not a shrunken fit.
+     The stage's own scroll locks while the photo is open: the overlay is
+     anchored to the top of the stage's content, so a pre-scrolled list
+     left it half off-screen with the reflow bleeding through under it. */
   #peekwrap { position:absolute; inset:0; display:none; z-index:4;
               background:#000; overflow-y:auto;
               -webkit-overflow-scrolling:touch; }
   body.peeking #peekwrap { display:block; }
+  body.peeking #stage { overflow:hidden; }
   #peek { width:100%; height:auto; display:block; }
   #peek-cap { position:absolute; left:50%; transform:translateX(-50%);
               bottom:14px; z-index:5; display:none; background:rgb(0 0 0/.65);
