@@ -290,3 +290,40 @@ class TestCurtains:
         ))
         all_items = [i for r in m["rows"] for i in r["items"]]
         assert any(i.get("lines") for i in all_items)
+
+
+class TestStateMarks:
+    """The visits list marks each verified EVV record with a drawn check,
+    shipped as an icon font's private glyph. Dropping it with the chevrons
+    erased the one thing the row exists to say — reported live: 'the front
+    end is not capturing the check mark icons'."""
+
+    def test_checks_inside_a_row_become_a_marks_line(self):
+        m = screenview.build(doc(
+            elements=[el("", "RelativeLayout", [0, 500, 720, 900])],
+            statics=[st([20, 520, 400, 580], "PACIENTE FICTICIA"),
+                     st([420, 530, 700, 580], "08/10/2026"),
+                     st([560, 820, 620, 870], ""),
+                     st([640, 820, 700, 870], "")],
+        ))
+        cell = m["rows"][0]["items"][0]
+        assert "✓ ✓" in cell["lines"]
+
+    def test_a_loose_check_still_shows(self):
+        m = screenview.build(doc(
+            elements=[],
+            statics=[st([20, 520, 400, 580], "Registro de entrada"),
+                     st([560, 520, 620, 580], "")],
+        ))
+        all_items = [i for r in m["rows"] for i in r["items"]]
+        assert any(i.get("txt") == "✓" for i in all_items)
+
+    def test_decoration_glyphs_are_still_dropped(self):
+        """Chevrons, hamburgers, user icons: still decoration, still gone."""
+        m = screenview.build(doc(
+            elements=[el("", "RelativeLayout", [0, 500, 720, 700])],
+            statics=[st([20, 520, 400, 580], "Detalles"),
+                     st([650, 530, 700, 580], "")],   # chevron
+        ))
+        cell = m["rows"][0]["items"][0]
+        assert cell["lines"] == ["Detalles"]

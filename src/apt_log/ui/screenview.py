@@ -61,6 +61,20 @@ def _is_icon_text(txt: str) -> bool:
         0xE000 <= ord(c) <= 0xF8FF or c.isspace() for c in txt)
 
 
+# Icon glyphs that are STATE, not decoration. The visits list marks each
+# EVV check-in and check-out with a drawn check, shipped as an icon font's
+# private character — dropping it with the chevrons and hamburgers erased
+# the one thing the row exists to say. Known state glyphs translate to real
+# symbols; everything else in the private use area stays decoration.
+ICON_MARKS = {
+    "\uf00c": "\u2713",   # check
+    "\uf058": "\u2713",   # circled check
+    "\uf00d": "\u2715",   # cross
+    "\uf057": "\u2715",   # circled cross
+    "\uf071": "\u26a0",   # warning triangle
+}
+
+
 def _fold_label(cell_b: list[int], s: dict) -> tuple[str, str]:
     """How a label folded into a cell should be carried: as a line, a badge,
     or not at all.
@@ -71,6 +85,8 @@ def _fold_label(cell_b: list[int], s: dict) -> tuple[str, str]:
     riding in a bubble. Words are lines wherever they sit.
     """
     txt = s.get("txt", "")
+    if txt.strip() in ICON_MARKS:
+        return "mark", ICON_MARKS[txt.strip()]
     if _is_icon_text(txt):
         return "drop", ""
     if len(txt) <= 3 and txt.strip().isdigit():
@@ -180,18 +196,30 @@ def build(doc: dict) -> dict | None:
         if kind == "row":
             own = sorted(labels.get(id(e), []),
                          key=lambda s: (s["b"][1], s["b"][0]))
-            lines, badge = [], ""
+            lines, badge, marks = [], "", []
             for s in own:
                 how, value = _fold_label(e["b"], s)
                 if how == "line" and value:
                     lines.append(value)
                 elif how == "badge":
                     badge = value
+                elif how == "mark":
+                    marks.append(value)
+            if marks:
+                # The row's state marks, gathered onto one line: the visits
+                # list draws a check per verified EVV record, and "✓ ✓"
+                # under the times is the row's whole point.
+                lines.append(" ".join(marks))
             item["lines"] = lines
             item["badge"] = badge
         items.append(item)
     for i, s in enumerate(statics):
-        if i not in folded and s.get("txt") and not _is_icon_text(s["txt"]):
+        if i in folded or not s.get("txt"):
+            continue
+        mark = ICON_MARKS.get(s["txt"].strip())
+        if mark:
+            items.append(_item({**s, "txt": mark}, "label"))
+        elif not _is_icon_text(s["txt"]):
             items.append(_item(s, "label"))
 
     # A curtain — an anonymous, label-less container spanning most of the
