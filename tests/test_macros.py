@@ -713,3 +713,38 @@ class TestMobileCaregiverPin:
             macros.MACROS["mobile_caregiver_pin"].run(driver, lambda _k: None)
         provider_cls.assert_not_called()
         driver.find_elements.assert_not_called()
+
+
+class TestUmaWebFormIsTheAsk:
+    """Reported live: the tile 'didn't even try'. The macro had run, seen an
+    activity that was not the app's 'auth' one, and reported done — while
+    the phone sat on the sign-in form, which lives in a Chrome Custom Tab
+    under Chrome's own activity name. The form in front IS the ask."""
+
+    def test_a_form_already_in_chrome_is_filled_not_skipped(self):
+        import itertools
+
+        from apt_log.secrets import (APP_PASSWORD, APP_USERNAME,
+                                     MemorySecretProvider)
+
+        driver = MagicMock()
+        driver.current_activity = "org.chromium.chrome.CustomTabActivity"
+        driver.current_package = "com.android.chrome"
+        provider = MemorySecretProvider(**{APP_USERNAME: "u",
+                                           APP_PASSWORD: "p"})
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider",
+                   return_value=provider), \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            try:
+                macros.MACROS["hhax_uma_login"].run(driver, lambda _k: None)
+            except RuntimeError:
+                pass    # the mock form is shallow past the fields
+
+        calls = [c.args for c in driver.find_elements.call_args_list]
+        # It went for the form's fields directly — and never hunted for the
+        # app's sign-in button inside Chrome, which is not there to find.
+        assert ("id", "email") in calls
+        assert ("id", "idp_login_button") not in calls

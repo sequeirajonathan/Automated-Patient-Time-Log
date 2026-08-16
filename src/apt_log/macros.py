@@ -226,7 +226,8 @@ def _hhax_uma_login(driver, report) -> None:
     button opens a Chrome Custom Tab with an email/password form (web ids
     `email` and `password`), and finishing returns to the app. Same contract
     as the legacy macro: auth only, nothing else — if the app opens onto
-    anything but its sign-in screen, the session is alive and this is done.
+    anything but its sign-in screen *or that pending Chrome form*, the
+    session is alive and this is done.
     """
     from apt_log.secrets import (APP_PASSWORD, APP_USERNAME, UMA_PASSWORD,
                                  UMA_USERNAME, FileSecretProvider,
@@ -237,11 +238,22 @@ def _hhax_uma_login(driver, report) -> None:
     driver.activate_app("com.hhaexchange.uma")
     wait_for(lambda: bool(driver.current_activity), timeout=15.0)
 
-    # Signed in already? Anything that is not the auth screen means yes.
+    # Three honest starting points, not two. The first run of this macro
+    # treated "not on the auth activity" as "signed in" — and reported done
+    # while the phone sat on the sign-in form, because the form lives in a
+    # Chrome Custom Tab and Chrome's activity is not the app's. The app
+    # reopens onto that pending tab, so the form in front IS the ask.
     def on_auth_screen():
         return "auth" in (driver.current_activity or "").lower()
 
-    if not wait_for(on_auth_screen, timeout=4.0, poll=0.5):
+    def on_web_form():
+        try:
+            return (driver.current_package or "") == "com.android.chrome"
+        except Exception:  # noqa: BLE001
+            return False
+
+    if not wait_for(lambda: on_auth_screen() or on_web_form(),
+                    timeout=4.0, poll=0.5):
         report("macro.step.checking")
         return
 
@@ -259,10 +271,12 @@ def _hhax_uma_login(driver, report) -> None:
         password = secrets.get(APP_PASSWORD)
 
     report("macro.step.signing_in")
-    buttons = driver.find_elements("id", "idp_login_button")
-    if not buttons:
-        raise RuntimeError("the sign-in button is not where discovery saw it")
-    buttons[0].click()
+    if not on_web_form():
+        # The app's own auth screen: its button opens the web form.
+        buttons = driver.find_elements("id", "idp_login_button")
+        if not buttons:
+            raise RuntimeError("the sign-in button is not where discovery saw it")
+        buttons[0].click()
 
     # The web form, in Chrome. The field ids are the page's own.
     def field(web_id):
