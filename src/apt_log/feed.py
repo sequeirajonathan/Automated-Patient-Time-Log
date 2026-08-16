@@ -165,6 +165,7 @@ ACTIVITY_SCREENS = {
         "languageactivity": "language",
         "signinactivity": "login",
         "agencyactivity": "agency",
+        "agencyselectionactivity": "agency",   # the name the device reports
         "homeactivity": "home",
         "todayscheduleactivity": "today",
         "visitdetailactivity": "visit",
