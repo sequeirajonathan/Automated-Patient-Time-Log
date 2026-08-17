@@ -124,7 +124,7 @@
         // mistap costs nothing and the code can be read off another phone
         // at leisure.
         if (/EditText|AutoCompleteTextView|SearchView/.test(aim.cls || '')) {
-          openTypeBar(aim);
+          openTypeBar(aim, (el.textContent || '').trim());
           return;
         }
         // No overlays and no sentences for a tap: the screen dims and
@@ -141,10 +141,16 @@
   // phone and gets typed here. Letters and digits, capped short; the
   // server enforces the same and refuses if the field moved.
   let typeAim = null;
-  function openTypeBar(aim) {
+  function openTypeBar(aim, label) {
     typeAim = aim;
     const bar = document.getElementById('typebar');
     if (!bar) return;
+    // The hint names the FIELD when the field names itself; the generic
+    // sentence otherwise. The first wording said "the code" for every
+    // field, and a search box tapped after sign-in read as the OTP
+    // prompt coming back.
+    const hint = bar.querySelector('.typehint');
+    if (hint) hint.textContent = label || i18n.typeHint || '';
     bar.hidden = false;
     const box = document.getElementById('typebox');
     box.value = '';
@@ -215,6 +221,10 @@
     if (html !== undefined && html === lastScreenHtml) {
       html = undefined;
     }
+    // A screen change retires the type bar: its aim belongs to the page
+    // that had the field, and a bar lingering over the NEXT page read as
+    // "it is asking for the code again" the moment a sign-in succeeded.
+    if (html !== undefined && typeAim) closeTypeBar();
     if (html !== undefined) {
       lastScreenHtml = html;
       const root = wrap();

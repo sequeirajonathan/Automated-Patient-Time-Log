@@ -216,7 +216,7 @@
   "scan.title": "La página completa",
   "scan.close": "Cerrar",
   "scan.empty": "No se encontró nada legible en esta página.",
-  "papp.type.hint": "Escriba el código y envíelo al teléfono",
+  "papp.type.hint": "Escriba aquí y envíelo al teléfono",
   "papp.type.send": "Enviar",
   "papp.type.cancel": "Cancelar"
 }
