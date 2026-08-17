@@ -328,6 +328,25 @@ def build(doc: dict) -> dict | None:
             bands[-1].append(item)
         else:
             bands.append([item])
+
+    # A band that is nothing but section headings is the scroll stitch's
+    # day dividers ("agosto 18", "19", "20") landing a few pixels apart and
+    # magnetizing into one row — where they lose the header treatment and
+    # render as boxed cells. Split them back to one heading per line. A
+    # short label sitting WITH controls (a care-plan row's "127 - Toilet
+    # Use" beside its ✓/✗, a nav title beside its buttons) is not an
+    # all-header band, so it is left whole.
+    def _is_header(it: dict) -> bool:
+        return it["kind"] == "label" and it.get("header")
+
+    split: list[list[dict]] = []
+    for band in bands:
+        if len(band) > 1 and all(_is_header(it) for it in band):
+            for it in sorted(band, key=lambda n: (n["b"][1], n["b"][0])):
+                split.append([it])
+        else:
+            split.append(band)
+    bands = split
     for band in bands:
         band.sort(key=lambda n: n["b"][0])
 

@@ -47,17 +47,30 @@ def _shift(prev: list[dict], cur: list[dict]) -> float | None:
     return median(deltas) if deltas else None
 
 
+# How close two same-identity items must be, on the virtual page, to count
+# as the SAME item seen in two overlapping captures rather than a genuine
+# repeat. Wider than the old 40 px bucket on purpose: the measured scroll
+# offset carries error (swipe momentum), so a label seen at the bottom of
+# one capture and the top of the next lands tens of pixels apart even though
+# it is one label — seen live as a schedule's day dividers ("agosto 18",
+# "19", "20") doubling up and banding into ugly boxed rows. Still far tighter
+# than the spacing between genuine repeats (a caregiver's name recurs a full
+# day of visits apart, hundreds of pixels down), so real repeats survive.
+DEDUP_VY_TOLERANCE = 150
+
+
 def stitch(captures: list[dict], nominal_dy: int) -> dict:
     """Join per-step captures into one page.
 
     Each capture is {"elements": [...], "statics": [...]} in device
     coordinates. Items gain ``vb`` (virtual bounds), ``step`` (which
     capture they were seen in, for the tap replay), and duplicates from
-    capture overlap are dropped — an item at the same virtual place with
-    the same identity was simply seen twice.
+    capture overlap are dropped — the same identity at nearly the same
+    virtual place was simply seen twice across two overlapping captures.
     """
     offset = 0.0
-    seen: set[tuple] = set()
+    # (kind, *identity) -> the virtual tops it has already been placed at.
+    seen: dict[tuple, list[int]] = {}
     out_elements: list[dict] = []
     out_statics: list[dict] = []
 
@@ -85,10 +98,11 @@ def stitch(captures: list[dict], nominal_dy: int) -> dict:
                     continue
                 vy1 = int(item["b"][1] + offset)
                 vy2 = int(item["b"][3] + offset)
-                identity = (kind, *_key(item), round(vy1 / 40))
-                if identity in seen:
-                    continue
-                seen.add(identity)
+                key = (kind, *_key(item))
+                placed = seen.setdefault(key, [])
+                if any(abs(vy1 - v) <= DEDUP_VY_TOLERANCE for v in placed):
+                    continue                 # same item, overlapping capture
+                placed.append(vy1)
                 sink.append({**item,
                              "vb": [item["b"][0], vy1, item["b"][2], vy2],
                              "step": step})

@@ -404,3 +404,35 @@ class TestProseVsHeadings:
                     all_txt.append(i["txt"])
         assert "•" not in all_txt
         assert "Toque Iniciar configuración" in all_txt
+
+
+class TestSectionHeaders:
+    """Day dividers on a scrolled-and-stitched schedule ('agosto 18',
+    '19', '20') landed a few pixels apart and banded into one boxed row,
+    losing the header treatment. Each heading gets its own line — but a
+    short label sitting WITH controls is not a lone heading."""
+
+    def test_headers_that_band_are_split_to_their_own_rows(self):
+        m = screenview.build(doc(
+            elements=[],
+            statics=[st([30, 600, 400, 650], "agosto 18, 2026"),
+                     st([30, 640, 400, 690], "agosto 19, 2026"),
+                     st([30, 680, 400, 730], "agosto 20, 2026")],
+        ))
+        header_rows = [r for r in m["rows"]
+                       if len(r["items"]) == 1 and r["items"][0].get("header")]
+        texts = [r["items"][0]["txt"] for r in header_rows]
+        assert texts == ["agosto 18, 2026", "agosto 19, 2026",
+                         "agosto 20, 2026"]
+
+    def test_a_short_label_with_controls_stays_on_its_row(self):
+        """The care-plan row's label is short (header by length) but belongs
+        beside its ✓/✗ — an all-header split must not tear it away."""
+        m = screenview.build(doc(
+            elements=[el("chk_yes", "RadioButton", [640, 610, 690, 660], "✓"),
+                      el("chk_no", "RadioButton", [692, 610, 720, 660], "✗")],
+            statics=[st([30, 615, 600, 655], "127 - Toilet Use")],
+        ))
+        row = m["rows"][0]["items"]
+        kinds = [i["kind"] for i in row]
+        assert "label" in kinds and "segment" in kinds
