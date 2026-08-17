@@ -68,6 +68,10 @@ AUTO_AUTH_COOLDOWN = 90.0
 AUTO_AUTH_FRESH = 6.0
 SCREEN_PATH = STATE_DIR / "screen.json"
 
+# Where a full-page reading lands: every text line of a scrolled-through
+# page, in reading order, for the portal's reading sheet.
+SCAN_PATH = STATE_DIR / "scan.json"
+
 # Sign in only while someone is actually watching. Unwatched, the app's own
 # inactivity timer signs the session back out and the two loop all night —
 # observed as sign-in / agency picker / "due to inactivity" / sign-out on
@@ -529,6 +533,74 @@ def _mobile_caregiver_pin(driver, report) -> None:
         raise RuntimeError("still on the passcode screen after typing the PIN")
 
 
+def _read_page(driver, report) -> None:
+    """Read a scrolling page end to end, and change nothing.
+
+    The accessibility tree only carries the viewport, so the reflow can
+    never show more than one screenful — the owner's ask: the front end
+    should have everything. This walks the page with mid-screen swipes
+    (they move the page and can press nothing), collecting every line of
+    text in reading order, then returns the page to its top. The result is
+    a READING, not a tappable surface: below-the-fold controls cannot be
+    tapped at coordinates that are no longer on screen, and pretending
+    otherwise would break the one promise the tap machinery makes.
+    """
+    from apt_log import feed as feed_mod
+
+    report("macro.step.reading")
+    size = driver.get_window_size()
+    cx = size["width"] // 2
+    top_y = int(size["height"] * 0.33)
+    bottom_y = int(size["height"] * 0.66)
+
+    def snapshot() -> list[str]:
+        rows = feed_mod.statics(driver.page_source or "")
+        rows.sort(key=lambda s: (s["b"][1], s["b"][0]))
+        return [s["txt"] for s in rows if s.get("txt")]
+
+    # To the top first: a reading starts at the beginning.
+    prev: list[str] = []
+    for _ in range(8):
+        texts = snapshot()
+        if texts == prev:
+            break
+        prev = texts
+        driver.swipe(cx, top_y, cx, bottom_y, 260)
+        time.sleep(0.8)
+
+    lines: list[str] = []
+    prev = []
+    steps_down = 0
+    for _ in range(14):
+        texts = snapshot()
+        # Overlap with the PREVIOUS capture is the scroll's doing and is
+        # dropped; a value repeating further down the page (the same
+        # patient on two visit rows) is content and is kept.
+        carried = set(prev)
+        lines.extend(t for t in texts if t not in carried)
+        if texts == prev:
+            break
+        prev = texts
+        driver.swipe(cx, bottom_y, cx, top_y, 260)
+        steps_down += 1
+        time.sleep(0.8)
+
+    for _ in range(steps_down):        # leave the page as found: at its top
+        driver.swipe(cx, top_y, cx, bottom_y, 260)
+        time.sleep(0.4)
+
+    report("macro.step.checking")
+    doc = {"at": datetime.now().isoformat(),
+           "app": (driver.current_package or ""), "lines": lines}
+    try:
+        SCAN_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = SCAN_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(doc), encoding="utf-8")
+        os.replace(tmp, SCAN_PATH)
+    except OSError as exc:
+        raise RuntimeError("could not save the page reading") from exc
+
+
 def _open_app(package: str):
     """Bring an app to the front and wait for it to settle. Nothing more.
 
@@ -564,6 +636,7 @@ MACROS: dict[str, Macro] = {
               _open_app("com.tellus.evv.v2")),
         Macro("open_inmyteam", "macro.open_inmyteam",
               _open_app("com.inmyteam.inmyteam")),
+        Macro("read_page", "macro.read_page", _read_page),
     )
 }
 

@@ -467,6 +467,9 @@ def write_screen(target: Path, frame: dict, screen: str, reason: str,
         # against the pixels. The page says so instead of letting a partial
         # list pass for the whole screen.
         "webview": bool(hierarchy and "android.webkit.WebView" in hierarchy),
+        # Whether the page scrolls: the offer to read it end to end only
+        # makes sense when there is something below the fold to read.
+        "scrollable": bool(hierarchy and 'scrollable="true"' in hierarchy),
         "elements": elements(hierarchy, label=True) if hierarchy else [],
         "statics": statics(hierarchy) if hierarchy else [],
     }

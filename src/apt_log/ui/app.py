@@ -207,6 +207,28 @@ def phone_app(request: Request):
     )
 
 
+@app.get("/scan", response_class=HTMLResponse)
+def page_reading(request: Request):
+    """The last full-page reading, as a rendered fragment for the sheet.
+
+    Text lines only — the read_page macro walked the page and wrote them.
+    Same exposure class as screen.json: the page's own words, served over
+    the tailnet to the same viewer.
+    """
+    t = _translator(request)
+    doc = _read_json(state_mod.STATE_DIR / "scan.json", None) or {}
+    lines = [str(line) for line in (doc.get("lines") or []) if str(line).strip()]
+    if not lines:
+        return HTMLResponse(
+            f'<p class="scan-empty">{t("scan.empty")}</p>',
+            headers={"Cache-Control": "no-store"})
+    from markupsafe import escape
+
+    body = "".join(f'<p class="scan-line">{escape(line)}</p>'
+                   for line in lines)
+    return HTMLResponse(body, headers={"Cache-Control": "no-store"})
+
+
 @app.get("/screen.jpg")
 def phone_screen():
     """The last capture of the phone screen.

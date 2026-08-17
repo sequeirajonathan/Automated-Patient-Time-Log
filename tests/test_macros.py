@@ -1103,3 +1103,40 @@ class TestMigrationPitch:
                    side_effect=itertools.count(step=0.5)):
             with pytest.raises(RuntimeError, match="did not close"):
                 macros._skip_migration_pitch(driver, lambda _k: None)
+
+
+class TestReadPage:
+    """The owner's ask: the front end should have everything a page shows.
+    The reading walks the page with mid-screen swipes — they move the page
+    and can press nothing — and writes every text line in reading order.
+    A reading, not a tappable surface: coordinates below the fold are not
+    targets."""
+
+    def test_the_page_is_walked_and_the_lines_stitched(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(macros, "SCAN_PATH", tmp_path / "scan.json")
+        driver = MagicMock()
+        driver.get_window_size.return_value = {"width": 720, "height": 1600}
+        driver.current_package = "com.hhaexchange.caregiver"
+        pages = [
+            # already at top: the up-phase sees the same page twice
+            '<node class="android.widget.TextView" text="Uno" clickable="false" bounds="[10,100][700,150]"/>',
+            '<node class="android.widget.TextView" text="Uno" clickable="false" bounds="[10,100][700,150]"/>',
+            # down-phase: overlap ("Dos") dropped, repeats further kept
+            '<node class="android.widget.TextView" text="Uno" clickable="false" bounds="[10,100][700,150]"/>'
+            '<node class="android.widget.TextView" text="Dos" clickable="false" bounds="[10,200][700,250]"/>',
+            '<node class="android.widget.TextView" text="Dos" clickable="false" bounds="[10,80][700,130]"/>'
+            '<node class="android.widget.TextView" text="Tres" clickable="false" bounds="[10,200][700,250]"/>',
+            '<node class="android.widget.TextView" text="Dos" clickable="false" bounds="[10,80][700,130]"/>'
+            '<node class="android.widget.TextView" text="Tres" clickable="false" bounds="[10,200][700,250]"/>',
+        ]
+        sources = iter(pages)
+        type(driver).page_source = property(
+            lambda self: next(sources, pages[-1]))
+        with patch("apt_log.macros.time.sleep"):
+            macros._read_page(driver, lambda _k: None)
+        doc = json.loads((tmp_path / "scan.json").read_text())
+        assert doc["lines"] == ["Uno", "Dos", "Tres"]
+        assert doc["app"] == "com.hhaexchange.caregiver"
+
+    def test_the_macro_is_registered_with_a_translation_key(self):
+        assert macros.MACROS["read_page"].label_key == "macro.read_page"

@@ -95,5 +95,12 @@
   {% if m.webview %}
   <div class="a-webnote">{{ t('papp.web_partial') }}</div>
   {% endif %}
+  {% if m.scrollable or m.webview %}
+  {# Read-only by construction: the phone scrolls its own page end to end
+     and every text line comes back as a reading sheet. Below-the-fold
+     controls stay untappable — coordinates off screen are not targets. #}
+  <button type="button" class="a-scanbtn" id="btn-scan"
+    >{{ t('papp.scan') }}</button>
+  {% endif %}
   </div>
 </div>

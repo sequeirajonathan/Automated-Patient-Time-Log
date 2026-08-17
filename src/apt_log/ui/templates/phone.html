@@ -217,6 +217,25 @@
   .a-webnote { text-align:center; color:var(--muted); font-size:12.5px;
                padding:4px 24px 10px; }
 
+  /* The read-the-whole-page offer, and the reading it produces. */
+  .a-scanbtn { display:block; margin:2px auto 16px; border:none;
+               cursor:pointer; color:var(--tint); background:var(--tint-soft);
+               font-size:14px; font-weight:600; padding:10px 18px;
+               border-radius:999px;
+               transition:transform .25s var(--spring); }
+  .a-scanbtn:active { transform:scale(.92); transition-duration:.05s; }
+  body.reading #scansheet { transform:translateY(0); }
+  #scansheet { max-height:75dvh; display:flex; flex-direction:column; }
+  .scan-head { display:flex; align-items:center; justify-content:space-between;
+               padding-bottom:10px; }
+  .scan-head span { font-weight:600; font-size:16px; }
+  .scan-head button { border:none; background:none; color:var(--tint);
+               font-size:16px; cursor:pointer; padding:4px 6px; }
+  #scancontent { overflow-y:auto; -webkit-overflow-scrolling:touch;
+               min-height:120px; }
+  .scan-line { margin:0 0 10px; font-size:15.5px; line-height:1.45; }
+  .scan-empty { color:var(--muted); text-align:center; padding:24px 0; }
+
   .a-alert { margin:12px 16px 0; padding:14px 16px; border-radius:16px;
              background:var(--card); box-shadow:var(--shadow-card);
              text-align:center; font-size:15.5px; }
@@ -655,6 +674,16 @@
   </div>
 </div>
 
+{# The whole page, as a reading: the phone scrolled its own screen end to
+   end and these are every line it showed, in order. Read-only on purpose. #}
+<div id="scansheet" class="sheet">
+  <div class="scan-head">
+    <span>{{ t('scan.title') }}</span>
+    <button type="button" id="scan-close">{{ t('scan.close') }}</button>
+  </div>
+  <div id="scancontent"></div>
+</div>
+
 {# The relay, as a sheet: when the controller stops and asks, the question
    slides up over whichever view she is in. #}
 <div id="sheet" class="sheet"><div id="relay">
@@ -677,6 +706,7 @@
     live:    {{ t('papp.live')|tojson }},
     syncing: {{ t('papp.syncing')|tojson }},
     webTitle: {{ t('papp.web')|tojson }},
+    scanning: {{ t('papp.scanning')|tojson }},
     {# The dot, explained on demand: tap the status and the current colour
        says what it means in a sentence. #}
     explainLive:    {{ t('papp.explain.live')|tojson }},

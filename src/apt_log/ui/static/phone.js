@@ -21,6 +21,7 @@
   let frameImg = '';
   let lastScreenHtml = '';
   let awaitingMacro = false;
+  let awaitingScan = false;
   let macroEndedAt = 0;
   let busyTimer = 0;
   let toastTimer = 0;
@@ -92,6 +93,20 @@
   function bindWire() {
     const root = wrap();
     if (!root) return;
+    // The read-the-whole-page offer: the phone scrolls its own screen end
+    // to end and the reading arrives as a sheet when the walk finishes.
+    const scan = root.querySelector('#btn-scan');
+    if (scan) scan.addEventListener('click', () => {
+      awaitingMacro = true;
+      awaitingScan = true;
+      busy(i18n.scanning || '', 60000);
+      fetch('/macro', {
+        method: 'POST',
+        body: new URLSearchParams({ name: 'read_page' }),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        redirect: 'follow'
+      }).catch(() => { awaitingMacro = false; awaitingScan = false; unbusy(); });
+    });
     for (const el of root.querySelectorAll('[data-aim]')) {
       el.addEventListener('click', (ev) => {
         ev.preventDefault();
@@ -260,11 +275,19 @@
       // instead of dropping to a half-drawn sketch and coming back.
       if (awaitingMacro && !pendingApp) unbusy();
       else if (pendingApp) busy(i18n.waiting || '', 20000);
+      if (awaitingScan && m.name === 'read_page') {
+        awaitingScan = false;
+        fetch('/scan').then((r) => r.text()).then((html) => {
+          const box = document.getElementById('scancontent');
+          if (box) { box.innerHTML = html; body.classList.add('reading'); }
+        }).catch(() => {});
+      }
       awaitingMacro = false;
       macroEndedAt = Date.now();
     } else if (m.state === 'failed') {
       if (awaitingMacro || pendingApp) { unbusy(); toast(m.state_text || ''); }
       awaitingMacro = false;
+      awaitingScan = false;
       macroEndedAt = Date.now();
       pendingApp = '';
     }
@@ -581,6 +604,9 @@
     });
     const offapp = document.getElementById('offapp-apps');
     if (offapp) offapp.addEventListener('click', () => view('launcher'));
+    const scanClose = document.getElementById('scan-close');
+    if (scanClose) scanClose.addEventListener('click',
+      () => body.classList.remove('reading'));
 
     // The dot, explained on demand: tap the status row and the current
     // colour says what it means — green/yellow/red each get a sentence.
