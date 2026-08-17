@@ -988,3 +988,47 @@ class TestSketchOwnership:
                           focus=HOME, hierarchy_focus=HOME)
         doc = json.loads(target.read_text())
         assert doc["app"] == doc["h_app"]
+
+
+class TestFocusNudge:
+    """The window manager can strand the phone awake with a resumed app and
+    no focused window — watched live for seventeen minutes of 'Syncing'.
+    Persistent null focus while awake earns one gentle re-activation of the
+    app already on top; blips and sleeping phones are left alone."""
+
+    def _reset(self):
+        feed._no_focus_since[0] = 0.0
+        feed._last_nudge[0] = 0.0
+
+    def test_a_persistent_null_focus_gets_one_nudge(self):
+        self._reset()
+        with patch.object(feed, "_refocus") as refocus, \
+             patch.object(feed.time, "time", side_effect=[1000.0, 1070.0]):
+            feed._watch_focus("", True)
+            feed._watch_focus("", True)
+        refocus.assert_called_once()
+
+    def test_a_transition_blip_is_left_alone(self):
+        self._reset()
+        with patch.object(feed, "_refocus") as refocus, \
+             patch.object(feed.time, "time", side_effect=[1000.0, 1005.0]):
+            feed._watch_focus("", True)
+            feed._watch_focus("", True)
+        refocus.assert_not_called()
+
+    def test_a_sleeping_phone_is_never_nudged(self):
+        self._reset()
+        with patch.object(feed, "_refocus") as refocus:
+            for _ in range(5):
+                feed._watch_focus("", False)
+        refocus.assert_not_called()
+
+    def test_focus_returning_resets_the_clock(self):
+        self._reset()
+        with patch.object(feed, "_refocus") as refocus, \
+             patch.object(feed.time, "time",
+                          side_effect=[1000.0, 1200.0]):
+            feed._watch_focus("", True)
+            feed._watch_focus(HOME, True)      # recovered on its own
+            feed._watch_focus("", True)        # a fresh episode starts
+        refocus.assert_not_called()

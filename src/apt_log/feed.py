@@ -273,6 +273,49 @@ def screen_for(focus: str) -> str:
     return "unknown"
 
 
+# The window manager can strand the phone awake with a resumed app and NO
+# focused window (mCurrentFocus=null) — watched live for seventeen minutes:
+# the feed reported blind on every tick and the portal sat on "Syncing".
+# Re-activating the app that is already on top restores focus without
+# changing what is on screen. Patient thresholds, because a second of null
+# focus during an ordinary transition is normal life.
+NO_FOCUS_NUDGE_AFTER = 60.0
+NO_FOCUS_NUDGE_COOLDOWN = 300.0
+_no_focus_since = [0.0]
+_last_nudge = [0.0]
+_RESUMED = re.compile(r"topResumedActivity=ActivityRecord\{\S+ \S+ ([\w.]+)/")
+
+
+def _refocus(serial: str | None = None) -> None:
+    """Restore window focus to whatever activity is already resumed."""
+    try:
+        out = _adb(["shell", "dumpsys", "activity", "activities"],
+                   serial).stdout.decode("utf-8", "replace")
+        m = _RESUMED.search(out)
+        if not m:
+            return
+        log.info("focus is null with %s resumed — re-activating it", m.group(1))
+        _adb(["shell", "monkey", "-p", m.group(1),
+              "-c", "android.intent.category.LAUNCHER", "1"], serial)
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("could not nudge focus back (%s)", exc)
+
+
+def _watch_focus(focus: str, awake: bool, serial: str | None = None) -> None:
+    """Track awake-but-focusless ticks and nudge when they persist."""
+    if focus or not awake:
+        _no_focus_since[0] = 0.0
+        return
+    now = time.time()
+    if not _no_focus_since[0]:
+        _no_focus_since[0] = now
+        return
+    if (now - _no_focus_since[0] > NO_FOCUS_NUDGE_AFTER
+            and now - _last_nudge[0] > NO_FOCUS_NUDGE_COOLDOWN):
+        _last_nudge[0] = now
+        _refocus(serial)
+
+
 def capture(serial: str | None = None,
             hierarchy: str | None = None) -> tuple[bytes | None, str, str]:
     """Return (png_or_None, focus, reason).
@@ -288,6 +331,7 @@ def capture(serial: str | None = None,
     race two callers of the old version had against each other.
     """
     focus, awake = window_state(serial)
+    _watch_focus(focus, awake, serial)
     if not focus or not awake:
         # A dark display and a missing focus are the same fact for the page:
         # the phone is not showing anyone anything. Publishing the focused
