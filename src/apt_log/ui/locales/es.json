@@ -209,8 +209,6 @@
   "papp.explain.syncing": "Amarillo: la pantalla del teléfono está cambiando — se muestra la página de carga hasta que llegue la pantalla nueva.",
   "papp.explain.offline": "Rojo: sin conexión con el controlador. Se reconecta solo; nada de lo que toque aquí llegará al teléfono hasta entonces.",
   "papp.web_partial": "Esta es una página web — puede mostrar más que esta lista. La foto (botón del ojo) tiene la pantalla completa.",
-  "papp.whole_page": "Esta es la página completa, de arriba a abajo — puede que el teléfono necesite desplazarse para mostrar todo lo que aparece aquí.",
-  "papp.mapping": "Leyendo el resto de esta página…",
   "papp.scan": "Leer toda la página",
   "papp.scanning": "Leyendo toda la página…",
   "macro.read_page": "Leer toda la página",

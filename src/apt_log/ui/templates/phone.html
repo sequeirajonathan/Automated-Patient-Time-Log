@@ -219,12 +219,27 @@
               transition:transform .25s var(--spring); }
   .a-navbtn:active { transform:scale(.88); transition-duration:.05s; }
 
-  /* The footnote under the list: whether these rows are the whole page
-     (a stitched walk — tinted, good news), a page still being read, or
-     a webview whose tree may underreport. */
+  /* The page's tail: motion while the scan is reading, stillness when it
+     is done. The sweep is a thin track with a tinted comet crossing it;
+     the end-of-page mark is a short quiet dash — no sentences. */
+  .a-scanning { height:4px; border-radius:999px; overflow:hidden;
+                background:var(--tint-soft); margin:10px 56px 16px; }
+  .a-scanning span { display:block; height:100%; width:38%;
+                border-radius:999px;
+                background:linear-gradient(90deg, transparent,
+                            var(--tint), transparent);
+                animation:scan-sweep 1.2s ease-in-out infinite; }
+  @keyframes scan-sweep { from { transform:translateX(-110%); }
+                          to   { transform:translateX(380%); } }
+  @media (prefers-reduced-motion: reduce) {
+    .a-scanning span { animation:none; transform:none; opacity:.6; } }
+  .a-pageend { width:48px; height:3px; border-radius:999px;
+               background:var(--line); margin:12px auto 16px; }
+
+  /* The webview honesty line: a web page's pixels can carry what its
+     accessibility tree does not. */
   .a-webnote { text-align:center; color:var(--muted); font-size:12.5px;
                padding:4px 24px 10px; }
-  .a-webnote.whole { color:var(--tint); }
 
   /* The read-the-whole-page offer, and the reading it produces. */
   .a-scanbtn { display:block; margin:2px auto 16px; border:none;
@@ -387,6 +402,11 @@
               -webkit-overflow-scrolling:touch; }
   body.peeking #peekwrap { display:block; }
   body.peeking #stage { overflow:hidden; }
+  /* The wire has no business showing while the photo is open: any row
+     that wins a stacking-context fight paints ON TOP of the photo —
+     seen live as section headers floating over the screenshot. Hidden
+     outright, there is no fight to win. */
+  body.peeking #screenwrap { visibility:hidden; }
   #peek { width:100%; height:auto; display:block; }
   #peek-cap { position:absolute; left:50%; transform:translateX(-50%);
               bottom:14px; z-index:5; display:none; background:rgb(0 0 0/.65);

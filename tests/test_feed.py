@@ -1078,12 +1078,14 @@ class TestFreshStitch:
            {"cls": "Button", "rid": "menu", "txt": "", "b": [10, 500, 700, 560]},
            {"cls": "TextView", "rid": "clock", "txt": "22:41", "b": [10, 600, 700, 660]}]
 
-    def _write(self, tmp_path, **extra):
-        doc = {"step0": "aaaa", "app": "com.hhaexchange.caregiver",
-               "elements": [dict(e, vb=e["b"], step=0) for e in self.ELS],
+    def _write(self, tmp_path, name="aaaa", els=None, **extra):
+        doc = {"step0": name, "app": "com.hhaexchange.caregiver",
+               "elements": [dict(e, vb=e["b"], step=0)
+                            for e in (els or self.ELS)],
                "statics": [], "steps": 2, **extra}
-        (tmp_path / feed.STITCH_NAME).write_text(json.dumps(doc),
-                                                 encoding="utf-8")
+        root = tmp_path / feed.STITCH_DIRNAME
+        root.mkdir(exist_ok=True)
+        (root / f"{name}.json").write_text(json.dumps(doc), encoding="utf-8")
         return doc
 
     def test_the_exact_frame_id_is_the_fast_path(self, tmp_path):
@@ -1118,8 +1120,22 @@ class TestFreshStitch:
         import os
         self._write(tmp_path)
         old = time.time() - feed.STITCH_MAX_AGE - 5
-        os.utime(tmp_path / feed.STITCH_NAME, (old, old))
+        os.utime(tmp_path / feed.STITCH_DIRNAME / "aaaa.json", (old, old))
         assert feed._fresh_stitch(tmp_path, "aaaa") is None
+
+    def test_switching_apps_does_not_lose_the_other_pages_scan(self, tmp_path):
+        """One file per scanned page: another app's page being scanned must
+        not throw this one's away — seen live as a page re-scanning itself
+        on every switch back."""
+        self._write(tmp_path)                     # this page, scanned earlier
+        other = [{"cls": "View", "rid": "", "txt": "Otra app",
+                  "b": [0, 0, 720, 100]}]
+        self._write(tmp_path, name="bbbb", els=other,
+                    app="com.hhaexchange.uma")    # the app she switched to
+        assert feed._fresh_stitch(tmp_path, "aaaa") is not None
+        got = feed._fresh_stitch(tmp_path, "zzzz", els=list(self.ELS),
+                                 app="com.hhaexchange.caregiver")
+        assert got is not None and got["step0"] == "aaaa"
 
 
 class TestHierarchyPackage:

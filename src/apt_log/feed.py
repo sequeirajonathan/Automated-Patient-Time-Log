@@ -418,7 +418,7 @@ FRAME_NAME = "frame.json"
 SCREEN_NAME = "screen.json"
 
 
-STITCH_NAME = "stitched.json"
+STITCH_DIRNAME = "stitched"
 
 
 # A stitched page older than this is walked again rather than trusted: the
@@ -437,38 +437,53 @@ STITCH_MIN_OVERLAP = 0.8
 def _fresh_stitch(directory: Path, viewport_id: str,
                   els: list[dict] | None = None,
                   app: str = "") -> dict | None:
-    """The stitched whole-page document, if it still describes this screen.
+    """The stitched document describing this screen, from the scan cache.
 
-    The exact frame-id match is the fast path. It is also brittle on
-    purpose everywhere else — one changed character re-hashes the frame —
-    which here meant a ticking clock invalidated a walk the moment it
-    finished. So a near-match is accepted too: same app in front, document
-    young, and nearly every element identity currently in the viewport
-    present in the stitched page. Identity is structure and place, not
-    words alone, so a different page of the same app does not pass.
+    One file per scanned page, so switching apps does not throw away the
+    other app's scans — come back to an unchanged page and it is still
+    whole, no re-scan. The exact frame-id match is the fast path. It is
+    also brittle on purpose everywhere else — one changed character
+    re-hashes the frame — which here meant a ticking clock invalidated a
+    walk the moment it finished. So a near-match is accepted too: same
+    app in front and nearly every element identity currently in the
+    viewport present in the stitched page. Identity is structure and
+    place, not words alone, so a different page of the same app — even
+    in a single-activity app — does not pass.
     """
     if not viewport_id:
         return None
-    path = directory / STITCH_NAME
+    root = directory / STITCH_DIRNAME
+    now = time.time()
+    docs: list[dict] = []
     try:
-        age = time.time() - path.stat().st_mtime
-        doc = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        files = sorted(root.glob("*.json"),
+                       key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
         return None
-    if age > STITCH_MAX_AGE:
-        return None
-    if doc.get("step0") == viewport_id:
-        return doc
-    if not els or not app or doc.get("app") != app:
+    for f in files:
+        try:
+            if now - f.stat().st_mtime > STITCH_MAX_AGE:
+                continue
+            docs.append(json.loads(f.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError):
+            continue
+    for doc in docs:
+        if doc.get("step0") == viewport_id:
+            return doc
+    if not els or not app:
         return None
     from apt_log import stitch as stitch_mod
 
-    stitched = {stitch_mod._key(e) for e in doc.get("elements") or []}
     mine = {stitch_mod._key(e) for e in els}
-    if not mine or not stitched:
+    if not mine:
         return None
-    overlap = len(mine & stitched) / len(mine)
-    return doc if overlap >= STITCH_MIN_OVERLAP else None
+    for doc in docs:
+        if doc.get("app") != app:
+            continue
+        stitched = {stitch_mod._key(e) for e in doc.get("elements") or []}
+        if stitched and len(mine & stitched) / len(mine) >= STITCH_MIN_OVERLAP:
+            return doc
+    return None
 
 
 def write_screen(target: Path, frame: dict, screen: str, reason: str,

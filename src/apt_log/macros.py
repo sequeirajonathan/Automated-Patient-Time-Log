@@ -73,11 +73,17 @@ SCREEN_PATH = STATE_DIR / "screen.json"
 # page, in reading order, for the portal's reading sheet.
 SCAN_PATH = STATE_DIR / "scan.json"
 
-# The stitched whole-page document (see apt_log.stitch), and the request/
+# The stitched whole-page documents (see apt_log.stitch) — a small cache,
+# one file per scanned page keyed by its top frame id, and the request/
 # result pair for taps below the fold — which must run here, where the
 # resident session lives, because they re-verify against a fresh dump
-# after replaying the scroll.
-STITCH_PATH = STATE_DIR / "stitched.json"
+# after replaying the scroll. A cache rather than a single file because a
+# single file meant every app switch threw away the other app's scan:
+# come back and the page scanned itself all over again, which the owner
+# rightly asked about ("the already scanned content was gone — why??").
+STITCH_DIR = STATE_DIR / "stitched"
+STITCH_CACHE_MAX = 12
+STITCH_CACHE_TTL = 600.0
 DEEPTAP_REQUEST_PATH = STATE_DIR / "deeptap-request.json"
 DEEPTAP_RESULT_PATH = STATE_DIR / "deeptap-result.json"
 DEEPTAP_MAX_AGE = 15.0
@@ -727,10 +733,12 @@ def _stitch_walk(driver) -> bool:
     # _fresh_stitch recognises the still-scrolled viewport as this page,
     # so the portal fills in whole seconds earlier than it used to.
     try:
-        STITCH_PATH.parent.mkdir(parents=True, exist_ok=True)
-        tmp = STITCH_PATH.with_suffix(".tmp")
+        STITCH_DIR.mkdir(parents=True, exist_ok=True)
+        target = STITCH_DIR / f"{doc['step0']}.json"
+        tmp = target.with_suffix(".tmp")
         tmp.write_text(json.dumps(doc), encoding="utf-8")
-        os.replace(tmp, STITCH_PATH)
+        os.replace(tmp, target)
+        _prune_stitched()
     except OSError as exc:
         log.warning("cannot write the stitched page (%s)", exc)
         return False
@@ -741,6 +749,36 @@ def _stitch_walk(driver) -> bool:
         _swipe(driver, cx, y_top, y_bot)
         time.sleep(0.25)
     return True
+
+
+def _prune_stitched() -> None:
+    """Keep the scan cache small and current: newest few pages, none old."""
+    try:
+        files = sorted(STITCH_DIR.glob("*.json"),
+                       key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        return
+    now = time.time()
+    for i, f in enumerate(files):
+        try:
+            if i >= STITCH_CACHE_MAX or now - f.stat().st_mtime > STITCH_CACHE_TTL:
+                f.unlink()
+        except OSError:
+            pass
+
+
+def _forget_stitched(app: str) -> None:
+    """Drop cached scans of one app's pages — after a tap changed them."""
+    try:
+        for f in STITCH_DIR.glob("*.json"):
+            try:
+                doc = json.loads(f.read_text(encoding="utf-8"))
+                if not app or doc.get("app") == app:
+                    f.unlink()
+            except (OSError, json.JSONDecodeError):
+                f.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def take_deep_tap() -> dict | None:
@@ -1093,6 +1131,8 @@ class Runner:
         aim = request["aim"]
         step = int(aim.get("step") or 0)
 
+        tapped_app: list[str] = []
+
         def _do(driver):
             cx, y_top, y_bot = _swipe_geometry(driver)
             _scroll_to_top(driver, cx, y_top, y_bot)
@@ -1103,6 +1143,7 @@ class Runner:
             found = stitch_mod.locate(aim, els)
             if found is None:
                 raise RuntimeError("no longer where it was — look again")
+            tapped_app.append(driver.current_package or "")
             x1, y1, x2, y2 = found["b"]
             driver.tap([((x1 + x2) // 2, (y1 + y2) // 2)])
 
@@ -1121,12 +1162,12 @@ class Runner:
             os.replace(tmp, DEEPTAP_RESULT_PATH)
         except OSError as exc:
             log.warning("cannot write the deep-tap result (%s)", exc)
-        # The tap changed the screen or the scroll; either way the stitched
-        # document no longer describes what is in front.
-        try:
-            STITCH_PATH.unlink()
-        except OSError:
-            pass
+        # The tap changed this app's page, so its cached scans are no longer
+        # the truth. Only this app's: the other apps' pages were not touched,
+        # and forgetting them meant every switch back re-scanned a page that
+        # had not changed.
+        if ok and tapped_app:
+            _forget_stitched(tapped_app[0])
 
     def maybe_auto_auth(self) -> bool:
         """Sign in when the known app is sitting on its sign-in screen.
