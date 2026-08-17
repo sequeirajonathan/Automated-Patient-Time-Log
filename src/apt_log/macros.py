@@ -1392,6 +1392,11 @@ class Runner:
         # scans immediately.
         self._stitch_next_at: float | None = None
         self._stitch_last_page: tuple | None = None
+        # Whether each app's last substantive screen was a foldable page
+        # (a run of date headers): a CHANGE in this is a page transition
+        # even when the activity name never changes (Compose keeps every
+        # page in one activity). None until first observed.
+        self._seen_folds: dict = {}
         # An app whose tabs are worth pre-scanning: set the moment a
         # sign-in finishes, cleared once its tabs are warmed (or the sweep
         # was pre-empted). None means nothing to warm.
@@ -1511,6 +1516,24 @@ class Runner:
         fid = doc.get("id") or ""
         if not fid or fid == self._stitch_failed_for:
             return False
+        # Page identity by (app, activity) misses every transition inside a
+        # Compose single-activity app: the schedule and the visit details
+        # both live in HomeActivity, so coming BACK from the details read as
+        # "same page" — no fresh walk, no re-expansion, and the owner tapped
+        # a stale expanded card that refused ("clicked ver detalles and it
+        # did not work"). The page's own shape breaks the tie: the schedule
+        # shows a run of date headers and the details page does not, so a
+        # change in foldability IS a page transition. Tracked on every look
+        # (not only on walks — the cooldown used to eat the observation),
+        # and a sparse mid-transition tree is no verdict either way.
+        statics = doc.get("statics") or []
+        app = doc.get("app")
+        if len(statics) >= 5:
+            folds_now = _page_folds(statics)
+            was_folds = self._seen_folds.get(app)
+            self._seen_folds[app] = folds_now
+        else:
+            folds_now = was_folds = self._seen_folds.get(app)
         try:
             poked = (target.parent / feed_mod.POKE_NAME).stat().st_mtime
             if time.time() - poked < STITCH_TAP_QUIET:
@@ -1519,7 +1542,8 @@ class Runner:
             pass
         page = (doc.get("app"), doc.get("activity"))
         now = time.monotonic()
-        fresh = page != self._stitch_last_page
+        fresh = (page != self._stitch_last_page
+                 or (was_folds is not None and folds_now != was_folds))
         if (not fresh
                 and self._stitch_next_at is not None
                 and now < self._stitch_next_at):

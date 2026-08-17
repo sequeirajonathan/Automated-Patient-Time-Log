@@ -103,6 +103,7 @@ ICON_LABELS = {
     **ICON_MARKS,
     "\uf059": "?",        # circled question \u2014 the info button
     "\uf05a": "\u2139",   # circled info
+    "\uf060": "\u2190",   # left arrow \u2014 the visit-details back button
 }
 
 # What a state mark MEANS, so the template can colour it. A verified check
@@ -343,6 +344,15 @@ def build(doc: dict) -> dict | None:
                     marks.append(value)
             item["lines"] = lines
             item["badge"] = badge
+            # A row whose only content is a KNOWN glyph is named by it —
+            # the visit-details back button carries nothing but the drawn
+            # arrow, and stripping that as decoration left an empty
+            # sliver the row filter then swallowed: no back control.
+            if not lines and not item["txt"]:
+                item["txt"] = next(
+                    (ICON_LABELS[t] for s in own
+                     if (t := (s.get("txt") or "").strip()) in ICON_LABELS),
+                    "")
             # State marks stay their own field — a verified EVV check-in is
             # a green tick the caregiver scans for, not a "✓" buried in a
             # subtitle line. The template draws them as coloured status pills.
@@ -361,12 +371,16 @@ def build(doc: dict) -> dict | None:
             # Anchored at the left content margin, where statements start:
             # a narrow tappable floating mid-screen ("Visita Buscar", the
             # schedule's search) is a utility button, and dressing it as
-            # information would hide a real control.
+            # information would hide a real control. And LINE-shaped: the
+            # visit-details "Funciones" tile is narrow, left-anchored and
+            # single-captioned too, but it is a tall icon tile — a real
+            # button, and dressing it as information hid its tap.
             narrow = (e["b"][2] - e["b"][0]) <= w * 0.6
             left_anchored = e["b"][0] <= w * 0.08
-            item["info"] = (narrow and left_anchored and not item["cta"]
-                            and not badge and len(lines) <= 1
-                            and bool(lines or marks))
+            line_shaped = (e["b"][3] - e["b"][1]) <= h * 0.03
+            item["info"] = (narrow and left_anchored and line_shaped
+                            and not item["cta"] and not badge
+                            and len(lines) <= 1 and bool(lines or marks))
             item["tone"] = (item["marks"][0]["tone"]
                             if item["info"] and item["marks"] else "")
         elif kind == "button":
@@ -375,15 +389,57 @@ def build(doc: dict) -> dict | None:
     # The loose text of the screen — everything not folded into a row. Marks
     # peel off first; the rest are captions, values, headings and prose.
     loose: list[dict] = []
+    loose_marks: list[dict] = []
     for i, s in enumerate(statics):
         if i in folded:
             continue
-        mark = _mark_for(s)
-        if mark:
-            items.append(_item({**s, "txt": mark}, "label"))
+        if _mark_for(s):
+            loose_marks.append(s)
         elif (s.get("txt") and not _is_icon_text(s["txt"])
                 and s["txt"].strip() not in BULLETS):
             loose.append(s)
+
+    # A loose mark with a sentence right beside it is one statement, not
+    # two strays: the visit-details screen draws its EVV chips with no
+    # container at all, and "✓" floating a line above "Registros de
+    # entrada…" read as debris. Pair them into the same status line the
+    # schedule's chips get; a mark with no neighbour stays a lone label.
+    paired: set[int] = set()
+    for s in loose_marks:
+        mark = _mark_for(s)
+        mate = next(
+            (t for t in loose
+             if id(t) not in paired
+             and 0 <= t["b"][0] - s["b"][2] <= 24
+             and _overlap(t["b"], s["b"]) >= 0.5), None)
+        if mate is None:
+            items.append(_item({**s, "txt": mark}, "label"))
+            continue
+        paired.add(id(mate))
+        chip = _item({k: v for k, v in s.items() if k != "rid"}, "row")
+        chip["b"] = [s["b"][0], min(s["b"][1], mate["b"][1]),
+                     mate["b"][2], max(s["b"][3], mate["b"][3])]
+        chip.update({"txt": "", "lines": [mate["txt"].strip()], "badge": "",
+                     "marks": [{"sym": mark,
+                                "tone": MARK_TONE.get(mark, "")}],
+                     "cta": False, "info": True,
+                     "tone": MARK_TONE.get(mark, "")})
+        items.append(chip)
+    loose = [t for t in loose if id(t) not in paired]
+
+    # Initials drawn as an avatar chip: a stub of capitals hugging the
+    # left of a real name ("LP" beside "LUCRESIA L PUPO") is the app's
+    # decoration, and rendering it as a section heading shouted noise.
+    # The chip is taller than the name line it decorates (the name's
+    # subtitle rides beside it too), so the overlap bar sits low.
+    loose = [s for s in loose
+             if not (len(s["txt"].strip()) <= 3
+                     and s["txt"].strip().isupper()
+                     and any(t is not s
+                             and 0 <= t["b"][0] - s["b"][2] <= 24
+                             and _overlap(t["b"], s["b"]) >= 0.25
+                             and len(t["txt"].strip()) > 3
+                             for t in loose))]
 
     # A field is a caption stacked tight above its value: the patient detail
     # renders "Identificación de admisión" and "XOR-900196" a pixel apart,
@@ -427,10 +483,15 @@ def build(doc: dict) -> dict | None:
     # screen and magnetizes them all into a single band — seen live as the
     # patient-details page rendered as sixteen strips of vertically
     # crushed letters. It says nothing, folds nothing, and is dropped.
+    # A row with a RESOURCE ID is a real control whatever its size: the
+    # visit-details back button is a 25px-tall strip at tablet density,
+    # and the sliver rule swallowed it — no way back. Anonymity is part
+    # of what makes a scrim a scrim.
     items = [n for n in items
              if not (n["kind"] == "row"
                      and not n.get("lines")
                      and not n.get("txt")
+                     and not (n.get("aim") or {}).get("rid")
                      and ((n["b"][3] - n["b"][1]) >= h * CURTAIN_MIN_HEIGHT
                           or (n["b"][3] - n["b"][1]) <= h * SLIVER_MAX_HEIGHT))]
 

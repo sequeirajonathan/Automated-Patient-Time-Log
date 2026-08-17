@@ -1351,6 +1351,70 @@ class TestMaybeStitch:
             assert runner.maybe_stitch() is False
         walk.assert_called_once()
 
+    def _folds_statics(self, n=3, today=True):
+        mark = " (Hoy)" if today else ""
+        out = [{"cls": "TextView", "b": [9, 347 + i*300, 98, 363 + i*300],
+                "txt": f"agosto {17+i}, 2026" + (mark if i == 0 else "")}
+               for i in range(n)]
+        out += [{"cls": "TextView", "b": [25, 400 + i*40, 142, 416 + i*40],
+                 "txt": f"linea {i}"} for i in range(4)]
+        return out
+
+    def test_returning_to_the_schedule_is_a_fresh_page(self, tmp_path):
+        """Compose keeps every page in one activity, so (app, activity)
+        cannot see schedule -> details -> Back. The page's own shape can:
+        the schedule shows a run of date headers, the details page does
+        not, and a change in foldability IS a page transition — the walk
+        runs immediately, expansion allowed (assume_top on)."""
+        runner = self._runner(tmp_path, app="com.hhaexchange.uma",
+                              fid="sched1")
+        self._repoint(runner, tmp_path, statics=self._folds_statics())
+        walks = []
+        with patch("apt_log.resident.run",
+                   side_effect=lambda work: walks.append(True) or True):
+            assert runner.maybe_stitch() is True           # schedule
+            self._repoint(runner, tmp_path, fid="details1",
+                          statics=[{"cls": "TextView",
+                                    "b": [25, 400 + i*40, 142, 416 + i*40],
+                                    "txt": f"detalle {i}"} for i in range(6)])
+            assert runner.maybe_stitch() is True           # details, no wait
+            self._repoint(runner, tmp_path, fid="sched2",
+                          statics=self._folds_statics())
+            assert runner.maybe_stitch() is True           # back: no wait
+        assert len(walks) == 3
+
+    def test_closing_a_card_stays_within_the_cooldown(self, tmp_path):
+        """Folding a card changes the frame but not the page's shape: not
+        a transition, so the floor holds and nothing re-expands over her
+        hand."""
+        runner = self._runner(tmp_path, app="com.hhaexchange.uma",
+                              fid="sched1")
+        self._repoint(runner, tmp_path, statics=self._folds_statics())
+        with patch("apt_log.resident.run", return_value=True) as walk:
+            assert runner.maybe_stitch() is True
+            self._repoint(runner, tmp_path, fid="sched-closed",
+                          statics=self._folds_statics())
+            assert runner.maybe_stitch() is False
+        walk.assert_called_once()
+
+    def test_a_sparse_transition_tree_is_no_verdict(self, tmp_path):
+        """A mid-transition frame publishes almost nothing; reading it as
+        "not foldable" would make the settled schedule look like a fresh
+        page and re-expand what she closed."""
+        runner = self._runner(tmp_path, app="com.hhaexchange.uma",
+                              fid="sched1")
+        self._repoint(runner, tmp_path, statics=self._folds_statics())
+        with patch("apt_log.resident.run", return_value=True) as walk:
+            assert runner.maybe_stitch() is True
+            self._repoint(runner, tmp_path, fid="blank",
+                          statics=[{"cls": "TextView", "b": [9, 40, 98, 56],
+                                    "txt": "cargando"}])
+            assert runner.maybe_stitch() is False   # sparse: cooldown holds
+            self._repoint(runner, tmp_path, fid="sched-settled",
+                          statics=self._folds_statics())
+            assert runner.maybe_stitch() is False   # same shape: still held
+        walk.assert_called_once()
+
 
 class TestSkipPreamble:
     """A freshly-entered page is already at its top; only a re-scan pays

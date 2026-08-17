@@ -656,3 +656,61 @@ class TestDemotedActions:
         btn = next(i for r in m["rows"] for i in r["items"]
                    if i["kind"] == "button")
         assert btn["cta"] is True
+
+
+class TestVisitDetailsScreen:
+    """The Ver detalles page, reflowed from its live capture: a nav bar
+    with the app's own back control, EVV chips with no containers, an
+    avatar chip of initials, and tall icon tiles that are buttons."""
+
+    def test_the_back_button_survives_and_names_the_nav(self):
+        """The back control is a 25px sliver whose only content is the
+        drawn arrow: the glyph names it, the resource id spares it from
+        the sliver rule, and the band reads as a nav bar."""
+        m = screenview.build(doc(
+            elements=[el("menu_top_bar_back_button", "View", [6, 68, 31, 93]),
+                      el("help_button", "View", [691, 68, 718, 94])],
+            statics=[st([12, 73, 25, 89], "\uf060"),
+                     st([321, 73, 399, 88], "agosto 17, 2026"),
+                     st([697, 73, 712, 89], "\uf059")],
+        ))
+        assert m["nav"] is not None
+        assert m["nav"]["title"] == "agosto 17, 2026"
+        assert m["nav"]["back"]["aim"]["rid"] == "menu_top_bar_back_button"
+        assert m["nav"]["back"]["txt"] == "\u2190"
+
+    def test_containerless_marks_pair_with_their_sentence(self):
+        """The details page draws its EVV chips with no container at all;
+        a loose check a line above loose prose read as debris. Side by
+        side they are one status line."""
+        m = screenview.build(doc(
+            elements=[],
+            statics=[st([276, 595, 283, 604], "\uf00c"),
+                     st([285, 593, 445, 606], "Registros de entrada de EVV")],
+        ))
+        chip = next(i for r in m["rows"] for i in r["items"]
+                    if i["kind"] == "row")
+        assert chip["info"] is True and chip["tone"] == "ok"
+        assert chip["lines"] == ["Registros de entrada de EVV"]
+
+    def test_avatar_initials_are_decoration(self):
+        m = screenview.build(doc(
+            elements=[],
+            statics=[st([16, 557, 43, 586], "LP"),
+                     st([59, 549, 143, 562], "LUCRESIA L PUPO")],
+        ))
+        texts = [i.get("txt") for r in m["rows"] for i in r["items"]]
+        assert "LUCRESIA L PUPO" in texts and "LP" not in texts
+
+    def test_a_tall_icon_tile_is_a_button_not_information(self):
+        """"Funciones" is narrow, left-anchored and single-captioned like
+        a status line — but it is an 80px icon tile, a real button, and
+        an info dress would hide its tap."""
+        m = screenview.build(doc(
+            elements=[el("", "View", [4, 718, 320, 798])],
+            statics=[st([120, 770, 200, 786], "Funciones")],
+        ))
+        tile = next(i for r in m["rows"] for i in r["items"]
+                    if i["kind"] == "row")
+        assert not tile.get("info")
+        assert tile["aim"]
