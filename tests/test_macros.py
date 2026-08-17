@@ -1214,21 +1214,60 @@ class TestMaybeStitch:
     succession, and never system UI."""
 
     def _runner(self, tmp_path, app="com.hhaexchange.caregiver",
-                screen="home", fid="abc123"):
+                screen="home", fid="abc123", activity="homeactivity",
+                scrollable=True):
         viewers = tmp_path / "viewers.json"
         viewers.write_text(json.dumps({"n": 1}), encoding="utf-8")
         screen_doc = tmp_path / "screen.json"
         screen_doc.write_text(json.dumps({
             "id": fid, "app": app, "screen": screen, "blocked": "",
-            "scrollable": True, "full": False}), encoding="utf-8")
+            "activity": activity, "scrollable": scrollable,
+            "full": False}), encoding="utf-8")
         return macros.Runner(status_path=tmp_path / "status.json",
                              screen_path=screen_doc, viewers_path=viewers)
+
+    def _repoint(self, runner, tmp_path, **kw):
+        doc = json.loads(runner._screen_path.read_text(encoding="utf-8"))
+        doc.update(kw)
+        runner._screen_path.write_text(json.dumps(doc), encoding="utf-8")
 
     def test_a_care_app_page_is_walked(self, tmp_path):
         runner = self._runner(tmp_path)
         with patch("apt_log.resident.run", return_value=True) as walk:
             assert runner.maybe_stitch() is True
         walk.assert_called_once()
+
+    def test_a_page_not_calling_itself_scrollable_is_still_scanned(self, tmp_path):
+        """Compose screens lie about scrollability, and the owner's spec is
+        that no page leaves anyone wondering: the walk itself discovers
+        whether there is more, and a one-screen page publishes as the
+        whole page — which is exactly what it is."""
+        runner = self._runner(tmp_path, scrollable=False)
+        with patch("apt_log.resident.run", return_value=True) as walk:
+            assert runner.maybe_stitch() is True
+        walk.assert_called_once()
+
+    def test_a_page_transition_pays_no_cooldown(self, tmp_path):
+        """Waiting out a floor on a FRESH page read as 'the front end is
+        missing things'. The floor binds only the page it was armed on."""
+        runner = self._runner(tmp_path)
+        with patch("apt_log.resident.run", return_value=True) as walk:
+            assert runner.maybe_stitch() is True
+            self._repoint(runner, tmp_path, activity="visitdetailactivity",
+                          id="def456")
+            assert runner.maybe_stitch() is True
+        assert walk.call_count == 2
+
+    def test_a_fresh_tap_defers_the_scan(self, tmp_path):
+        """No scanning over her fingers: a tap seconds ago means someone is
+        driving the phone, and the walk waits its turn."""
+        from apt_log import feed as feed_mod
+
+        runner = self._runner(tmp_path)
+        (tmp_path / feed_mod.POKE_NAME).write_text("now", encoding="utf-8")
+        with patch("apt_log.resident.run") as walk:
+            assert runner.maybe_stitch() is False
+        walk.assert_not_called()
 
     def test_system_ui_is_never_walked(self, tmp_path):
         """Seen live: the walker swiping through the notification shade —

@@ -82,10 +82,21 @@ DEEPTAP_REQUEST_PATH = STATE_DIR / "deeptap-request.json"
 DEEPTAP_RESULT_PATH = STATE_DIR / "deeptap-result.json"
 DEEPTAP_MAX_AGE = 15.0
 STITCH_MAX_STEPS = 10
-# The floor between walk ATTEMPTS, success or failure. A page whose text
+# The floor between walk attempts ON THE SAME PAGE. A page whose text
 # ticks (a clock, a countdown) re-hashes every frame, and without a floor
 # the phone would visibly scroll itself over and over for the same page.
+# A page TRANSITION pays no floor at all: the owner's spec is that every
+# page is scanned whole the moment it appears — waiting out a cooldown
+# on a fresh page read as "the front end is missing things".
 STITCH_COOLDOWN = 45.0
+# How long a walk's swipes settle. Shorter than a macro's waits on
+# purpose: the walk presses nothing, so the worst a rushed read costs is
+# one re-walk, while every extra second is the owner staring at a page
+# that says it is still being read.
+STITCH_SETTLE = 0.5
+# No scanning over her fingers: a tap in the last few seconds means
+# someone is driving the phone, and the walk waits its turn.
+STITCH_TAP_QUIET = 4.0
 
 # Sign in only while someone is actually watching. Unwatched, the app's own
 # inactivity timer signs the session back out and the two loop all night —
@@ -667,7 +678,7 @@ def _scroll_to_top(driver, cx: int, y_top: int, y_bot: int) -> None:
             break
         prev = src
         _swipe(driver, cx, y_top, y_bot)
-        time.sleep(0.8)
+        time.sleep(STITCH_SETTLE)
 
 
 def _stitch_walk(driver) -> bool:
@@ -697,13 +708,12 @@ def _stitch_walk(driver) -> bool:
         captures.append(cap)
         prev = cap
         _swipe(driver, cx, y_bot, y_top)
-        time.sleep(0.8)
-
-    for _ in range(max(len(captures) - 1, 0)):
-        _swipe(driver, cx, y_top, y_bot)
-        time.sleep(0.4)
+        time.sleep(STITCH_SETTLE)
 
     if not captures or not captures[0]["elements"]:
+        for _ in range(max(len(captures) - 1, 0)):
+            _swipe(driver, cx, y_top, y_bot)
+            time.sleep(0.25)
         return False
     doc = stitch_mod.stitch(captures, nominal_dy=y_bot - y_top)
     doc.update({
@@ -713,6 +723,9 @@ def _stitch_walk(driver) -> bool:
         "app": driver.current_package or "",
         "at": datetime.now().isoformat(),
     })
+    # Published BEFORE the walk back to the top: the near-match in
+    # _fresh_stitch recognises the still-scrolled viewport as this page,
+    # so the portal fills in whole seconds earlier than it used to.
     try:
         STITCH_PATH.parent.mkdir(parents=True, exist_ok=True)
         tmp = STITCH_PATH.with_suffix(".tmp")
@@ -723,6 +736,10 @@ def _stitch_walk(driver) -> bool:
         return False
     log.info("stitched %d captures into a whole-page document",
              len(captures))
+
+    for _ in range(max(len(captures) - 1, 0)):   # leave the page at its top
+        _swipe(driver, cx, y_top, y_bot)
+        time.sleep(0.25)
     return True
 
 
@@ -951,8 +968,11 @@ class Runner:
         # changes, or a stubborn page would be walked forever.
         self._stitch_failed_for: str = ""
         # When the next walk attempt is allowed (monotonic). None, not 0.0,
-        # for the same reason as the auth cooldown above.
+        # for the same reason as the auth cooldown above. The floor binds
+        # only re-walks of the page it was armed on — a page transition
+        # scans immediately.
         self._stitch_next_at: float | None = None
+        self._stitch_last_page: tuple | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -988,14 +1008,19 @@ class Runner:
             self._stop.wait(POLL_EVERY)
 
     def maybe_stitch(self) -> bool:
-        """Walk the current scrollable page into a whole-page document.
+        """Walk the current page into a whole-page document.
 
-        The owner's spec: the portal should never leave anyone wondering
-        whether there is more below the fold. The phone is remote-only, so
-        it may scroll itself — but only while someone is watching, only on
-        an unblocked care-app screen, and never over a running macro. A
-        failed walk is not retried for the same screen; the next screen
-        change resets the ledger.
+        The owner's spec, verbatim: "the front end should represent
+        everything on the screen whether it's viewable or not" — nobody
+        should ever scroll the phone to find out whether the portal missed
+        something. So EVERY care-app page is scanned when it appears, not
+        just ones advertising themselves scrollable (Compose screens lie
+        about that), and a page that turns out not to scroll publishes as
+        the whole page too — which is exactly what it is. The phone is
+        remote-only, so it may scroll itself — but only while someone is
+        watching, never over a running macro, and never within seconds of
+        a tap: no scanning over her fingers. A failed walk is not retried
+        for the same screen; the next screen change resets the ledger.
         """
         if not someone_is_watching(self._viewers_path):
             return False
@@ -1006,8 +1031,7 @@ class Runner:
             doc = json.loads(target.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return False
-        if (doc.get("blocked") or not doc.get("scrollable")
-                or doc.get("full") or not doc.get("app")
+        if (doc.get("blocked") or doc.get("full") or not doc.get("app")
                 or doc.get("screen") == "launcher"):
             return False
         from apt_log import feed as feed_mod
@@ -1020,9 +1044,19 @@ class Runner:
         fid = doc.get("id") or ""
         if not fid or fid == self._stitch_failed_for:
             return False
+        try:
+            poked = (target.parent / feed_mod.POKE_NAME).stat().st_mtime
+            if time.time() - poked < STITCH_TAP_QUIET:
+                return False
+        except OSError:
+            pass
+        page = (doc.get("app"), doc.get("activity"))
         now = time.monotonic()
-        if self._stitch_next_at is not None and now < self._stitch_next_at:
+        if (page == self._stitch_last_page
+                and self._stitch_next_at is not None
+                and now < self._stitch_next_at):
             return False
+        self._stitch_last_page = page
         self._stitch_next_at = now + STITCH_COOLDOWN
 
         from apt_log import resident
