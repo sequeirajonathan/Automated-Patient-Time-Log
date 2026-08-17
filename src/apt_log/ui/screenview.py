@@ -270,6 +270,15 @@ def build(doc: dict) -> dict | None:
     statics = [dict(s, b=s.get("vb") or s["b"])
                for s in doc.get("statics") or [] if s.get("b")]
 
+    # The app's own bottom tab bar comes out first, before anything is
+    # folded or banded: its captions and the containers under them are
+    # chrome, lifted to the control bar, not content for the list. Detected
+    # from the captions (every tab has one) so the selected tab — which
+    # Compose leaves without a clickable container — is not lost.
+    apptabs, tab_ids = _app_tabs(elements, statics, w, h)
+    elements = [e for e in elements if id(e) not in tab_ids]
+    statics = [s for s in statics if id(s) not in tab_ids]
+
     # Labels inside a tappable container belong to it: they are the row's own
     # text, not free-floating captions. This is what turns "an unlabelled
     # rectangle above three orphaned words" back into a list cell.
@@ -455,10 +464,9 @@ def build(doc: dict) -> dict | None:
     rows = []
     for band in bands:
         shape = _band_shape(band, h)
-        if shape.get("tabs"):
-            band = _fold_tab_captions(band)
         rows.append({"items": band, **shape})
     return {"id": doc.get("id", ""), "nav": nav, "rows": rows,
+            "apptabs": apptabs,
             "notice": doc.get("notice", ""), "blocked": doc.get("blocked", ""),
             "webview": bool(doc.get("webview")),
             "scrollable": bool(doc.get("scrollable")),
@@ -488,6 +496,74 @@ def _fold_tab_captions(band: list[dict]) -> list[dict]:
 
 # The bottom strip of a screen, where an app keeps its own tab bar.
 TAB_BAND_TOP = 0.88
+
+
+def _app_tabs(elements: list[dict], statics: list[dict],
+              w: int, h: int) -> tuple[list[dict], set[int]]:
+    """The app's own bottom tab bar as {txt, aim, current}, and the ids of
+    every node it consumed.
+
+    Detected from the CAPTIONS, not the clickable containers: Compose does
+    not mark the selected tab clickable, so a container-only detector loses
+    a slot (the schedule's 'Programación' when it is the tab in front).
+    Every tab has a caption; the caption's container, when there is one, is
+    the tap point, and the caption with none is the tab already selected —
+    shown lit, not tappable, since tapping the current tab does nothing.
+    """
+    band = h * TAB_BAND_TOP
+    narrow = w * 0.5
+    holders = [e for e in elements
+               if e["b"][3] > band and (e["b"][2] - e["b"][0]) < narrow
+               and _kind(e.get("cls", "")) == "row"]
+    caps = [s for s in statics
+            if s["b"][1] > band and (s.get("txt") or "").strip()
+            and not _is_icon_text(s["txt"])
+            and (s["b"][2] - s["b"][0]) < narrow
+            and len(s["txt"].strip()) <= HEADER_MAX_CHARS]
+    caps.sort(key=lambda s: s["b"][0])
+
+    def _aim(holder):
+        aim = {"rid": holder.get("rid", ""), "cls": holder.get("cls", ""),
+               "b": holder.get("aim_b") or holder["b"]}
+        if holder.get("step"):
+            aim["step"] = holder["step"]
+        return aim
+
+    consumed: set[int] = set()
+    tabs: list[dict] = []
+
+    # Compose-shaped bar: every tab has a caption, and the selected one has
+    # no clickable container. Detect from captions so that slot survives.
+    if len(caps) >= 2:
+        for s in caps:
+            cx = (s["b"][0] + s["b"][2]) / 2
+            holder = next((e for e in holders
+                           if e["b"][0] <= cx <= e["b"][2]), None)
+            if holder is not None:
+                consumed.add(id(holder))
+            tabs.append({"txt": s["txt"].strip(),
+                         "aim": _aim(holder) if holder else None,
+                         "current": holder is None})
+            consumed.add(id(s))
+        return tabs, consumed
+
+    # Icon-tab bar (inMyTeam): three or more equal containers hugging the
+    # bottom, captions optional. Each container is a tab; a stray caption
+    # folds into the one above it.
+    holders.sort(key=lambda e: e["b"][0])
+    if len(holders) >= 3:
+        for e in holders:
+            cx = (e["b"][0] + e["b"][2]) / 2
+            cap = next((s for s in caps
+                        if s["b"][0] <= cx <= s["b"][2]), None)
+            txt = cap["txt"].strip() if cap else ""
+            if cap is not None:
+                consumed.add(id(cap))
+            tabs.append({"txt": txt, "aim": _aim(e), "current": False})
+            consumed.add(id(e))
+        return tabs, consumed
+
+    return [], set()
 
 
 def _band_shape(band: list[dict], height: int) -> dict:

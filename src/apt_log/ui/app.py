@@ -565,6 +565,10 @@ async def live(ws: WebSocket):
                     "h_app": screen_doc.get("h_app", ""),
                     "blocked": screen_doc.get("blocked", ""),
                     "notice": screen_doc.get("notice", ""),
+                    # The app's own tab bar, lifted out of the list to ride
+                    # the control bar beside Back and Home. Empty on screens
+                    # without one.
+                    "apptabs": (model or {}).get("apptabs") or [],
                 }
                 payload["screen_html"] = (
                     "" if model is None

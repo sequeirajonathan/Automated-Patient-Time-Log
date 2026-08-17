@@ -223,9 +223,10 @@ class TestBandShapes:
                       el("trips", "FrameLayout", [540, 1450, 720, 1580])],
             statics=[st([20, 1470, 160, 1520], "Visits")],
         ))
-        tabs = [r for r in m["rows"] if r.get("tabs")]
-        assert len(tabs) == 1
-        assert len(tabs[0]["items"]) == 4
+        # The app's tab bar is lifted out of the list to ride the control
+        # bar (apptabs), never buried as a row in the body.
+        assert not any(r.get("tabs") for r in m["rows"])
+        assert len(m["apptabs"]) == 4
 
     def test_an_ordinary_pair_of_wide_buttons_is_neither(self):
         m = screenview.build(doc(
@@ -496,3 +497,26 @@ class TestFieldPairs:
         assert any(i["kind"] == "label" and i.get("header")
                    and i["txt"] == "Números de teléfono" for i in items)
         assert not any(i["kind"] == "kv" for i in items)
+
+
+class TestAppTabsToControlBar:
+    """The app's own bottom tab bar is lifted out of the list to ride the
+    portal's control bar — always reachable, the way the native app keeps
+    it. The selected tab (no clickable container in Compose) survives as
+    the lit 'current' slot; the rest carry a tap aim."""
+
+    def test_a_compose_bar_keeps_the_selected_tab(self):
+        m = screenview.build(doc(
+            elements=[el("pac", "View", [246, 1508, 478, 1580]),
+                      el("menu", "View", [483, 1508, 720, 1580])],
+            statics=[st([40, 1520, 200, 1560], "Programación"),
+                     st([300, 1520, 440, 1560], "Pacientes"),
+                     st([560, 1520, 660, 1560], "Menú")],
+        ))
+        tabs = m["apptabs"]
+        assert [t["txt"] for t in tabs] == ["Programación", "Pacientes", "Menú"]
+        assert tabs[0]["current"] is True and tabs[0]["aim"] is None
+        assert tabs[1]["aim"] and tabs[2]["aim"]
+        # And it is not left duplicated in the body.
+        assert not any(t["txt"] == "Programación"
+                       for r in m["rows"] for t in r["items"])

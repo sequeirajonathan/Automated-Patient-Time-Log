@@ -107,6 +107,12 @@
         redirect: 'follow'
       }).catch(() => { awaitingMacro = false; awaitingScan = false; unbusy(); });
     });
+    bindAims(root);
+  }
+
+  // Every element carrying a verified aim — a reflow control, or an app tab
+  // lifted into the control bar — posts the same tap the overlay always did.
+  function bindAims(root) {
     for (const el of root.querySelectorAll('[data-aim]')) {
       el.addEventListener('click', (ev) => {
         ev.preventDefault();
@@ -120,6 +126,30 @@
         socket.send(JSON.stringify({ type: 'tap', frame: frameId, element: aim }));
       });
     }
+  }
+
+  // The app's own tab bar, lifted into the control bar. Rebuilt whenever the
+  // screen changes: a page with no tab bar hides the strip entirely, so Back
+  // and Home never share a crowded row with tabs that are not there.
+  function renderAppTabs(tabs) {
+    const strip = document.getElementById('apptabs');
+    if (!strip) return;
+    tabs = tabs || [];
+    if (!tabs.length) { strip.hidden = true; strip.innerHTML = ''; return; }
+    strip.innerHTML = '';
+    for (const t of tabs) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'apptab' + (t.current ? ' current' : '');
+      // The selected tab has no aim (Compose leaves it unclickable) — it is
+      // lit as where-you-are, not a control. Every other tab posts a tap.
+      if (t.aim) b.dataset.aim = JSON.stringify(t.aim);
+      else b.setAttribute('aria-current', 'page');
+      b.textContent = t.txt || '·';
+      strip.appendChild(b);
+    }
+    strip.hidden = false;
+    bindAims(strip);
   }
 
   let currentPackage = '';
@@ -173,6 +203,12 @@
     const wasPackage = currentPackage;
     currentPackage = meta.app || '';
     currentScreen = meta.name || '';
+
+    // The app's own tabs ride the control bar. Hidden on the launcher (no
+    // app in front) and while a launch overlay holds, so they never point
+    // at a screen that is not there.
+    renderAppTabs((meta.name === 'launcher' || pendingApp)
+                  ? [] : meta.apptabs);
 
     // The moment a launch is truly over: the app she asked for is the app in
     // front, awake, with *its own screen* rendered — h_app is whose sketch

@@ -545,11 +545,37 @@
   .navbar { position:absolute; left:0; right:0; bottom:0; z-index:7;
             pointer-events:none;
             padding:0 12px calc(env(safe-area-inset-bottom) + 10px); }
+  .navbar { display:flex; flex-direction:column; align-items:center; gap:8px; }
   .navbar .pill { pointer-events:auto; display:flex; align-items:stretch;
                   gap:6px; border-radius:30px; border:.5px solid var(--line);
                   background:var(--card); padding:8px 10px;
                   box-shadow:var(--shadow-pill); max-width:420px;
-                  margin:0 auto; }
+                  margin:0 auto; width:100%; box-sizing:border-box; }
+
+  /* The app's own tabs, in their own pill above the phone controls: a
+     native-feeling bottom nav for the app's sections, tinted so it reads
+     as the app's chrome rather than ours. Scrolls sideways if an app packs
+     in more tabs than fit. */
+  .navbar .apptabs { pointer-events:auto; display:flex; gap:4px;
+                     border-radius:26px; border:.5px solid var(--line);
+                     background:var(--card); padding:5px;
+                     box-shadow:var(--shadow-pill); max-width:420px;
+                     width:100%; box-sizing:border-box; margin:0 auto;
+                     overflow-x:auto; scrollbar-width:none; }
+  .navbar .apptabs::-webkit-scrollbar { display:none; }
+  .navbar .apptabs[hidden] { display:none; }
+  .navbar .apptab { flex:1 0 auto; min-width:0; border:none;
+                    background:var(--tint-soft); color:var(--tint);
+                    border-radius:20px; padding:9px 14px; cursor:pointer;
+                    font-size:12.5px; font-weight:600; white-space:nowrap;
+                    max-width:none;
+                    transition:transform .3s var(--spring), filter .2s ease; }
+  .navbar .apptab:active { transform:scale(.9); filter:brightness(1.1);
+                    transition-duration:.06s; }
+  /* The tab already in front: filled, the way a native bottom nav lights
+     its current section. Not a control — it points at where you are. */
+  .navbar .apptab.current { background:var(--tint); color:#fff; cursor:default; }
+  .navbar .apptab.current:active { transform:none; filter:none; }
   /* Press feel, everywhere: snap in fast, spring out slow. A single
      transition speed makes a press feel laggy going down and abrupt coming
      up — the native asymmetry is most of what "alive" means. */
@@ -721,6 +747,12 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 9.5 L12 15.5 L18 9.5"/></svg></button>
   </div>
   <nav class="navbar" aria-label="Phone">
+    {# The app's OWN tab bar, lifted out of the scrolled list to ride here —
+       always reachable, the way the native app keeps it, so she can move
+       through the app's sections from where Back and Home already live.
+       Filled by phone.js from the screen payload; hidden when the screen
+       has no tab bar. #}
+    <div id="apptabs" class="apptabs" hidden></div>
     {# The phone's own three, in Android's shapes, plus wake — riding a
        floating pill so the chrome reads native instead of edge-to-edge web. #}
     <div class="pill">
