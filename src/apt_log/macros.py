@@ -847,6 +847,27 @@ def _stitch_walk(driver, assume_top: bool = False) -> bool:
             return {"elements": feed_mod.elements(src, label=True),
                     "statics": feed_mod.statics(src)}
 
+        def settled_capture() -> dict:
+            """A capture the page has stopped moving under.
+
+            The schedule ANIMATES: expansion unfolds over a few hundred
+            milliseconds, and recompose after a swipe rebuilds cards in
+            stages. A single dump on a fixed settle caught trees mid-
+            animation — name lines with a card's height of nothing under
+            them, chevrons absent — and stitching half-built trees is
+            where the duplicated day headers actually came from. Stable
+            means two consecutive dumps agree, the same test the
+            scroll-to-top probe has always trusted.
+            """
+            cap = capture()
+            for _ in range(3):
+                time.sleep(STITCH_SETTLE)
+                again = capture()
+                if again == cap:
+                    return cap
+                cap = again
+            return cap
+
         # Accordions are opened as the walk reaches them, so the scan
         # captures what they hide (see EXPAND_GLYPH above). Budgeted per
         # walk, gated to the proven app and page shape, and guarded: a tap
@@ -876,7 +897,7 @@ def _stitch_walk(driver, assume_top: bool = False) -> bool:
                     expanding = False
                     break
                 time.sleep(STITCH_SETTLE)
-                fresh = capture()
+                fresh = settled_capture()
                 # An unfolded card keeps the page's date headers and its
                 # chevrons (one merely rotated); a page missing them is
                 # wherever the tap navigated to instead.
@@ -908,7 +929,7 @@ def _stitch_walk(driver, assume_top: bool = False) -> bool:
         captures: list[dict] = []
         prev: dict | None = None
         for step in range(STITCH_MAX_STEPS):
-            cap = capture()
+            cap = settled_capture()
             if step == 0:
                 cap = open_folds(cap)
                 if opened:
