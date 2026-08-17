@@ -500,6 +500,7 @@ def _hhax_uma_login(driver, report) -> None:
                                      f'//*[@resource-id="{web_id}"]')
         return found[0] if found else None
 
+    restarted_expiry = False
     clicked_expiry = False
     clicked_sign_in = False
     sign_in_sightings = 0
@@ -532,16 +533,35 @@ def _hhax_uma_login(driver, report) -> None:
         if not clicked_expiry:
             exits = driver.find_elements("xpath", expiry_exit)
             if exits:
-                # Click the dialog's exit ("Regresar al inicio de sesión",
-                # the log_out_button): it hands off to the Chrome sign-in
-                # form and the ordinary walk from there completes in ~23s.
-                # An earlier version terminated and relaunched the app here
-                # instead, on the theory that clicking left a stale activity
-                # stack that swallowed the redirect. Live testing on a real
-                # expiry contradicted that — the click lands cleanly on the
-                # form — and the restart path was actively harmful: a
-                # terminate_app on the wedged app hung inside the driver
-                # call and froze the whole runner. Click, don't restart.
+                if not restarted_expiry:
+                    # A FRESH STACK is the recovery. Clicking the dialog's
+                    # exit (log_out_button) walks into the stale activity
+                    # stack, which swallows the sign-in redirect — watched
+                    # live twice: Chrome submits, the app resurfaces the
+                    # same dialog, not signed in. But the restart must not
+                    # go through the driver: terminate_app against exactly
+                    # this wedged app hung inside its HTTP call for an
+                    # hour, freezing the whole runner. Plain adb touches
+                    # neither — force-stop kills the process outright, the
+                    # launcher intent brings it back, and a cold start
+                    # lands directly on the pending Chrome sign-in form
+                    # (verified live), which the ordinary walk fills.
+                    subprocess.run(
+                        ["adb", "shell", "am", "force-stop",
+                         "com.hhaexchange.uma"],
+                        capture_output=True, timeout=15, check=True)
+                    time.sleep(1.0)
+                    subprocess.run(
+                        ["adb", "shell", "monkey", "-p",
+                         "com.hhaexchange.uma",
+                         "-c", "android.intent.category.LAUNCHER", "1"],
+                        capture_output=True, timeout=15, check=True)
+                    restarted_expiry = True
+                    time.sleep(1.0)
+                    continue
+                # Still the dialog on a stack that is now fresh: clicking
+                # is then the only exit left, and a fresh stack is the one
+                # place it has nothing stale to strand the redirect in.
                 exits[0].click()
                 clicked_expiry = True
                 time.sleep(1.0)

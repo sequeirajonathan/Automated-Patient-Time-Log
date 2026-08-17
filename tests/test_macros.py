@@ -630,13 +630,15 @@ class TestUmaLogin:
         assert not any(
             c for c in driver.method_calls if c[0].endswith(".click"))
 
-    def test_the_expiry_dialog_is_clicked_through_to_the_web_form(self):
-        """'Desconectado — se ha cerrado la sesión': the dialog's exit is
-        log_out_button ("Regresar al inicio de sesión"). Clicking it hands
-        off to the Chrome sign-in form, where the ordinary walk takes over.
-        An earlier version terminated and relaunched the app here instead —
-        which could hang inside the driver call and freeze the whole runner
-        — so the button is pressed, and the app is never restarted."""
+    def test_the_expiry_dialog_is_restarted_over_adb_not_clicked(self):
+        """'Desconectado — se ha cerrado la sesión': a FRESH STACK is the
+        recovery. Clicking the dialog's exit walks into the stale activity
+        stack, which swallows the sign-in redirect (watched live twice:
+        Chrome submits, the dialog resurfaces). And the restart must not go
+        through the driver — terminate_app against exactly this wedged app
+        hung inside its HTTP call for an hour and froze the whole runner.
+        Plain adb force-stops and relaunches; a cold start lands directly
+        on the pending Chrome form, which the ordinary walk fills."""
         import itertools
 
         from apt_log.secrets import (APP_PASSWORD, APP_USERNAME,
@@ -645,8 +647,13 @@ class TestUmaLogin:
         driver = self._driver("com.hhaexchange.uma.HomeActivity")
         state = {"dismissed": False}
         exit_btn = MagicMock()
-        exit_btn.click.side_effect = \
-            lambda: state.__setitem__("dismissed", True)
+        adb_calls = []
+
+        def adb(cmd, **_kw):
+            adb_calls.append(cmd)
+            if cmd[2:4] == ["am", "force-stop"]:
+                state["dismissed"] = True
+            return MagicMock(returncode=0)
 
         def find_elements(_by, selector):
             if "Regresar al inicio" in selector:
@@ -663,6 +670,7 @@ class TestUmaLogin:
         with patch("apt_log.macros.wake_display"), \
              patch("apt_log.secrets.FileSecretProvider",
                    return_value=provider), \
+             patch("apt_log.macros.subprocess.run", side_effect=adb), \
              patch("apt_log.macros.time.sleep"), \
              patch("apt_log.macros.time.monotonic",
                    side_effect=itertools.count(step=0.5)):
@@ -670,8 +678,54 @@ class TestUmaLogin:
                 macros.MACROS["hhax_uma_login"].run(driver, lambda _k: None)
             except RuntimeError:
                 pass    # the mock form is shallow past the fields
-        exit_btn.click.assert_called_once()
+        assert any(c[2:4] == ["am", "force-stop"] for c in adb_calls)
+        assert any(c[2] == "monkey" for c in adb_calls)
+        exit_btn.click.assert_not_called()
         driver.terminate_app.assert_not_called()
+
+    def test_a_dialog_surviving_the_restart_is_clicked_as_a_last_resort(self):
+        """A fresh stack has nothing stale to strand the redirect in, so if
+        the dialog somehow comes back after the restart, its button is the
+        one exit left — pressed once, never looped on."""
+        import itertools
+
+        from apt_log.secrets import (APP_PASSWORD, APP_USERNAME,
+                                     MemorySecretProvider)
+
+        driver = self._driver("com.hhaexchange.uma.HomeActivity")
+        state = {"restarted": False, "dismissed": False}
+        exit_btn = MagicMock()
+        exit_btn.click.side_effect = \
+            lambda: state.__setitem__("dismissed", True)
+
+        def adb(cmd, **_kw):
+            if cmd[2:4] == ["am", "force-stop"]:
+                state["restarted"] = True
+            return MagicMock(returncode=0)
+
+        def find_elements(_by, selector):
+            if "Regresar al inicio" in selector:
+                return [] if state["dismissed"] else [exit_btn]
+            if 'resource-id=' in selector and state["dismissed"]:
+                return [MagicMock()]
+            return []
+        driver.find_elements.side_effect = find_elements
+
+        provider = MemorySecretProvider(**{APP_USERNAME: "u",
+                                           APP_PASSWORD: "p"})
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider",
+                   return_value=provider), \
+             patch("apt_log.macros.subprocess.run", side_effect=adb), \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            try:
+                macros.MACROS["hhax_uma_login"].run(driver, lambda _k: None)
+            except RuntimeError:
+                pass    # the mock form is shallow past the fields
+        assert state["restarted"] is True
+        exit_btn.click.assert_called_once()
 
     def test_missing_credentials_stop_the_macro_before_any_tap(self):
         """The secrets are read before the first tap, so an uncredentialed
