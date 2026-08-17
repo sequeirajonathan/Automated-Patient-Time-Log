@@ -113,9 +113,10 @@ STITCH_TAP_QUIET = 4.0
 # a real action arrives. WARM_ENABLED turns the whole behaviour off in one
 # place if the autonomous movement is ever unwanted.
 WARM_ENABLED = True
-# A bottom-band clickable narrower than half the screen is a tab. The band
-# is the bottom sixth, where every app of the four keeps its tab bar.
-WARM_TAB_BAND = 0.84
+# A tab label is a short text in the bottom band, narrower than half the
+# screen. The band starts at 0.82 of the height, where the four apps keep
+# their tab bars (HHAeXchange+'s captions sit at 0.89).
+WARM_TAB_BAND = 0.82
 WARM_TAB_MAX_WIDTH = 0.5
 WARM_SETTLE = 0.9
 
@@ -803,51 +804,64 @@ def _forget_stitched(app: str) -> None:
         pass
 
 
-def _bottom_tabs(driver) -> list[dict]:
-    """The current screen's own tab bar, left to right, or [].
+def _bottom_tabs(driver) -> list[tuple[int, int]]:
+    """The current screen's tab bar as tap points, left to right, or [].
 
-    A tab is a clickable in the bottom band narrower than half the screen;
-    the app's back/menu chrome lives at the top, its content fills the
-    middle, and its tab bar — when it has one — sits along the bottom.
+    Detected from the tab LABELS, not the clickable containers: Compose
+    does not mark the selected tab clickable (so the clickables miss a
+    slot), while every tab — selected or not — carries its caption. The
+    label's centre falls inside its tab, so it is a reliable tap point,
+    and having all the slots (including the selected one) is what lets the
+    sweep return to the landing tab afterward. A tab label is a short text
+    in the bottom band, narrower than half the screen.
     """
     from apt_log import feed as feed_mod
 
     size = driver.get_window_size()
     w, h = size["width"], size["height"]
-    tabs = [e for e in feed_mod.elements(driver.page_source or "")
-            if e["b"][1] > h * WARM_TAB_BAND
-            and (e["b"][2] - e["b"][0]) < w * WARM_TAB_MAX_WIDTH]
-    return sorted(tabs, key=lambda e: e["b"][0])
+    labels = [s for s in feed_mod.statics(driver.page_source or "")
+              if s["b"][1] > h * WARM_TAB_BAND
+              and (s.get("txt") or "").strip()
+              and (s["b"][2] - s["b"][0]) < w * WARM_TAB_MAX_WIDTH]
+    labels.sort(key=lambda s: s["b"][0])
+    return [((s["b"][0] + s["b"][2]) // 2, (s["b"][1] + s["b"][3]) // 2)
+            for s in labels]
 
 
 def _warm_sweep(driver, request_path, deep_path, poke_path) -> int:
     """Open each sibling tab once and scan it, then return to the landing
     tab. Non-committing throughout (tab switches change no records), and
     it bails the instant a real action is waiting. Returns how many tabs
-    it warmed."""
-    landing = driver.current_activity
-    tabs = _bottom_tabs(driver)
-    if len(tabs) < 2:
+    it warmed.
+
+    The landing is identified by its frame, not its activity: these apps
+    are often single-activity (every tab is HomeActivity), so only the
+    frame tells one tab from another and tells the sweep it has arrived
+    back where it started.
+    """
+    from apt_log import feed as feed_mod
+
+    def here() -> str:
+        return feed_mod.frame_id(feed_mod.elements(driver.page_source or ""))
+
+    landing = here()
+    slots = _bottom_tabs(driver)
+    if len(slots) < 2:
         return 0                       # not a tabbed screen; nothing to warm
 
-    def centre(e):
-        x1, y1, x2, y2 = e["b"]
-        return (x1 + x2) // 2, (y1 + y2) // 2
-
     warmed = 0
-    for tab in tabs:
+    for cx, cy in slots[1:]:           # slot 0 is the landing (leftmost)
         if someone_wants_the_phone(request_path, deep_path, poke_path):
             break
-        cx, cy = centre(tab)
         driver.tap([(cx, cy)])
         time.sleep(WARM_SETTLE)
         if _stitch_walk(driver, assume_top=True):
             warmed += 1
-    # Home again: whichever tab the app opened onto after sign-in. The
-    # leftmost tab is the schedule on every one of the four; if that is not
-    # where we started, the landing check keeps the phone honest.
-    if driver.current_activity != landing and tabs:
-        cx, cy = centre(tabs[0])
+    # Home again: tap slots until the landing frame is back in front, so
+    # the sweep never leaves her parked on a tab she did not choose.
+    for cx, cy in slots:
+        if here() == landing:
+            break
         driver.tap([(cx, cy)])
         time.sleep(WARM_SETTLE)
     return warmed

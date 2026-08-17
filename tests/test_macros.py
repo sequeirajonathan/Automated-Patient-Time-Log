@@ -1334,20 +1334,21 @@ class TestWarmSweep:
     their scans cannot exist. The sweep opens each once — non-committing —
     and yields the phone the instant a real action is waiting."""
 
-    def _driver(self, tabs=3, activity="HomeActivity"):
+    def _driver(self, tabs=3):
         driver = MagicMock()
         driver.get_window_size.return_value = {"width": 720, "height": 1600}
         driver.current_package = "com.hhaexchange.uma"
-        type(driver).current_activity = activity
-        band = 1450
+        labels = ["Programación", "Pacientes", "Menú", "Más"][:tabs]
         nodes = "".join(
-            f'<node class="android.widget.Button" clickable="true" '
-            f'bounds="[{i*220},{band}][{i*220+180},{band+120}]"/>'
-            for i in range(tabs))
+            f'<node class="android.widget.TextView" text="{lbl}" '
+            f'clickable="false" bounds="[{i*240},1427][{i*240+200},1475]"/>'
+            for i, lbl in enumerate(labels))
         type(driver).page_source = property(lambda self: nodes)
         return driver
 
-    def test_each_tab_is_opened_once(self, tmp_path, monkeypatch):
+    def test_each_sibling_tab_is_opened_once(self, tmp_path, monkeypatch):
+        """Slot 0 is the landing tab — already in front, already scanned;
+        the sweep warms the others and comes home."""
         monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
         driver = self._driver(tabs=3)
         with patch("apt_log.macros.time.sleep"), \
@@ -1355,8 +1356,8 @@ class TestWarmSweep:
             warmed = macros._warm_sweep(driver, tmp_path / "req.json",
                                         tmp_path / "deep.json",
                                         tmp_path / "poke")
-        assert warmed == 3
-        assert walk.call_count == 3
+        assert warmed == 2
+        assert walk.call_count == 2
 
     def test_a_screen_without_tabs_is_left_alone(self, tmp_path, monkeypatch):
         monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
