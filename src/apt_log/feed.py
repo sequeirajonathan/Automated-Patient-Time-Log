@@ -305,6 +305,31 @@ def _refocus(serial: str | None = None) -> None:
         log.warning("could not nudge focus back (%s)", exc)
 
 
+# The notification shade, pulled over whatever she was doing. On a phone
+# nobody holds it only ever arrives by accident (an edge swipe misread, a
+# stray tap in the status bar), it is never a destination, and its content
+# is the owner's private notifications — which must not travel to the
+# portal. Collapsed automatically, the way lost focus is nudged back.
+_SHADE_MARKS = ("notification_stack", "quick_qs_panel", "qs_tile",
+                "NotificationShade")
+SHADE_COLLAPSE_COOLDOWN = 20.0
+_last_collapse = [0.0]
+
+
+def _watch_shade(hierarchy: str | None, serial: str | None = None) -> None:
+    if not hierarchy or not any(m in hierarchy for m in _SHADE_MARKS):
+        return
+    now = time.time()
+    if now - _last_collapse[0] < SHADE_COLLAPSE_COOLDOWN:
+        return
+    _last_collapse[0] = now
+    log.info("the notification shade is over the screen — collapsing it")
+    try:
+        _adb(["shell", "cmd", "statusbar", "collapse"], serial)
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("could not collapse the shade (%s)", exc)
+
+
 def _watch_focus(focus: str, awake: bool, serial: str | None = None) -> None:
     """Track awake-but-focusless ticks and nudge when they persist."""
     if focus or not awake:
@@ -336,6 +361,8 @@ def capture(serial: str | None = None,
     """
     focus, awake = window_state(serial)
     _watch_focus(focus, awake, serial)
+    if awake:
+        _watch_shade(hierarchy, serial)
     if not focus or not awake:
         # A dark display and a missing focus are the same fact for the page:
         # the phone is not showing anyone anything. Publishing the focused
@@ -898,6 +925,11 @@ def elements(xml: str, label: bool = False) -> list[dict]:
     for raw in _NODE.findall(xml or ""):
         if _attr(raw, "clickable") != "true":
             continue
+        # The status bar's and shade's own nodes are never care content —
+        # and the shade's are the owner's private notifications, which a
+        # reflow once painted into the portal as shredded columns.
+        if _attr(raw, "package") == "com.android.systemui":
+            continue
         m = _BOUNDS.search(_attr(raw, "bounds"))
         if not m:
             continue
@@ -948,6 +980,8 @@ def statics(xml: str) -> list[dict]:
     for raw in _NODE.findall(xml or ""):
         if _attr(raw, "clickable") == "true":
             continue
+        if _attr(raw, "package") == "com.android.systemui":
+            continue                      # see elements(): never care content
         cls = (_attr(raw, "class") or raw[1:].split()[0].rstrip("/>")).rsplit(".", 1)[-1]
         if cls in EDITABLE:
             continue

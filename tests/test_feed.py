@@ -1233,8 +1233,11 @@ class TestTypeInto:
             out = feed.type_into("f1", dict(self.FIELD), "123456",
                                  frame_path=p)
         assert out["typed"]["chars"] == 6
-        assert calls[0][:3] == ["shell", "input", "tap"]
-        assert calls[1] == ["shell", "input", "text", "123456"]
+        # Another test's watcher thread may interleave its own adb call
+        # into the focus-settle pause; only the input calls are ours.
+        inputs = [c for c in calls if c[:2] == ["shell", "input"]]
+        assert inputs[0][:3] == ["shell", "input", "tap"]
+        assert inputs[1] == ["shell", "input", "text", "123456"]
 
     def test_a_moved_field_is_refused(self, tmp_path):
         p = self._publish(tmp_path, [dict(self.FIELD,
@@ -1253,3 +1256,45 @@ class TestTypeInto:
         for bad in ("", "with space", "semi;colon", "x" * 33, "$(rm)"):
             with pytest.raises(ValueError):
                 feed.type_into("f1", dict(self.FIELD), bad, frame_path=p)
+
+
+class TestNotificationShade:
+    """The shade only ever arrives by accident on a phone nobody holds,
+    and its content is the owner's private notifications. The watcher
+    collapses it; the parsers never publish its nodes."""
+
+    SHADE_NODE = ('<node class="android.widget.TextView" text="Gmail" '
+                  'package="com.android.systemui" clickable="true" '
+                  'bounds="[0,300][720,360]" resource-id='
+                  '"com.android.systemui:id/qs_tile"/>')
+    APP_NODE = ('<node class="android.widget.TextView" text="Hola" '
+                'package="com.hhaexchange.uma" clickable="true" '
+                'bounds="[0,500][720,560]"/>')
+
+    def test_shade_nodes_never_publish(self):
+        xml = self.SHADE_NODE + self.APP_NODE
+        els = feed.elements(xml, label=True)
+        assert len(els) == 1
+        shade_static = self.SHADE_NODE.replace('clickable="true"',
+                                               'clickable="false"')
+        sts = feed.statics(shade_static + self.APP_NODE)
+        assert all("Gmail" not in (s.get("txt") or "") for s in sts)
+
+    def test_an_open_shade_is_collapsed_once(self):
+        feed._last_collapse[0] = 0.0
+        calls = []
+        with patch.object(feed, "_adb",
+                          side_effect=lambda a, *_, **__: calls.append(a)
+                          or MagicMock(returncode=0)):
+            feed._watch_shade('<node resource-id="com.android.systemui:id/'
+                              'quick_qs_panel"/>')
+            feed._watch_shade('<node resource-id="com.android.systemui:id/'
+                              'quick_qs_panel"/>')   # within cooldown
+        collapses = [c for c in calls if c[:3] == ["shell", "cmd", "statusbar"]]
+        assert len(collapses) == 1
+
+    def test_an_ordinary_screen_is_left_alone(self):
+        feed._last_collapse[0] = 0.0
+        with patch.object(feed, "_adb") as adb:
+            feed._watch_shade(self.APP_NODE)
+        adb.assert_not_called()
