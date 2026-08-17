@@ -971,12 +971,14 @@ class Runner:
 
         from apt_log import resident
 
+        log.info("walking the page for a whole-page document (frame %s)", fid)
         try:
             ok = bool(resident.run(_stitch_walk))
         except Exception as exc:  # noqa: BLE001
             log.warning("stitch walk failed: %s", exc)
             ok = False
         if not ok:
+            log.info("stitch walk yielded nothing for frame %s", fid)
             self._stitch_failed_for = fid
         return ok
 
