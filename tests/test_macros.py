@@ -1140,3 +1140,77 @@ class TestReadPage:
 
     def test_the_macro_is_registered_with_a_translation_key(self):
         assert macros.MACROS["read_page"].label_key == "macro.read_page"
+
+
+class TestSwipeFallback:
+    """UiAutomator2 refuses W3C action chains now and then while a plain
+    `input swipe` on the same device works. The walk falls back instead of
+    dying — observed live as half the whole-page walks failing with
+    "Unable to perform W3C actions"."""
+
+    def test_a_working_driver_swipes_without_adb(self):
+        driver = MagicMock()
+        with patch("apt_log.macros.subprocess.run") as run:
+            macros._swipe(driver, 360, 900, 500)
+        driver.swipe.assert_called_once_with(360, 900, 360, 500, 260)
+        run.assert_not_called()
+
+    def test_a_w3c_refusal_falls_back_to_adb(self):
+        driver = MagicMock()
+        driver.swipe.side_effect = Exception("Unable to perform W3C actions")
+        with patch("apt_log.macros.subprocess.run") as run:
+            macros._swipe(driver, 360, 900, 500)
+        run.assert_called_once()
+        assert run.call_args.args[0] == [
+            "adb", "shell", "input", "swipe", "360", "900", "360", "500", "260"]
+
+
+class TestMaybeStitch:
+    """The walk fires itself, so its gates carry the safety argument: only a
+    watched, unblocked, scrollable care-app page, never twice in quick
+    succession, and never system UI."""
+
+    def _runner(self, tmp_path, app="com.hhaexchange.caregiver",
+                screen="home", fid="abc123"):
+        viewers = tmp_path / "viewers.json"
+        viewers.write_text(json.dumps({"n": 1}), encoding="utf-8")
+        screen_doc = tmp_path / "screen.json"
+        screen_doc.write_text(json.dumps({
+            "id": fid, "app": app, "screen": screen, "blocked": "",
+            "scrollable": True, "full": False}), encoding="utf-8")
+        return macros.Runner(status_path=tmp_path / "status.json",
+                             screen_path=screen_doc, viewers_path=viewers)
+
+    def test_a_care_app_page_is_walked(self, tmp_path):
+        runner = self._runner(tmp_path)
+        with patch("apt_log.resident.run", return_value=True) as walk:
+            assert runner.maybe_stitch() is True
+        walk.assert_called_once()
+
+    def test_system_ui_is_never_walked(self, tmp_path):
+        """Seen live: the walker swiping through the notification shade —
+        system UI nobody asked to read, on a phone nobody is holding."""
+        runner = self._runner(tmp_path, app="com.android.systemui")
+        with patch("apt_log.resident.run") as walk:
+            assert runner.maybe_stitch() is False
+        walk.assert_not_called()
+
+    def test_the_cooldown_stops_back_to_back_walks(self, tmp_path):
+        """A page whose text ticks re-hashes every frame; without a floor
+        between attempts the phone scrolls itself over and over."""
+        runner = self._runner(tmp_path)
+        with patch("apt_log.resident.run", return_value=True) as walk:
+            assert runner.maybe_stitch() is True
+            assert runner.maybe_stitch() is False
+        walk.assert_called_once()
+
+    def test_a_transient_failure_is_also_held_to_the_cooldown(self, tmp_path):
+        """Transient failures are not latched to the frame — but they must
+        not retry every poll tick either, or a dying session animates the
+        phone once a second."""
+        runner = self._runner(tmp_path)
+        with patch("apt_log.resident.run",
+                   side_effect=RuntimeError("no Appium session")) as walk:
+            assert runner.maybe_stitch() is False
+            assert runner.maybe_stitch() is False
+        walk.assert_called_once()

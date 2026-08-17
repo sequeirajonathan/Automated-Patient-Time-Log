@@ -1060,3 +1060,63 @@ class TestWebviewHonesty:
                'clickable="false" bounds="[0,0][100,50]"/>')
         feed.write_screen(target, frame, "home", "", xml, focus=HOME)
         assert json.loads(target.read_text())["webview"] is False
+
+
+class TestFreshStitch:
+    """When the whole-page document still counts as the page in front.
+
+    The exact frame-id match proved brittle live: a ticking clock re-hashed
+    the viewport the moment a walk finished, and a four-capture document
+    was thrown away unpublished. The near-match accepts one volatile node;
+    it must still refuse a different page, a different app, and old news.
+    """
+
+    ELS = [{"cls": "Button", "rid": "go", "txt": "Go", "b": [10, 100, 700, 160]},
+           {"cls": "TextView", "rid": "", "txt": "Hola", "b": [10, 200, 700, 260]},
+           {"cls": "TextView", "rid": "", "txt": "Visitas", "b": [10, 300, 700, 360]},
+           {"cls": "TextView", "rid": "", "txt": "Pacientes", "b": [10, 400, 700, 460]},
+           {"cls": "Button", "rid": "menu", "txt": "", "b": [10, 500, 700, 560]},
+           {"cls": "TextView", "rid": "clock", "txt": "22:41", "b": [10, 600, 700, 660]}]
+
+    def _write(self, tmp_path, **extra):
+        doc = {"step0": "aaaa", "app": "com.hhaexchange.caregiver",
+               "elements": [dict(e, vb=e["b"], step=0) for e in self.ELS],
+               "statics": [], "steps": 2, **extra}
+        (tmp_path / feed.STITCH_NAME).write_text(json.dumps(doc),
+                                                 encoding="utf-8")
+        return doc
+
+    def test_the_exact_frame_id_is_the_fast_path(self, tmp_path):
+        self._write(tmp_path)
+        assert feed._fresh_stitch(tmp_path, "aaaa") is not None
+
+    def test_one_volatile_node_does_not_void_the_walk(self, tmp_path):
+        self._write(tmp_path)
+        els = [dict(e) for e in self.ELS[:-1]] + \
+              [dict(self.ELS[-1], txt="22:42")]        # the clock ticked
+        got = feed._fresh_stitch(tmp_path, "bbbb", els=els,
+                                 app="com.hhaexchange.caregiver")
+        assert got is not None
+
+    def test_a_different_page_of_the_same_app_is_refused(self, tmp_path):
+        self._write(tmp_path)
+        els = [{"cls": "Button", "rid": "other", "txt": "No", "b": [0, 0, 100, 50]},
+               {"cls": "TextView", "rid": "", "txt": "Otra", "b": [0, 60, 100, 110]}]
+        assert feed._fresh_stitch(tmp_path, "bbbb", els=els,
+                                  app="com.hhaexchange.caregiver") is None
+
+    def test_another_apps_screen_never_wears_the_document(self, tmp_path):
+        self._write(tmp_path)
+        assert feed._fresh_stitch(tmp_path, "bbbb", els=list(self.ELS),
+                                  app="com.android.systemui") is None
+
+    def test_without_the_viewport_no_near_match_is_attempted(self, tmp_path):
+        self._write(tmp_path)
+        assert feed._fresh_stitch(tmp_path, "bbbb") is None
+
+    def test_an_old_document_is_not_trusted_even_on_exact_match(self, tmp_path):
+        import os
+        self._write(tmp_path)
+        old = time.time() - feed.STITCH_MAX_AGE - 5
+        os.utime(tmp_path / feed.STITCH_NAME, (old, old))
+        assert feed._fresh_stitch(tmp_path, "aaaa") is None

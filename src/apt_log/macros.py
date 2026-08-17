@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 import threading
 import time
 import uuid
@@ -81,6 +82,10 @@ DEEPTAP_REQUEST_PATH = STATE_DIR / "deeptap-request.json"
 DEEPTAP_RESULT_PATH = STATE_DIR / "deeptap-result.json"
 DEEPTAP_MAX_AGE = 15.0
 STITCH_MAX_STEPS = 10
+# The floor between walk ATTEMPTS, success or failure. A page whose text
+# ticks (a clock, a countdown) re-hashes every frame, and without a floor
+# the phone would visibly scroll itself over and over for the same page.
+STITCH_COOLDOWN = 45.0
 
 # Sign in only while someone is actually watching. Unwatched, the app's own
 # inactivity timer signs the session back out and the two loop all night —
@@ -620,6 +625,23 @@ def _swipe_geometry(driver) -> tuple[int, int, int]:
             int(size["height"] * 0.33), int(size["height"] * 0.66))
 
 
+def _swipe(driver, x: int, y1: int, y2: int, ms: int = 260) -> None:
+    """One vertical swipe, with a plain-adb fallback.
+
+    UiAutomator2 refuses W3C action chains outright now and then
+    ("Unable to perform W3C actions") while `input swipe` on the same
+    device at the same moment works fine. The gesture is uncontroversial —
+    mid-screen, presses nothing — so the walk falls back instead of dying
+    on the driver's mood.
+    """
+    try:
+        driver.swipe(x, y1, x, y2, ms)
+    except Exception:  # noqa: BLE001 — the fallback is the point
+        subprocess.run(["adb", "shell", "input", "swipe",
+                        str(x), str(y1), str(x), str(y2), str(ms)],
+                       capture_output=True, timeout=20, check=True)
+
+
 def _scroll_to_top(driver, cx: int, y_top: int, y_bot: int) -> None:
     prev = None
     for _ in range(8):
@@ -627,7 +649,7 @@ def _scroll_to_top(driver, cx: int, y_top: int, y_bot: int) -> None:
         if src == prev:
             break
         prev = src
-        driver.swipe(cx, y_top, cx, y_bot, 260)
+        _swipe(driver, cx, y_top, y_bot)
         time.sleep(0.8)
 
 
@@ -657,11 +679,11 @@ def _stitch_walk(driver) -> bool:
             break
         captures.append(cap)
         prev = cap
-        driver.swipe(cx, y_bot, cx, y_top, 260)
+        _swipe(driver, cx, y_bot, y_top)
         time.sleep(0.8)
 
     for _ in range(max(len(captures) - 1, 0)):
-        driver.swipe(cx, y_top, cx, y_bot, 260)
+        _swipe(driver, cx, y_top, y_bot)
         time.sleep(0.4)
 
     if not captures or not captures[0]["elements"]:
@@ -669,6 +691,9 @@ def _stitch_walk(driver) -> bool:
     doc = stitch_mod.stitch(captures, nominal_dy=y_bot - y_top)
     doc.update({
         "step0": feed_mod.frame_id(captures[0]["elements"]),
+        # Whose page this is: the feed's freshness check refuses to dress
+        # another app's screen in this document, however similar.
+        "app": driver.current_package or "",
         "at": datetime.now().isoformat(),
     })
     try:
@@ -908,6 +933,9 @@ class Runner:
         # The frame a stitch walk failed on: not retried until the screen
         # changes, or a stubborn page would be walked forever.
         self._stitch_failed_for: str = ""
+        # When the next walk attempt is allowed (monotonic). None, not 0.0,
+        # for the same reason as the auth cooldown above.
+        self._stitch_next_at: float | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -965,9 +993,20 @@ class Runner:
                 or doc.get("full") or not doc.get("app")
                 or doc.get("screen") == "launcher"):
             return False
+        from apt_log import feed as feed_mod
+
+        # Only the four apps the portal exists for. Without this, the walker
+        # cheerfully walked the notification shade — swiping through system
+        # UI nobody asked to read, on a phone nobody is holding.
+        if doc.get("app") not in feed_mod.CARE_APPS:
+            return False
         fid = doc.get("id") or ""
         if not fid or fid == self._stitch_failed_for:
             return False
+        now = time.monotonic()
+        if self._stitch_next_at is not None and now < self._stitch_next_at:
+            return False
+        self._stitch_next_at = now + STITCH_COOLDOWN
 
         from apt_log import resident
 
@@ -1007,7 +1046,7 @@ class Runner:
             cx, y_top, y_bot = _swipe_geometry(driver)
             _scroll_to_top(driver, cx, y_top, y_bot)
             for _ in range(step):
-                driver.swipe(cx, y_bot, cx, y_top, 260)
+                _swipe(driver, cx, y_bot, y_top)
                 time.sleep(0.8)
             els = feed_mod.elements(driver.page_source or "")
             found = stitch_mod.locate(aim, els)

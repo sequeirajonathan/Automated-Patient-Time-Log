@@ -421,15 +421,54 @@ SCREEN_NAME = "screen.json"
 STITCH_NAME = "stitched.json"
 
 
-def _fresh_stitch(directory: Path, viewport_id: str) -> dict | None:
-    """The stitched whole-page document, if it still describes this screen."""
+# A stitched page older than this is walked again rather than trusted: the
+# identity check below sees structure, not words, and ten minutes is long
+# enough for a page's text to have moved on even where its rows have not.
+STITCH_MAX_AGE = 600.0
+
+# The share of the viewport's element identities that must appear in the
+# stitched document for it to still count as this page. Less than all of
+# them, because one volatile node — a clock, a badge count — must not throw
+# away a whole-page walk; most of them, because a genuinely different page
+# must never wear another page's document.
+STITCH_MIN_OVERLAP = 0.8
+
+
+def _fresh_stitch(directory: Path, viewport_id: str,
+                  els: list[dict] | None = None,
+                  app: str = "") -> dict | None:
+    """The stitched whole-page document, if it still describes this screen.
+
+    The exact frame-id match is the fast path. It is also brittle on
+    purpose everywhere else — one changed character re-hashes the frame —
+    which here meant a ticking clock invalidated a walk the moment it
+    finished. So a near-match is accepted too: same app in front, document
+    young, and nearly every element identity currently in the viewport
+    present in the stitched page. Identity is structure and place, not
+    words alone, so a different page of the same app does not pass.
+    """
     if not viewport_id:
         return None
+    path = directory / STITCH_NAME
     try:
-        doc = json.loads((directory / STITCH_NAME).read_text(encoding="utf-8"))
+        age = time.time() - path.stat().st_mtime
+        doc = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    return doc if doc.get("step0") == viewport_id else None
+    if age > STITCH_MAX_AGE:
+        return None
+    if doc.get("step0") == viewport_id:
+        return doc
+    if not els or not app or doc.get("app") != app:
+        return None
+    from apt_log import stitch as stitch_mod
+
+    stitched = {stitch_mod._key(e) for e in doc.get("elements") or []}
+    mine = {stitch_mod._key(e) for e in els}
+    if not mine or not stitched:
+        return None
+    overlap = len(mine & stitched) / len(mine)
+    return doc if overlap >= STITCH_MIN_OVERLAP else None
 
 
 def write_screen(target: Path, frame: dict, screen: str, reason: str,
@@ -536,7 +575,9 @@ def write_frame(path: Path, serial: str | None = None,
     # document's first capture still matches what is in front, the portal
     # renders and aims at everything, not just the viewport. The moment the
     # screen moves on, the match fails and the viewport is the truth again.
-    stitched = _fresh_stitch(path.parent, frame_id(els)) if not reason else None
+    stitched = (_fresh_stitch(path.parent, frame_id(els), els=els,
+                              app=(focus or "").split("/")[0])
+                if not reason else None)
     frame = {
         "id": frame_id(els),
         # Why there is no picture, so the page can say something better than
