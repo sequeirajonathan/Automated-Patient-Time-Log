@@ -1298,3 +1298,76 @@ class TestNotificationShade:
         with patch.object(feed, "_adb") as adb:
             feed._watch_shade(self.APP_NODE)
         adb.assert_not_called()
+
+
+class TestContainment:
+    """No command from the portal may leave the phone anywhere but the
+    four care apps. A verified tap can still fire an intent — the dialer,
+    Maps, Android settings — so the watcher brings the last care app back
+    once an unsanctioned package holds the foreground past the dwell."""
+
+    def _reset(self):
+        feed._out_since[0] = 0.0
+        feed._last_return[0] = 0.0
+        feed._last_care_app[0] = ""
+
+    def _run(self, focuses, dt=3.0, status_state="idle"):
+        """Feed a sequence of focus sightings dt seconds apart; return the
+        monkey relaunches issued."""
+        self._reset()
+        calls = []
+        clock = [1000.0]
+
+        class S:  # macro status stub
+            state = status_state
+
+        with patch.object(feed.time, "time", side_effect=lambda: clock[0]), \
+             patch.object(feed, "_adb",
+                          side_effect=lambda a, *_, **__: calls.append(a)
+                          or MagicMock(returncode=0)):
+            import apt_log.macros as macros_mod
+            with patch.object(macros_mod, "read_status", return_value=S()):
+                for f in focuses:
+                    feed._watch_containment(f)
+                    clock[0] += dt
+        return [c for c in calls if c[:2] == ["shell", "monkey"]]
+
+    CARE = "com.hhaexchange.uma/com.hhaexchange.carehub.ui.HomeActivity"
+    SETTINGS = "com.android.settings/.Settings"
+
+    def test_a_stray_settings_screen_is_brought_back(self):
+        out = self._run([self.CARE, self.SETTINGS, self.SETTINGS,
+                         self.SETTINGS])
+        assert len(out) == 1
+        assert out[0][2:4] == ["monkey", "-p"] or "-p" in out[0]
+        assert "com.hhaexchange.uma" in out[0]
+
+    def test_a_momentary_crossing_is_left_alone(self):
+        """One sighting inside the dwell is a transition, not a departure."""
+        out = self._run([self.CARE, self.SETTINGS, self.CARE], dt=2.0)
+        assert out == []
+
+    def test_chromes_custom_tab_is_part_of_the_flow(self):
+        chrome = ("com.android.chrome/org.chromium.chrome.browser."
+                  "customtabs.CustomTabActivity")
+        out = self._run([self.CARE, chrome, chrome, chrome, chrome])
+        assert out == []
+
+    def test_the_full_browser_is_not(self):
+        chrome = ("com.android.chrome/com.google.android.apps.chrome.Main")
+        out = self._run([self.CARE, chrome, chrome, chrome, chrome])
+        assert len(out) == 1
+
+    def test_the_launcher_is_scenery(self):
+        launcher = "com.android.launcher3/.Launcher"
+        out = self._run([self.CARE, launcher, launcher, launcher])
+        assert out == []
+
+    def test_a_running_macro_suspends_the_guard(self):
+        out = self._run([self.CARE, self.SETTINGS, self.SETTINGS,
+                         self.SETTINGS], status_state="running")
+        assert out == []
+
+    def test_nowhere_to_return_means_nothing_happens(self):
+        out = self._run([self.SETTINGS, self.SETTINGS, self.SETTINGS])
+        assert out == []

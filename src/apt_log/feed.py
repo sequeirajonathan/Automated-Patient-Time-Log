@@ -330,6 +330,67 @@ def _watch_shade(hierarchy: str | None, serial: str | None = None) -> None:
         log.warning("could not collapse the shade (%s)", exc)
 
 
+# Containment: no command from the portal should ever LEAVE her anywhere
+# but the four care apps. Taps are verified against the published frame,
+# but a verified tap can still fire an intent — a phone number opens the
+# dialer, an address opens Maps, a help link opens the browser, and
+# inMyTeam once opened Android's own settings. The owner's rule, verbatim:
+# "no command from the front end should land me anywhere unknown besides
+# the 4 known app containers." So the watcher tracks the last care app in
+# front, and when the foreground is an unsanctioned package for more than
+# a moment, it brings that app back.
+#
+# Sanctioned besides the four: the launcher (scenery — the picker
+# experience owns it, and bouncing it would fight the client's own Back
+# handling); Chrome CUSTOM TABS (the HHAeXchange+ sign-in lives in one,
+# and a custom tab is an app-embedded surface, part of the app's own
+# flow) — the full Chrome browser is not; and any moment a macro is
+# running, because macros drive the phone through surfaces on purpose.
+CONTAIN_DWELL = 5.0
+CONTAIN_COOLDOWN = 20.0
+_out_since = [0.0]
+_last_return = [0.0]
+_last_care_app = [""]
+
+
+def _watch_containment(focus: str, serial: str | None = None) -> None:
+    pkg = (focus or "").split("/")[0]
+    if pkg in CARE_APPS:
+        _last_care_app[0] = pkg
+        _out_since[0] = 0.0
+        return
+    if (not pkg or pkg in LAUNCHER_APPS or pkg == "com.android.systemui"
+            or not _last_care_app[0]):
+        _out_since[0] = 0.0
+        return
+    if pkg == "com.android.chrome" and "CustomTabActivity" in (focus or ""):
+        _out_since[0] = 0.0
+        return
+    now = time.time()
+    if not _out_since[0]:
+        _out_since[0] = now
+        return
+    if now - _out_since[0] < CONTAIN_DWELL:
+        return
+    if now - _last_return[0] < CONTAIN_COOLDOWN:
+        return
+    try:
+        from apt_log import macros as macros_mod
+
+        if macros_mod.read_status().state == "running":
+            return
+    except Exception:  # noqa: BLE001 — an unreadable status never blocks
+        pass
+    _last_return[0] = now
+    _out_since[0] = 0.0
+    log.info("foreground is %s — returning to %s", pkg, _last_care_app[0])
+    try:
+        _adb(["shell", "monkey", "-p", _last_care_app[0],
+              "-c", "android.intent.category.LAUNCHER", "1"], serial)
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("could not return to the care app (%s)", exc)
+
+
 def _watch_focus(focus: str, awake: bool, serial: str | None = None) -> None:
     """Track awake-but-focusless ticks and nudge when they persist."""
     if focus or not awake:
@@ -363,6 +424,7 @@ def capture(serial: str | None = None,
     _watch_focus(focus, awake, serial)
     if awake:
         _watch_shade(hierarchy, serial)
+        _watch_containment(focus, serial)
     if not focus or not awake:
         # A dark display and a missing focus are the same fact for the page:
         # the phone is not showing anyone anything. Publishing the focused
