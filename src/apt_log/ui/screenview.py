@@ -243,12 +243,19 @@ def build(doc: dict) -> dict | None:
     # Labels inside a tappable container belong to it: they are the row's own
     # text, not free-floating captions. This is what turns "an unlabelled
     # rectangle above three orphaned words" back into a list cell.
+    #
+    # Containment is judged WITHIN a capture, never across the stitch. The
+    # virtual bounds carry the scroll offset's accumulated error, so on a
+    # long page a day divider from one capture drifted inside a visit card
+    # from another and folded in as a bogus subtitle (seen live: "agosto
+    # 19/20/21" stuck under a visit row). Only a label captured at the same
+    # scroll step as the container was really inside it.
     containers = [e for e in elements if _kind(e.get("cls", "")) == "row"]
     folded: set[int] = set()
     labels: dict[int, list[dict]] = {}
     for i, s in enumerate(statics):
         for c in containers:
-            if _contains(c["b"], s["b"]):
+            if s.get("step", 0) == c.get("step", 0) and _contains(c["b"], s["b"]):
                 labels.setdefault(id(c), []).append(s)
                 folded.add(i)
                 break
