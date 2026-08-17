@@ -120,9 +120,16 @@ STITCH_TAP_QUIET = 4.0
 # row unfolds the EVV records and the details button beneath it. A scan
 # that never opens them publishes a page that is honestly incomplete —
 # the owner asked for the opposite ("open accordion elements so we get an
-# accurate front end"). So the walk unfolds them as it goes, and leaves
-# them unfolded: the phone then matches the portal, and the next scan has
+# accurate front end"). So the walk unfolds them, and leaves them
+# unfolded: the phone then matches the portal, and the next scan has
 # nothing left to open.
+#
+# ONLY TODAY'S CARDS. The owner's scoping, verbatim: "We don't care
+# about the past or future schedules for patients we just care about
+# today!" — and today is also where every actionable thing lives.
+# Expanding the whole week grew the page past one screen; today's
+# section (however many patients are in it) keeps the page short enough
+# to publish whole in one or two captures, and the taps down to a couple.
 #
 # The chevron is the state signal, verified live on the device: the same
 # icon-font glyph is drawn ROTATED when open — collapsed it is taller
@@ -138,6 +145,8 @@ EXPAND_APPS = {"com.hhaexchange.uma"}
 EXPAND_MAX_TAPS = 16
 EXPAND_MIN_DATE_HEADERS = 3
 _DATE_HEADER = re.compile(r"\d{1,2},\s*20\d{2}")
+# How the schedule marks today's header, in the app's two locales.
+_TODAY_MARKS = ("hoy", "today")
 
 # Cache-warming: right after a sign-in, the app's other tabs have never
 # been opened, so their virtualized lists have never been materialised and
@@ -771,14 +780,35 @@ def _page_folds(statics: list[dict]) -> bool:
     return dates >= EXPAND_MIN_DATE_HEADERS
 
 
+def _today_span(statics: list[dict]) -> tuple[int, int] | None:
+    """The y-range of TODAY's section: from its marked header ("agosto 17,
+    2026 (Hoy)") down to the next date header, or None when today is not
+    on screen. However many patients share the day, they all live in this
+    span — that is the multi-patient case handled by construction."""
+    dates = sorted(
+        ((s["b"][1], (s.get("txt") or "").lower()) for s in statics
+         if s.get("b") and _DATE_HEADER.search(s.get("txt") or "")),
+        key=lambda pair: pair[0])
+    for i, (y, txt) in enumerate(dates):
+        if any(mark in txt for mark in _TODAY_MARKS):
+            bottom = dates[i + 1][0] if i + 1 < len(dates) else 10**9
+            return y, bottom
+    return None
+
+
 def _collapsed_rows(elements: list[dict], statics: list[dict],
                     width: int) -> list[list[int]]:
-    """Bounds of full-width rows still folded shut, top to bottom.
+    """Bounds of TODAY's full-width rows still folded shut, top to bottom.
 
     A collapsed accordion is a trailing-edge chevron glyph standing
     taller than wide (the open state draws the same glyph rotated),
-    sitting inside a row that spans the screen.
+    sitting inside a row that spans the screen — and inside today's
+    section, the only day whose cards are opened (see EXPAND_GLYPH).
     """
+    span = _today_span(statics)
+    if span is None:
+        return []
+    top, bottom = span
     rows: list[list[int]] = []
     for s in statics:
         if (s.get("txt") or "").strip() != EXPAND_GLYPH:
@@ -789,6 +819,8 @@ def _collapsed_rows(elements: list[dict], statics: list[dict],
         if b[0] < width * 0.75:
             continue                          # trailing edge only
         cy = (b[1] + b[3]) // 2
+        if not top <= cy < bottom:
+            continue                          # another day's card
         for e in elements:
             eb = e.get("b") or []
             if (len(eb) == 4 and eb[2] - eb[0] >= width * 0.7

@@ -1613,8 +1613,10 @@ class TestAccordionScan:
     CHEV = "\uf054"
 
     def _dates(self, n=3):
+        # The first header is today's, marked the way the app marks it.
         return "".join(
-            f'<node class="android.widget.TextView" text="agosto {17+i}, 2026" '
+            f'<node class="android.widget.TextView" '
+            f'text="agosto {17+i}, 2026{" (Hoy)" if i == 0 else ""}" '
             f'clickable="false" bounds="[9,{347+i*300}][98,{363+i*300}]"/>'
             for i in range(n))
 
@@ -1770,4 +1772,50 @@ class TestAccordionScan:
         with patch("apt_log.macros.time.sleep"), \
              patch("apt_log.macros._tap_xy") as tapped:
             macros._stitch_walk(driver, assume_top=False)
+        tapped.assert_not_called()
+
+    def test_only_todays_cards_are_opened_and_all_of_them(
+            self, tmp_path, monkeypatch):
+        """The owner's scoping: "we just care about today". Every card in
+        today's section opens — two patients, three, however many share
+        the day — and no card under any other date header is touched."""
+        monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
+        def page(a_open, b_open):
+            return (self._dates()
+                    + self._card(401, "LUCRESIA L PUPO",
+                                 folded=not a_open, details=a_open)
+                    + self._card(501, "NIEVES C MASTRAPA",
+                                 folded=not b_open, details=b_open)
+                    + self._card(701, "PACIENTE FUTURO"))
+        state = {"taps": []}
+        pages = {0: page(False, False), 1: page(True, False),
+                 2: page(True, True)}
+        driver = MagicMock()
+        driver.get_window_size.return_value = {"width": self.W, "height": self.H}
+        driver.current_package = "com.hhaexchange.uma"
+        type(driver).page_source = property(
+            lambda _self: pages[len(state["taps"])])
+
+        def tap(x, y):
+            state["taps"].append((x, y))
+
+        with patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros._tap_xy", side_effect=tap):
+            assert macros._stitch_walk(driver, assume_top=True) is True
+        assert state["taps"] == [(362, 417), (362, 517)]   # today only
+
+    def test_no_today_header_on_screen_means_no_taps(
+            self, tmp_path, monkeypatch):
+        """A schedule scrolled past today (or filtered to another week)
+        offers nothing this scan should touch."""
+        monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
+        dates = "".join(
+            f'<node class="android.widget.TextView" text="agosto {20+i}, 2026" '
+            f'clickable="false" bounds="[9,{347+i*300}][98,{363+i*300}]"/>'
+            for i in range(3))
+        pages = {"collapsed": dates + self._card(401, "PACIENTE")}
+        driver = self._driver({"page": "collapsed"}, pages)
+        with patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros._tap_xy") as tapped:
+            macros._stitch_walk(driver, assume_top=True)
         tapped.assert_not_called()
