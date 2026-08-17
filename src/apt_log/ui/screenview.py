@@ -359,13 +359,18 @@ def build(doc: dict) -> dict | None:
                     badge = value
                 elif how == "mark":
                     marks.append(value)
-            # An avatar chip's initial folded in as the row's first line
-            # ("H" ahead of the agency's name on the visits list): a stub
-            # of capitals ahead of real lines is the app's decoration,
+            # An avatar chip's initial folded in among the row's first
+            # lines ("H" beside the agency's name on the visits list): a
+            # stub of capitals among real lines is the app's decoration,
             # the folded twin of the loose "LP" beside a patient's name.
-            if (len(lines) >= 3 and len(lines[0].strip()) <= 2
-                    and lines[0].strip().isupper()):
-                lines = lines[1:]
+            # It sorts first or second depending on which baseline sits a
+            # pixel higher, so both leading slots are checked.
+            if len(lines) >= 3:
+                for k in (0, 1):
+                    if (len(lines[k].strip()) <= 2
+                            and lines[k].strip().isupper()):
+                        lines.pop(k)
+                        break
             item["lines"] = lines
             item["badge"] = badge
             # A row whose only content is a KNOWN glyph is named by it —
