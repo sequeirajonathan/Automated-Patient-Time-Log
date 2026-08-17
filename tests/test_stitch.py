@@ -41,6 +41,34 @@ class TestStitching:
         ], nominal_dy=300)
         assert len(doc["elements"]) == 1
 
+    def test_repeated_identities_do_not_vote_on_the_shift(self):
+        """A schedule is anonymous containers and repeated lines: a dozen
+        bare Views sharing one identity, the same patient name four
+        times. Matching each against the FIRST same-keyed item of the
+        previous capture produced garbage deltas that dragged the median
+        154 px off the real scroll — watched live, day headers doubled.
+        Only identities unique in both captures may vote."""
+        prev = {"elements": [el("", "View", [25, 200 + i * 120, 700,
+                                             232 + i * 120])
+                             for i in range(8)],
+                "statics": [el("", "TextView", [9, 150, 98, 166],
+                               "agosto 18, 2026"),
+                            el("", "TextView", [9, 600, 98, 616],
+                               "agosto 19, 2026")]}
+        cur = {"elements": [el("", "View", [25, 137 + i * 120, 700,
+                                            169 + i * 120])
+                            for i in range(8)],
+                "statics": [el("", "TextView", [9, 100, 98, 116],
+                               "agosto 19, 2026"),
+                            el("", "TextView", [9, 550, 98, 566],
+                               "agosto 20, 2026")]}
+        doc = stitch.stitch([prev, cur], nominal_dy=300)
+        added = [s for s in doc["statics"] if s["txt"] == "agosto 20, 2026"]
+        # The unique anchor (agosto 19: 600 -> 100) says the page moved
+        # 500; the anonymous Views' self-similar 63 px offsets must not
+        # drag that down. agosto 20 lands at 550 + 500 = 1050.
+        assert added and added[0]["vb"][1] == 1050
+
     def test_twins_in_one_capture_are_both_kept(self):
         """Two same-identity items close together in the SAME capture are
         genuinely two items — the dump saw them side by side. The

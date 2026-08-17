@@ -270,7 +270,7 @@ def build(doc: dict) -> dict | None:
     # only `b`, and the two roles coincide.
     elements = [dict(e, b=e.get("vb") or e["b"], aim_b=e["b"])
                 for e in doc.get("elements") or [] if e.get("b")]
-    statics = [dict(s, b=s.get("vb") or s["b"])
+    statics = [dict(s, b=s.get("vb") or s["b"], dev_b=s["b"])
                for s in doc.get("statics") or [] if s.get("b")]
 
     # The app's own bottom tab bar comes out first, before anything is
@@ -519,6 +519,23 @@ def _fold_tab_captions(band: list[dict]) -> list[dict]:
 
 # The bottom strip of a screen, where an app keeps its own tab bar.
 TAB_BAND_TOP = 0.88
+# And the bar must actually HUG the bottom edge: its nodes reach into the
+# screen's last twentieth. The schedule's list runs to within 8% of the
+# bottom, and on a stitched page the tail's own rows (a page's virtual
+# bottom runs on past the pinned bar) matched the loose band test —
+# watched live: 'agosto 21', patient names and their times consumed as a
+# sixteen-tab bar, and the page's last two days vanished from the portal.
+TAB_REACH = 0.95
+
+
+def _dev(item: dict) -> list[int]:
+    """Where the node sat on the DEVICE when captured.
+
+    Stitched pages give every item a virtual position too, and chrome
+    must be judged where it was drawn: the tab bar is pinned to the
+    screen's bottom while the page's virtual bottom runs on past it.
+    """
+    return item.get("dev_b") or item.get("aim_b") or item["b"]
 
 
 def _app_tabs(elements: list[dict], statics: list[dict],
@@ -534,12 +551,15 @@ def _app_tabs(elements: list[dict], statics: list[dict],
     shown lit, not tappable, since tapping the current tab does nothing.
     """
     band = h * TAB_BAND_TOP
+    reach = h * TAB_REACH
     narrow = w * 0.5
     holders = [e for e in elements
-               if e["b"][3] > band and (e["b"][2] - e["b"][0]) < narrow
+               if _dev(e)[3] > band and _dev(e)[3] >= reach
+               and (e["b"][2] - e["b"][0]) < narrow
                and _kind(e.get("cls", "")) == "row"]
     caps = [s for s in statics
-            if s["b"][1] > band and (s.get("txt") or "").strip()
+            if _dev(s)[1] > band and _dev(s)[3] >= reach
+            and (s.get("txt") or "").strip()
             and not _is_icon_text(s["txt"])
             and (s["b"][2] - s["b"][0]) < narrow
             and len(s["txt"].strip()) <= HEADER_MAX_CHARS]
@@ -612,7 +632,9 @@ def _band_shape(band: list[dict], height: int) -> dict:
     if (len(interactive) >= 3
             and len(band) - len(interactive) <= 2
             and all(i["kind"] in ("row", "image") for i in interactive)
-            and all(i["b"][3] >= height * TAB_BAND_TOP for i in interactive)):
+            and all((i["aim"]["b"][3] >= height * TAB_BAND_TOP
+                     and i["aim"]["b"][3] >= height * TAB_REACH)
+                    for i in interactive)):
         return {"tabs": True}
     return {}
 

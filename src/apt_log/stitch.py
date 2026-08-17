@@ -24,6 +24,7 @@ often enough that assuming it would misplace every band after the first.
 
 from __future__ import annotations
 
+from collections import Counter
 from statistics import median
 
 # An item is the same item in two captures when identity and horizontal
@@ -34,12 +35,25 @@ def _key(item: dict) -> tuple:
 
 
 def _shift(prev: list[dict], cur: list[dict]) -> float | None:
-    """The scroll distance between two captures, from shared anchors."""
-    where = {}
-    for item in prev:
-        where.setdefault(_key(item), item["b"][1])
+    """The scroll distance between two captures, from shared anchors.
+
+    Only items whose identity is UNIQUE within both captures may vote. A
+    schedule is built of anonymous containers and repeated lines — a
+    dozen bare Views sharing one identity, the same patient name four
+    times — and matching each of those against the first same-keyed item
+    of the previous capture produced a spread of garbage deltas that
+    dragged the median 154 px off the real scroll (watched live: every
+    unique anchor said 396, the stitch used 242, and the page came out
+    with its day headers doubled). The date headers and one-off lines
+    are unambiguous, and they are enough.
+    """
+    prev_counts = Counter(_key(item) for item in prev)
+    cur_counts = Counter(_key(item) for item in cur)
+    where = {_key(item): item["b"][1] for item in prev
+             if prev_counts[_key(item)] == 1}
     deltas = [where[_key(item)] - item["b"][1]
-              for item in cur if _key(item) in where]
+              for item in cur
+              if cur_counts[_key(item)] == 1 and _key(item) in where]
     # Strictly positive: fixed chrome — a tab bar, a pinned header — shares
     # identity across captures at delta zero, and letting it vote would
     # report a page that never scrolls.
@@ -87,8 +101,12 @@ def stitch(captures: list[dict], nominal_dy: int) -> dict:
                               (captures[step - 1].get("statics") or [])
             everything_cur = (capture.get("elements") or []) + \
                              (capture.get("statics") or [])
-            for item in everything_prev:
-                prev_pos.setdefault(_key(item), item["b"][1])
+            # Unique identities only, like _shift: an anonymous container
+            # sitting where the FIRST same-keyed container used to sit is
+            # a coincidence of repeated shapes, not proof of pinned chrome.
+            counts = Counter(_key(item) for item in everything_prev)
+            prev_pos = {_key(item): item["b"][1] for item in everything_prev
+                        if counts[_key(item)] == 1}
             shift = _shift(everything_prev, everything_cur)
             offset += shift if shift is not None else nominal_dy
 
