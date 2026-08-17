@@ -349,6 +349,23 @@
   .a-mark:not(.ok):not(.warn):not(.bad) { background:var(--track);
             color:var(--muted); }
 
+  /* A statement, not a door: the expanded card's status lines ("✓
+     Registros de entrada de EVV 6:00") render as soft chips in the
+     mark's tone — the phone draws them exactly this way — with no
+     chevron and no button dress. Toneless info rows are plain labels. */
+  .a-inforow { flex:1; display:flex; align-items:center; gap:8px;
+               padding:8px 12px; border-radius:10px; min-width:0; }
+  .a-inforow .a-mark { margin:0; flex:none; }
+  .a-infotext { font-size:13.5px; font-weight:500; color:var(--ink);
+                line-height:1.35; overflow-wrap:break-word; min-width:0;
+                display:-webkit-box; -webkit-line-clamp:2;
+                -webkit-box-orient:vertical; overflow:hidden; }
+  .a-inforow.ok   { background:hsl(142 71% 40% / .10); }
+  .a-inforow.warn { background:hsl(38 92% 50% / .10); }
+  .a-inforow.bad  { background:hsl(0 72% 51% / .08); }
+  .a-row:has(> .a-inforow) { background:none; box-shadow:none; border:none;
+               padding:2px 2px; min-height:0; }
+
   /* A call to action, whether the app drew it as a Button or a plain
      clickable row: filled accent, centred, no chevron — it commits or
      advances, it does not "open more". This is the difference the owner

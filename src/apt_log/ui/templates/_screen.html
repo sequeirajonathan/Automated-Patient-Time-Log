@@ -65,6 +65,14 @@
                 data-aim='{{ it.aim | tojson }}'
                 aria-label="{{ it.aim.cls }}{% if it.aim.rid %} {{ it.aim.rid }}{% endif %}"
           ><span class="knob"></span></button>
+      {% elif it.kind == 'row' and it.info %}
+        {# A statement, not a door: a status line the app drew as its own
+           fact — "✓ Registros de entrada de EVV 6:00" — with the mark's
+           colour as a soft chip and no chevron pretending it opens more. #}
+        <span class="a-inforow{% if it.tone %} {{ it.tone }}{% endif %}">
+          {% for m in it.marks %}<span class="a-mark {{ m.tone }}">{{ m.sym }}</span>{% endfor %}
+          <span class="a-infotext">{{ it.txt or (it.lines[0] if it.lines else '') }}</span>
+        </span>
       {% elif it.kind == 'row' %}
         {# A call to action ("Continuar visitando") is a filled button, not
            one more grey row with a chevron. A data row is a list cell: its

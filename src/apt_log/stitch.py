@@ -69,8 +69,13 @@ def stitch(captures: list[dict], nominal_dy: int) -> dict:
     virtual place was simply seen twice across two overlapping captures.
     """
     offset = 0.0
-    # (kind, *identity) -> the virtual tops it has already been placed at.
-    seen: dict[tuple, list[int]] = {}
+    # (kind, *identity) -> (virtual top, step) already placed. The step
+    # matters: two same-identity items within the tolerance in the SAME
+    # capture are genuinely two items — the dump saw them side by side —
+    # not one item seen twice. The schedule's stacked EVV check glyphs sit
+    # 32 px apart with identical identity, and dropping the second erased
+    # a real check-out record from the page.
+    seen: dict[tuple, list[tuple[int, int]]] = {}
     out_elements: list[dict] = []
     out_statics: list[dict] = []
 
@@ -100,9 +105,10 @@ def stitch(captures: list[dict], nominal_dy: int) -> dict:
                 vy2 = int(item["b"][3] + offset)
                 key = (kind, *_key(item))
                 placed = seen.setdefault(key, [])
-                if any(abs(vy1 - v) <= DEDUP_VY_TOLERANCE for v in placed):
+                if any(abs(vy1 - v) <= DEDUP_VY_TOLERANCE and s != step
+                       for v, s in placed):
                     continue                 # same item, overlapping capture
-                placed.append(vy1)
+                placed.append((vy1, step))
                 sink.append({**item,
                              "vb": [item["b"][0], vy1, item["b"][2], vy2],
                              "step": step})

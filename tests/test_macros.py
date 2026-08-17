@@ -1542,3 +1542,133 @@ class TestScanOwnsTheSession:
         with pytest.raises(RuntimeError):
             macros._stitch_walk(driver, assume_top=True)
         assert macros.SCAN_ACTIVE.is_set() is False
+
+
+class TestAccordionScan:
+    """The scan opens the schedule's folded visit cards as it walks.
+
+    A collapsed card hides its EVV records and details button; the owner
+    asked for the opposite ("open accordion elements so we get an accurate
+    front end"). The chevron glyph is the state signal, verified live:
+    collapsed it stands taller than wide at the row's trailing edge,
+    expanded the same glyph is drawn rotated. Taps are budgeted, gated to
+    the proven app and to a page showing a run of date headers, and backed
+    out of the moment a tap navigates instead of unfolding."""
+
+    W, H = 720, 1600
+    CHEV = "\uf054"
+
+    def _dates(self, n=3):
+        return "".join(
+            f'<node class="android.widget.TextView" text="agosto {17+i}, 2026" '
+            f'clickable="false" bounds="[9,{347+i*300}][98,{363+i*300}]"/>'
+            for i in range(n))
+
+    def _card(self, y, name, folded=True, details=False):
+        chev = (f'<node class="android.widget.TextView" text="{self.CHEV}" '
+                f'clickable="false" bounds="[694,{y+3}][700,{y+14}]"/>'
+                if folded else
+                f'<node class="android.widget.TextView" text="{self.CHEV}" '
+                f'clickable="false" bounds="[692,{y+6}][703,{y+12}]"/>')
+        extra = ('<node class="android.widget.TextView" '
+                 f'text="Registros de entrada de EVV 6:00 a. m." '
+                 f'clickable="false" bounds="[45,{y+83}][253,{y+99}]"/>'
+                 if details else "")
+        return (f'<node class="android.view.View" clickable="true" '
+                f'bounds="[25,{y}][700,{y+32}]"/>'
+                f'<node class="android.widget.TextView" text="{name}" '
+                f'clickable="false" bounds="[25,{y}][142,{y+16}]"/>'
+                + chev + extra)
+
+    def _driver(self, state, pages, package="com.hhaexchange.uma"):
+        driver = MagicMock()
+        driver.get_window_size.return_value = {"width": self.W, "height": self.H}
+        driver.current_package = package
+        type(driver).page_source = property(
+            lambda _self: pages[state["page"]])
+        return driver
+
+    def test_a_folded_card_is_opened_and_its_contents_scanned(
+            self, tmp_path, monkeypatch):
+        monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
+        pages = {
+            "collapsed": self._dates() + self._card(401, "NIEVES C MASTRAPA"),
+            "expanded": self._dates() + self._card(
+                401, "NIEVES C MASTRAPA", folded=False, details=True),
+        }
+        state = {"page": "collapsed"}
+        driver = self._driver(state, pages)
+
+        def tap(x, y):
+            assert (x, y) == (362, 417)     # the folded row's centre
+            state["page"] = "expanded"
+
+        with patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros._tap_xy", side_effect=tap) as tapped:
+            assert macros._stitch_walk(driver, assume_top=True) is True
+        tapped.assert_called_once()
+        written = "".join(p.read_text() for p in (tmp_path / "stitched").glob("*.json"))
+        assert "Registros de entrada de EVV" in written
+
+    def test_a_tap_that_navigates_is_backed_out_of(self, tmp_path, monkeypatch):
+        """The guard: an unfolded card keeps the page's dates and chevrons;
+        a page missing them is wherever the tap went instead. One Back
+        returns, and the walk stops trusting taps."""
+        monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
+        schedule = self._dates() + "".join(
+            self._card(401 + i * 60, f"PACIENTE {i}") for i in range(4))
+        pages = {
+            "collapsed": schedule,
+            "elsewhere": ('<node class="android.widget.TextView" text="Detalle" '
+                          'clickable="false" bounds="[25,401][142,417]"/>'),
+        }
+        state = {"page": "collapsed"}
+        driver = self._driver(state, pages)
+
+        def tap(x, y):
+            state["page"] = "elsewhere"
+
+        def back(code):
+            assert code == 4
+            state["page"] = "collapsed"
+
+        driver.press_keycode.side_effect = back
+        with patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros._tap_xy", side_effect=tap) as tapped:
+            assert macros._stitch_walk(driver, assume_top=True) is True
+        tapped.assert_called_once()          # never a second gamble
+        driver.press_keycode.assert_called_once_with(4)
+
+    def test_only_the_proven_app_is_expanded(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
+        pages = {"collapsed": self._dates() + self._card(401, "PACIENTE")}
+        driver = self._driver({"page": "collapsed"}, pages,
+                              package="com.tellus.evv.v2")
+        with patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros._tap_xy") as tapped:
+            macros._stitch_walk(driver, assume_top=True)
+        tapped.assert_not_called()
+
+    def test_a_page_without_a_run_of_dates_is_left_alone(
+            self, tmp_path, monkeypatch):
+        """One or two dates on screen is any details page — its trailing
+        chevrons navigate, and the scan must never walk away from the
+        screen it was asked to read."""
+        monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
+        pages = {"collapsed": self._dates(2) + self._card(401, "PACIENTE")}
+        driver = self._driver({"page": "collapsed"}, pages)
+        with patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros._tap_xy") as tapped:
+            macros._stitch_walk(driver, assume_top=True)
+        tapped.assert_not_called()
+
+    def test_an_open_cards_rotated_chevron_is_not_tapped(
+            self, tmp_path, monkeypatch):
+        monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
+        pages = {"collapsed": self._dates() + self._card(
+            401, "PACIENTE", folded=False, details=True)}
+        driver = self._driver({"page": "collapsed"}, pages)
+        with patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros._tap_xy") as tapped:
+            macros._stitch_walk(driver, assume_top=True)
+        tapped.assert_not_called()

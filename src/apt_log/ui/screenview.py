@@ -115,19 +115,22 @@ MARK_TONE = {
     "\u26a0": "warn",     # warning -> amber
 }
 
-# Text that opens an ACTION rather than navigating to more information \u2014
-# the primary buttons a screen is built around. Matched at the start of a
-# label so "Continuar visitando", "Iniciar visita no programada", "Guardar
+# Text the app itself presents as a PRIMARY BUTTON \u2014 the filled calls to
+# action a screen is built around. Matched at the start of a label so
+# "Continuar visitando", "Iniciar visita no programada", "Guardar
 # cambios" all read as calls to action and earn the filled, coloured
 # treatment instead of looking like one more grey row. Spanish first
 # because that is the caregiver's app language; the English forms cover the
-# apps that mix locales.
+# apps that mix locales. "Ver detalles" is here although it navigates:
+# the schedule's expanded card draws it as its one filled button, and the
+# owner named it the card's only real call to action \u2014 the app's own
+# visual weight is the standard, not the tap's side effect.
 ACTION_WORDS = (
     "continuar", "iniciar sesi\u00f3n", "iniciar visita", "guardar",
     "confirmar", "enviar", "comenzar", "empezar", "aceptar",
-    "registrar entrada", "registrar salida",
+    "registrar entrada", "registrar salida", "ver detalles",
     "clock in", "clock out", "sign in", "start visit", "save", "submit",
-    "confirm", "continue",
+    "confirm", "continue", "view details", "see details",
 )
 
 
@@ -335,6 +338,26 @@ def build(doc: dict) -> dict | None:
             item["marks"] = [{"sym": m, "tone": MARK_TONE.get(m, "")}
                              for m in marks]
             item["cta"] = _looks_like_cta(lines[0] if lines else "")
+            # A content-hugging row carrying one status line is the app
+            # STATING something, not offering a door: the expanded visit
+            # card's "✓ Registros de entrada de EVV" hugs its text at a
+            # third of the screen while every genuinely navigable cell
+            # spans it. Compose marks these clickable anyway, and drawing
+            # them as chevroned cells made the whole card look like it
+            # kept expanding ("makes it look like the individual elements
+            # can continue to expand"). They render as status lines — the
+            # check keeps its colour, the chevron and button dress go.
+            # Anchored at the left content margin, where statements start:
+            # a narrow tappable floating mid-screen ("Visita Buscar", the
+            # schedule's search) is a utility button, and dressing it as
+            # information would hide a real control.
+            narrow = (e["b"][2] - e["b"][0]) <= w * 0.6
+            left_anchored = e["b"][0] <= w * 0.08
+            item["info"] = (narrow and left_anchored and not item["cta"]
+                            and not badge and len(lines) <= 1
+                            and bool(lines or marks))
+            item["tone"] = (item["marks"][0]["tone"]
+                            if item["info"] and item["marks"] else "")
         elif kind == "button":
             item["cta"] = _looks_like_cta(item["txt"])
         items.append(item)

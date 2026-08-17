@@ -41,6 +41,32 @@ class TestStitching:
         ], nominal_dy=300)
         assert len(doc["elements"]) == 1
 
+    def test_twins_in_one_capture_are_both_kept(self):
+        """Two same-identity items close together in the SAME capture are
+        genuinely two items — the dump saw them side by side. The
+        schedule's stacked EVV check glyphs sit 32 px apart with identical
+        identity, and the dedup silently erased the check-out record."""
+        doc = stitch.stitch([
+            {"elements": [],
+             "statics": [el("", "TextView", [33, 269, 42, 280], ""),
+                         el("", "TextView", [33, 301, 42, 312], "")]},
+        ], nominal_dy=300)
+        assert len(doc["statics"]) == 2
+
+    def test_the_same_twin_reseen_across_captures_still_dedups(self):
+        """And when the overlapping next capture sees both twins again,
+        each collapses onto its own first sighting — two on the page, not
+        four."""
+        doc = stitch.stitch([
+            {"elements": [el("anchor", "Button", [0, 700, 200, 760])],
+             "statics": [el("", "TextView", [33, 669, 42, 680], ""),
+                         el("", "TextView", [33, 701, 42, 712], "")]},
+            {"elements": [el("anchor", "Button", [0, 200, 200, 260])],
+             "statics": [el("", "TextView", [33, 169, 42, 180], ""),
+                         el("", "TextView", [33, 201, 42, 212], "")]},
+        ], nominal_dy=300)
+        assert len(doc["statics"]) == 2
+
     def test_fixed_chrome_is_recorded_once(self):
         """A tab bar shares identity across captures at the same device
         position; re-adding it per step sprinkled tab bars through the

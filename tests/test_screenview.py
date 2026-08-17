@@ -520,3 +520,85 @@ class TestAppTabsToControlBar:
         # And it is not left duplicated in the body.
         assert not any(t["txt"] == "Programación"
                        for r in m["rows"] for t in r["items"])
+
+
+class TestInformationalRows:
+    """The expanded visit card's status lines are statements, not doors.
+
+    Compose marks '✓ Registros de entrada de EVV 6:00' clickable, and the
+    reflow drew it as one more chevroned cell — which made the whole card
+    look like every element kept expanding (reported live). A row that hugs
+    its content and carries a single status line renders as an info line:
+    the check keeps its colour, the chevron and the button dress go. The
+    card's one real call to action, 'Ver detalles', is drawn by the app as
+    its filled button and earns the same here."""
+
+    def _model(self):
+        return screenview.build(doc(
+            elements=[
+                el("", "View", [25, 583, 700, 615]),    # card header row
+                el("", "View", [25, 626, 148, 658]),    # "Detalles del paciente"
+                el("", "View", [25, 658, 261, 690]),    # EVV check row
+                el("", "View", [28, 727, 699, 759]),    # "Ver detalles"
+            ],
+            statics=[
+                st([25, 583, 126, 599], "LUCRESIA L PUPO"),
+                st([25, 599, 125, 615], "6:00 a. m. - 9:00 a. m."),
+                st([25, 634, 33, 646], ""),       # person icon
+                st([36, 634, 148, 650], "Detalles del paciente"),
+                st([33, 669, 42, 680], ""),       # drawn check
+                st([45, 666, 253, 682], "Registros de entrada de EVV 6:00 a. m."),
+                st([333, 736, 395, 750], "Ver detalles"),
+            ],
+        ))
+
+    def _items(self):
+        return [i for r in self._model()["rows"] for i in r["items"]]
+
+    def test_a_status_line_is_informational_in_its_marks_tone(self):
+        evv = next(i for i in self._items()
+                   if "Registros de entrada" in " ".join(i.get("lines", [])))
+        assert evv["info"] is True
+        assert evv["tone"] == "ok"
+        assert [m["sym"] for m in evv["marks"]] == ["✓"]
+
+    def test_a_bare_caption_row_is_informational_without_a_tone(self):
+        cap = next(i for i in self._items()
+                   if "Detalles del paciente" in " ".join(i.get("lines", [])))
+        assert cap["info"] is True and cap["tone"] == ""
+
+    def test_the_full_width_card_header_stays_a_cell(self):
+        head = next(i for i in self._items()
+                    if "LUCRESIA L PUPO" in " ".join(i.get("lines", [])))
+        assert not head.get("info")
+
+    def test_ver_detalles_is_the_cards_call_to_action(self):
+        cta = next(i for i in self._items()
+                   if "Ver detalles" in " ".join(i.get("lines", [])))
+        assert cta["cta"] is True and not cta.get("info")
+
+    def test_a_mid_screen_utility_is_not_dressed_as_information(self):
+        """The schedule's search ("Visita Buscar") is a narrow tappable
+        floating mid-screen. Statements start at the left content margin;
+        this is a control, and hiding its tap behind an info dress would
+        cost a real feature."""
+        m = screenview.build(doc(
+            elements=[el("schedule_screen_visit_search", "View",
+                         [419, 506, 484, 538])],
+            statics=[st([419, 515, 484, 529], "Visita Buscar")],
+        ))
+        cell = next(i for r in m["rows"] for i in r["items"]
+                    if i["kind"] == "row")
+        assert not cell.get("info")
+
+    def test_a_narrow_two_line_row_is_still_a_cell(self):
+        """Two stacked lines are a data cell whatever its width — only a
+        single status line reads as a statement."""
+        m = screenview.build(doc(
+            elements=[el("", "View", [25, 583, 400, 655])],
+            statics=[st([25, 591, 126, 607], "LUCRESIA L PUPO"),
+                     st([25, 607, 125, 623], "6:00 a. m. - 9:00 a. m.")],
+        ))
+        cell = next(i for r in m["rows"] for i in r["items"]
+                    if i["kind"] == "row")
+        assert not cell.get("info")

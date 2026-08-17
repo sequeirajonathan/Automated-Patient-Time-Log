@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 import threading
 import time
@@ -113,6 +114,30 @@ SCAN_ACTIVE = threading.Event()
 # No scanning over her fingers: a tap in the last few seconds means
 # someone is driving the phone, and the walk waits its turn.
 STITCH_TAP_QUIET = 4.0
+
+# The schedule's visit cards fold their details behind an accordion: a
+# collapsed card shows name and time with a sideways chevron; tapping the
+# row unfolds the EVV records and the details button beneath it. A scan
+# that never opens them publishes a page that is honestly incomplete —
+# the owner asked for the opposite ("open accordion elements so we get an
+# accurate front end"). So the walk unfolds them as it goes, and leaves
+# them unfolded: the phone then matches the portal, and the next scan has
+# nothing left to open.
+#
+# The chevron is the state signal, verified live on the device: the same
+# icon-font glyph is drawn ROTATED when open — collapsed it is taller
+# than wide (6x11 at the row's trailing edge), expanded it is wider than
+# tall (11x6). Only rows whose chevron still stands sideways are tapped.
+#
+# Tapping mid-scan is only trusted where the page is known to fold rather
+# than navigate: the schedule list, recognised by its run of date
+# headers. Everywhere else a trailing chevron means "opens another page",
+# and a scan must never walk away from the screen it was asked to read.
+EXPAND_GLYPH = "\uf054"
+EXPAND_APPS = {"com.hhaexchange.uma"}
+EXPAND_MAX_TAPS = 16
+EXPAND_MIN_DATE_HEADERS = 3
+_DATE_HEADER = re.compile(r"\d{1,2},\s*20\d{2}")
 
 # Cache-warming: right after a sign-in, the app's other tabs have never
 # been opened, so their virtualized lists have never been materialised and
@@ -714,6 +739,55 @@ def _swipe(driver, x: int, y1: int, y2: int, ms: int = 260) -> None:
                        capture_output=True, timeout=20, check=True)
 
 
+def _page_folds(statics: list[dict]) -> bool:
+    """Whether this page is trusted to fold rather than navigate on a row
+    tap: the schedule list, recognised by its run of date headers. One or
+    two dates on screen is any details page; a run of them is the week."""
+    dates = sum(1 for s in statics
+                if _DATE_HEADER.search(s.get("txt") or ""))
+    return dates >= EXPAND_MIN_DATE_HEADERS
+
+
+def _collapsed_rows(elements: list[dict], statics: list[dict],
+                    width: int) -> list[list[int]]:
+    """Bounds of full-width rows still folded shut, top to bottom.
+
+    A collapsed accordion is a trailing-edge chevron glyph standing
+    taller than wide (the open state draws the same glyph rotated),
+    sitting inside a row that spans the screen.
+    """
+    rows: list[list[int]] = []
+    for s in statics:
+        if (s.get("txt") or "").strip() != EXPAND_GLYPH:
+            continue
+        b = s.get("b") or []
+        if len(b) != 4 or (b[3] - b[1]) <= (b[2] - b[0]):
+            continue                          # wide = already open
+        if b[0] < width * 0.75:
+            continue                          # trailing edge only
+        cy = (b[1] + b[3]) // 2
+        for e in elements:
+            eb = e.get("b") or []
+            if (len(eb) == 4 and eb[2] - eb[0] >= width * 0.7
+                    and eb[1] <= cy <= eb[3]):
+                rows.append(eb)
+                break
+    rows.sort(key=lambda eb: eb[1])
+    return rows
+
+
+def _chevron_count(statics: list[dict]) -> int:
+    return sum(1 for s in statics
+               if (s.get("txt") or "").strip() == EXPAND_GLYPH)
+
+
+def _tap_xy(x: int, y: int) -> None:
+    """A coordinate tap over plain adb — same channel the portal's own taps
+    use, and immune to the driver's W3C moods that _swipe falls back from."""
+    subprocess.run(["adb", "shell", "input", "tap", str(x), str(y)],
+                   capture_output=True, timeout=10, check=True)
+
+
 def _scroll_to_top(driver, cx: int, y_top: int, y_bot: int) -> None:
     prev = None
     for _ in range(8):
@@ -755,10 +829,53 @@ def _stitch_walk(driver, assume_top: bool = False) -> bool:
             return {"elements": feed_mod.elements(src, label=True),
                     "statics": feed_mod.statics(src)}
 
+        # Accordions are opened as the walk reaches them, so the scan
+        # captures what they hide (see EXPAND_GLYPH above). Budgeted per
+        # walk, gated to the proven app and page shape, and guarded: a tap
+        # that made the page's chevrons vanish navigated somewhere instead
+        # of unfolding — one Back returns, and the walk stops trusting taps.
+        size = driver.get_window_size()
+        taps_left = EXPAND_MAX_TAPS
+        expanding = (driver.current_package or "") in EXPAND_APPS
+
+        def open_folds(cap: dict) -> dict:
+            nonlocal taps_left, expanding
+            if not expanding or not _page_folds(cap["statics"]):
+                return cap
+            while taps_left > 0:
+                rows = _collapsed_rows(cap["elements"], cap["statics"],
+                                       size["width"])
+                if not rows:
+                    break
+                eb = rows[0]
+                before = _chevron_count(cap["statics"])
+                taps_left -= 1
+                try:
+                    _tap_xy((eb[0] + eb[2]) // 2, (eb[1] + eb[3]) // 2)
+                except Exception as exc:  # noqa: BLE001
+                    log.info("accordion tap failed (%s); scanning as-is", exc)
+                    expanding = False
+                    break
+                time.sleep(STITCH_SETTLE)
+                fresh = capture()
+                # An unfolded card keeps the page's date headers and its
+                # chevrons (one merely rotated); a page missing them is
+                # wherever the tap navigated to instead.
+                if (not _page_folds(fresh["statics"])
+                        or _chevron_count(fresh["statics"]) < before - 2):
+                    log.warning("a fold tap navigated instead of unfolding; "
+                                "backing out")
+                    expanding = False
+                    driver.press_keycode(4)
+                    time.sleep(STITCH_SETTLE)
+                    return capture()
+                cap = fresh
+            return cap
+
         captures: list[dict] = []
         prev: dict | None = None
         for _ in range(STITCH_MAX_STEPS):
-            cap = capture()
+            cap = open_folds(capture())
             if prev is not None and cap == prev:
                 break
             captures.append(cap)
