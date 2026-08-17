@@ -765,3 +765,44 @@ class TestWrapperContainers:
                     if i["kind"] == "row")
         assert card["lines"][0] == "HOME CARE ON CALL, LLC"
         assert "H" not in card["lines"]
+
+
+class TestVisitDetailActions:
+    """inMyTeam's visit detail carries its commit actions in a two-item
+    bottom bar. Two aligned captions are a page's action pair, not a tab
+    bar — "Check in" must never ride the control bar dressed as
+    navigation. And its section switch ("Visits | Plan of care") is two
+    side-by-side rows: controls, not statements."""
+
+    def _model(self):
+        return screenview.build(doc(
+            elements=[el("", "View", [15, 483, 360, 508]),
+                      el("", "View", [360, 483, 705, 508]),
+                      el("", "View", [186, 1527, 267, 1559]),
+                      el("", "View", [453, 1527, 534, 1559])],
+            statics=[st([100, 489, 160, 504], "Visits"),
+                     st([400, 489, 500, 504], "Plan of care"),
+                     st([207, 1537, 246, 1549], "Check in"),
+                     st([472, 1533, 516, 1553], "Note & Check out")],
+        ))
+
+    def test_two_bottom_captions_are_not_a_tab_bar(self):
+        m = self._model()
+        assert m["apptabs"] == []
+        texts = [t for r in m["rows"] for i in r["items"]
+                 for t in ([i.get("txt")] + (i.get("lines") or [])) if t]
+        assert "Check in" in texts and "Note & Check out" in texts
+
+    def test_side_by_side_rows_are_never_information(self):
+        m = self._model()
+        rows = [i for r in m["rows"] for i in r["items"] if i["kind"] == "row"]
+        assert rows and all(not i.get("info") for i in rows)
+
+    def test_a_centred_avatar_above_the_name_is_decoration(self):
+        m = screenview.build(doc(
+            elements=[],
+            statics=[st([356, 508, 366, 525], "H"),
+                     st([291, 537, 430, 552], "HOME CARE ON CALL, LLC")],
+        ))
+        texts = [i.get("txt") for r in m["rows"] for i in r["items"]]
+        assert "HOME CARE ON CALL, LLC" in texts and "H" not in texts

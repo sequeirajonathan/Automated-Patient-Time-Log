@@ -461,13 +461,20 @@ def build(doc: dict) -> dict | None:
     # decoration, and rendering it as a section heading shouted noise.
     # The chip is taller than the name line it decorates (the name's
     # subtitle rides beside it too), so the overlap bar sits low.
+    def _beside(t, s):
+        return (0 <= t["b"][0] - s["b"][2] <= 24
+                and _overlap(t["b"], s["b"]) >= 0.25)
+
+    def _beneath(t, s):
+        return (0 <= t["b"][1] - s["b"][3] <= 30
+                and t["b"][0] < s["b"][2] and t["b"][2] > s["b"][0])
+
     loose = [s for s in loose
              if not (len(s["txt"].strip()) <= 3
                      and s["txt"].strip().isupper()
                      and any(t is not s
-                             and 0 <= t["b"][0] - s["b"][2] <= 24
-                             and _overlap(t["b"], s["b"]) >= 0.25
                              and len(t["txt"].strip()) > 3
+                             and (_beside(t, s) or _beneath(t, s))
                              for t in loose))]
 
     # A field is a caption stacked tight above its value: the patient detail
@@ -555,6 +562,16 @@ def build(doc: dict) -> dict | None:
     bands = split
     for band in bands:
         band.sort(key=lambda n: n["b"][0])
+
+    # Side-by-side rows are CONTROLS, not statements: the visit detail's
+    # "Visits | Plan of care" section switch is two half-width rows in one
+    # band, and the left one matched the info-row shape. A statement
+    # stands alone on its line.
+    for band in bands:
+        rows_here = [it for it in band if it["kind"] == "row"]
+        if len(rows_here) >= 2:
+            for it in rows_here:
+                it["info"] = False
 
     # --------------------------------------------------------------- segments
     for band in bands:
@@ -692,7 +709,10 @@ def _app_tabs(elements: list[dict], statics: list[dict],
 
     # Compose-shaped bar: every tab has a caption, and the selected one has
     # no clickable container. Detect from captions so that slot survives.
-    if len(caps) >= 2:
+    # THREE or more: a two-item bottom bar is a page's action pair — the
+    # visit detail's "Check in" / "Note & Check out" rode the control bar
+    # dressed as navigation, which a commit action must never do.
+    if len(caps) >= 3:
         for s in caps:
             cx = (s["b"][0] + s["b"][2]) / 2
             holder = next((e for e in holders

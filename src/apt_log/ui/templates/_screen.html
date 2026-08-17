@@ -52,10 +52,12 @@
         {% endfor %}
         </span>
       {% elif it.kind == 'button' %}
+        {# A button with no words still needs a face: a blank pill reads
+           as broken, and the visit detail's icon buttons shipped three. #}
         <button type="button" class="a-btn{% if it.small %} sm{% elif it.cta %} cta{% endif %}"
                 data-aim='{{ it.aim | tojson }}'
                 {% if not it.txt %}aria-label="{{ it.aim.cls }}{% if it.aim.rid %} {{ it.aim.rid }}{% endif %}"{% endif %}
-          >{{ it.txt or '' }}</button>
+          >{{ it.txt or '···' }}</button>
       {% elif it.kind == 'field' %}
         <button type="button" class="a-field{% if it.focused %} focus{% endif %}"
                 data-aim='{{ it.aim | tojson }}'
