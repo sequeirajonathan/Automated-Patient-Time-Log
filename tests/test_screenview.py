@@ -750,3 +750,18 @@ class TestWrapperContainers:
         cell = next(i for r in m["rows"] for i in r["items"]
                     if i["kind"] == "row")
         assert cell["cta"] is True
+
+    def test_a_folded_avatar_stub_is_not_the_first_line(self):
+        """The visits list folds the agency chip's initial in as the row's
+        first line ("H" ahead of the agency name) — decoration, dropped."""
+        m = screenview.build(doc(
+            elements=[el("", "View", [11, 194, 709, 257])],
+            statics=[st([30, 205, 40, 222], "H"),
+                     st([56, 200, 300, 216], "HOME CARE ON CALL, LLC"),
+                     st([56, 218, 200, 232], "05:00 AM | 06:00 AM"),
+                     st([56, 236, 200, 252], "Carmen Villalon")],
+        ))
+        card = next(i for r in m["rows"] for i in r["items"]
+                    if i["kind"] == "row")
+        assert card["lines"][0] == "HOME CARE ON CALL, LLC"
+        assert "H" not in card["lines"]
