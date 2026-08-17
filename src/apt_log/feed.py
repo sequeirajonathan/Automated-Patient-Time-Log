@@ -54,6 +54,7 @@ import struct
 import subprocess
 import threading
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -417,9 +418,24 @@ FRAME_NAME = "frame.json"
 SCREEN_NAME = "screen.json"
 
 
+STITCH_NAME = "stitched.json"
+
+
+def _fresh_stitch(directory: Path, viewport_id: str) -> dict | None:
+    """The stitched whole-page document, if it still describes this screen."""
+    if not viewport_id:
+        return None
+    try:
+        doc = json.loads((directory / STITCH_NAME).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return doc if doc.get("step0") == viewport_id else None
+
+
 def write_screen(target: Path, frame: dict, screen: str, reason: str,
                  hierarchy: str | None, focus: str = "",
-                 hierarchy_at: float = 0.0, hierarchy_focus: str = "") -> None:
+                 hierarchy_at: float = 0.0, hierarchy_focus: str = "",
+                 stitched: dict | None = None) -> None:
     """Publish the render feed for the wireframe view.
 
     Two files on purpose, with two policies. `frame.json` is the one that can
@@ -470,8 +486,13 @@ def write_screen(target: Path, frame: dict, screen: str, reason: str,
         # Whether the page scrolls: the offer to read it end to end only
         # makes sense when there is something below the fold to read.
         "scrollable": bool(hierarchy and 'scrollable="true"' in hierarchy),
-        "elements": elements(hierarchy, label=True) if hierarchy else [],
-        "statics": statics(hierarchy) if hierarchy else [],
+        # Whether this document is the WHOLE page (a stitched walk) or the
+        # viewport. Full documents leave nothing to wonder about.
+        "full": bool(stitched),
+        "elements": (stitched["elements"] if stitched
+                     else elements(hierarchy, label=True) if hierarchy else []),
+        "statics": (stitched["statics"] if stitched
+                    else statics(hierarchy) if hierarchy else []),
     }
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -510,6 +531,12 @@ def write_frame(path: Path, serial: str | None = None,
 
     speak = text_is_disclosable(reason)
     els = elements(hierarchy, label=speak) if hierarchy else []
+
+    # The whole page, when the runner has walked it: while the stitched
+    # document's first capture still matches what is in front, the portal
+    # renders and aims at everything, not just the viewport. The moment the
+    # screen moves on, the match fails and the viewport is the truth again.
+    stitched = _fresh_stitch(path.parent, frame_id(els)) if not reason else None
     frame = {
         "id": frame_id(els),
         # Why there is no picture, so the page can say something better than
@@ -524,7 +551,9 @@ def write_frame(path: Path, serial: str | None = None,
         "img": hashlib.sha256(png).hexdigest()[:12] if png else "",
         "at": datetime.now().isoformat(),
         "size": screen_size(serial),
-        "elements": els,
+        # Stitched elements carry original bounds plus their scroll step,
+        # so a below-the-fold aim verifies here exactly like any other.
+        "elements": stitched["elements"] if stitched else els,
         "captured": bool(png),
     }
     target = path.parent / FRAME_NAME
@@ -537,7 +566,7 @@ def write_frame(path: Path, serial: str | None = None,
         log.warning("cannot publish the frame map (%s)", exc)
 
     write_screen(path.parent / SCREEN_NAME, frame, screen, reason, hierarchy,
-                 focus, hierarchy_at, hierarchy_focus)
+                 focus, hierarchy_at, hierarchy_focus, stitched=stitched)
 
     if png:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1104,6 +1133,14 @@ def tap(claimed_frame: str, element: dict, serial: str | None = None,
          and e["cls"] == element.get("cls", "")),
         None,
     )
+    if match is not None and int(match.get("step") or 0) > 0:
+        # Below the fold: the runner replays the scroll, re-verifies the
+        # element against a fresh dump at its step, and taps the FOUND
+        # bounds — the same refuse-if-moved promise, extended past the
+        # viewport. This process cannot dump the screen itself (the feed
+        # holds the only UiAutomator2 session), so the work crosses on a
+        # request file like every macro does.
+        return _deep_tap(claimed_frame, match)
     if match is None:
         # Presence at those bounds *is* the staleness check, and a stronger one
         # than comparing whole-frame hashes. If the screen moved on, the thing
@@ -1139,3 +1176,39 @@ def tap(claimed_frame: str, element: dict, serial: str | None = None,
     except OSError:
         pass
     return {"tapped": {"rid": match["rid"], "cls": match["cls"], "at": [cx, cy]}}
+
+
+def _deep_tap(claimed_frame: str, match: dict) -> dict:
+    """Hand a below-the-fold tap to the runner and wait for its verdict."""
+    from apt_log import macros as macros_mod
+
+    rid = uuid.uuid4().hex[:12]
+    aim = {"rid": match.get("rid", ""), "cls": match.get("cls", ""),
+           "b": list(match["b"]), "step": int(match.get("step") or 0)}
+    try:
+        macros_mod.DEEPTAP_REQUEST_PATH.parent.mkdir(parents=True,
+                                                     exist_ok=True)
+        tmp = macros_mod.DEEPTAP_REQUEST_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"id": rid, "aim": aim,
+                                   "at": time.time()}), encoding="utf-8")
+        os.replace(tmp, macros_mod.DEEPTAP_REQUEST_PATH)
+    except OSError as exc:
+        raise StaleAim(f"could not reach the controller ({exc})") from None
+
+    deadline = time.monotonic() + 20.0
+    while time.monotonic() < deadline:
+        try:
+            result = json.loads(macros_mod.DEEPTAP_RESULT_PATH.read_text(
+                encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            result = None
+        if result and result.get("id") == rid:
+            if result.get("ok"):
+                log.info("deep-tapped %s/%s at step %d on frame %s",
+                         aim["cls"], aim["rid"] or "-", aim["step"],
+                         claimed_frame)
+                return {"deep": True}
+            raise StaleAim(result.get("error")
+                           or "that is no longer on the screen — look again")
+        time.sleep(0.3)
+    raise StaleAim("the tap below the fold timed out — look again")

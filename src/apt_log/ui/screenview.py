@@ -190,8 +190,14 @@ def _item(node: dict, kind: str) -> dict:
         "b": node["b"],
     }
     if "rid" in node:
+        # The aim carries the bounds AS CAPTURED at the element's scroll
+        # step — tap truth — while node["b"] may be the virtual page
+        # position — layout truth. A below-the-fold aim also carries its
+        # step, so the tap machinery knows to replay the scroll first.
         out["aim"] = {"rid": node.get("rid", ""), "cls": node.get("cls", ""),
-                      "b": node["b"]}
+                      "b": node.get("aim_b") or node["b"]}
+        if node.get("step"):
+            out["aim"]["step"] = node["step"]
     return out
 
 
@@ -201,8 +207,15 @@ def build(doc: dict) -> dict | None:
     if not w or not h:
         return None
 
-    elements = [e for e in doc.get("elements") or [] if e.get("b")]
-    statics = [s for s in doc.get("statics") or [] if s.get("b")]
+    # Stitched documents carry two coordinate systems: `vb` is the item's
+    # place on the page as a whole (layout truth, what everything below
+    # sorts and groups by) and `b` is where it sat on the device when
+    # captured (tap truth, preserved in aim_b). Viewport documents have
+    # only `b`, and the two roles coincide.
+    elements = [dict(e, b=e.get("vb") or e["b"], aim_b=e["b"])
+                for e in doc.get("elements") or [] if e.get("b")]
+    statics = [dict(s, b=s.get("vb") or s["b"])
+               for s in doc.get("statics") or [] if s.get("b")]
 
     # Labels inside a tappable container belong to it: they are the row's own
     # text, not free-floating captions. This is what turns "an unlabelled

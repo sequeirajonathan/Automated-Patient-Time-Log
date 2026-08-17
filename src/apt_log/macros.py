@@ -72,6 +72,16 @@ SCREEN_PATH = STATE_DIR / "screen.json"
 # page, in reading order, for the portal's reading sheet.
 SCAN_PATH = STATE_DIR / "scan.json"
 
+# The stitched whole-page document (see apt_log.stitch), and the request/
+# result pair for taps below the fold — which must run here, where the
+# resident session lives, because they re-verify against a fresh dump
+# after replaying the scroll.
+STITCH_PATH = STATE_DIR / "stitched.json"
+DEEPTAP_REQUEST_PATH = STATE_DIR / "deeptap-request.json"
+DEEPTAP_RESULT_PATH = STATE_DIR / "deeptap-result.json"
+DEEPTAP_MAX_AGE = 15.0
+STITCH_MAX_STEPS = 10
+
 # Sign in only while someone is actually watching. Unwatched, the app's own
 # inactivity timer signs the session back out and the two loop all night —
 # observed as sign-in / agency picker / "due to inactivity" / sign-out on
@@ -604,6 +614,93 @@ def _read_page(driver, report) -> None:
         raise RuntimeError("could not save the page reading") from exc
 
 
+def _swipe_geometry(driver) -> tuple[int, int, int]:
+    size = driver.get_window_size()
+    return (size["width"] // 2,
+            int(size["height"] * 0.33), int(size["height"] * 0.66))
+
+
+def _scroll_to_top(driver, cx: int, y_top: int, y_bot: int) -> None:
+    prev = None
+    for _ in range(8):
+        src = driver.page_source or ""
+        if src == prev:
+            break
+        prev = src
+        driver.swipe(cx, y_top, cx, y_bot, 260)
+        time.sleep(0.8)
+
+
+def _stitch_walk(driver) -> bool:
+    """Walk the current page and write the stitched whole-page document.
+
+    Swipes move the page and can press nothing; the page is returned to
+    its top, which is also the scroll state every below-the-fold tap
+    replay starts from.
+    """
+    from apt_log import feed as feed_mod
+    from apt_log import stitch as stitch_mod
+
+    cx, y_top, y_bot = _swipe_geometry(driver)
+    _scroll_to_top(driver, cx, y_top, y_bot)
+
+    def capture() -> dict:
+        src = driver.page_source or ""
+        return {"elements": feed_mod.elements(src, label=True),
+                "statics": feed_mod.statics(src)}
+
+    captures: list[dict] = []
+    prev: dict | None = None
+    for _ in range(STITCH_MAX_STEPS):
+        cap = capture()
+        if prev is not None and cap == prev:
+            break
+        captures.append(cap)
+        prev = cap
+        driver.swipe(cx, y_bot, cx, y_top, 260)
+        time.sleep(0.8)
+
+    for _ in range(max(len(captures) - 1, 0)):
+        driver.swipe(cx, y_top, cx, y_bot, 260)
+        time.sleep(0.4)
+
+    if not captures or not captures[0]["elements"]:
+        return False
+    doc = stitch_mod.stitch(captures, nominal_dy=y_bot - y_top)
+    doc.update({
+        "step0": feed_mod.frame_id(captures[0]["elements"]),
+        "at": datetime.now().isoformat(),
+    })
+    try:
+        STITCH_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = STITCH_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(doc), encoding="utf-8")
+        os.replace(tmp, STITCH_PATH)
+    except OSError as exc:
+        log.warning("cannot write the stitched page (%s)", exc)
+        return False
+    log.info("stitched %d captures into a whole-page document",
+             len(captures))
+    return True
+
+
+def take_deep_tap() -> dict | None:
+    """Claim a pending below-the-fold tap request, removing it."""
+    try:
+        payload = json.loads(DEEPTAP_REQUEST_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    try:
+        DEEPTAP_REQUEST_PATH.unlink()
+    except OSError:
+        pass
+    if time.time() - float(payload.get("at", 0)) > DEEPTAP_MAX_AGE:
+        return None
+    if not isinstance(payload.get("aim"), dict):
+        return None
+    return payload
+
+
 def _open_app(package: str):
     """Bring an app to the front and wait for it to settle. Nothing more.
 
@@ -808,6 +905,9 @@ class Runner:
         # freshly recycled container failed three tests a long-lived one had
         # been passing all day.
         self._auto_auth_at: float | None = None
+        # The frame a stitch walk failed on: not retried until the screen
+        # changes, or a stubborn page would be walked forever.
+        self._stitch_failed_for: str = ""
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -827,6 +927,9 @@ class Runner:
 
         while not self._stop.is_set():
             try:
+                deep = take_deep_tap()
+                if deep is not None:
+                    self.execute_deep_tap(deep)
                 pending = take_request(self._request_path)
                 if pending is not None:
                     self.execute(pending["name"], pending["id"])
@@ -834,9 +937,98 @@ class Runner:
                 if signature is not None:
                     sign.execute(signature)
                 self.maybe_auto_auth()
+                self.maybe_stitch()
             except Exception as exc:  # noqa: BLE001
                 log.warning("macro runner: %s", exc)
             self._stop.wait(POLL_EVERY)
+
+    def maybe_stitch(self) -> bool:
+        """Walk the current scrollable page into a whole-page document.
+
+        The owner's spec: the portal should never leave anyone wondering
+        whether there is more below the fold. The phone is remote-only, so
+        it may scroll itself — but only while someone is watching, only on
+        an unblocked care-app screen, and never over a running macro. A
+        failed walk is not retried for the same screen; the next screen
+        change resets the ledger.
+        """
+        if not someone_is_watching(self._viewers_path):
+            return False
+        if read_status(self._status_path).state == "running":
+            return False
+        target = self._screen_path or SCREEN_PATH
+        try:
+            doc = json.loads(target.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        if (doc.get("blocked") or not doc.get("scrollable")
+                or doc.get("full") or not doc.get("app")
+                or doc.get("screen") == "launcher"):
+            return False
+        fid = doc.get("id") or ""
+        if not fid or fid == self._stitch_failed_for:
+            return False
+
+        from apt_log import resident
+
+        try:
+            ok = bool(resident.run(_stitch_walk))
+        except Exception as exc:  # noqa: BLE001
+            log.warning("stitch walk failed: %s", exc)
+            ok = False
+        if not ok:
+            self._stitch_failed_for = fid
+        return ok
+
+    def execute_deep_tap(self, request: dict) -> None:
+        """Tap below the fold: replay the scroll, re-verify, then touch.
+
+        The same refuse-if-moved promise the tap machinery has always made,
+        extended past the fold — the element must be found in a FRESH dump
+        at its scroll step, and the tap lands on the found bounds, never
+        the recorded ones.
+        """
+        from apt_log import resident
+        from apt_log import stitch as stitch_mod
+        from apt_log import feed as feed_mod
+
+        aim = request["aim"]
+        step = int(aim.get("step") or 0)
+
+        def _do(driver):
+            cx, y_top, y_bot = _swipe_geometry(driver)
+            _scroll_to_top(driver, cx, y_top, y_bot)
+            for _ in range(step):
+                driver.swipe(cx, y_bot, cx, y_top, 260)
+                time.sleep(0.8)
+            els = feed_mod.elements(driver.page_source or "")
+            found = stitch_mod.locate(aim, els)
+            if found is None:
+                raise RuntimeError("no longer where it was — look again")
+            x1, y1, x2, y2 = found["b"]
+            driver.tap([((x1 + x2) // 2, (y1 + y2) // 2)])
+
+        ok, error = True, ""
+        try:
+            resident.run(_do)
+        except RuntimeError as exc:
+            ok, error = False, str(exc)
+        except Exception as exc:  # noqa: BLE001
+            ok, error = False, type(exc).__name__
+        try:
+            tmp = DEEPTAP_RESULT_PATH.with_suffix(".tmp")
+            tmp.write_text(json.dumps({
+                "id": request.get("id", ""), "ok": ok, "error": error,
+                "at": time.time()}), encoding="utf-8")
+            os.replace(tmp, DEEPTAP_RESULT_PATH)
+        except OSError as exc:
+            log.warning("cannot write the deep-tap result (%s)", exc)
+        # The tap changed the screen or the scroll; either way the stitched
+        # document no longer describes what is in front.
+        try:
+            STITCH_PATH.unlink()
+        except OSError:
+            pass
 
     def maybe_auto_auth(self) -> bool:
         """Sign in when the known app is sitting on its sign-in screen.
