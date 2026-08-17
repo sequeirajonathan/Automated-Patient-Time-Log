@@ -507,16 +507,17 @@ def _hhax_uma_login(driver, report) -> None:
         if not clicked_expiry:
             exits = driver.find_elements("xpath", expiry_exit)
             if exits:
-                # NOT clicked. The dialog's exit is literally log_out_button:
-                # walking through it tears down session state and leaves a
-                # stale activity stack that swallows the sign-in redirect —
-                # watched live: the full walk ran, Chrome submitted, and the
-                # app resurfaced the same dialog, not signed in. A clean
-                # restart lands on a fresh auth screen, and the ordinary
-                # walk from there is the one proven to work.
-                driver.terminate_app("com.hhaexchange.uma")
-                time.sleep(1.0)
-                driver.activate_app("com.hhaexchange.uma")
+                # Click the dialog's exit ("Regresar al inicio de sesión",
+                # the log_out_button): it hands off to the Chrome sign-in
+                # form and the ordinary walk from there completes in ~23s.
+                # An earlier version terminated and relaunched the app here
+                # instead, on the theory that clicking left a stale activity
+                # stack that swallowed the redirect. Live testing on a real
+                # expiry contradicted that — the click lands cleanly on the
+                # form — and the restart path was actively harmful: a
+                # terminate_app on the wedged app hung inside the driver
+                # call and froze the whole runner. Click, don't restart.
+                exits[0].click()
                 clicked_expiry = True
                 time.sleep(1.0)
                 continue

@@ -50,6 +50,43 @@ RETRY_AFTER = 30.0
 # bounds this, so it is bounded here.
 CONNECT_BUDGET = 40.0
 
+# An INDIVIDUAL command can hang too, and that one is worse: a macro calling
+# terminate_app on a wedged app sat inside a single driver call for an hour,
+# holding the session lock the entire time, so the overlay could not read the
+# screen and no tap could land -- the whole runner frozen behind one HTTP
+# request that never returned. Appium's client sets no socket timeout, so a
+# dead request blocks forever. This bounds every command: page reads are ~1.75s
+# and taps are milliseconds, so 120s is pure headroom for anything legitimate
+# while still letting a hung call raise, free the lock, and let the macro's own
+# deadline take over.
+COMMAND_HTTP_TIMEOUT = 120.0
+
+
+def _bound_command_timeout(driver) -> None:
+    """Give every HTTP command on this driver a socket timeout.
+
+    Selenium's RemoteConnection reads ``client_config.timeout`` for each
+    request and hands it to urllib3, so setting it on the live command
+    executor bounds all subsequent calls -- reads, taps, app lifecycle.
+    Wrapped defensively because the exact attribute has moved across
+    selenium/appium versions; a session without the bound is the old
+    behaviour, not a broken one.
+    """
+    executor = getattr(driver, "command_executor", None)
+    if executor is None:
+        return
+    config = getattr(executor, "client_config", None)
+    if config is not None:
+        try:
+            config.timeout = COMMAND_HTTP_TIMEOUT
+            return
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        executor.set_timeout(COMMAND_HTTP_TIMEOUT)
+    except Exception as exc:  # noqa: BLE001
+        log.info("could not bound per-command timeout (%s); continuing", exc)
+
 
 class Resident:
     """One Appium session, created on demand and rebuilt when it dies.
@@ -104,6 +141,7 @@ class Resident:
             driver.update_settings({"waitForIdleTimeout": 100})
         except Exception as exc:  # noqa: BLE001
             log.info("could not lower waitForIdleTimeout (%s); continuing", exc)
+        _bound_command_timeout(driver)
         return driver
 
     def _discard(self) -> None:
