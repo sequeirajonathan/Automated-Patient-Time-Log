@@ -597,8 +597,20 @@ def _fresh_stitch(directory: Path, viewport_id: str,
                 and _folded_count(sts) > _folded_count(doc.get("statics"))):
             continue
         stitched = {stitch_mod._key(e) for e in doc.get("elements") or []}
-        if stitched and len(mine & stitched) / len(mine) >= STITCH_MIN_OVERLAP:
-            return doc
+        if not stitched or len(mine & stitched) / len(mine) < STITCH_MIN_OVERLAP:
+            continue
+        # And the WORDS must agree, not just the shapes. inMyTeam builds
+        # every page from the same anonymous containers, so the element
+        # identities of its five tabs are near-identical — the patients
+        # tab wore the dashboard's scan, and the Tomorrow list wore
+        # Today's. The statics carry each page's actual text; most of the
+        # viewport's must appear in the document before it counts.
+        if sts is not None and len(sts) >= 3:
+            words = {stitch_mod._key(s) for s in sts}
+            doc_words = {stitch_mod._key(s) for s in doc.get("statics") or []}
+            if len(words & doc_words) / len(words) < STITCH_MIN_OVERLAP:
+                continue
+        return doc
     return None
 
 

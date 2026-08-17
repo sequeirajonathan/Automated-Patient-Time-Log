@@ -1147,6 +1147,37 @@ class TestFreshStitch:
                                   app="com.hhaexchange.caregiver",
                                   sts=same) is not None
 
+    def test_a_structural_twin_with_different_words_is_refused(self, tmp_path):
+        """inMyTeam builds every page from the same anonymous containers,
+        so element identity alone let the patients tab wear the
+        dashboard's scan and the Tomorrow list wear Today's. The words
+        are the page."""
+        self._write(tmp_path, statics=[
+            {"cls": "TextView", "txt": "Today Visits",
+             "b": [30, 70, 200, 90], "vb": [30, 70, 200, 90], "step": 0},
+            {"cls": "TextView", "txt": "MONDAY, AUGUST 17",
+             "b": [200, 300, 520, 320], "vb": [200, 300, 520, 320],
+             "step": 0},
+            {"cls": "TextView", "txt": "Carmen Villalon",
+             "b": [56, 400, 300, 420], "vb": [56, 400, 300, 420],
+             "step": 0}])
+        els = [dict(e) for e in self.ELS[:-1]] + \
+              [dict(self.ELS[-1], txt="22:42")]
+        other_words = [
+            {"cls": "TextView", "txt": "Tomorrow Visits", "b": [30, 70, 200, 90]},
+            {"cls": "TextView", "txt": "TUESDAY, AUGUST 18",
+             "b": [200, 300, 520, 320]},
+            {"cls": "TextView", "txt": "Carmen Villalon", "b": [56, 400, 300, 420]}]
+        assert feed._fresh_stitch(tmp_path, "bbbb", els=els,
+                                  app="com.hhaexchange.caregiver",
+                                  sts=other_words) is None
+        same_words = [dict(s) for s in other_words]
+        same_words[0]["txt"] = "Today Visits"
+        same_words[1]["txt"] = "MONDAY, AUGUST 17"
+        assert feed._fresh_stitch(tmp_path, "bbbb", els=els,
+                                  app="com.hhaexchange.caregiver",
+                                  sts=same_words) is not None
+
     def test_a_wide_open_chevron_is_not_a_fold(self, tmp_path):
         """The open state draws the same glyph rotated — wider than tall.
         An expanded viewport must not read as folded."""
