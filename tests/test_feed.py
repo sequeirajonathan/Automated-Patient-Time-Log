@@ -1116,6 +1116,49 @@ class TestFreshStitch:
         self._write(tmp_path)
         assert feed._fresh_stitch(tmp_path, "bbbb") is None
 
+    def test_a_more_folded_viewport_refuses_the_unfolded_scan(self, tmp_path):
+        """Coming back from the visit details re-folds today's cards. Same
+        page, different STATE — and dressing the folded phone in the
+        expanded document had the owner tapping a card the phone no longer
+        showed. More folded chevrons in front than in the scan means the
+        page moved on."""
+        chev = "\uf054"
+        self._write(tmp_path, statics=[
+            {"cls": "TextView", "txt": chev, "b": [694, 104, 700, 115],
+             "vb": [694, 104, 700, 115], "step": 0}])   # one folded card
+        els = [dict(e) for e in self.ELS[:-1]] + \
+              [dict(self.ELS[-1], txt="22:42")]
+        folded_two = [
+            {"cls": "TextView", "txt": chev, "b": [694, 104, 700, 115]},
+            {"cls": "TextView", "txt": chev, "b": [694, 304, 700, 315]}]
+        assert feed._fresh_stitch(tmp_path, "bbbb", els=els,
+                                  app="com.hhaexchange.caregiver",
+                                  sts=folded_two) is None
+
+    def test_an_equally_folded_viewport_still_matches(self, tmp_path):
+        chev = "\uf054"
+        self._write(tmp_path, statics=[
+            {"cls": "TextView", "txt": chev, "b": [694, 104, 700, 115],
+             "vb": [694, 104, 700, 115], "step": 0}])
+        els = [dict(e) for e in self.ELS[:-1]] + \
+              [dict(self.ELS[-1], txt="22:42")]
+        same = [{"cls": "TextView", "txt": chev, "b": [694, 104, 700, 115]}]
+        assert feed._fresh_stitch(tmp_path, "bbbb", els=els,
+                                  app="com.hhaexchange.caregiver",
+                                  sts=same) is not None
+
+    def test_a_wide_open_chevron_is_not_a_fold(self, tmp_path):
+        """The open state draws the same glyph rotated — wider than tall.
+        An expanded viewport must not read as folded."""
+        chev = "\uf054"
+        self._write(tmp_path, statics=[])
+        els = [dict(e) for e in self.ELS[:-1]] + \
+              [dict(self.ELS[-1], txt="22:42")]
+        wide = [{"cls": "TextView", "txt": chev, "b": [692, 106, 703, 112]}]
+        assert feed._fresh_stitch(tmp_path, "bbbb", els=els,
+                                  app="com.hhaexchange.caregiver",
+                                  sts=wide) is not None
+
     def test_an_old_document_is_not_trusted_even_on_exact_match(self, tmp_path):
         import os
         self._write(tmp_path)

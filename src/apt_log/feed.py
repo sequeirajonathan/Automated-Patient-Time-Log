@@ -433,10 +433,27 @@ STITCH_MAX_AGE = 600.0
 # must never wear another page's document.
 STITCH_MIN_OVERLAP = 0.8
 
+# The schedule's accordion chevron (see macros.EXPAND_GLYPH): drawn taller
+# than wide while a card is folded, rotated once it opens. Identity says
+# which PAGE this is; the chevrons say which STATE it is in.
+_FOLD_GLYPH = "\uf054"
+
+
+def _folded_count(statics: list[dict] | None) -> int:
+    """How many cards the tree shows still folded shut."""
+    n = 0
+    for s in statics or []:
+        if (s.get("txt") or "").strip() != _FOLD_GLYPH:
+            continue
+        b = s.get("b") or []
+        if len(b) == 4 and (b[3] - b[1]) > (b[2] - b[0]):
+            n += 1
+    return n
+
 
 def _fresh_stitch(directory: Path, viewport_id: str,
                   els: list[dict] | None = None,
-                  app: str = "") -> dict | None:
+                  app: str = "", sts: list[dict] | None = None) -> dict | None:
     """The stitched document describing this screen, from the scan cache.
 
     One file per scanned page, so switching apps does not throw away the
@@ -479,6 +496,16 @@ def _fresh_stitch(directory: Path, viewport_id: str,
         return None
     for doc in docs:
         if doc.get("app") != app:
+            continue
+        # Same page is not enough — same STATE. Coming back from the visit
+        # details re-folds today's cards, and the collapsed viewport's
+        # elements are a subset of the expanded document's, so the identity
+        # test alone dressed a folded phone in an unfolded scan: the owner
+        # tapped a card the phone no longer showed, and the tap refused.
+        # A viewport more folded than the document means the page moved on;
+        # the honest viewport (and the rescan already underway) take over.
+        if (sts is not None
+                and _folded_count(sts) > _folded_count(doc.get("statics"))):
             continue
         stitched = {stitch_mod._key(e) for e in doc.get("elements") or []}
         if stitched and len(mine & stitched) / len(mine) >= STITCH_MIN_OVERLAP:
@@ -594,7 +621,8 @@ def write_frame(path: Path, serial: str | None = None,
     # renders and aims at everything, not just the viewport. The moment the
     # screen moves on, the match fails and the viewport is the truth again.
     stitched = (_fresh_stitch(path.parent, frame_id(els), els=els,
-                              app=(focus or "").split("/")[0])
+                              app=(focus or "").split("/")[0],
+                              sts=statics(hierarchy) if hierarchy else [])
                 if not reason else None)
     frame = {
         "id": frame_id(els),
