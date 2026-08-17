@@ -1296,3 +1296,100 @@ class TestMaybeStitch:
             assert runner.maybe_stitch() is False
             assert runner.maybe_stitch() is False
         walk.assert_called_once()
+
+
+class TestSkipPreamble:
+    """A freshly-entered page is already at its top; only a re-scan pays
+    the scroll-to-top probe. The probe swipe plus its settle was pure
+    latency on the common case (a tab tapped, an activity opened)."""
+
+    def _driver(self):
+        driver = MagicMock()
+        driver.get_window_size.return_value = {"width": 720, "height": 1600}
+        driver.current_package = "com.hhaexchange.uma"
+        src = ('<node class="android.widget.TextView" text="Uno" '
+               'clickable="false" bounds="[10,100][700,150]"/>')
+        type(driver).page_source = property(lambda self: src)
+        return driver
+
+    def test_a_fresh_page_skips_the_scroll_to_top(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
+        driver = self._driver()
+        with patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros._scroll_to_top") as to_top:
+            macros._stitch_walk(driver, assume_top=True)
+        to_top.assert_not_called()
+
+    def test_a_rescan_still_scrolls_to_top(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
+        driver = self._driver()
+        with patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros._scroll_to_top") as to_top:
+            macros._stitch_walk(driver, assume_top=False)
+        to_top.assert_called_once()
+
+
+class TestWarmSweep:
+    """After a sign-in, the app's other tabs have never been opened, so
+    their scans cannot exist. The sweep opens each once — non-committing —
+    and yields the phone the instant a real action is waiting."""
+
+    def _driver(self, tabs=3, activity="HomeActivity"):
+        driver = MagicMock()
+        driver.get_window_size.return_value = {"width": 720, "height": 1600}
+        driver.current_package = "com.hhaexchange.uma"
+        type(driver).current_activity = activity
+        band = 1450
+        nodes = "".join(
+            f'<node class="android.widget.Button" clickable="true" '
+            f'bounds="[{i*220},{band}][{i*220+180},{band+120}]"/>'
+            for i in range(tabs))
+        type(driver).page_source = property(lambda self: nodes)
+        return driver
+
+    def test_each_tab_is_opened_once(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
+        driver = self._driver(tabs=3)
+        with patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros._stitch_walk", return_value=True) as walk:
+            warmed = macros._warm_sweep(driver, tmp_path / "req.json",
+                                        tmp_path / "deep.json",
+                                        tmp_path / "poke")
+        assert warmed == 3
+        assert walk.call_count == 3
+
+    def test_a_screen_without_tabs_is_left_alone(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
+        driver = self._driver(tabs=1)
+        with patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros._stitch_walk", return_value=True) as walk:
+            assert macros._warm_sweep(driver, tmp_path / "req.json",
+                                      tmp_path / "deep.json",
+                                      tmp_path / "poke") == 0
+        walk.assert_not_called()
+
+    def test_a_waiting_request_stops_the_sweep(self, tmp_path, monkeypatch):
+        """She tapped something: the sweep yields the phone at once."""
+        monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
+        req = tmp_path / "req.json"
+        req.write_text("{}", encoding="utf-8")
+        driver = self._driver(tabs=3)
+        with patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros._stitch_walk", return_value=True) as walk:
+            macros._warm_sweep(driver, req, tmp_path / "deep.json",
+                               tmp_path / "poke")
+        walk.assert_not_called()
+
+    def test_the_runner_arms_warming_after_a_login_macro(self, tmp_path):
+        runner = macros.Runner(status_path=tmp_path / "s.json")
+        with patch("apt_log.resident.run"), \
+             patch("apt_log.ui.mirror.publish"):
+            runner.execute("hhax_uma_login", "rid1")
+        assert runner._warm_app == "hhax_uma_login"
+
+    def test_a_non_login_macro_does_not_arm_warming(self, tmp_path):
+        runner = macros.Runner(status_path=tmp_path / "s.json")
+        with patch("apt_log.resident.run"), \
+             patch("apt_log.ui.mirror.publish"):
+            runner.execute("open_inmyteam", "rid2")
+        assert runner._warm_app is None

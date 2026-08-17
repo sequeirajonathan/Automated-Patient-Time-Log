@@ -104,6 +104,21 @@ STITCH_SETTLE = 0.5
 # someone is driving the phone, and the walk waits its turn.
 STITCH_TAP_QUIET = 4.0
 
+# Cache-warming: right after a sign-in, the app's other tabs have never
+# been opened, so their virtualized lists have never been materialised and
+# their scans cannot exist yet. The warm sweep opens each sibling tab once
+# and scans it, so her FIRST visit to any tab is instant instead of a
+# fresh scroll. It runs only just after a sign-in (she is not yet
+# interacting), only on a tabbed screen, and yields the phone the instant
+# a real action arrives. WARM_ENABLED turns the whole behaviour off in one
+# place if the autonomous movement is ever unwanted.
+WARM_ENABLED = True
+# A bottom-band clickable narrower than half the screen is a tab. The band
+# is the bottom sixth, where every app of the four keeps its tab bar.
+WARM_TAB_BAND = 0.84
+WARM_TAB_MAX_WIDTH = 0.5
+WARM_SETTLE = 0.9
+
 # Sign in only while someone is actually watching. Unwatched, the app's own
 # inactivity timer signs the session back out and the two loop all night —
 # observed as sign-in / agency picker / "due to inactivity" / sign-out on
@@ -687,18 +702,25 @@ def _scroll_to_top(driver, cx: int, y_top: int, y_bot: int) -> None:
         time.sleep(STITCH_SETTLE)
 
 
-def _stitch_walk(driver) -> bool:
+def _stitch_walk(driver, assume_top: bool = False) -> bool:
     """Walk the current page and write the stitched whole-page document.
 
     Swipes move the page and can press nothing; the page is returned to
     its top, which is also the scroll state every below-the-fold tap
     replay starts from.
+
+    ``assume_top`` skips the scroll-to-top probe. A page entered by a
+    fresh transition — a tab tapped, an activity opened — is already at
+    its top, and the probe swipe plus its settle was pure latency on the
+    common case. A re-scan of a page that may have been left scrolled
+    still pays it.
     """
     from apt_log import feed as feed_mod
     from apt_log import stitch as stitch_mod
 
     cx, y_top, y_bot = _swipe_geometry(driver)
-    _scroll_to_top(driver, cx, y_top, y_bot)
+    if not assume_top:
+        _scroll_to_top(driver, cx, y_top, y_bot)
 
     def capture() -> dict:
         src = driver.page_source or ""
@@ -779,6 +801,56 @@ def _forget_stitched(app: str) -> None:
                 f.unlink(missing_ok=True)
     except OSError:
         pass
+
+
+def _bottom_tabs(driver) -> list[dict]:
+    """The current screen's own tab bar, left to right, or [].
+
+    A tab is a clickable in the bottom band narrower than half the screen;
+    the app's back/menu chrome lives at the top, its content fills the
+    middle, and its tab bar — when it has one — sits along the bottom.
+    """
+    from apt_log import feed as feed_mod
+
+    size = driver.get_window_size()
+    w, h = size["width"], size["height"]
+    tabs = [e for e in feed_mod.elements(driver.page_source or "")
+            if e["b"][1] > h * WARM_TAB_BAND
+            and (e["b"][2] - e["b"][0]) < w * WARM_TAB_MAX_WIDTH]
+    return sorted(tabs, key=lambda e: e["b"][0])
+
+
+def _warm_sweep(driver, request_path, deep_path, poke_path) -> int:
+    """Open each sibling tab once and scan it, then return to the landing
+    tab. Non-committing throughout (tab switches change no records), and
+    it bails the instant a real action is waiting. Returns how many tabs
+    it warmed."""
+    landing = driver.current_activity
+    tabs = _bottom_tabs(driver)
+    if len(tabs) < 2:
+        return 0                       # not a tabbed screen; nothing to warm
+
+    def centre(e):
+        x1, y1, x2, y2 = e["b"]
+        return (x1 + x2) // 2, (y1 + y2) // 2
+
+    warmed = 0
+    for tab in tabs:
+        if someone_wants_the_phone(request_path, deep_path, poke_path):
+            break
+        cx, cy = centre(tab)
+        driver.tap([(cx, cy)])
+        time.sleep(WARM_SETTLE)
+        if _stitch_walk(driver, assume_top=True):
+            warmed += 1
+    # Home again: whichever tab the app opened onto after sign-in. The
+    # leftmost tab is the schedule on every one of the four; if that is not
+    # where we started, the landing check keeps the phone honest.
+    if driver.current_activity != landing and tabs:
+        cx, cy = centre(tabs[0])
+        driver.tap([(cx, cy)])
+        time.sleep(WARM_SETTLE)
+    return warmed
 
 
 def take_deep_tap() -> dict | None:
@@ -941,6 +1013,27 @@ def request(name: str, path: Path | None = None) -> str:
     return rid
 
 
+def someone_wants_the_phone(request_path: Path | None,
+                            deep_path: Path | None,
+                            poke_path: Path | None) -> bool:
+    """True if a real action is waiting — a macro, a below-fold tap, a fresh
+    finger. The warm sweep peeks with this (never consuming the request) so
+    it yields the phone the instant she actually asks for something."""
+    for p in (request_path or REQUEST_PATH, deep_path or DEEPTAP_REQUEST_PATH):
+        try:
+            if p.exists():
+                return True
+        except OSError:
+            pass
+    try:
+        poke = (poke_path or SCREEN_PATH.parent / "hierarchy-poke")
+        if time.time() - poke.stat().st_mtime < STITCH_TAP_QUIET:
+            return True
+    except OSError:
+        pass
+    return False
+
+
 def take_request(path: Path | None = None) -> dict | None:
     """Claim a pending request, removing it. None when there is nothing to do."""
     target = path or REQUEST_PATH
@@ -1011,6 +1104,10 @@ class Runner:
         # scans immediately.
         self._stitch_next_at: float | None = None
         self._stitch_last_page: tuple | None = None
+        # An app whose tabs are worth pre-scanning: set the moment a
+        # sign-in finishes, cleared once its tabs are warmed (or the sweep
+        # was pre-empted). None means nothing to warm.
+        self._warm_app: str | None = None
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -1040,10 +1137,54 @@ class Runner:
                 if signature is not None:
                     sign.execute(signature)
                 self.maybe_auto_auth()
+                self.maybe_warm()
                 self.maybe_stitch()
             except Exception as exc:  # noqa: BLE001
                 log.warning("macro runner: %s", exc)
             self._stop.wait(POLL_EVERY)
+
+    def maybe_warm(self) -> bool:
+        """Pre-scan the just-signed-in app's other tabs, once.
+
+        Warming is the only way a never-opened tab can be cached: its
+        virtualized list has never been materialised, so scrolling it into
+        being is unavoidable — the sweep just pays that cost before she
+        does, while she is not yet interacting. Guarded like the scan
+        (watching, idle, unblocked) and disarmed after one attempt whether
+        it warmed anything or was pre-empted, so it never loops.
+        """
+        app = self._warm_app
+        if not app:
+            return False
+        if not someone_is_watching(self._viewers_path):
+            return False
+        if read_status(self._status_path).state == "running":
+            return False
+        deep_path = DEEPTAP_REQUEST_PATH
+        poke_path = (self._screen_path or SCREEN_PATH).parent / "hierarchy-poke"
+        if someone_wants_the_phone(self._request_path, deep_path, poke_path):
+            # She is already doing something; skip warming entirely rather
+            # than fight her for the phone. Disarmed: her navigation will
+            # scan each page she actually visits anyway.
+            self._warm_app = None
+            return False
+        self._warm_app = None            # one attempt, whatever happens
+
+        from apt_log import resident
+
+        log.info("warming the tabs after sign-in")
+        try:
+            warmed = resident.run(
+                lambda d: _warm_sweep(d, self._request_path, deep_path,
+                                      poke_path))
+            log.info("warmed %s tab(s)", warmed)
+            # The sweep left the phone on a fresh page; let the normal scan
+            # own it rather than treating the warmed landing as seen.
+            self._stitch_last_page = None
+            return bool(warmed)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("tab warm failed: %s", exc)
+            return False
 
     def maybe_stitch(self) -> bool:
         """Walk the current page into a whole-page document.
@@ -1090,7 +1231,8 @@ class Runner:
             pass
         page = (doc.get("app"), doc.get("activity"))
         now = time.monotonic()
-        if (page == self._stitch_last_page
+        fresh = page != self._stitch_last_page
+        if (not fresh
                 and self._stitch_next_at is not None
                 and now < self._stitch_next_at):
             return False
@@ -1101,7 +1243,9 @@ class Runner:
 
         log.info("walking the page for a whole-page document (frame %s)", fid)
         try:
-            ok = bool(resident.run(_stitch_walk))
+            # A freshly-entered page is already at its top; only a re-scan
+            # of the same page pays the scroll-to-top probe.
+            ok = bool(resident.run(lambda d: _stitch_walk(d, assume_top=fresh)))
         except Exception as exc:  # noqa: BLE001
             # Transient — a session mid-rebuild, an adb hiccup. NOT latched:
             # the next loop may find the session back, and latching here
@@ -1272,4 +1416,9 @@ class Runner:
         status.at = datetime.now().isoformat()
         write_status(status, self._status_path)
         log.info("macro %s finished", name)
+        # A sign-in just landed on the app's home tab; its other tabs have
+        # never been opened, so nothing about them is cached. Arm the warm
+        # sweep to pre-scan them before she navigates.
+        if WARM_ENABLED and "login" in name:
+            self._warm_app = name
         return status
