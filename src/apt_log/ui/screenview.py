@@ -134,8 +134,19 @@ ACTION_WORDS = (
 )
 
 
+# Actions the app itself plays DOWN, whatever their verb. "Iniciar
+# visita no programada" starts the exception workflow — creating an
+# UNSCHEDULED visit — and the app draws it as small plain text under
+# today's cards while "Ver detalles" gets the filled pill (checked
+# against the phone's own pixels). The portal must not out-shout the
+# app on a record-creating path: these render as ordinary rows.
+DEMOTED_HINTS = ("no programada", "unscheduled")
+
+
 def _looks_like_cta(text: str) -> bool:
     t = (text or "").strip().lower()
+    if any(h in t for h in DEMOTED_HINTS):
+        return False
     return bool(t) and any(t.startswith(w) for w in ACTION_WORDS)
 
 # Some apps draw their state marks as ImageViews instead \u2014 no text at all,

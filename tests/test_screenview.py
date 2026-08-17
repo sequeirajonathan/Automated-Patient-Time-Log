@@ -626,3 +626,33 @@ class TestTabBaseline:
         body = [t for r in m["rows"] for i in r["items"]
                 for t in ([i.get("txt")] + (i.get("lines") or [])) if t]
         assert any("Detalles del paciente" in t for t in body)
+
+
+class TestDemotedActions:
+    """"Iniciar visita no programada" starts the exception workflow —
+    creating an UNSCHEDULED visit — and the app draws it as small plain
+    text while "Ver detalles" gets the filled pill (checked against the
+    phone's own pixels). The portal must not out-shout the app on a
+    record-creating path: it renders as an ordinary row, still tappable,
+    never dressed as the page's primary action."""
+
+    def test_the_unscheduled_visit_entry_is_not_a_cta(self):
+        m = screenview.build(doc(
+            elements=[el("schedule_screen_create_unscheduled_visit", "View",
+                         [14, 890, 706, 935])],
+            statics=[st([300, 900, 421, 925], "Iniciar visita no programada")],
+        ))
+        cell = next(i for r in m["rows"] for i in r["items"]
+                    if i["kind"] == "row")
+        assert not cell.get("cta")
+        assert cell["aim"]["rid"] == "schedule_screen_create_unscheduled_visit"
+
+    def test_a_plain_start_visit_button_keeps_its_weight(self):
+        m = screenview.build(doc(
+            elements=[el("btn_start", "Button", [60, 800, 660, 900],
+                         "Iniciar visita")],
+            statics=[],
+        ))
+        btn = next(i for r in m["rows"] for i in r["items"]
+                   if i["kind"] == "button")
+        assert btn["cta"] is True
