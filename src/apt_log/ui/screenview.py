@@ -41,11 +41,16 @@ BAND_OVERLAP = 0.5
 SEGMENT_MAX_WIDTH = 0.18
 SEGMENT_MAX_GAP = 0.02
 
-# The top of the screen, where an app keeps its own navigation bar. 0.13,
-# not 0.12: the legacy agency picker's title block reaches 0.123 of the
-# screen, and missing the cut rendered the app's own header as a boxed row
-# with an orphaned info button instead of a title bar.
-NAV_BAND_BOTTOM = 0.13
+# The top of the screen, where an app keeps its own navigation bar: the
+# first band is a nav when it STARTS at the very top, ENDS above the
+# content, and every tappable in it is a small utility button — a back
+# chevron, an info dot, a badge — never a wide call to action. The band
+# bottom alone was the old test, and each app's header missed it by its
+# own margin: the agency picker's title block at 0.123, the legacy home's
+# logo-and-agency block at 0.19, both rendered as boxed rows instead of
+# title bars. Smallness is what actually separates chrome from content.
+NAV_TOP_MAX = 0.12
+NAV_BAND_BOTTOM = 0.20
 
 # A tappable container this flat is a scrim edge or a divider — a 5px strip
 # nobody could hit with a finger on the real phone — not a row. Rendering
@@ -267,7 +272,10 @@ def build(doc: dict) -> dict | None:
             lines, badge, marks = [], "", []
             for s in own:
                 how, value = _fold_label(e["b"], s)
-                if how == "line" and value:
+                # No line twice: the legacy home repeats a subtitle node in
+                # its own hierarchy, and a cell reading the same sentence
+                # two times looks broken even when the tree really does.
+                if how == "line" and value and value not in lines:
                     lines.append(value)
                 elif how == "badge":
                     badge = value
@@ -329,11 +337,14 @@ def build(doc: dict) -> dict | None:
 
     # -------------------------------------------------------------------- nav
     nav = None
-    if bands and all(n["b"][3] <= h * NAV_BAND_BOTTOM for n in bands[0]):
+    if bands:
         first = bands[0]
         buttons = [n for n in first if n.get("aim")]
         titles = [n for n in first if not n.get("aim") and n.get("txt")]
-        if buttons:
+        if (buttons
+                and min(n["b"][1] for n in first) <= h * NAV_TOP_MAX
+                and max(n["b"][3] for n in first) <= h * NAV_BAND_BOTTOM
+                and all(n.get("small") for n in buttons)):
             title = max(titles, key=lambda n: len(n["txt"]), default=None)
             nav = {
                 "back": buttons[0],

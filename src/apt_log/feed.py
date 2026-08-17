@@ -513,8 +513,11 @@ def write_screen(target: Path, frame: dict, screen: str, reason: str,
         # different app. During every app switch the two disagree, and the
         # page must say "syncing", not dress the old app's rows in the new
         # app's name — seen live as the launcher's search row rendered under
-        # a title saying HHAeXchange, "finished loading".
-        "h_app": (hierarchy_focus or "").split("/")[0],
+        # a title saying HHAeXchange, "finished loading". The tree's own
+        # package attributes outrank the focus recorded at read time: the
+        # tree can lag the focus through a switch (see hierarchy_package).
+        "h_app": (hierarchy_package(hierarchy)
+                  or (hierarchy_focus or "").split("/")[0]),
         "blocked": reason,
         "notice": frame.get("notice", ""),
         # A webview's accessibility tree underreports: the migration pitch
@@ -797,6 +800,26 @@ def run(path: Path, interval: float = DEFAULT_INTERVAL,
 def _attr(node: str, name: str) -> str:
     m = re.search(rf'{name}="([^"]*)"', node)
     return m.group(1) if m else ""
+
+
+def hierarchy_package(xml: str | None) -> str:
+    """The app the TREE itself belongs to, by majority of its nodes.
+
+    The focus recorded when the hierarchy was read is not the same fact:
+    during an app switch the window manager names the new app while the
+    accessibility tree still serves the old one's nodes — watched live as
+    the legacy home screen published under HHAeXchange+'s name, exactly
+    the mislabeled-sketch lie h_app exists to prevent. Every node carries
+    a package attribute; the tree's own majority is the honest answer.
+    System overlay nodes (the status bar's) are not candidates.
+    """
+    if not xml:
+        return ""
+    counts: dict[str, int] = {}
+    for pkg in re.findall(r' package="([^"]*)"', xml):
+        if pkg and pkg != "com.android.systemui":
+            counts[pkg] = counts.get(pkg, 0) + 1
+    return max(counts, key=counts.__getitem__) if counts else ""
 
 
 def elements(xml: str, label: bool = False) -> list[dict]:

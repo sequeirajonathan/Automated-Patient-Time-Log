@@ -1120,3 +1120,30 @@ class TestFreshStitch:
         old = time.time() - feed.STITCH_MAX_AGE - 5
         os.utime(tmp_path / feed.STITCH_NAME, (old, old))
         assert feed._fresh_stitch(tmp_path, "aaaa") is None
+
+
+class TestHierarchyPackage:
+    """The tree's own package attributes outrank the focus recorded at
+    read time: through an app switch the window manager names the new app
+    while the accessibility tree still serves the old one's nodes — seen
+    live as the legacy home screen published under HHAeXchange+'s name."""
+
+    def test_the_trees_majority_names_the_app(self):
+        xml = ('<node package="com.hhaexchange.caregiver"/>' * 5
+               + '<node package="com.android.systemui"/>' * 9)
+        assert feed.hierarchy_package(xml) == "com.hhaexchange.caregiver"
+
+    def test_no_tree_is_no_answer(self):
+        assert feed.hierarchy_package(None) == ""
+        assert feed.hierarchy_package("") == ""
+
+    def test_the_screen_document_prefers_the_trees_answer(self, tmp_path):
+        xml = '<node package="com.hhaexchange.caregiver" bounds="[0,0][720,100]"/>'
+        frame = {"id": "x", "img": "", "at": "now", "size": [720, 1600]}
+        feed.write_screen(tmp_path / "screen.json", frame, "home", "", xml,
+                          focus="com.hhaexchange.uma/.HomeActivity",
+                          hierarchy_at=1.0,
+                          hierarchy_focus="com.hhaexchange.uma/.HomeActivity")
+        doc = json.loads((tmp_path / "screen.json").read_text())
+        assert doc["app"] == "com.hhaexchange.uma"
+        assert doc["h_app"] == "com.hhaexchange.caregiver"
