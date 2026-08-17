@@ -807,25 +807,48 @@ def _forget_stitched(app: str) -> None:
 def _bottom_tabs(driver) -> list[tuple[int, int]]:
     """The current screen's tab bar as tap points, left to right, or [].
 
-    Detected from the tab LABELS, not the clickable containers: Compose
-    does not mark the selected tab clickable (so the clickables miss a
-    slot), while every tab — selected or not — carries its caption. The
-    label's centre falls inside its tab, so it is a reliable tap point,
-    and having all the slots (including the selected one) is what lets the
-    sweep return to the landing tab afterward. A tab label is a short text
-    in the bottom band, narrower than half the screen.
+    Detection and aim come from two different nodes, because on Compose
+    they disagree:
+
+    - The tab LABELS enumerate the slots. Every tab carries its caption,
+      selected or not, so the labels see all the slots — which is what
+      lets the sweep know the landing tab and return to it. (The clickable
+      containers miss the selected tab, which Compose does not mark
+      clickable.)
+    - The clickable CONTAINER is the tap point. Tapping the label's own
+      centre does nothing — verified live, the caption sits in the tab's
+      lower strip where the touch does not take; the container's centre,
+      up in the icon zone, is where the tab actually responds. When a slot
+      has no container (the selected tab) the aim falls just above the
+      label, in that same icon zone.
     """
     from apt_log import feed as feed_mod
 
     size = driver.get_window_size()
     w, h = size["width"], size["height"]
-    labels = [s for s in feed_mod.statics(driver.page_source or "")
-              if s["b"][1] > h * WARM_TAB_BAND
-              and (s.get("txt") or "").strip()
-              and (s["b"][2] - s["b"][0]) < w * WARM_TAB_MAX_WIDTH]
+    src = driver.page_source or ""
+    band = h * WARM_TAB_BAND
+    narrow = w * WARM_TAB_MAX_WIDTH
+    labels = [s for s in feed_mod.statics(src)
+              if s["b"][1] > band and (s.get("txt") or "").strip()
+              and (s["b"][2] - s["b"][0]) < narrow]
     labels.sort(key=lambda s: s["b"][0])
-    return [((s["b"][0] + s["b"][2]) // 2, (s["b"][1] + s["b"][3]) // 2)
-            for s in labels]
+    # Clickable tab containers sit a little higher than their captions, so
+    # the band is loosened slightly for them.
+    containers = [e for e in feed_mod.elements(src)
+                  if e["b"][3] > band and (e["b"][2] - e["b"][0]) < narrow]
+
+    points: list[tuple[int, int]] = []
+    for s in labels:
+        cx = (s["b"][0] + s["b"][2]) // 2
+        holder = next((e for e in containers
+                       if e["b"][0] <= cx <= e["b"][2]), None)
+        if holder:
+            points.append(((holder["b"][0] + holder["b"][2]) // 2,
+                           (holder["b"][1] + holder["b"][3]) // 2))
+        else:
+            points.append((cx, s["b"][1] - 40))
+    return points
 
 
 def _warm_sweep(driver, request_path, deep_path, poke_path) -> int:

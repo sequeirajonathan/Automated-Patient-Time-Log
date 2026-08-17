@@ -1417,3 +1417,34 @@ class TestWarmReturnHome:
         with patch("apt_log.macros.time.sleep"):
             macros._return_to_tabbar(driver, want)
         driver.back.assert_called()          # stepped out of the sub-page
+
+
+class TestTabAim:
+    """Tapping a Compose tab's caption does nothing (verified live); the
+    clickable container up in the icon zone is where the tap takes. So the
+    labels enumerate the slots but the container is the aim."""
+
+    def test_the_clickable_container_is_the_tap_point_not_the_label(self):
+        driver = MagicMock()
+        driver.get_window_size.return_value = {"width": 720, "height": 1600}
+        # A HHAeXchange+ tab bar: Programación selected (no container),
+        # Pacientes and Menú clickable containers higher than their labels.
+        src = (
+            '<node class="android.widget.TextView" text="Programación" '
+            'clickable="false" bounds="[0,1427][228,1475]"/>'
+            '<node class="android.widget.TextView" text="Pacientes" '
+            'clickable="false" bounds="[268,1427][452,1475]"/>'
+            '<node class="android.widget.TextView" text="Menú" '
+            'clickable="false" bounds="[552,1427][659,1475]"/>'
+            '<node class="android.view.View" clickable="true" '
+            'bounds="[246,1312][474,1492]"/>'          # Pacientes container
+            '<node class="android.view.View" clickable="true" '
+            'bounds="[492,1312][720,1492]"/>')         # Menú container
+        type(driver).page_source = property(lambda self: src)
+        points = macros._bottom_tabs(driver)
+        assert len(points) == 3
+        # Programación selected: no container, aim just above its label.
+        assert points[0] == (114, 1387)
+        # Pacientes and Menú: the container centre, up in the icon zone.
+        assert points[1] == (360, 1402)
+        assert points[2] == (606, 1402)
