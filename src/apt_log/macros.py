@@ -553,10 +553,13 @@ def _read_page(driver, report) -> None:
     top_y = int(size["height"] * 0.33)
     bottom_y = int(size["height"] * 0.66)
 
+    from apt_log.ui.screenview import BULLETS
+
     def snapshot() -> list[str]:
         rows = feed_mod.statics(driver.page_source or "")
         rows.sort(key=lambda s: (s["b"][1], s["b"][0]))
-        return [s["txt"] for s in rows if s.get("txt")]
+        return [s["txt"] for s in rows
+                if s.get("txt") and s["txt"].strip() not in BULLETS]
 
     # To the top first: a reading starts at the beginning.
     prev: list[str] = []
