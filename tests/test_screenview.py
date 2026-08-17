@@ -714,3 +714,28 @@ class TestVisitDetailsScreen:
                     if i["kind"] == "row")
         assert not tile.get("info")
         assert tile["aim"]
+
+
+class TestWrapperContainers:
+    """The inMyTeam sign-in hangs one clickable View over the whole page.
+    Letting it fold labels swallowed the title, the field's caption and
+    the submit's text into one giant "button" whose first line started
+    with "Sign in" — a full-page CTA — while the real control rendered
+    empty. A tall container WITH other interactive elements inside it is
+    scaffolding and folds nothing."""
+
+    def test_a_full_page_wrapper_folds_nothing(self):
+        m = screenview.build(doc(
+            elements=[el("", "View", [0, 64, 720, 1579]),
+                      el("", "EditText", [11, 992, 709, 1026]),
+                      el("", "View", [11, 1279, 709, 1321])],
+            statics=[st([0, 317, 720, 381], "Sign in with your phone number"),
+                     st([38, 1004, 150, 1017], "Enter your cell phone number"),
+                     st([334, 1294, 362, 1306], "Sign in")],
+        ))
+        items = [i for r in m["rows"] for i in r["items"]]
+        ctas = [i for i in items if i.get("cta")]
+        assert len(ctas) == 1
+        assert ctas[0]["lines"] == ["Sign in"]
+        texts = [i.get("txt") for i in items if i["kind"] == "label"]
+        assert "Sign in with your phone number" in texts

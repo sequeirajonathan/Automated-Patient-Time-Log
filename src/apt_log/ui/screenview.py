@@ -304,7 +304,21 @@ def build(doc: dict) -> dict | None:
     # from another and folded in as a bogus subtitle (seen live: "agosto
     # 19/20/21" stuck under a visit row). Only a label captured at the same
     # scroll step as the container was really inside it.
-    containers = [e for e in elements if _kind(e.get("cls", "")) == "row"]
+    # A tall container with other interactive elements INSIDE it is a
+    # WRAPPER, not a row: the inMyTeam sign-in hangs one clickable View
+    # over the whole page, and letting it fold labels swallowed the
+    # title, the field's caption and the submit's text into one giant
+    # "button" — while the real Sign in control rendered empty. A tall
+    # card that holds nothing but the page's text is still content and
+    # keeps its labels; scaffolding folds nothing.
+    def _wraps_others(e: dict) -> bool:
+        return any(o is not e and _contains(e["b"], o["b"])
+                   for o in elements)
+
+    containers = [e for e in elements
+                  if _kind(e.get("cls", "")) == "row"
+                  and not ((e["b"][3] - e["b"][1]) >= h * CURTAIN_MIN_HEIGHT
+                           and _wraps_others(e))]
     folded: set[int] = set()
     labels: dict[int, list[dict]] = {}
     for i, s in enumerate(statics):
