@@ -1727,39 +1727,34 @@ class TestAccordionScan:
             macros._stitch_walk(driver, assume_top=True)
         tapped.assert_not_called()
 
-    def test_a_walk_that_opened_folds_rescans_the_settled_page(
+    def test_only_the_first_viewports_folds_are_opened(
             self, tmp_path, monkeypatch):
-        """Opening a fold moves everything beneath it, and the stitcher's
-        overlap math assumes a page that holds still — one combined pass
-        published duplicated day headers (seen live). The pass that opened
-        anything is only the expansion pass; the publish comes from a
-        second walk over the now-static page, started back at the top."""
+        """Two designs failed live before this one: opening cards as the
+        walk reached them moved content between captures and the stitch
+        published duplicated day headers; and a second clean sweep
+        corrupted identically, because the app forgets an opened card
+        once it scrolls out of view — a fully-open page does not exist to
+        be rescanned. Only taps that land before anything is captured are
+        stable, so a folded card that appears after the first swipe is
+        left as its tappable header row."""
         monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
         pages = {
-            "collapsed": self._dates() + self._card(401, "NIEVES C MASTRAPA"),
-            "expanded": self._dates() + self._card(
+            "top": self._dates() + self._card(401, "NIEVES C MASTRAPA"),
+            "top_open": self._dates() + self._card(
                 401, "NIEVES C MASTRAPA", folded=False, details=True),
+            "below": self._dates() + self._card(401, "LUCRESIA L PUPO"),
         }
-        state = {"page": "collapsed"}
+        state = {"page": "top"}
         driver = self._driver(state, pages)
 
         def tap(x, y):
-            state["page"] = "expanded"
+            state["page"] = "top_open"
 
+        def swipe(*_a, **_kw):
+            state["page"] = "below"      # the next viewport scrolls in
+
+        driver.swipe.side_effect = swipe
         with patch("apt_log.macros.time.sleep"), \
-             patch("apt_log.macros._scroll_to_top") as to_top, \
-             patch("apt_log.macros._tap_xy", side_effect=tap):
+             patch("apt_log.macros._tap_xy", side_effect=tap) as tapped:
             assert macros._stitch_walk(driver, assume_top=True) is True
-        to_top.assert_called_once()      # the rescan starts at the top
-
-    def test_a_walk_that_opened_nothing_scans_once(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
-        pages = {"collapsed": self._dates() + self._card(
-            401, "NIEVES C MASTRAPA", folded=False, details=True)}
-        driver = self._driver({"page": "collapsed"}, pages)
-        with patch("apt_log.macros.time.sleep"), \
-             patch("apt_log.macros._scroll_to_top") as to_top, \
-             patch("apt_log.macros._tap_xy") as tapped:
-            macros._stitch_walk(driver, assume_top=True)
-        tapped.assert_not_called()
-        to_top.assert_not_called()       # fresh page, no folds: no probe
+        tapped.assert_called_once()      # the below-the-fold card: never

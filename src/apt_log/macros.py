@@ -892,31 +892,34 @@ def _stitch_walk(driver, assume_top: bool = False) -> bool:
                 cap = fresh
             return cap
 
-        # The stitcher's overlap math assumes the page holds still between
-        # captures, and opening a fold moves everything beneath it — one
-        # pass that both opened cards and stitched published duplicated
-        # day headers and interleaved fragments (seen live). So a pass
-        # that opened anything is only the expansion pass: the page is
-        # walked again from the top, now static and fully unfolded, and
-        # THAT walk is the one stitched and published.
-        for sweep in (1, 2):
-            if sweep == 2 or not assume_top:
-                _scroll_to_top(driver, cx, y_top, y_bot)
-            captures: list[dict] = []
-            prev: dict | None = None
-            for _ in range(STITCH_MAX_STEPS):
-                cap = open_folds(capture())
-                if prev is not None and cap == prev:
-                    break
-                captures.append(cap)
-                prev = cap
-                _swipe(driver, cx, y_bot, y_top)
-                time.sleep(STITCH_SETTLE)
-            if sweep == 1 and opened:
-                log.info("opened %d folded cards; rescanning the settled "
-                         "page", opened)
-                continue
-            break
+        # ONLY the first viewport's folds are opened, before the first
+        # capture. Two designs failed live before this one: opening cards
+        # as the walk reached them moved content between captures and the
+        # stitch published duplicated day headers; and a second clean
+        # sweep after an expansion pass corrupted identically, because
+        # the app FORGETS an opened card once it scrolls out of view (12
+        # opened at one walk, 8 found folded again minutes later) — a
+        # fully-open page does not exist to be rescanned. What is stable:
+        # taps that all land before anything is captured. The first
+        # viewport is today's cards, the ones she is working with; deeper
+        # cards keep their tappable header rows and open on request.
+        if not assume_top:
+            _scroll_to_top(driver, cx, y_top, y_bot)
+        captures: list[dict] = []
+        prev: dict | None = None
+        for step in range(STITCH_MAX_STEPS):
+            cap = capture()
+            if step == 0:
+                cap = open_folds(cap)
+                if opened:
+                    log.info("opened %d folded cards in the first viewport",
+                             opened)
+            if prev is not None and cap == prev:
+                break
+            captures.append(cap)
+            prev = cap
+            _swipe(driver, cx, y_bot, y_top)
+            time.sleep(STITCH_SETTLE)
 
         if not captures or not captures[0]["elements"]:
             for _ in range(max(len(captures) - 1, 0)):
