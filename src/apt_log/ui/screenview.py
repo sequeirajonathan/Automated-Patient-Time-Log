@@ -41,8 +41,16 @@ BAND_OVERLAP = 0.5
 SEGMENT_MAX_WIDTH = 0.18
 SEGMENT_MAX_GAP = 0.02
 
-# The top of the screen, where an app keeps its own navigation bar.
-NAV_BAND_BOTTOM = 0.12
+# The top of the screen, where an app keeps its own navigation bar. 0.13,
+# not 0.12: the legacy agency picker's title block reaches 0.123 of the
+# screen, and missing the cut rendered the app's own header as a boxed row
+# with an orphaned info button instead of a title bar.
+NAV_BAND_BOTTOM = 0.13
+
+# A tappable container this flat is a scrim edge or a divider — a 5px strip
+# nobody could hit with a finger on the real phone — not a row. Rendering
+# one produced a full-height empty cell with a chevron pointing at nothing.
+SLIVER_MAX_HEIGHT = 0.02
 
 # An anonymous container spanning at least this share of the screen's height
 # is a curtain — a slide-over's scrim, a drawer edge — not a row.
@@ -80,6 +88,16 @@ ICON_MARKS = {
     "\uf00d": "\u2715",   # cross
     "\uf057": "\u2715",   # circled cross
     "\uf071": "\u26a0",   # warning triangle
+}
+
+# Glyphs that NAME A BUTTON rather than mark state. On a clickable these
+# keep their meaning (the agency picker's info button rendered as an empty
+# box until its glyph translated); as loose statics they stay decoration \u2014
+# an \u2139 beside a paragraph says nothing the paragraph doesn't.
+ICON_LABELS = {
+    **ICON_MARKS,
+    "\uf059": "?",        # circled question \u2014 the info button
+    "\uf05a": "\u2139",   # circled info
 }
 
 # Some apps draw their state marks as ImageViews instead \u2014 no text at all,
@@ -239,7 +257,10 @@ def build(doc: dict) -> dict | None:
         # never was. Width relative to the screen is the only signal needed.
         item["small"] = (e["b"][2] - e["b"][0]) <= w * 0.22
         if _is_icon_text(item["txt"]):
-            item["txt"] = ""       # a drawn icon, not a word; see _is_icon_text
+            # A drawn icon, not a word (see _is_icon_text) — but a KNOWN
+            # glyph keeps its meaning: the agency picker's info button
+            # rendered as an empty box until its glyph translated.
+            item["txt"] = ICON_LABELS.get(item["txt"].strip(), "")
         if kind == "row":
             own = sorted(labels.get(id(e), []),
                          key=lambda s: (s["b"][1], s["b"][0]))
@@ -286,7 +307,8 @@ def build(doc: dict) -> dict | None:
              if not (n["kind"] == "row"
                      and not n.get("lines")
                      and not n.get("txt")
-                     and (n["b"][3] - n["b"][1]) >= h * CURTAIN_MIN_HEIGHT)]
+                     and ((n["b"][3] - n["b"][1]) >= h * CURTAIN_MIN_HEIGHT
+                          or (n["b"][3] - n["b"][1]) <= h * SLIVER_MAX_HEIGHT))]
 
     items.sort(key=lambda n: (n["b"][1], n["b"][0]))
 

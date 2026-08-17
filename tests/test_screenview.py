@@ -145,12 +145,25 @@ class TestLayoutIntelligence:
         """A private-use glyph rendered raw is a tofu box or a stray hamburger
         where the app drew an icon."""
         m = screenview.build(doc(
-            elements=[el("btn_info", "TextView", [575, 300, 648, 380],
-                         "")],
+            elements=[el("btn_menu", "TextView", [575, 300, 648, 380],
+                         "")],
             statics=[st([100, 300, 200, 380], "")],
         ))
         items = [i for r in m["rows"] for i in r["items"]]
         assert all(not i.get("txt") for i in items)
+        assert all(i["kind"] != "label" for i in items)
+
+    def test_a_known_button_glyph_keeps_its_meaning(self):
+        """The agency picker's info button is drawn as  — stripped to
+        an empty box it was unfindable; translated it reads as itself. A
+        loose static with a mere decoration glyph stays dropped."""
+        m = screenview.build(doc(
+            elements=[el("btn_info", "TextView", [575, 800, 648, 880],
+                         "")],
+            statics=[st([100, 800, 160, 880], "")],
+        ))
+        items = [i for r in m["rows"] for i in r["items"]]
+        assert any(i.get("txt") == "?" and i.get("aim") for i in items)
         assert all(i["kind"] != "label" for i in items)
 
     def test_a_count_on_the_right_is_a_badge(self):

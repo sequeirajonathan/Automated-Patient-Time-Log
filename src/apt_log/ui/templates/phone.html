@@ -203,14 +203,21 @@
 
   /* ----------------------------------------------- the reflowed app screen */
   .wire { padding:2px 0 calc(env(safe-area-inset-bottom) + 104px); }
-  .a-nav { display:flex; align-items:center; min-height:44px; gap:4px;
-           padding:2px 8px 2px 14px; margin-bottom:2px; }
-  .a-title { flex:1; text-align:left; font-weight:600; font-size:16px;
-             overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .a-trail { display:flex; gap:2px; }
-  .a-navbtn { border:none; background:none; color:var(--tint); font-size:16px;
-              padding:8px 8px; cursor:pointer; }
-  .a-navbtn:active { opacity:.4; }
+  /* The app's own title bar. Its NAME is already worn by the portal's
+     large title (#where reads .a-title from here — see phone.js), so the
+     text stays in the DOM but out of sight: showing it twice, once in the
+     header and again in the wire, was the clunk. What remains visible is
+     the app's utility buttons, riding as small round chips on the right. */
+  .a-nav { display:flex; align-items:center; justify-content:flex-end;
+           min-height:0; gap:8px; padding:0 16px; margin-bottom:2px; }
+  .a-title { position:absolute; width:1px; height:1px; overflow:hidden;
+             clip-path:inset(50%); white-space:nowrap; }
+  .a-trail { display:flex; gap:8px; }
+  .a-navbtn { border:none; background:var(--tint-soft); color:var(--tint);
+              font-size:15px; font-weight:600; min-width:34px; height:34px;
+              padding:0 10px; border-radius:999px; cursor:pointer;
+              transition:transform .25s var(--spring); }
+  .a-navbtn:active { transform:scale(.88); transition-duration:.05s; }
 
   /* The footnote under the list: whether these rows are the whole page
      (a stitched walk — tinted, good news), a page still being read, or
@@ -247,7 +254,7 @@
      label to a one-character column (the docs page's breadcrumb, rendered as
      vertical strips of letters). Items keep a readable width and wrap. */
   .a-row { display:flex; align-items:center; gap:10px; background:var(--card);
-           padding:11px 14px; min-height:46px; position:relative;
+           padding:13px 16px; min-height:52px; position:relative;
            flex-wrap:wrap; }
   .a-row:first-child { border-radius:16px 16px 0 0; }
   .a-row + .a-row { border-top:.5px solid var(--line); }
@@ -274,11 +281,13 @@
      uppercase treatment on whole paragraphs was a wall of shouting. */
   .a-row.n1 > .a-label.hdr:only-child { color:var(--muted); font-size:13px;
              font-weight:600; text-transform:uppercase;
-             letter-spacing:.05em; }
-  .a-row.n1 > .a-label:not(.hdr):only-child { font-size:15.5px;
-             line-height:1.45; }
+             letter-spacing:.06em; }
+  .a-row.n1 > .a-label:not(.hdr):only-child { font-size:15px;
+             line-height:1.5; color:var(--muted); }
   .a-row:has(> .a-label:only-child) { background:none; box-shadow:none;
-             border:none; padding:4px 2px 6px; min-height:0; }
+             border:none; padding:6px 4px 8px; min-height:0; }
+  /* A section heading opens a group: air above it, snug below. */
+  .a-row:has(> .a-label.hdr:only-child) { padding:16px 4px 6px; }
   .a-label:first-child { flex:1; }
 
   .a-cell { flex:1; border:none; background:none; text-align:left; padding:0;
