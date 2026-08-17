@@ -320,7 +320,8 @@ class TestStateMarks:
                      st([640, 820, 700, 870], "")],
         ))
         cell = m["rows"][0]["items"][0]
-        assert "✓ ✓" in cell["lines"]
+        assert [mk["sym"] for mk in cell["marks"]] == ["✓", "✓"]
+        assert all(mk["tone"] == "ok" for mk in cell["marks"])
 
     def test_a_loose_check_still_shows(self):
         m = screenview.build(doc(
@@ -358,7 +359,7 @@ class TestImageMarks:
                       "txt": "", "rid": "imgEndTime"}],
         ))
         cell = m["rows"][0]["items"][0]
-        assert "✓ ✓" in cell["lines"]
+        assert [mk["sym"] for mk in cell["marks"]] == ["✓", "✓"]
 
     def test_an_anonymous_image_is_still_decoration(self):
         m = screenview.build(doc(
@@ -436,3 +437,62 @@ class TestSectionHeaders:
         row = m["rows"][0]["items"]
         kinds = [i["kind"] for i in row]
         assert "label" in kinds and "segment" in kinds
+
+
+class TestCallsToAction:
+    """A call to action ('Continuar visitando') is filled and centred, not
+    one more grey nav row with a chevron — the difference the owner missed
+    where every action looked the same."""
+
+    def test_an_action_row_is_flagged_cta(self):
+        m = screenview.build(doc(
+            elements=[el("", "RelativeLayout", [0, 500, 720, 600])],
+            statics=[st([200, 520, 520, 580], "Continuar visitando")],
+        ))
+        cell = m["rows"][0]["items"][0]
+        assert cell["cta"] is True
+
+    def test_a_data_row_is_not_a_cta(self):
+        m = screenview.build(doc(
+            elements=[el("", "RelativeLayout", [0, 500, 720, 600])],
+            statics=[st([20, 520, 520, 580], "Detalles del paciente")],
+        ))
+        cell = m["rows"][0]["items"][0]
+        assert not cell.get("cta")
+
+    def test_a_login_button_is_a_cta(self):
+        m = screenview.build(doc(
+            elements=[el("btn", "Button", [40, 800, 680, 890], "Iniciar sesión")],
+            statics=[],
+        ))
+        assert m["rows"][0]["items"][0]["cta"] is True
+
+
+class TestFieldPairs:
+    """A caption stacked a pixel above its value is one field, not two
+    floating headers with a wall of space between them (the patient
+    detail's 'Identificación de admisión' / 'XOR-900196')."""
+
+    def test_caption_and_value_pair_into_a_field(self):
+        m = screenview.build(doc(
+            elements=[],
+            statics=[st([160, 115, 500, 131], "Identificación de admisión"),
+                     st([160, 131, 500, 147], "XOR-900196")],
+        ))
+        items = [i for r in m["rows"] for i in r["items"]]
+        kv = [i for i in items if i["kind"] == "kv"]
+        assert kv and kv[0]["caption"] == "Identificación de admisión"
+        assert kv[0]["value"] == "XOR-900196"
+
+    def test_a_caption_over_a_card_stays_a_heading(self):
+        """Its value is a tappable row, folded into a container — the
+        caption introduces a section, it is not half of a field."""
+        m = screenview.build(doc(
+            elements=[el("", "RelativeLayout", [160, 226, 709, 290])],
+            statics=[st([160, 207, 500, 223], "Números de teléfono"),
+                     st([175, 240, 500, 270], "Teléfono principal")],
+        ))
+        items = [i for r in m["rows"] for i in r["items"]]
+        assert any(i["kind"] == "label" and i.get("header")
+                   and i["txt"] == "Números de teléfono" for i in items)
+        assert not any(i["kind"] == "kv" for i in items)

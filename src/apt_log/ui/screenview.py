@@ -105,6 +105,36 @@ ICON_LABELS = {
     "\uf05a": "\u2139",   # circled info
 }
 
+# What a state mark MEANS, so the template can colour it. A verified check
+# is good news (green); a cross or a warning is not. The medical context
+# makes this worth the colour: a caregiver scanning her day wants the
+# confirmed check-ins to read as confirmed at a glance.
+MARK_TONE = {
+    "\u2713": "ok",       # check -> green
+    "\u2715": "bad",      # cross -> red
+    "\u26a0": "warn",     # warning -> amber
+}
+
+# Text that opens an ACTION rather than navigating to more information \u2014
+# the primary buttons a screen is built around. Matched at the start of a
+# label so "Continuar visitando", "Iniciar visita no programada", "Guardar
+# cambios" all read as calls to action and earn the filled, coloured
+# treatment instead of looking like one more grey row. Spanish first
+# because that is the caregiver's app language; the English forms cover the
+# apps that mix locales.
+ACTION_WORDS = (
+    "continuar", "iniciar sesi\u00f3n", "iniciar visita", "guardar",
+    "confirmar", "enviar", "comenzar", "empezar", "aceptar",
+    "registrar entrada", "registrar salida",
+    "clock in", "clock out", "sign in", "start visit", "save", "submit",
+    "confirm", "continue",
+)
+
+
+def _looks_like_cta(text: str) -> bool:
+    t = (text or "").strip().lower()
+    return bool(t) and any(t.startswith(w) for w in ACTION_WORDS)
+
 # Some apps draw their state marks as ImageViews instead \u2014 no text at all,
 # identity carried by the resource-id alone. The legacy visits list shows a
 # drawable check per verified EVV record under exactly these ids; the image
@@ -288,14 +318,20 @@ def build(doc: dict) -> dict | None:
                     badge = value
                 elif how == "mark":
                     marks.append(value)
-            if marks:
-                # The row's state marks, gathered onto one line: the visits
-                # list draws a check per verified EVV record, and "✓ ✓"
-                # under the times is the row's whole point.
-                lines.append(" ".join(marks))
             item["lines"] = lines
             item["badge"] = badge
+            # State marks stay their own field — a verified EVV check-in is
+            # a green tick the caregiver scans for, not a "✓" buried in a
+            # subtitle line. The template draws them as coloured status pills.
+            item["marks"] = [{"sym": m, "tone": MARK_TONE.get(m, "")}
+                             for m in marks]
+            item["cta"] = _looks_like_cta(lines[0] if lines else "")
+        elif kind == "button":
+            item["cta"] = _looks_like_cta(item["txt"])
         items.append(item)
+    # The loose text of the screen — everything not folded into a row. Marks
+    # peel off first; the rest are captions, values, headings and prose.
+    loose: list[dict] = []
     for i, s in enumerate(statics):
         if i in folded:
             continue
@@ -304,12 +340,42 @@ def build(doc: dict) -> dict | None:
             items.append(_item({**s, "txt": mark}, "label"))
         elif (s.get("txt") and not _is_icon_text(s["txt"])
                 and s["txt"].strip() not in BULLETS):
-            label = _item(s, "label")
-            # Short reads as a heading; longer is prose and must never
-            # wear the uppercase header treatment — a paragraph in small
-            # caps is a wall of shouting, not a section title.
-            label["header"] = len(s["txt"].strip()) <= HEADER_MAX_CHARS
-            items.append(label)
+            loose.append(s)
+
+    # A field is a caption stacked tight above its value: the patient detail
+    # renders "Identificación de admisión" and "XOR-900196" a pixel apart,
+    # and rendering both as muted section headings made a value read as
+    # another label with a wall of space around it. Two short loose labels,
+    # left-aligned and nearly touching, are one field — caption over value.
+    # A caption over a CARD (its value being a tappable row) is not here:
+    # that value folded into a container, so the caption stays a heading.
+    loose.sort(key=lambda s: (s["b"][1], s["b"][0]))
+    j = 0
+    while j < len(loose):
+        s = loose[j]
+        nxt = loose[j + 1] if j + 1 < len(loose) else None
+        height = s["b"][3] - s["b"][1]
+        caption_shaped = len(s["txt"].strip()) <= HEADER_MAX_CHARS
+        # A caption sits a hair above its value (a field), not a heading a
+        # line above a paragraph. Tight gap, left-aligned, and the value is
+        # a datum — a phone number, an ID, an office — never prose.
+        if (nxt is not None and caption_shaped
+                and 0 <= nxt["b"][1] - s["b"][3] <= 0.5 * height
+                and abs(nxt["b"][0] - s["b"][0]) <= max(8, 0.06 * w)
+                and len((nxt["txt"] or "").strip()) <= 80):
+            field = _item(s, "kv")
+            field["caption"] = s["txt"]
+            field["value"] = nxt["txt"]
+            items.append(field)
+            j += 2
+            continue
+        label = _item(s, "label")
+        # Short reads as a heading; longer is prose and must never wear the
+        # uppercase header treatment — a paragraph in small caps is a wall
+        # of shouting, not a section title.
+        label["header"] = caption_shaped
+        items.append(label)
+        j += 1
 
     # A curtain — an anonymous, label-less container spanning most of the
     # screen's height (the sliver of dimmed screen beside a slide-over

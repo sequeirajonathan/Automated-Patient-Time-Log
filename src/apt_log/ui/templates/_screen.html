@@ -52,7 +52,7 @@
         {% endfor %}
         </span>
       {% elif it.kind == 'button' %}
-        <button type="button" class="a-btn{% if it.small %} sm{% endif %}"
+        <button type="button" class="a-btn{% if it.small %} sm{% elif it.cta %} cta{% endif %}"
                 data-aim='{{ it.aim | tojson }}'
                 {% if not it.txt %}aria-label="{{ it.aim.cls }}{% if it.aim.rid %} {{ it.aim.rid }}{% endif %}"{% endif %}
           >{{ it.txt or '' }}</button>
@@ -66,15 +66,26 @@
                 aria-label="{{ it.aim.cls }}{% if it.aim.rid %} {{ it.aim.rid }}{% endif %}"
           ><span class="knob"></span></button>
       {% elif it.kind == 'row' %}
-        <button type="button" class="a-cell" data-aim='{{ it.aim | tojson }}'>
+        {# A call to action ("Continuar visitando") is a filled button, not
+           one more grey row with a chevron. A data row is a list cell: its
+           title on top, details muted below, verified check-ins as green
+           status pills, a chevron saying "opens more". #}
+        <button type="button" class="a-cell{% if it.cta %} cta{% endif %}" data-aim='{{ it.aim | tojson }}'>
           {% if it.txt %}<span class="a-line">{{ it.txt }}</span>{% endif %}
           {% for line in it.lines %}
           <span class="a-line{% if not loop.first or it.txt %} sub{% endif %}">{{ line }}</span>
           {% endfor %}
+          {% if it.marks %}
+          <span class="a-marks">
+            {% for m in it.marks %}<span class="a-mark {{ m.tone }}">{{ m.sym }}</span>{% endfor %}
+          </span>
+          {% endif %}
           {% if it.badge %}<span class="a-badge">{{ it.badge }}</span>{% endif %}
+          {% if not it.cta %}
           <svg class="a-chev" viewBox="0 0 10 16" fill="none"
                stroke="currentColor" stroke-width="2.2" stroke-linecap="round"
             ><path d="M2 2 L8 8 L2 14"/></svg>
+          {% endif %}
         </button>
       {% elif it.kind == 'image' %}
         {% if it.aim %}
@@ -85,6 +96,13 @@
       {% elif it.kind == 'text' and it.aim %}
         <button type="button" class="a-link" data-aim='{{ it.aim | tojson }}'
           >{{ it.txt or '' }}</button>
+      {% elif it.kind == 'kv' %}
+        {# A field: caption over value, stacked tight. Reads as one datum,
+           not two floating headers. #}
+        <span class="a-kv">
+          <span class="a-kv-cap">{{ it.caption }}</span>
+          <span class="a-kv-val">{{ it.value }}</span>
+        </span>
       {% else %}
         <span class="a-label{% if it.header %} hdr{% endif %}">{{ it.txt }}</span>
       {% endif %}

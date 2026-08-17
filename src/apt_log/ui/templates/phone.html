@@ -264,18 +264,20 @@
              background:var(--card); box-shadow:var(--shadow-card);
              text-align:center; font-size:15.5px; }
 
-  .a-list { padding:8px 16px 0; }
-  /* Wrap, never crush: a band with more text than width used to shrink each
-     label to a one-character column (the docs page's breadcrumb, rendered as
-     vertical strips of letters). Items keep a readable width and wrap. */
+  /* ---- reflow type scale: mobile-standard, tuned for a data-dense medical
+     list. Titles read at a glance, details step back, nothing shouts. ---- */
+  .a-list { padding:6px 14px 0; font-size:15px; }
+  /* Wrap, never crush, never mid-word: a band with more text than width used
+     to shrink each label to a one-character column. Items wrap at word
+     boundaries and clamp long titles rather than letting them run. */
   .a-row { display:flex; align-items:center; gap:10px; background:var(--card);
-           padding:13px 16px; min-height:52px; position:relative;
+           padding:11px 14px; min-height:46px; position:relative;
            flex-wrap:wrap; }
-  .a-row:first-child { border-radius:16px 16px 0 0; }
+  .a-row:first-child { border-radius:14px 14px 0 0; }
   .a-row + .a-row { border-top:.5px solid var(--line); }
-  .a-row:last-child { border-radius:0 0 16px 16px; margin-bottom:14px;
+  .a-row:last-child { border-radius:0 0 14px 14px; margin-bottom:10px;
                       box-shadow:var(--shadow-card); }
-  .a-row:first-child:last-child { border-radius:16px; }
+  .a-row:first-child:last-child { border-radius:14px; }
 
   /* Entrance: his fade-up, staggered a breath per row — and only when the
      screen actually changed, so a checkbox flip does not re-run it. */
@@ -290,30 +292,76 @@
   @keyframes fade-up { from { opacity:0; transform:translateY(8px); }
                        to { opacity:1; transform:translateY(0); } }
 
-  .a-label { color:var(--ink); font-size:16.5px;
-             min-width:min(10ch, 100%); overflow-wrap:anywhere; }
+  .a-label { color:var(--ink); font-size:15px; line-height:1.4;
+             min-width:min(10ch, 100%); overflow-wrap:break-word; }
   /* A short loose label is a section heading; prose stays prose. The
      uppercase treatment on whole paragraphs was a wall of shouting. */
-  .a-row.n1 > .a-label.hdr:only-child { color:var(--muted); font-size:13px;
-             font-weight:600; text-transform:uppercase;
-             letter-spacing:.06em; }
-  .a-row.n1 > .a-label:not(.hdr):only-child { font-size:15px;
-             line-height:1.5; color:var(--muted); }
+  .a-row.n1 > .a-label.hdr:only-child { color:var(--muted); font-size:11.5px;
+             font-weight:700; text-transform:uppercase;
+             letter-spacing:.07em; }
+  .a-row.n1 > .a-label:not(.hdr):only-child { font-size:13.5px;
+             line-height:1.45; color:var(--muted); }
   .a-row:has(> .a-label:only-child) { background:none; box-shadow:none;
-             border:none; padding:6px 4px 8px; min-height:0; }
+             border:none; padding:4px 4px 5px; min-height:0; }
   /* A section heading opens a group: air above it, snug below. */
-  .a-row:has(> .a-label.hdr:only-child) { padding:16px 4px 6px; }
+  .a-row:has(> .a-label.hdr:only-child) { padding:14px 4px 5px; }
   .a-label:first-child { flex:1; }
+
+  /* A field: caption above value, one tight unit — a datum, not two
+     floating headers. The caption is a quiet uppercase label; the value
+     is the reading, in full ink. Grouped in a card like list rows. */
+  .a-kv { flex:1; display:flex; flex-direction:column; gap:2px;
+          min-width:0; }
+  .a-kv-cap { font-size:11px; font-weight:700; text-transform:uppercase;
+              letter-spacing:.06em; color:var(--muted); }
+  .a-kv-val { font-size:15px; font-weight:500; color:var(--ink);
+              line-height:1.35; overflow-wrap:break-word; }
+  .a-row:has(> .a-kv) { padding:9px 14px; min-height:0; }
 
   .a-cell { flex:1; border:none; background:none; text-align:left; padding:0;
             cursor:pointer; display:flex; flex-direction:column; gap:2px;
-            min-width:0; position:relative; padding-right:22px; }
-  .a-cell { transition:opacity .25s ease; }
+            min-width:0; position:relative; padding-right:20px;
+            transition:opacity .25s ease; }
   .a-cell:active { opacity:.45; transition-duration:.04s; }
-  .a-line { font-size:16.5px; overflow-wrap:anywhere; }
-  .a-line.sub { font-size:13px; color:var(--muted); }
+  /* The row's title: one line by preference, wrapping to two before it
+     ever clips — long patient names stay legible, runaway strings do not
+     blow the row open. Details sit quiet beneath it. */
+  .a-line { font-size:15px; font-weight:500; line-height:1.35;
+            color:var(--ink); overflow-wrap:break-word;
+            display:-webkit-box; -webkit-line-clamp:2;
+            -webkit-box-orient:vertical; overflow:hidden; }
+  .a-line.sub { font-size:12.5px; font-weight:400; color:var(--muted);
+                -webkit-line-clamp:2; }
   .a-chev { position:absolute; right:0; top:50%; transform:translateY(-50%);
-            width:8px; height:14px; color:hsl(240 6% 47% / .35); }
+            width:7px; height:13px; color:hsl(240 6% 47% / .4);
+            flex:none; }
+
+  /* Verified check-ins and other state marks, as coloured pills: green for
+     a confirmed EVV record, amber for a warning, red for a miss. In a
+     medical day the caregiver scans for exactly these. */
+  .a-marks { display:flex; gap:5px; margin-top:3px; }
+  .a-mark { display:inline-flex; align-items:center; justify-content:center;
+            min-width:18px; height:18px; padding:0 5px; border-radius:999px;
+            font-size:11px; font-weight:700; line-height:1; }
+  .a-mark.ok  { background:hsl(142 71% 40% / .16); color:var(--ok); }
+  .a-mark.warn{ background:hsl(38 92% 50% / .16); color:var(--unknown); }
+  .a-mark.bad { background:hsl(0 72% 51% / .14); color:var(--bad); }
+  .a-mark:not(.ok):not(.warn):not(.bad) { background:var(--track);
+            color:var(--muted); }
+
+  /* A call to action, whether the app drew it as a Button or a plain
+     clickable row: filled accent, centred, no chevron — it commits or
+     advances, it does not "open more". This is the difference the owner
+     missed, where every action looked like one more grey row. */
+  .a-cell.cta { align-items:center; text-align:center; padding:12px 14px;
+                background:var(--tint); color:#fff; border-radius:12px;
+                min-height:44px; justify-content:center;
+                transition:transform .15s var(--spring), filter .15s ease; }
+  .a-cell.cta .a-line { color:#fff; font-weight:600; font-size:15.5px;
+                        -webkit-line-clamp:1; }
+  .a-cell.cta:active { opacity:1; transform:scale(.97); filter:brightness(.9); }
+  .a-row:has(> .a-cell.cta) { background:none; box-shadow:none; border:none;
+            padding:5px 2px; }
   /* A keypad reads as one when its keys are centred, not listed. */
   .a-row.a-keys { justify-content:center; gap:18px; }
   .a-row.a-keys .a-btn.sm, .a-row.a-keys .a-icon { min-width:64px;
@@ -329,24 +377,29 @@
                   background:var(--tint-soft); transition-duration:.06s; }
 
   /* Counts ride in bubbles, the way every native list draws them. */
-  .a-badge { position:absolute; right:16px; top:50%;
-             transform:translateY(-50%); background:hsl(0 72% 51%);
-             color:#fff; font-size:13px; font-weight:600; line-height:1;
-             min-width:22px; padding:4px 7px; border-radius:999px;
+  .a-badge { position:absolute; right:14px; top:50%;
+             transform:translateY(-50%); background:var(--bad);
+             color:#fff; font-size:12px; font-weight:700; line-height:1;
+             min-width:20px; padding:3px 6px; border-radius:999px;
              text-align:center; }
 
-  .a-btn { flex:1; border:none; border-radius:13px; background:var(--tint);
-           color:#fff; font-weight:600; font-size:16.5px; padding:13px 16px;
-           cursor:pointer; min-height:48px;
+  /* Buttons in three weights: a filled primary CTA, a plain secondary, a
+     small utility chip. The default IS the primary — a lone button on a
+     screen is almost always its purpose. */
+  .a-btn { flex:1; border:none; border-radius:12px; background:var(--tint);
+           color:#fff; font-weight:600; font-size:15.5px; padding:12px 16px;
+           cursor:pointer; min-height:46px; overflow-wrap:break-word;
            transition:transform .15s var(--spring), filter .15s ease; }
-  .a-btn:active { transform:scale(.96); filter:brightness(.85);
+  .a-btn:active { transform:scale(.97); filter:brightness(.88);
               transition-duration:.05s, .05s; }
-  .a-btn.sm { flex:none; min-width:44px; padding:9px 13px; min-height:38px;
-              background:var(--track); color:var(--tint); font-size:15px; }
+  .a-btn.cta { box-shadow:0 6px 16px -8px var(--tint); }
+  .a-btn.sm { flex:none; min-width:44px; padding:9px 13px; min-height:36px;
+              background:var(--track); color:var(--tint); font-size:14px;
+              font-weight:600; }
 
-  .a-field { flex:1; border:none; border-radius:11px; background:var(--track);
-             color:var(--ink); text-align:left; padding:12px 14px;
-             min-height:44px; cursor:text; font-size:16.5px; }
+  .a-field { flex:1; border:none; border-radius:10px; background:var(--track);
+             color:var(--ink); text-align:left; padding:11px 14px;
+             min-height:44px; cursor:text; font-size:15px; }
   .a-field.focus { outline:2px solid var(--tint); }
 
   /* iOS segmented anatomy: grey track, the chosen part raised on a card. */
