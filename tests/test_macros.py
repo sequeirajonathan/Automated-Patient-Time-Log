@@ -1397,26 +1397,47 @@ class TestWarmSweep:
 
 
 class TestWarmReturnHome:
-    """A 'Menú' tab opens a sub-page that buries the tab bar; the sweep
-    must climb back to the landing tab rather than strand her deep — seen
-    live parked on a Tools page after warming."""
+    """Home is 'the leftmost tab is selected', detected by the selected
+    tab having no clickable container — never a remembered frame (the app
+    changes those) and never Back (that walked out of the app to the
+    launcher, seen live landing on Google)."""
 
-    def test_a_buried_tab_bar_is_climbed_back_out(self):
+    def _bar(self, selected):
+        """A three-tab bar with `selected` (0-based) the tab in front."""
+        labels = ["Programación", "Pacientes", "Menú"]
+        parts = []
+        for i, lbl in enumerate(labels):
+            x = i * 240
+            parts.append(f'<node class="android.widget.TextView" text="{lbl}" '
+                         f'clickable="false" bounds="[{x},1427][{x+200},1475]"/>')
+            if i != selected:            # the selected tab has no container
+                parts.append('<node class="android.view.View" clickable="true" '
+                             f'bounds="[{x},1312][{x+200},1492]"/>')
+        return "".join(parts)
+
+    def test_it_taps_until_the_leftmost_tab_is_selected(self):
         driver = MagicMock()
         driver.get_window_size.return_value = {"width": 720, "height": 1600}
-        landing = ('<node class="android.widget.Button" resource-id="sched" '
-                   'clickable="true" bounds="[0,300][720,400]"/>')
-        subpage = ('<node class="android.widget.Button" resource-id="tools" '
-                   'clickable="true" bounds="[0,300][720,400]"/>')  # no tab bar
-        state = {"src": subpage}
+        state = {"src": self._bar(selected=2)}   # parked on Menú
         type(driver).page_source = property(lambda self: state["src"])
-        driver.back.side_effect = lambda: state.__setitem__("src", landing)
-
-        from apt_log import feed as feed_mod
-        want = feed_mod.frame_id(feed_mod.elements(landing))
+        driver.tap.side_effect = lambda *_a: state.__setitem__(
+            "src", self._bar(selected=0))        # a tap returns to schedule
         with patch("apt_log.macros.time.sleep"):
-            macros._return_to_tabbar(driver, want)
-        driver.back.assert_called()          # stepped out of the sub-page
+            macros._return_to_landing(driver)
+        driver.tap.assert_called_once()          # one tap, then home
+
+    def test_a_screen_without_a_tab_bar_is_never_backed_out_of(self):
+        """No Back: a sub-page with no visible tab bar is left as-is rather
+        than escaped into the launcher."""
+        driver = MagicMock()
+        driver.get_window_size.return_value = {"width": 720, "height": 1600}
+        type(driver).page_source = property(
+            lambda self: '<node class="android.widget.Button" clickable="true" '
+                         'bounds="[0,300][720,400]"/>')
+        with patch("apt_log.macros.time.sleep"):
+            macros._return_to_landing(driver)
+        driver.tap.assert_not_called()
+        driver.back.assert_not_called()
 
 
 class TestTabAim:
@@ -1441,10 +1462,10 @@ class TestTabAim:
             '<node class="android.view.View" clickable="true" '
             'bounds="[492,1312][720,1492]"/>')         # Menú container
         type(driver).page_source = property(lambda self: src)
-        points = macros._bottom_tabs(driver)
-        assert len(points) == 3
+        slots = macros._tab_slots(driver)
+        assert len(slots) == 3
         # Programación selected: no container, aim just above its label.
-        assert points[0] == (114, 1387)
+        assert slots[0] == {"point": (114, 1387), "selected": True}
         # Pacientes and Menú: the container centre, up in the icon zone.
-        assert points[1] == (360, 1402)
-        assert points[2] == (606, 1402)
+        assert slots[1] == {"point": (360, 1402), "selected": False}
+        assert slots[2] == {"point": (606, 1402), "selected": False}

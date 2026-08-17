@@ -804,23 +804,23 @@ def _forget_stitched(app: str) -> None:
         pass
 
 
-def _bottom_tabs(driver) -> list[tuple[int, int]]:
-    """The current screen's tab bar as tap points, left to right, or [].
+def _tab_slots(driver) -> list[dict]:
+    """The current screen's tab bar, left to right, or [].
 
-    Detection and aim come from two different nodes, because on Compose
-    they disagree:
+    Each slot is ``{"point": (x, y), "selected": bool}``. Detection and
+    aim come from two different nodes, because on Compose they disagree:
 
     - The tab LABELS enumerate the slots. Every tab carries its caption,
-      selected or not, so the labels see all the slots — which is what
-      lets the sweep know the landing tab and return to it. (The clickable
-      containers miss the selected tab, which Compose does not mark
-      clickable.)
-    - The clickable CONTAINER is the tap point. Tapping the label's own
-      centre does nothing — verified live, the caption sits in the tab's
-      lower strip where the touch does not take; the container's centre,
-      up in the icon zone, is where the tab actually responds. When a slot
-      has no container (the selected tab) the aim falls just above the
-      label, in that same icon zone.
+      selected or not, so the labels see all the slots — including the
+      selected one, which is how the sweep knows when it is home.
+    - The clickable CONTAINER is the tap point AND the selected marker.
+      Tapping the label's own centre does nothing — verified live, the
+      caption sits in the tab's lower strip where the touch does not take;
+      the container's centre, up in the icon zone, is where the tab
+      responds. Compose does not give the SELECTED tab a container, so a
+      label with no container beneath it is the tab already in front —
+      which is the only "am I home?" signal that does not depend on a
+      frame the app keeps changing under us.
     """
     from apt_log import feed as feed_mod
 
@@ -833,82 +833,56 @@ def _bottom_tabs(driver) -> list[tuple[int, int]]:
               if s["b"][1] > band and (s.get("txt") or "").strip()
               and (s["b"][2] - s["b"][0]) < narrow]
     labels.sort(key=lambda s: s["b"][0])
-    # Clickable tab containers sit a little higher than their captions, so
-    # the band is loosened slightly for them.
     containers = [e for e in feed_mod.elements(src)
                   if e["b"][3] > band and (e["b"][2] - e["b"][0]) < narrow]
 
-    points: list[tuple[int, int]] = []
+    slots: list[dict] = []
     for s in labels:
         cx = (s["b"][0] + s["b"][2]) // 2
         holder = next((e for e in containers
                        if e["b"][0] <= cx <= e["b"][2]), None)
         if holder:
-            points.append(((holder["b"][0] + holder["b"][2]) // 2,
-                           (holder["b"][1] + holder["b"][3]) // 2))
+            slots.append({"point": ((holder["b"][0] + holder["b"][2]) // 2,
+                                    (holder["b"][1] + holder["b"][3]) // 2),
+                          "selected": False})
         else:
-            points.append((cx, s["b"][1] - 40))
-    return points
+            slots.append({"point": (cx, s["b"][1] - 40), "selected": True})
+    return slots
 
 
 def _warm_sweep(driver, request_path, deep_path, poke_path) -> int:
     """Open each sibling tab once and scan it, then return to the landing
     tab. Non-committing throughout (tab switches change no records), and
     it bails the instant a real action is waiting. Returns how many tabs
-    it warmed.
-
-    The landing is identified by its frame, not its activity: these apps
-    are often single-activity (every tab is HomeActivity), so only the
-    frame tells one tab from another and tells the sweep it has arrived
-    back where it started.
-    """
-    from apt_log import feed as feed_mod
-
-    def here() -> str:
-        return feed_mod.frame_id(feed_mod.elements(driver.page_source or ""))
-
-    landing = here()
-    slots = _bottom_tabs(driver)
+    it warmed."""
+    slots = _tab_slots(driver)
     if len(slots) < 2:
         return 0                       # not a tabbed screen; nothing to warm
 
     warmed = 0
-    for cx, cy in slots[1:]:           # slot 0 is the landing (leftmost)
+    for slot in slots[1:]:             # slot 0 is the landing (leftmost)
         if someone_wants_the_phone(request_path, deep_path, poke_path):
             break
-        driver.tap([(cx, cy)])
+        driver.tap([slot["point"]])
         time.sleep(WARM_SETTLE)
         if _stitch_walk(driver, assume_top=True):
             warmed += 1
-        # A tab that opened a sub-page (a "Menú" of tools, not a peer tab)
-        # has buried the tab bar; step back out so the next warm — and the
-        # return home — start from the bar again, never stranded deep.
-        _return_to_tabbar(driver, landing)
-    _return_to_tabbar(driver, landing)
+    _return_to_landing(driver)
     return warmed
 
 
-def _return_to_tabbar(driver, landing: str) -> None:
-    """Get back to the landing tab, robust to the bar having moved or a
-    sub-page having covered it. Re-detects the bar each step and taps its
-    first slot; steps Back when no bar is visible (a sub-page). Bounded,
-    so a screen that will not return cannot spin here forever."""
-    from apt_log import feed as feed_mod
-
-    def here() -> str:
-        return feed_mod.frame_id(feed_mod.elements(driver.page_source or ""))
-
-    for _ in range(5):
-        if here() == landing:
+def _return_to_landing(driver) -> None:
+    """Select the leftmost tab, so the sweep never leaves her on a tab she
+    did not choose. Home is 'the leftmost tab is selected' — no container
+    under its label — never a remembered frame (the app changes those) and
+    never Back (that walked out of the app entirely, to the launcher).
+    Bounded, and it acts only on a visible tab bar, so a screen without one
+    is left as-is rather than escaped."""
+    for _ in range(4):
+        slots = _tab_slots(driver)
+        if not slots or slots[0]["selected"]:
             return
-        slots = _bottom_tabs(driver)
-        if slots:
-            driver.tap([slots[0]])
-        else:
-            try:
-                driver.back()
-            except Exception:  # noqa: BLE001 — best effort back out
-                return
+        driver.tap([slots[0]["point"]])
         time.sleep(WARM_SETTLE)
 
 
