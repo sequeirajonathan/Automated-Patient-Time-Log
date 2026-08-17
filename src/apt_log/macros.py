@@ -975,9 +975,15 @@ class Runner:
         try:
             ok = bool(resident.run(_stitch_walk))
         except Exception as exc:  # noqa: BLE001
+            # Transient — a session mid-rebuild, an adb hiccup. NOT latched:
+            # the next loop may find the session back, and latching here
+            # left a healthy screen unstitched until it changed.
             log.warning("stitch walk failed: %s", exc)
-            ok = False
+            return False
         if not ok:
+            # The walk ran and produced nothing: this screen has nothing to
+            # stitch, and retrying it forever would animate the phone for
+            # no one. Latched until the screen changes.
             log.info("stitch walk yielded nothing for frame %s", fid)
             self._stitch_failed_for = fid
         return ok
