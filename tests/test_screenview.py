@@ -356,3 +356,38 @@ class TestImageMarks:
         ))
         cell = m["rows"][0]["items"][0]
         assert cell["lines"] == ["Detalles"]
+
+
+class TestProseVsHeadings:
+    """The migration pitch rendered as a wall of shouting: whole paragraphs
+    wore the uppercase section-header treatment, and orphaned list dots
+    flexed into gap-rows of their own."""
+
+    def test_a_short_loose_label_is_a_heading_and_prose_is_not(self):
+        m = screenview.build(doc(
+            elements=[],
+            statics=[st([20, 100, 400, 160], "Esto es lo que debe hacer:"),
+                     st([20, 200, 700, 400],
+                        "La aplicación es nueva y más fácil de usar. La "
+                        "configuración solo tarda unos minutos en total.")],
+        ))
+        labels = [i for r in m["rows"] for i in r["items"]
+                  if i["kind"] == "label"]
+        assert labels[0]["header"] is True
+        assert labels[1]["header"] is False
+
+    def test_orphaned_bullets_are_dropped(self):
+        m = screenview.build(doc(
+            elements=[el("", "RelativeLayout", [0, 500, 720, 640])],
+            statics=[st([30, 520, 60, 570], "•"),
+                     st([80, 520, 700, 570], "Toque Iniciar configuración"),
+                     st([30, 600, 60, 630], "•")],
+        ))
+        all_txt = []
+        for r in m["rows"]:
+            for i in r["items"]:
+                all_txt.extend(i.get("lines") or [])
+                if i.get("txt"):
+                    all_txt.append(i["txt"])
+        assert "•" not in all_txt
+        assert "Toque Iniciar configuración" in all_txt

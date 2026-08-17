@@ -244,9 +244,13 @@
 
   .a-label { color:var(--ink); font-size:16.5px;
              min-width:min(10ch, 100%); overflow-wrap:anywhere; }
-  .a-row.n1 > .a-label:only-child { color:var(--muted); font-size:13px;
+  /* A short loose label is a section heading; prose stays prose. The
+     uppercase treatment on whole paragraphs was a wall of shouting. */
+  .a-row.n1 > .a-label.hdr:only-child { color:var(--muted); font-size:13px;
              font-weight:600; text-transform:uppercase;
              letter-spacing:.05em; }
+  .a-row.n1 > .a-label:not(.hdr):only-child { font-size:15.5px;
+             line-height:1.45; }
   .a-row:has(> .a-label:only-child) { background:none; box-shadow:none;
              border:none; padding:4px 2px 6px; min-height:0; }
   .a-label:first-child { flex:1; }

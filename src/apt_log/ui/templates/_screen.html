@@ -86,7 +86,7 @@
         <button type="button" class="a-link" data-aim='{{ it.aim | tojson }}'
           >{{ it.txt or '' }}</button>
       {% else %}
-        <span class="a-label">{{ it.txt }}</span>
+        <span class="a-label{% if it.header %} hdr{% endif %}">{{ it.txt }}</span>
       {% endif %}
     {% endfor %}
     </div>

@@ -48,6 +48,14 @@ NAV_BAND_BOTTOM = 0.12
 # is a curtain — a slide-over's scrim, a drawer edge — not a row.
 CURTAIN_MIN_HEIGHT = 0.55
 
+# Orphaned list dots. The reflow keeps a list's items, not its typography.
+BULLETS = {"•", "·", "◦", "‣", "∙", "*", "-"}
+
+# A loose label this short reads as a section heading; longer is prose. The
+# header treatment (uppercase, small, muted) applied to whole paragraphs
+# turned the migration pitch into a wall of shouting.
+HEADER_MAX_CHARS = 32
+
 
 def _is_icon_text(txt: str) -> bool:
     """Text that is an icon font's private glyph, not a word.
@@ -108,6 +116,11 @@ def _fold_label(cell_b: list[int], s: dict) -> tuple[str, str]:
         return "mark", mark
     if not txt:
         return "drop", ""      # an unrecognised image: decoration
+    if txt.strip() in BULLETS:
+        # A lone list dot: the list's structure does not survive the
+        # reflow, and the orphaned glyph rendered as a row of its own
+        # with a ten-character gap where flex stretched it.
+        return "drop", ""
     if _is_icon_text(txt):
         return "drop", ""
     if len(txt) <= 3 and txt.strip().isdigit():
@@ -240,8 +253,14 @@ def build(doc: dict) -> dict | None:
         mark = _mark_for(s)
         if mark:
             items.append(_item({**s, "txt": mark}, "label"))
-        elif s.get("txt") and not _is_icon_text(s["txt"]):
-            items.append(_item(s, "label"))
+        elif (s.get("txt") and not _is_icon_text(s["txt"])
+                and s["txt"].strip() not in BULLETS):
+            label = _item(s, "label")
+            # Short reads as a heading; longer is prose and must never
+            # wear the uppercase header treatment — a paragraph in small
+            # caps is a wall of shouting, not a section title.
+            label["header"] = len(s["txt"].strip()) <= HEADER_MAX_CHARS
+            items.append(label)
 
     # A curtain — an anonymous, label-less container spanning most of the
     # screen's height (the sliver of dimmed screen beside a slide-over
