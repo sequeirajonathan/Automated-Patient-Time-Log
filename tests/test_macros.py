@@ -1758,3 +1758,16 @@ class TestAccordionScan:
              patch("apt_log.macros._tap_xy", side_effect=tap) as tapped:
             assert macros._stitch_walk(driver, assume_top=True) is True
         tapped.assert_called_once()      # the below-the-fold card: never
+
+    def test_a_rescan_never_reopens_what_she_closed(self, tmp_path, monkeypatch):
+        """Unfolding is part of arriving at a page, never part of watching
+        one: a re-scan (assume_top=False) means someone changed the page —
+        and if what changed is that she CLOSED a card, a scan that reopens
+        it is the phone fighting her hand."""
+        monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
+        pages = {"collapsed": self._dates() + self._card(401, "PACIENTE")}
+        driver = self._driver({"page": "collapsed"}, pages)
+        with patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros._tap_xy") as tapped:
+            macros._stitch_walk(driver, assume_top=False)
+        tapped.assert_not_called()

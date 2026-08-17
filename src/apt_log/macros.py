@@ -596,13 +596,16 @@ def _hhax_uma_login(driver, report) -> None:
     # The submit control carries no id and no text in the accessibility tree.
     # Discovery's recording: it is the one wide button below the password
     # field — the eye toggle beside the field is narrow. Width is the
-    # discriminator, and wrong-guess damage is a tap inside a login form.
-    size = driver.get_window_size()
-    password_bottom = field("password").rect["y"]
+    # discriminator, measured against the FORM, not the screen: at tablet
+    # densities the web page draws its form as a narrow centred column
+    # (213 px on a 720 px screen at density 72), and a screen-relative
+    # test refused the real submit. The submit spans the field it sits
+    # under; the eye toggle never comes close.
+    pw = field("password").rect
     candidates = [
         b for b in driver.find_elements("class name", "android.widget.Button")
-        if b.rect["width"] > size["width"] * 0.5
-        and b.rect["y"] > password_bottom
+        if b.rect["width"] >= pw["width"] * 0.8
+        and b.rect["y"] > pw["y"]
     ]
     if not candidates:
         raise RuntimeError("no submit-shaped button below the password field")
@@ -873,9 +876,15 @@ def _stitch_walk(driver, assume_top: bool = False) -> bool:
         # walk, gated to the proven app and page shape, and guarded: a tap
         # that made the page's chevrons vanish navigated somewhere instead
         # of unfolding — one Back returns, and the walk stops trusting taps.
+        #
+        # And only on a FRESH ENTRY (assume_top: a tab tapped, an app
+        # opened). A re-scan of the same page means someone changed it —
+        # and if what changed is that she CLOSED a card, a scan that
+        # reopens it is the phone fighting her hand. Unfolding is part of
+        # arriving at a page, never part of watching one.
         size = driver.get_window_size()
         taps_left = EXPAND_MAX_TAPS
-        expanding = (driver.current_package or "") in EXPAND_APPS
+        expanding = assume_top and (driver.current_package or "") in EXPAND_APPS
         opened = 0
 
         def open_folds(cap: dict) -> dict:
