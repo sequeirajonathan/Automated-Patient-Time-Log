@@ -119,6 +119,10 @@ WARM_ENABLED = True
 WARM_TAB_BAND = 0.82
 WARM_TAB_MAX_WIDTH = 0.5
 WARM_SETTLE = 0.9
+# The sign-in's activate_app can leave the app mid-reload when the sweep
+# starts, its tab bar not yet drawn; wait this long for it before
+# concluding the screen simply is not tabbed.
+WARM_TABBAR_WAIT = 6.0
 
 # Sign in only while someone is actually watching. Unwatched, the app's own
 # inactivity timer signs the session back out and the two loop all night —
@@ -855,7 +859,16 @@ def _warm_sweep(driver, request_path, deep_path, poke_path) -> int:
     tab. Non-committing throughout (tab switches change no records), and
     it bails the instant a real action is waiting. Returns how many tabs
     it warmed."""
+    # The app may still be settling from the sign-in's activate_app when
+    # the sweep starts; wait for the tab bar rather than mistaking a
+    # half-drawn screen for an untabbed one.
     slots = _tab_slots(driver)
+    deadline = time.monotonic() + WARM_TABBAR_WAIT
+    while len(slots) < 2 and time.monotonic() < deadline:
+        if someone_wants_the_phone(request_path, deep_path, poke_path):
+            return 0
+        time.sleep(0.5)
+        slots = _tab_slots(driver)
     if len(slots) < 2:
         return 0                       # not a tabbed screen; nothing to warm
 

@@ -1469,3 +1469,36 @@ class TestTabAim:
         # Pacientes and Menú: the container centre, up in the icon zone.
         assert slots[1] == {"point": (360, 1402), "selected": False}
         assert slots[2] == {"point": (606, 1402), "selected": False}
+
+
+class TestWarmWaitsForTabBar:
+    """The sign-in's activate_app can leave the app mid-reload when the
+    sweep starts — seen live warming 0 because the tab bar was not yet
+    drawn. The sweep waits for it rather than giving up."""
+
+    def test_a_late_tab_bar_is_waited_for(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
+        bar = "".join(
+            f'<node class="android.widget.TextView" text="T{i}" '
+            f'clickable="false" bounds="[{i*240},1427][{i*240+200},1475]"/>'
+            for i in range(3))
+        seq = ["", "", bar]              # blank while reloading, then the bar
+        driver = MagicMock()
+        driver.get_window_size.return_value = {"width": 720, "height": 1600}
+        state = {"i": 0}
+
+        def src(_self):
+            i = min(state["i"], len(seq) - 1)
+            state["i"] += 1
+            return seq[i]
+        type(driver).page_source = property(src)
+
+        with patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=[0, 1, 2, 3, 4, 5, 6, 7]), \
+             patch("apt_log.macros._stitch_walk", return_value=True) as walk, \
+             patch("apt_log.macros._return_to_landing"):
+            warmed = macros._warm_sweep(driver, tmp_path / "r", tmp_path / "d",
+                                        tmp_path / "p")
+        assert warmed == 2
+        assert walk.call_count == 2
