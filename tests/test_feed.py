@@ -1032,3 +1032,31 @@ class TestFocusNudge:
             feed._watch_focus(HOME, True)      # recovered on its own
             feed._watch_focus("", True)        # a fresh episode starts
         refocus.assert_not_called()
+
+
+class TestWebviewHonesty:
+    """A webview's accessibility tree underreports — the migration pitch
+    renders a title and a banner that never appear in it, verified against
+    the pixels. The document says so."""
+
+    def test_a_webview_screen_is_flagged(self, tmp_path):
+        import datetime as dt
+
+        target = tmp_path / "screen.json"
+        frame = {"id": "f1", "img": "", "at": dt.datetime.now().isoformat(),
+                 "size": [720, 1600], "notice": ""}
+        xml = ('<node class="android.webkit.WebView" clickable="false" '
+               'bounds="[0,0][720,1600]"/>')
+        feed.write_screen(target, frame, "unknown", "", xml, focus=HOME)
+        assert json.loads(target.read_text())["webview"] is True
+
+    def test_a_native_screen_is_not(self, tmp_path):
+        import datetime as dt
+
+        target = tmp_path / "screen.json"
+        frame = {"id": "f1", "img": "", "at": dt.datetime.now().isoformat(),
+                 "size": [720, 1600], "notice": ""}
+        xml = ('<node class="android.widget.TextView" text="Hola" '
+               'clickable="false" bounds="[0,0][100,50]"/>')
+        feed.write_screen(target, frame, "home", "", xml, focus=HOME)
+        assert json.loads(target.read_text())["webview"] is False

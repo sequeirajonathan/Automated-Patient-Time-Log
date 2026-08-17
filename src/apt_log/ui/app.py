@@ -546,7 +546,8 @@ async def live(ws: WebSocket):
                 }
                 payload["screen_html"] = (
                     "" if model is None
-                    else templates.get_template("_screen.html").render(m=model))
+                    else templates.get_template("_screen.html").render(
+                        m=model, t=t))
 
             # "Live" is a claim, and the page must not keep making it over a
             # document nobody is refreshing. The feed restarting, the resident

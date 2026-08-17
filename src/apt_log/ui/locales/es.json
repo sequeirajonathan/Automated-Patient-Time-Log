@@ -207,5 +207,6 @@
   "papp.scroll_down": "Desplazar el teléfono hacia abajo",
   "papp.explain.live": "Verde: esta página coincide con el teléfono en Florida en este momento.",
   "papp.explain.syncing": "Amarillo: la pantalla del teléfono está cambiando — se muestra la página de carga hasta que llegue la pantalla nueva.",
-  "papp.explain.offline": "Rojo: sin conexión con el controlador. Se reconecta solo; nada de lo que toque aquí llegará al teléfono hasta entonces."
+  "papp.explain.offline": "Rojo: sin conexión con el controlador. Se reconecta solo; nada de lo que toque aquí llegará al teléfono hasta entonces.",
+  "papp.web_partial": "Esta es una página web — puede mostrar más que esta lista. La foto (botón del ojo) tiene la pantalla completa."
 }

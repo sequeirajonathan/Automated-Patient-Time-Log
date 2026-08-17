@@ -314,7 +314,8 @@ def build(doc: dict) -> dict | None:
             band = _fold_tab_captions(band)
         rows.append({"items": band, **shape})
     return {"id": doc.get("id", ""), "nav": nav, "rows": rows,
-            "notice": doc.get("notice", ""), "blocked": doc.get("blocked", "")}
+            "notice": doc.get("notice", ""), "blocked": doc.get("blocked", ""),
+            "webview": bool(doc.get("webview"))}
 
 
 def _fold_tab_captions(band: list[dict]) -> list[dict]:

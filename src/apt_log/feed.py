@@ -462,6 +462,11 @@ def write_screen(target: Path, frame: dict, screen: str, reason: str,
         "h_app": (hierarchy_focus or "").split("/")[0],
         "blocked": reason,
         "notice": frame.get("notice", ""),
+        # A webview's accessibility tree underreports: the migration pitch
+        # renders a title and a banner that never appear in it, verified
+        # against the pixels. The page says so instead of letting a partial
+        # list pass for the whole screen.
+        "webview": bool(hierarchy and "android.webkit.WebView" in hierarchy),
         "elements": elements(hierarchy, label=True) if hierarchy else [],
         "statics": statics(hierarchy) if hierarchy else [],
     }
