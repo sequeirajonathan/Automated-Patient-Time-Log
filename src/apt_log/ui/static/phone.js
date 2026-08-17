@@ -119,13 +119,19 @@
         if (!socket || socket.readyState !== 1) return;
         let aim;
         try { aim = JSON.parse(el.dataset.aim); } catch (e) { return; }
-        // A text field opens the type bar instead of dimming the page: the
-        // send is what taps (the server focuses the field first), so a
-        // mistap costs nothing and the code can be read off another phone
-        // at leisure.
+        // The type bar exists for ONE moment: a screen asking for a
+        // verification code. Offering it for every text field put a
+        // "type here" prompt over the patients list's search box the
+        // moment sign-in finished — read, fairly, as the OTP asking
+        // again. A field on any other screen taps like anything else
+        // (the phone focuses it); only a code-asking screen types.
         if (/EditText|AutoCompleteTextView|SearchView/.test(aim.cls || '')) {
-          openTypeBar(aim, (el.textContent || '').trim());
-          return;
+          const page = (document.getElementById('screenwrap') || {})
+            .textContent || '';
+          if (/\bcode\b|c[oó]digo|verif/i.test(page)) {
+            openTypeBar(aim, (el.textContent || '').trim());
+            return;
+          }
         }
         // No overlays and no sentences for a tap: the screen dims and
         // shimmers until its successor arrives, the way a native app treats
