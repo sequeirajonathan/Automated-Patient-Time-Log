@@ -1381,19 +1381,24 @@ class TestWarmSweep:
                                tmp_path / "poke")
         walk.assert_not_called()
 
-    def test_the_runner_arms_warming_after_a_login_macro(self, tmp_path):
+    def test_warming_is_disabled_so_a_login_does_not_arm_it(self, tmp_path):
+        """Warming is off (WARM_ENABLED False): it stranded the owner on a
+        settings sub-page. A login must not arm the autonomous sweep."""
+        assert macros.WARM_ENABLED is False
         runner = macros.Runner(status_path=tmp_path / "s.json")
         with patch("apt_log.resident.run"), \
              patch("apt_log.ui.mirror.publish"):
             runner.execute("hhax_uma_login", "rid1")
-        assert runner._warm_app == "hhax_uma_login"
+        assert runner._warm_app is None
 
-    def test_a_non_login_macro_does_not_arm_warming(self, tmp_path):
+    def test_the_arming_still_gates_on_a_login_name(self, tmp_path):
+        """The gate itself is intact for when warming is re-enabled."""
         runner = macros.Runner(status_path=tmp_path / "s.json")
         with patch("apt_log.resident.run"), \
-             patch("apt_log.ui.mirror.publish"):
-            runner.execute("open_inmyteam", "rid2")
-        assert runner._warm_app is None
+             patch("apt_log.ui.mirror.publish"), \
+             patch("apt_log.macros.WARM_ENABLED", True):
+            runner.execute("hhax_uma_login", "rid1")
+        assert runner._warm_app == "hhax_uma_login"
 
 
 class TestWarmReturnHome:
@@ -1502,3 +1507,38 @@ class TestWarmWaitsForTabBar:
                                         tmp_path / "p")
         assert warmed == 2
         assert walk.call_count == 2
+
+
+class TestScanOwnsTheSession:
+    """A scan flags SCAN_ACTIVE so the hierarchy watcher yields the one
+    Appium session — the interleaved dumps were what made the scan crawl
+    and the live view lurch through the scroll."""
+
+    def test_the_flag_is_set_during_the_walk_and_cleared_after(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
+        driver = MagicMock()
+        driver.get_window_size.return_value = {"width": 720, "height": 1600}
+        driver.current_package = "com.hhaexchange.uma"
+        seen = {}
+        src = ('<node class="android.widget.TextView" text="A" '
+               'clickable="false" bounds="[10,100][700,150]"/>')
+        type(driver).page_source = property(lambda self: src)
+
+        real_swipe = macros._swipe
+
+        def spy_swipe(*a, **k):
+            seen["during"] = macros.SCAN_ACTIVE.is_set()
+        with patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros._swipe", spy_swipe):
+            macros.SCAN_ACTIVE.clear()
+            macros._stitch_walk(driver, assume_top=True)
+        assert seen.get("during") is True          # set while walking
+        assert macros.SCAN_ACTIVE.is_set() is False  # cleared after
+
+    def test_the_flag_is_cleared_even_when_the_walk_raises(self, monkeypatch):
+        driver = MagicMock()
+        driver.get_window_size.side_effect = RuntimeError("session gone")
+        macros.SCAN_ACTIVE.clear()
+        with pytest.raises(RuntimeError):
+            macros._stitch_walk(driver, assume_top=True)
+        assert macros.SCAN_ACTIVE.is_set() is False

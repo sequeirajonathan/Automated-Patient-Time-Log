@@ -99,7 +99,17 @@ STITCH_COOLDOWN = 45.0
 # purpose: the walk presses nothing, so the worst a rushed read costs is
 # one re-walk, while every extra second is the owner staring at a page
 # that says it is still being read.
-STITCH_SETTLE = 0.5
+STITCH_SETTLE = 0.35
+
+# Set while a scan is walking the page, so the hierarchy watcher yields the
+# one Appium session to it instead of interleaving its own dumps. That
+# interleaving was the whole cause of two live complaints at once: the scan
+# crawled (every watcher dump stole a turn from the scan), and the live
+# view lurched to whatever half-scrolled position the scan was mid-swipe on
+# ("it shows where the scan stopped"). While this is set the watcher holds
+# the last complete frame instead — stable under the scanning animation —
+# and the scan owns the session, so it finishes faster.
+SCAN_ACTIVE = threading.Event()
 # No scanning over her fingers: a tap in the last few seconds means
 # someone is driving the phone, and the walk waits its turn.
 STITCH_TAP_QUIET = 4.0
@@ -112,7 +122,14 @@ STITCH_TAP_QUIET = 4.0
 # interacting), only on a tabbed screen, and yields the phone the instant
 # a real action arrives. WARM_ENABLED turns the whole behaviour off in one
 # place if the autonomous movement is ever unwanted.
-WARM_ENABLED = True
+#
+# OFF, deliberately: warming navigates the phone through tabs on its own,
+# and on HHAeXchange+ the "Menú" tab opens a sub-page whose return proved
+# fragile enough to strand the owner on a settings screen. The per-page
+# scan cache already makes a tab instant the moment she opens it herself;
+# pre-opening tabs for her was not worth driving the phone unattended. The
+# machinery is kept, flag-gated, for a future where the return is proven.
+WARM_ENABLED = False
 # A tab label is a short text in the bottom band, narrower than half the
 # screen. The band starts at 0.82 of the height, where the four apps keep
 # their tab bars (HHAeXchange+'s captions sit at 0.89).
@@ -723,59 +740,66 @@ def _stitch_walk(driver, assume_top: bool = False) -> bool:
     from apt_log import feed as feed_mod
     from apt_log import stitch as stitch_mod
 
-    cx, y_top, y_bot = _swipe_geometry(driver)
-    if not assume_top:
-        _scroll_to_top(driver, cx, y_top, y_bot)
-
-    def capture() -> dict:
-        src = driver.page_source or ""
-        return {"elements": feed_mod.elements(src, label=True),
-                "statics": feed_mod.statics(src)}
-
-    captures: list[dict] = []
-    prev: dict | None = None
-    for _ in range(STITCH_MAX_STEPS):
-        cap = capture()
-        if prev is not None and cap == prev:
-            break
-        captures.append(cap)
-        prev = cap
-        _swipe(driver, cx, y_bot, y_top)
-        time.sleep(STITCH_SETTLE)
-
-    if not captures or not captures[0]["elements"]:
-        for _ in range(max(len(captures) - 1, 0)):
-            _swipe(driver, cx, y_top, y_bot)
-            time.sleep(0.25)
-        return False
-    doc = stitch_mod.stitch(captures, nominal_dy=y_bot - y_top)
-    doc.update({
-        "step0": feed_mod.frame_id(captures[0]["elements"]),
-        # Whose page this is: the feed's freshness check refuses to dress
-        # another app's screen in this document, however similar.
-        "app": driver.current_package or "",
-        "at": datetime.now().isoformat(),
-    })
-    # Published BEFORE the walk back to the top: the near-match in
-    # _fresh_stitch recognises the still-scrolled viewport as this page,
-    # so the portal fills in whole seconds earlier than it used to.
+    # Own the session for the duration: the watcher holds its last complete
+    # frame while this is set, so the scan is not slowed by interleaved
+    # dumps and the live view does not lurch through the scroll.
+    SCAN_ACTIVE.set()
     try:
-        STITCH_DIR.mkdir(parents=True, exist_ok=True)
-        target = STITCH_DIR / f"{doc['step0']}.json"
-        tmp = target.with_suffix(".tmp")
-        tmp.write_text(json.dumps(doc), encoding="utf-8")
-        os.replace(tmp, target)
-        _prune_stitched()
-    except OSError as exc:
-        log.warning("cannot write the stitched page (%s)", exc)
-        return False
-    log.info("stitched %d captures into a whole-page document",
-             len(captures))
+        cx, y_top, y_bot = _swipe_geometry(driver)
+        if not assume_top:
+            _scroll_to_top(driver, cx, y_top, y_bot)
 
-    for _ in range(max(len(captures) - 1, 0)):   # leave the page at its top
-        _swipe(driver, cx, y_top, y_bot)
-        time.sleep(0.25)
-    return True
+        def capture() -> dict:
+            src = driver.page_source or ""
+            return {"elements": feed_mod.elements(src, label=True),
+                    "statics": feed_mod.statics(src)}
+
+        captures: list[dict] = []
+        prev: dict | None = None
+        for _ in range(STITCH_MAX_STEPS):
+            cap = capture()
+            if prev is not None and cap == prev:
+                break
+            captures.append(cap)
+            prev = cap
+            _swipe(driver, cx, y_bot, y_top)
+            time.sleep(STITCH_SETTLE)
+
+        if not captures or not captures[0]["elements"]:
+            for _ in range(max(len(captures) - 1, 0)):
+                _swipe(driver, cx, y_top, y_bot)
+                time.sleep(0.2)
+            return False
+        doc = stitch_mod.stitch(captures, nominal_dy=y_bot - y_top)
+        doc.update({
+            "step0": feed_mod.frame_id(captures[0]["elements"]),
+            # Whose page this is: the feed's freshness check refuses to dress
+            # another app's screen in this document, however similar.
+            "app": driver.current_package or "",
+            "at": datetime.now().isoformat(),
+        })
+        # Published BEFORE the walk back to the top: the near-match in
+        # _fresh_stitch recognises the still-scrolled viewport as this page,
+        # so the portal fills in whole seconds earlier than it used to.
+        try:
+            STITCH_DIR.mkdir(parents=True, exist_ok=True)
+            target = STITCH_DIR / f"{doc['step0']}.json"
+            tmp = target.with_suffix(".tmp")
+            tmp.write_text(json.dumps(doc), encoding="utf-8")
+            os.replace(tmp, target)
+            _prune_stitched()
+        except OSError as exc:
+            log.warning("cannot write the stitched page (%s)", exc)
+            return False
+        log.info("stitched %d captures into a whole-page document",
+                 len(captures))
+
+        for _ in range(max(len(captures) - 1, 0)):   # leave page at its top
+            _swipe(driver, cx, y_top, y_bot)
+            time.sleep(0.2)
+        return True
+    finally:
+        SCAN_ACTIVE.clear()
 
 
 def _prune_stitched() -> None:

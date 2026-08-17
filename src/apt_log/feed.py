@@ -729,7 +729,20 @@ class _Hierarchy:
         return not elements(self._xml or "")  # nothing better to keep
 
     def _loop(self) -> None:
+        from apt_log import macros as macros_mod
+
         while not self._stop.is_set():
+            # A scan owns the one Appium session while it walks the page.
+            # Interleaving a dump here made the scan crawl and made the live
+            # view lurch through the scroll. Hold the last complete frame
+            # instead — the read_at is refreshed so it does not read as
+            # stale (the screen IS being read, just aggregated), and the
+            # scanning animation already says work is in progress.
+            if macros_mod.SCAN_ACTIVE.is_set():
+                with self._lock:
+                    self._read_at = time.time()
+                self._wait()
+                continue
             try:
                 fresh = read_hierarchy(self._serial)
                 if fresh is not None:
