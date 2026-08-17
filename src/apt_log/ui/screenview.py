@@ -563,6 +563,20 @@ def _app_tabs(elements: list[dict], statics: list[dict],
             and not _is_icon_text(s["txt"])
             and (s["b"][2] - s["b"][0]) < narrow
             and len(s["txt"].strip()) <= HEADER_MAX_CHARS]
+    # The bar's captions share ONE baseline. At a dense-enough layout the
+    # page's last card runs to within a few pixels of the pinned bar, and
+    # its own short lines passed every test above — consumed live as a
+    # five-tab bar ('Detalles del paciente' riding next to 'Programación').
+    # Content sits on its own lines; the bar's captions align. Keep only
+    # the bottom-most aligned run of two or more.
+    caps.sort(key=lambda s: _dev(s)[1])
+    groups: list[list[dict]] = []
+    for s in caps:
+        if groups and abs(_dev(s)[1] - _dev(groups[-1][0])[1]) <= 6:
+            groups[-1].append(s)
+        else:
+            groups.append([s])
+    caps = next((g for g in reversed(groups) if len(g) >= 2), [])
     caps.sort(key=lambda s: s["b"][0])
 
     def _aim(holder):

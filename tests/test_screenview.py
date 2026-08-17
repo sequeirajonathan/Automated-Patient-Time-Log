@@ -602,3 +602,27 @@ class TestInformationalRows:
         cell = next(i for r in m["rows"] for i in r["items"]
                     if i["kind"] == "row")
         assert not cell.get("info")
+
+
+class TestTabBaseline:
+    """The bar's captions share one baseline. At density 84 the schedule's
+    last card runs to within a few pixels of the pinned bar, and its own
+    short lines were consumed as extra tabs ('Detalles del paciente'
+    riding next to 'Programación'). Only the bottom-most aligned run of
+    two or more captions is the bar."""
+
+    def test_content_hugging_the_bar_is_not_a_tab(self):
+        m = screenview.build(doc(
+            elements=[el("pac", "View", [246, 1508, 478, 1580]),
+                      el("menu", "View", [483, 1508, 720, 1580])],
+            statics=[st([36, 1521, 148, 1537], "Detalles del paciente"),
+                     st([592, 1521, 697, 1537], "Detalles de la visita"),
+                     st([40, 1542, 200, 1553], "Programación"),
+                     st([300, 1542, 440, 1553], "Pacientes"),
+                     st([560, 1542, 660, 1553], "Menú")],
+        ))
+        tabs = m["apptabs"]
+        assert [t["txt"] for t in tabs] == ["Programación", "Pacientes", "Menú"]
+        body = [t for r in m["rows"] for i in r["items"]
+                for t in ([i.get("txt")] + (i.get("lines") or [])) if t]
+        assert any("Detalles del paciente" in t for t in body)
