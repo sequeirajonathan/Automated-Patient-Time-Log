@@ -166,6 +166,9 @@ ACTIVITY_SCREENS = {
         "signinactivity": "login",
         "agencyactivity": "agency",
         "agencyselectionactivity": "agency",   # the name the device reports
+        # The migrate-to-the-new-app interstitial after sign-in. "startup"
+        # is honest: the app is still on its way in.
+        "migrationwebviewactivity": "startup",
         "homeactivity": "home",
         "todayscheduleactivity": "today",
         "visitdetailactivity": "visit",

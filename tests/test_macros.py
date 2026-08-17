@@ -1039,3 +1039,67 @@ class TestTheDialogThatDismissesItself:
              patch("apt_log.macros.time.sleep"):
             with pytest.raises(Reached):
                 macros._hhax_legacy_login(driver, lambda _k: None)
+
+
+class TestMigrationPitch:
+    """After sign-in the legacy app parks on a webview pitching
+    HHAeXchange+. Its content never reaches the accessibility tree, and
+    Back RETREATS to the login screen (walked live) — so the macro takes
+    the page's own mid-shift recommendation, «Recordarme más tarde», by
+    the only handle offered: a bottom-anchored coordinate tap, verified
+    by the landing."""
+
+    def _driver(self):
+        import itertools
+        from unittest.mock import PropertyMock
+
+        driver = MagicMock()
+        state = {"tapped": False}
+        webview = MagicMock()
+        webview.rect = {"x": 11, "y": 75, "width": 698, "height": 1406}
+        driver.find_elements.return_value = [webview]
+
+        def activity():
+            return ("com.hhaexchange.caregiver.AgencySelectionActivity"
+                    if state["tapped"]
+                    else "com.hhaexchange.caregiver.MigrationWebViewActivity")
+        type(driver).current_activity = PropertyMock(side_effect=activity)
+        driver.tap.side_effect = lambda *_a, **_k: state.__setitem__(
+            "tapped", True)
+        return driver
+
+    def test_the_later_link_is_tapped_at_the_bottom(self):
+        import itertools
+
+        driver = self._driver()
+        with patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            macros._skip_migration_pitch(driver, lambda _k: None)
+        driver.tap.assert_called_once_with([(360, 1401)])
+        assert driver.swipe.call_count == 2
+
+    def test_any_other_screen_is_left_alone(self):
+        import itertools
+
+        driver = MagicMock()
+        driver.current_activity = "com.hhaexchange.caregiver.HomeActivity"
+        with patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            macros._skip_migration_pitch(driver, lambda _k: None)
+        driver.tap.assert_not_called()
+
+    def test_a_pitch_that_will_not_close_fails_loudly(self):
+        import itertools
+        from unittest.mock import PropertyMock
+
+        driver = self._driver()
+        driver.tap.side_effect = None            # the tap changes nothing
+        type(driver).current_activity = PropertyMock(
+            return_value="com.hhaexchange.caregiver.MigrationWebViewActivity")
+        with patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            with pytest.raises(RuntimeError, match="did not close"):
+                macros._skip_migration_pitch(driver, lambda _k: None)

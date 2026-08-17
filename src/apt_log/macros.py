@@ -231,6 +231,49 @@ def _hhax_legacy_login(driver, report) -> None:
         if not wait_for(lambda: not screen.is_displayed(), timeout=15.0):
             raise RuntimeError("still on the sign-in screen after signing in")
 
+    _skip_migration_pitch(driver, report)
+
+
+def _skip_migration_pitch(driver, report) -> None:
+    """Tap 'Recordarme más tarde' on the migrate-to-the-new-app interstitial.
+
+    After sign-in the legacy app now parks on MigrationWebViewActivity — a
+    webview pitching HHAeXchange+ — between the login and the agency
+    picker. Its content never reaches the accessibility tree, so there is
+    no button to find by name; and Back RETREATS to the login screen (walked
+    live), so the only way past is the choice the page itself recommends
+    for anyone mid-shift: «Recordarme más tarde».
+
+    A coordinate tap, exceptionally, because the screen offers no other
+    handle — gated on the exact activity, aimed after scrolling to the
+    page's bottom where the layout is anchored (the later-link sits just
+    above the webview's bottom edge, well clear of the blue setup button
+    ~120px higher), and verified by the landing: still on the migration
+    screen afterwards is a loud failure, never a shrug. Skipping the pitch
+    changes nothing about her account; the app repeats the offer freely.
+    """
+    def on_migration():
+        return "migration" in (driver.current_activity or "").lower()
+
+    if not wait_for(on_migration, timeout=6.0, poll=1.0):
+        return
+    report("macro.step.checking")
+    views = driver.find_elements(
+        "xpath", '//*[contains(@resource-id,"migration_webview")]')
+    if not views:
+        raise RuntimeError("the migration screen has no webview to aim at")
+    rect = views[0].rect
+    cx = rect["x"] + rect["width"] // 2
+    bottom = rect["y"] + rect["height"]
+    # To the bottom, deterministically: two swipes on a one-screen page,
+    # the second a rubber-band no-op.
+    for _ in range(2):
+        driver.swipe(cx, int(bottom * 0.66), cx, int(bottom * 0.33), 300)
+        time.sleep(1.0)
+    driver.tap([(cx, bottom - 80)])
+    if not wait_for(lambda: not on_migration(), timeout=10.0):
+        raise RuntimeError("the migration pitch did not close")
+
 
 def _hhax_uma_login(driver, report) -> None:
     """HHAeXchange+ — sign in through its web form, only if it asks.
