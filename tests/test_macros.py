@@ -1726,3 +1726,40 @@ class TestAccordionScan:
              patch("apt_log.macros._tap_xy") as tapped:
             macros._stitch_walk(driver, assume_top=True)
         tapped.assert_not_called()
+
+    def test_a_walk_that_opened_folds_rescans_the_settled_page(
+            self, tmp_path, monkeypatch):
+        """Opening a fold moves everything beneath it, and the stitcher's
+        overlap math assumes a page that holds still — one combined pass
+        published duplicated day headers (seen live). The pass that opened
+        anything is only the expansion pass; the publish comes from a
+        second walk over the now-static page, started back at the top."""
+        monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
+        pages = {
+            "collapsed": self._dates() + self._card(401, "NIEVES C MASTRAPA"),
+            "expanded": self._dates() + self._card(
+                401, "NIEVES C MASTRAPA", folded=False, details=True),
+        }
+        state = {"page": "collapsed"}
+        driver = self._driver(state, pages)
+
+        def tap(x, y):
+            state["page"] = "expanded"
+
+        with patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros._scroll_to_top") as to_top, \
+             patch("apt_log.macros._tap_xy", side_effect=tap):
+            assert macros._stitch_walk(driver, assume_top=True) is True
+        to_top.assert_called_once()      # the rescan starts at the top
+
+    def test_a_walk_that_opened_nothing_scans_once(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
+        pages = {"collapsed": self._dates() + self._card(
+            401, "NIEVES C MASTRAPA", folded=False, details=True)}
+        driver = self._driver({"page": "collapsed"}, pages)
+        with patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros._scroll_to_top") as to_top, \
+             patch("apt_log.macros._tap_xy") as tapped:
+            macros._stitch_walk(driver, assume_top=True)
+        tapped.assert_not_called()
+        to_top.assert_not_called()       # fresh page, no folds: no probe

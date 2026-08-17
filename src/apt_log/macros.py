@@ -841,8 +841,6 @@ def _stitch_walk(driver, assume_top: bool = False) -> bool:
     SCAN_ACTIVE.set()
     try:
         cx, y_top, y_bot = _swipe_geometry(driver)
-        if not assume_top:
-            _scroll_to_top(driver, cx, y_top, y_bot)
 
         def capture() -> dict:
             src = driver.page_source or ""
@@ -857,9 +855,10 @@ def _stitch_walk(driver, assume_top: bool = False) -> bool:
         size = driver.get_window_size()
         taps_left = EXPAND_MAX_TAPS
         expanding = (driver.current_package or "") in EXPAND_APPS
+        opened = 0
 
         def open_folds(cap: dict) -> dict:
-            nonlocal taps_left, expanding
+            nonlocal taps_left, expanding, opened
             if not expanding or not _page_folds(cap["statics"]):
                 return cap
             while taps_left > 0:
@@ -889,19 +888,35 @@ def _stitch_walk(driver, assume_top: bool = False) -> bool:
                     driver.press_keycode(4)
                     time.sleep(STITCH_SETTLE)
                     return capture()
+                opened += 1
                 cap = fresh
             return cap
 
-        captures: list[dict] = []
-        prev: dict | None = None
-        for _ in range(STITCH_MAX_STEPS):
-            cap = open_folds(capture())
-            if prev is not None and cap == prev:
-                break
-            captures.append(cap)
-            prev = cap
-            _swipe(driver, cx, y_bot, y_top)
-            time.sleep(STITCH_SETTLE)
+        # The stitcher's overlap math assumes the page holds still between
+        # captures, and opening a fold moves everything beneath it — one
+        # pass that both opened cards and stitched published duplicated
+        # day headers and interleaved fragments (seen live). So a pass
+        # that opened anything is only the expansion pass: the page is
+        # walked again from the top, now static and fully unfolded, and
+        # THAT walk is the one stitched and published.
+        for sweep in (1, 2):
+            if sweep == 2 or not assume_top:
+                _scroll_to_top(driver, cx, y_top, y_bot)
+            captures: list[dict] = []
+            prev: dict | None = None
+            for _ in range(STITCH_MAX_STEPS):
+                cap = open_folds(capture())
+                if prev is not None and cap == prev:
+                    break
+                captures.append(cap)
+                prev = cap
+                _swipe(driver, cx, y_bot, y_top)
+                time.sleep(STITCH_SETTLE)
+            if sweep == 1 and opened:
+                log.info("opened %d folded cards; rescanning the settled "
+                         "page", opened)
+                continue
+            break
 
         if not captures or not captures[0]["elements"]:
             for _ in range(max(len(captures) - 1, 0)):
