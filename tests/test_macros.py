@@ -1043,21 +1043,35 @@ class TestTheDialogThatDismissesItself:
 
 class TestMigrationPitch:
     """After sign-in the legacy app parks on a webview pitching
-    HHAeXchange+. Its content never reaches the accessibility tree, and
-    Back RETREATS to the login screen (walked live) — so the macro takes
-    the page's own mid-shift recommendation, «Recordarme más tarde», by
-    the only handle offered: a bottom-anchored coordinate tap, verified
-    by the landing."""
+    HHAeXchange+, and Back RETREATS to the login screen (walked live) —
+    so the macro takes the page's own mid-shift recommendation,
+    «Recordarme más tarde». The webview's mood decides the aim: some
+    visits it surfaces the button by name once scrolled, some visits its
+    content never reaches the tree and the bottom-anchored coordinate
+    tap from the first discovery is all there is. The landing is
+    verified either way."""
 
-    def _driver(self):
-        import itertools
+    def _driver(self, button_after_swipes=None):
         from unittest.mock import PropertyMock
 
         driver = MagicMock()
-        state = {"tapped": False}
+        driver.get_window_size.return_value = {"width": 720, "height": 1600}
+        state = {"tapped": False, "swipes": 0}
         webview = MagicMock()
         webview.rect = {"x": 11, "y": 75, "width": 698, "height": 1406}
-        driver.find_elements.return_value = [webview]
+        button = MagicMock()
+        button.rect = {"x": 38, "y": 1375, "width": 645, "height": 52}
+
+        def find(_strategy, xpath):
+            if "Recordarme" in xpath:
+                if (button_after_swipes is not None
+                        and state["swipes"] >= button_after_swipes):
+                    return [button]
+                return []
+            return [webview]
+        driver.find_elements.side_effect = find
+        driver.swipe.side_effect = lambda *_a, **_k: state.__setitem__(
+            "swipes", state["swipes"] + 1)
 
         def activity():
             return ("com.hhaexchange.caregiver.AgencySelectionActivity"
@@ -1068,16 +1082,45 @@ class TestMigrationPitch:
             "tapped", True)
         return driver
 
-    def test_the_later_link_is_tapped_at_the_bottom(self):
+    def test_the_named_button_is_preferred(self):
+        """Seen live: after one swipe the webview exposed «Recordarme más
+        tarde» as a real Button. Its own centre is the aim — no blind
+        coordinates when the page offers a handle."""
         import itertools
 
-        driver = self._driver()
+        driver = self._driver(button_after_swipes=1)
         with patch("apt_log.macros.time.sleep"), \
              patch("apt_log.macros.time.monotonic",
                    side_effect=itertools.count(step=0.5)):
             macros._skip_migration_pitch(driver, lambda _k: None)
         driver.tap.assert_called_once_with([(360, 1401)])
-        assert driver.swipe.call_count == 2
+
+    def test_a_mute_webview_gets_the_bottom_anchored_tap(self):
+        """The first discovery's webview exposed nothing by name; the
+        coordinate tap just above its bottom edge is the fallback."""
+        import itertools
+
+        driver = self._driver(button_after_swipes=None)
+        with patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            macros._skip_migration_pitch(driver, lambda _k: None)
+        driver.tap.assert_called_once_with([(360, 1401)])
+        assert driver.swipe.call_count == 3
+
+    def test_a_screen_offering_nothing_fails_loudly(self):
+        import itertools
+        from unittest.mock import PropertyMock
+
+        driver = self._driver()
+        driver.find_elements.side_effect = lambda *_a: []
+        type(driver).current_activity = PropertyMock(
+            return_value="com.hhaexchange.caregiver.MigrationWebViewActivity")
+        with patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            with pytest.raises(RuntimeError, match="nothing to aim at"):
+                macros._skip_migration_pitch(driver, lambda _k: None)
 
     def test_any_other_screen_is_left_alone(self):
         import itertools

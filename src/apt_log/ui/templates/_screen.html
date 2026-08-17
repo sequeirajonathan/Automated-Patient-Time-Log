@@ -92,7 +92,17 @@
     </div>
     {% endif %}
   {% endfor %}
-  {% if m.webview %}
+  {# The footnote reads opposite ways depending on what the page holds.
+     A stitched walk means these rows are the WHOLE page — it is the
+     phone that would need scrolling to show what is mapped here. A
+     scrollable page not yet walked says so, instead of leaving anyone
+     wondering if there is more. Only a webview that cannot scroll keeps
+     the old caveat: its pixels can carry what its tree does not. #}
+  {% if m.full %}
+  <div class="a-webnote whole">{{ t('papp.whole_page') }}</div>
+  {% elif m.scrollable %}
+  <div class="a-webnote">{{ t('papp.mapping') }}</div>
+  {% elif m.webview %}
   <div class="a-webnote">{{ t('papp.web_partial') }}</div>
   {% endif %}
   </div>

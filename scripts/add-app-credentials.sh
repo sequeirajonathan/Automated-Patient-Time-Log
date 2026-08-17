@@ -46,6 +46,16 @@ if [[ -n "${MC_PIN_VAL}" && ! "$MC_PIN_VAL" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
+echo
+echo "inMyTeam signs in with the caregiver's CELL NUMBER (digits only, as"
+echo "the app expects it typed). The SMS code arrives on the tethered phone"
+echo "itself, so the sign-in can heal without anyone reading a text aloud."
+read -rp  "inMyTeam phone number       : " IMT_PHONE_VAL || true
+if [[ -n "${IMT_PHONE_VAL}" && ! "$IMT_PHONE_VAL" =~ ^[0-9]+$ ]]; then
+    echo "digits only — no dashes, spaces, or country-code plus sign" >&2
+    exit 1
+fi
+
 # Update-or-append each key, never disturbing the others.
 upsert() {
     local key="$1" value="$2"
@@ -63,8 +73,9 @@ upsert() {
 upsert "UMA_USERNAME" "${UMA_USER:-}"
 upsert "UMA_PASSWORD" "${UMA_PASS:-}"
 upsert "MC_PIN"       "${MC_PIN_VAL:-}"
+upsert "INMYTEAM_PHONE" "${IMT_PHONE_VAL:-}"
 
-unset UMA_PASS UMA_PASS2 MC_PIN_VAL
+unset UMA_PASS UMA_PASS2 MC_PIN_VAL IMT_PHONE_VAL
 
 chown "$SERVICE_USER:$SERVICE_USER" "$SECRETS"
 chmod 0600 "$SECRETS"
@@ -76,12 +87,13 @@ VENV="/opt/aptlog/.venv/bin/python"
 sudo -u "$SERVICE_USER" "$VENV" - <<'PY' 2>/dev/null || echo "  (could not verify)"
 import sys
 sys.path.insert(0, "/opt/aptlog/src")
-from apt_log.secrets import (MC_PIN, UMA_PASSWORD, UMA_USERNAME,
-                             FileSecretProvider, SecretNotFound)
+from apt_log.secrets import (INMYTEAM_PHONE, MC_PIN, UMA_PASSWORD,
+                             UMA_USERNAME, FileSecretProvider, SecretNotFound)
 p = FileSecretProvider()
 for label, key, masked in (("UMA_USERNAME", UMA_USERNAME, False),
                            ("UMA_PASSWORD", UMA_PASSWORD, True),
-                           ("MC_PIN", MC_PIN, True)):
+                           ("MC_PIN", MC_PIN, True),
+                           ("INMYTEAM_PHONE", INMYTEAM_PHONE, True)):
     try:
         v = p.get(key)
         print("  %-13s: %s" % (label, v if not masked else f"set ({len(v)} chars)"))

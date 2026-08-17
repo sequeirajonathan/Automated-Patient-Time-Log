@@ -33,6 +33,10 @@ UMA_USERNAME = "UMA_USERNAME"      # HHAeXchange+ signs in through a web form
 UMA_PASSWORD = "UMA_PASSWORD"
 MC_PIN = "MC_PIN"                  # Mobile Caregiver+ guards its session
                                    # with a numeric passcode keypad
+INMYTEAM_PHONE = "INMYTEAM_PHONE"  # inMyTeam signs in with a cell number
+                                   # (walked live: "Sign in with your phone
+                                   # number" — the SMS code lands on the
+                                   # tethered phone itself)
 
 
 class SecretNotFound(KeyError):

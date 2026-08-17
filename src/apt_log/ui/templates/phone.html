@@ -212,10 +212,12 @@
               padding:8px 8px; cursor:pointer; }
   .a-navbtn:active { opacity:.4; }
 
-  /* The webview honesty line: a web page's accessibility tree can
-     underreport, so the list admits it may be partial. */
+  /* The footnote under the list: whether these rows are the whole page
+     (a stitched walk — tinted, good news), a page still being read, or
+     a webview whose tree may underreport. */
   .a-webnote { text-align:center; color:var(--muted); font-size:12.5px;
                padding:4px 24px 10px; }
+  .a-webnote.whole { color:var(--tint); }
 
   /* The read-the-whole-page offer, and the reading it produces. */
   .a-scanbtn { display:block; margin:2px auto 16px; border:none;

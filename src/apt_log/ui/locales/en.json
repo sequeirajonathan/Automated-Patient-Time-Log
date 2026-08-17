@@ -209,6 +209,8 @@
   "papp.explain.syncing": "Yellow: the phone's screen is changing — showing the loading page until the fresh screen arrives.",
   "papp.explain.offline": "Red: not connected to the controller. It reconnects on its own; nothing tapped here reaches the phone until it does.",
   "papp.web_partial": "This is a web page — it may show more than this list. The photo (eye button) has the whole screen.",
+  "papp.whole_page": "This is the whole page, top to bottom — the phone itself may need scrolling to show everything mapped here.",
+  "papp.mapping": "Reading the rest of this page…",
   "papp.scan": "Read the whole page",
   "papp.scanning": "Reading the whole page…",
   "macro.read_page": "Read the whole page",

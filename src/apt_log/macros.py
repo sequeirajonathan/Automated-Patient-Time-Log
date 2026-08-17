@@ -258,18 +258,21 @@ def _skip_migration_pitch(driver, report) -> None:
 
     After sign-in the legacy app now parks on MigrationWebViewActivity — a
     webview pitching HHAeXchange+ — between the login and the agency
-    picker. Its content never reaches the accessibility tree, so there is
-    no button to find by name; and Back RETREATS to the login screen (walked
-    live), so the only way past is the choice the page itself recommends
-    for anyone mid-shift: «Recordarme más tarde».
+    picker. Back RETREATS to the login screen (walked live), so the only
+    way past is the choice the page itself recommends for anyone
+    mid-shift: «Recordarme más tarde».
 
-    A coordinate tap, exceptionally, because the screen offers no other
-    handle — gated on the exact activity, aimed after scrolling to the
-    page's bottom where the layout is anchored (the later-link sits just
-    above the webview's bottom edge, well clear of the blue setup button
-    ~120px higher), and verified by the landing: still on the migration
-    screen afterwards is a loud failure, never a shrug. Skipping the pitch
-    changes nothing about her account; the app repeats the offer freely.
+    The webview's mood decides the aim. Some visits it exposes real
+    buttons once the page has been scrolled (seen live: «Recordarme más
+    tarde» as a Button after one swipe); other visits its content never
+    reaches the accessibility tree at all. So: scroll and look for the
+    button by name first, and only when the tree stays empty fall back to
+    the bottom-anchored coordinate tap from the first discovery (the
+    later-link sits just above the webview's bottom edge, well clear of
+    the blue setup button ~120px higher). Either way the landing is
+    verified: still on the migration screen afterwards is a loud failure,
+    never a shrug. Skipping the pitch changes nothing about her account;
+    the app repeats the offer freely.
     """
     def on_migration():
         return "migration" in (driver.current_activity or "").lower()
@@ -277,19 +280,33 @@ def _skip_migration_pitch(driver, report) -> None:
     if not wait_for(on_migration, timeout=6.0, poll=1.0):
         return
     report("macro.step.checking")
-    views = driver.find_elements(
-        "xpath", '//*[contains(@resource-id,"migration_webview")]')
-    if not views:
-        raise RuntimeError("the migration screen has no webview to aim at")
-    rect = views[0].rect
-    cx = rect["x"] + rect["width"] // 2
-    bottom = rect["y"] + rect["height"]
-    # To the bottom, deterministically: two swipes on a one-screen page,
-    # the second a rubber-band no-op.
-    for _ in range(2):
-        driver.swipe(cx, int(bottom * 0.66), cx, int(bottom * 0.33), 300)
+
+    later = ('//*[contains(@text,"Recordarme") '
+             'or contains(@text,"Remind me later")]')
+    cx, y_top, y_bot = _swipe_geometry(driver)
+    target = None
+    # To the bottom, deterministically: the pitch is a one-screen page, so
+    # the later swipes are rubber-band no-ops — and each stop is another
+    # chance for the webview to surface its buttons.
+    for attempt in range(3):
+        found = driver.find_elements("xpath", later)
+        if found:
+            target = found[0]
+            break
+        _swipe(driver, cx, y_bot, y_top, 300)
         time.sleep(1.0)
-    driver.tap([(cx, bottom - 80)])
+    if target is not None:
+        rect = target.rect
+        driver.tap([(rect["x"] + rect["width"] // 2,
+                     rect["y"] + rect["height"] // 2)])
+    else:
+        views = driver.find_elements(
+            "xpath", '//*[contains(@resource-id,"migration_webview")]')
+        if not views:
+            raise RuntimeError("the migration screen offers nothing to aim at")
+        rect = views[0].rect
+        driver.tap([(rect["x"] + rect["width"] // 2,
+                     rect["y"] + rect["height"] - 80)])
     if not wait_for(lambda: not on_migration(), timeout=10.0):
         raise RuntimeError("the migration pitch did not close")
 

@@ -329,7 +329,10 @@ def build(doc: dict) -> dict | None:
     return {"id": doc.get("id", ""), "nav": nav, "rows": rows,
             "notice": doc.get("notice", ""), "blocked": doc.get("blocked", ""),
             "webview": bool(doc.get("webview")),
-            "scrollable": bool(doc.get("scrollable"))}
+            "scrollable": bool(doc.get("scrollable")),
+            # Whether the rows above are the WHOLE page (a stitched walk)
+            # or just the viewport — the footnote reads opposite ways.
+            "full": bool(doc.get("full"))}
 
 
 def _fold_tab_captions(band: list[dict]) -> list[dict]:
