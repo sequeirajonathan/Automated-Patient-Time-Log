@@ -132,6 +132,7 @@ ACTION_WORDS = (
     "registrar entrada", "registrar salida", "ver detalles",
     "clock in", "clock out", "sign in", "start visit", "save", "submit",
     "confirm", "continue", "view details", "see details",
+    "let's get started", "get started",
 )
 
 
@@ -145,7 +146,9 @@ DEMOTED_HINTS = ("no programada", "unscheduled")
 
 
 def _looks_like_cta(text: str) -> bool:
-    t = (text or "").strip().lower()
+    # The curly apostrophe is the one apps actually ship ("Let\u2019s Get
+    # Started"); the word list is written with the plain one.
+    t = (text or "").strip().lower().replace("\u2019", "'")
     if any(h in t for h in DEMOTED_HINTS):
         return False
     return bool(t) and any(t.startswith(w) for w in ACTION_WORDS)

@@ -739,3 +739,14 @@ class TestWrapperContainers:
         assert ctas[0]["lines"] == ["Sign in"]
         texts = [i.get("txt") for i in items if i["kind"] == "label"]
         assert "Sign in with your phone number" in texts
+
+    def test_the_welcome_pages_get_started_is_the_call_to_action(self):
+        """inMyTeam's initial page offers exactly one action, shipped with
+        the curly apostrophe the word list is not written in."""
+        m = screenview.build(doc(
+            elements=[el("", "View", [30, 1531, 690, 1573])],
+            statics=[st([314, 1546, 382, 1558], "Let\u2019s Get Started")],
+        ))
+        cell = next(i for r in m["rows"] for i in r["items"]
+                    if i["kind"] == "row")
+        assert cell["cta"] is True
