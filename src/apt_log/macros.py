@@ -857,14 +857,36 @@ def _warm_sweep(driver, request_path, deep_path, poke_path) -> int:
         time.sleep(WARM_SETTLE)
         if _stitch_walk(driver, assume_top=True):
             warmed += 1
-    # Home again: tap slots until the landing frame is back in front, so
-    # the sweep never leaves her parked on a tab she did not choose.
-    for cx, cy in slots:
-        if here() == landing:
-            break
-        driver.tap([(cx, cy)])
-        time.sleep(WARM_SETTLE)
+        # A tab that opened a sub-page (a "Menú" of tools, not a peer tab)
+        # has buried the tab bar; step back out so the next warm — and the
+        # return home — start from the bar again, never stranded deep.
+        _return_to_tabbar(driver, landing)
+    _return_to_tabbar(driver, landing)
     return warmed
+
+
+def _return_to_tabbar(driver, landing: str) -> None:
+    """Get back to the landing tab, robust to the bar having moved or a
+    sub-page having covered it. Re-detects the bar each step and taps its
+    first slot; steps Back when no bar is visible (a sub-page). Bounded,
+    so a screen that will not return cannot spin here forever."""
+    from apt_log import feed as feed_mod
+
+    def here() -> str:
+        return feed_mod.frame_id(feed_mod.elements(driver.page_source or ""))
+
+    for _ in range(5):
+        if here() == landing:
+            return
+        slots = _bottom_tabs(driver)
+        if slots:
+            driver.tap([slots[0]])
+        else:
+            try:
+                driver.back()
+            except Exception:  # noqa: BLE001 — best effort back out
+                return
+        time.sleep(WARM_SETTLE)
 
 
 def take_deep_tap() -> dict | None:

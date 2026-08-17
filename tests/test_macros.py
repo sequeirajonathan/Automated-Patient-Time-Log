@@ -1394,3 +1394,26 @@ class TestWarmSweep:
              patch("apt_log.ui.mirror.publish"):
             runner.execute("open_inmyteam", "rid2")
         assert runner._warm_app is None
+
+
+class TestWarmReturnHome:
+    """A 'Menú' tab opens a sub-page that buries the tab bar; the sweep
+    must climb back to the landing tab rather than strand her deep — seen
+    live parked on a Tools page after warming."""
+
+    def test_a_buried_tab_bar_is_climbed_back_out(self):
+        driver = MagicMock()
+        driver.get_window_size.return_value = {"width": 720, "height": 1600}
+        landing = ('<node class="android.widget.Button" resource-id="sched" '
+                   'clickable="true" bounds="[0,300][720,400]"/>')
+        subpage = ('<node class="android.widget.Button" resource-id="tools" '
+                   'clickable="true" bounds="[0,300][720,400]"/>')  # no tab bar
+        state = {"src": subpage}
+        type(driver).page_source = property(lambda self: state["src"])
+        driver.back.side_effect = lambda: state.__setitem__("src", landing)
+
+        from apt_log import feed as feed_mod
+        want = feed_mod.frame_id(feed_mod.elements(landing))
+        with patch("apt_log.macros.time.sleep"):
+            macros._return_to_tabbar(driver, want)
+        driver.back.assert_called()          # stepped out of the sub-page
