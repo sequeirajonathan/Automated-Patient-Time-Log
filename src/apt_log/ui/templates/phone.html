@@ -366,6 +366,23 @@
   .a-row:has(> .a-inforow) { background:none; box-shadow:none; border:none;
                padding:2px 2px; min-height:0; }
 
+  /* The type bar: floats above the pill when a text field is tapped. One
+     input, one send — the OTP moment, not a keyboard. */
+  .typebar { position:fixed; left:12px; right:12px; bottom:88px; z-index:40;
+             background:var(--card, #fff); border-radius:16px; padding:12px 14px;
+             box-shadow:0 12px 32px -12px rgb(0 0 0 / .35);
+             display:flex; flex-direction:column; gap:8px; }
+  .typehint { font-size:12.5px; color:var(--muted); }
+  .typerow { display:flex; gap:8px; }
+  .typerow input { flex:1; min-width:0; font-size:18px; letter-spacing:2px;
+             padding:10px 12px; border-radius:10px;
+             border:1.5px solid var(--tint); background:var(--bg, #fff);
+             color:var(--ink); }
+  .typerow button { border:none; border-radius:10px; padding:0 16px;
+             font-size:14px; font-weight:600; cursor:pointer; }
+  #typesend { background:var(--tint); color:#fff; }
+  #typecancel { background:var(--track); color:var(--muted); }
+
   /* A call to action, whether the app drew it as a Button or a plain
      clickable row: filled accent, centred, no chevron — it commits or
      advances, it does not "open more". This is the difference the owner
@@ -770,6 +787,18 @@
        Filled by phone.js from the screen payload; hidden when the screen
        has no tab bar. #}
     <div id="apptabs" class="apptabs" hidden></div>
+    {# The type bar: one short code into the field she aimed at — the OTP
+       moment. Hidden until a text field is tapped; the server holds the
+       same contract (fields only, short plain token, refuse-if-moved). #}
+    <div id="typebar" class="typebar" hidden>
+      <span class="typehint">{{ t('papp.type.hint') }}</span>
+      <div class="typerow">
+        <input id="typebox" type="text" inputmode="text" autocomplete="one-time-code"
+               maxlength="32" pattern="[A-Za-z0-9]*" />
+        <button id="typesend" type="button">{{ t('papp.type.send') }}</button>
+        <button id="typecancel" type="button">{{ t('papp.type.cancel') }}</button>
+      </div>
+    </div>
     {# The phone's own three, in Android's shapes, plus wake — riding a
        floating pill so the chrome reads native instead of edge-to-edge web. #}
     <div class="pill">
@@ -832,6 +861,7 @@
     waiting: {{ t('papp.waiting_screen')|tojson }},
     moved:   {{ t('portal.moved')|tojson }},
     failed:  {{ t('portal.failed')|tojson }},
+    typeHint: {{ t('papp.type.hint')|tojson }},
     sent:    {{ t('phone.sent')|tojson }},
     devfail: {{ t('phone.failed')|tojson }},
     signSending: {{ t('sign.state.running')|tojson }},

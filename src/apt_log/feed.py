@@ -1298,6 +1298,69 @@ def tap(claimed_frame: str, element: dict, serial: str | None = None,
     return {"tapped": {"rid": match["rid"], "cls": match["cls"], "at": [cx, cy]}}
 
 
+TYPABLE = ("EditText", "AutoCompleteTextView", "SearchView",
+           "MultiAutoCompleteTextView")
+# A short plain token: the case this exists for is a verification code
+# read off a family member's phone. Letters and digits only — nothing
+# that needs shell quoting, nothing essay-length.
+_TYPABLE_VALUE = re.compile(r"^[A-Za-z0-9]{1,32}$")
+
+
+def type_into(claimed_frame: str, element: dict, value: str,
+              serial: str | None = None,
+              frame_path: Path | None = None) -> dict:
+    """Type into a field she aimed at, under tap's refuse-if-moved contract.
+
+    Only fields take text; the field is focused with a tap first, then the
+    value travels over `input text`. Honest limitation, same as the phone
+    PIN: `input text` takes the value as an argv element, so it is briefly
+    visible in `ps` on this host and on the phone. The value is never
+    logged here, and the length cap keeps this a token channel — a
+    verification code, not a message pipe.
+    """
+    if not isinstance(value, str) or not _TYPABLE_VALUE.match(value or ""):
+        raise ValueError("only a short plain code can be typed")
+    current = published_elements(frame_path)
+    bounds = list(element.get("b") or [])
+    match = next(
+        (e for e in current
+         if e["b"] == bounds
+         and e["rid"] == element.get("rid", "")
+         and e["cls"] == element.get("cls", "")),
+        None,
+    )
+    if match is None:
+        raise StaleAim("that is no longer on the screen — look again")
+    if int(match.get("step") or 0) > 0:
+        raise StaleAim("scroll the field into view first")
+    if not any((match.get("cls") or "").endswith(t) for t in TYPABLE):
+        raise StaleAim("that is not a text field")
+
+    x1, y1, x2, y2 = match["b"]
+    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+    focus = _adb(["shell", "input", "tap", str(cx), str(cy)], serial,
+                 timeout=20.0)
+    if focus.returncode != 0:
+        raise StaleAim("adb refused to focus the field")
+    time.sleep(0.6)
+    result = _adb(["shell", "input", "text", value], serial, timeout=20.0)
+    if result.returncode != 0:
+        raise StaleAim("adb refused the text")
+
+    # Identity and length only — never the value.
+    log.info("typed %d chars into %s/%s on frame %s",
+             len(value), match["cls"], match["rid"] or "-", claimed_frame)
+    try:
+        from apt_log.ui.state import STATE_DIR
+
+        (STATE_DIR / POKE_NAME).write_text(str(time.time()),
+                                           encoding="utf-8")
+    except OSError:
+        pass
+    return {"typed": {"rid": match["rid"], "cls": match["cls"],
+                      "chars": len(value)}}
+
+
 def _deep_tap(claimed_frame: str, match: dict) -> dict:
     """Hand a below-the-fold tap to the runner and wait for its verdict."""
     from apt_log import macros as macros_mod

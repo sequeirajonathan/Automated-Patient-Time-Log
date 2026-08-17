@@ -647,6 +647,8 @@ async def live(ws: WebSocket):
 
             if msg.get("type") == "tap":
                 await ws.send_json(await _do_tap(msg))
+            elif msg.get("type") == "text":
+                await ws.send_json(await _do_text(msg))
             elif msg.get("type") == "device":
                 await ws.send_json(await _do_device(msg))
             elif msg.get("type") == "video":
@@ -700,6 +702,32 @@ async def _do_tap(msg: dict) -> dict:
         log.warning("tap refused: %s", exc)
         return {"type": "tap_result", "ok": False, "reason": "stale"}
     return {"type": "tap_result", "ok": True}
+
+
+async def _do_text(msg: dict) -> dict:
+    """Type a short code into a field she aimed at.
+
+    Exists for exactly one shape of moment: a verification code lands on a
+    family member's phone and someone types it into the app's field from
+    the portal. Same aim verification as a tap (refuse-if-moved), fields
+    only, letters and digits only, capped short — a token channel, not a
+    message pipe. The value never appears in a log on either end.
+    """
+    from apt_log.feed import NotOnScreen, StaleAim, type_into
+
+    element = msg.get("element") or {}
+    frame = msg.get("frame") or ""
+    value = msg.get("value")
+    if not frame or not isinstance(element, dict) or not isinstance(value, str):
+        return {"type": "text_result", "ok": False, "reason": "malformed"}
+    try:
+        await asyncio.to_thread(type_into, frame, element, value)
+    except ValueError:
+        return {"type": "text_result", "ok": False, "reason": "malformed"}
+    except (StaleAim, NotOnScreen) as exc:
+        log.info("text refused: %s", exc)
+        return {"type": "text_result", "ok": False, "reason": "stale"}
+    return {"type": "text_result", "ok": True}
 
 
 async def _do_device(msg: dict) -> dict:

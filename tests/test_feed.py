@@ -10,7 +10,7 @@ from __future__ import annotations
 import io
 import json
 import time
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -1206,3 +1206,50 @@ class TestHierarchyPackage:
         doc = json.loads((tmp_path / "screen.json").read_text())
         assert doc["app"] == "com.hhaexchange.uma"
         assert doc["h_app"] == "com.hhaexchange.caregiver"
+
+
+class TestTypeInto:
+    """Typing a short code into a field, under tap's refuse-if-moved
+    contract. Exists for the OTP moment: a verification code lands on a
+    family member's phone and someone types it in from the portal."""
+
+    FIELD = {"cls": "android.widget.EditText", "rid": "otp",
+             "b": [11, 1051, 709, 1085], "step": 0}
+
+    def _publish(self, tmp_path, els):
+        from datetime import datetime
+        frame = {"id": "f1", "at": datetime.now().isoformat(),
+                 "elements": els}
+        p = tmp_path / "frame.json"
+        p.write_text(json.dumps(frame), encoding="utf-8")
+        return p
+
+    def test_the_code_is_typed_after_focusing_the_field(self, tmp_path):
+        p = self._publish(tmp_path, [dict(self.FIELD)])
+        calls = []
+        with patch.object(feed, "_adb",
+                          side_effect=lambda a, *_, **__: calls.append(a)
+                          or MagicMock(returncode=0)):
+            out = feed.type_into("f1", dict(self.FIELD), "123456",
+                                 frame_path=p)
+        assert out["typed"]["chars"] == 6
+        assert calls[0][:3] == ["shell", "input", "tap"]
+        assert calls[1] == ["shell", "input", "text", "123456"]
+
+    def test_a_moved_field_is_refused(self, tmp_path):
+        p = self._publish(tmp_path, [dict(self.FIELD,
+                                          b=[11, 900, 709, 934])])
+        with pytest.raises(feed.StaleAim):
+            feed.type_into("f1", dict(self.FIELD), "123456", frame_path=p)
+
+    def test_only_fields_take_text(self, tmp_path):
+        row = dict(self.FIELD, cls="android.view.View")
+        p = self._publish(tmp_path, [row])
+        with pytest.raises(feed.StaleAim):
+            feed.type_into("f1", dict(row), "123456", frame_path=p)
+
+    def test_only_a_short_plain_token_travels(self, tmp_path):
+        p = self._publish(tmp_path, [dict(self.FIELD)])
+        for bad in ("", "with space", "semi;colon", "x" * 33, "$(rm)"):
+            with pytest.raises(ValueError):
+                feed.type_into("f1", dict(self.FIELD), bad, frame_path=p)

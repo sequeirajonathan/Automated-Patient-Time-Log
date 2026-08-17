@@ -119,6 +119,14 @@
         if (!socket || socket.readyState !== 1) return;
         let aim;
         try { aim = JSON.parse(el.dataset.aim); } catch (e) { return; }
+        // A text field opens the type bar instead of dimming the page: the
+        // send is what taps (the server focuses the field first), so a
+        // mistap costs nothing and the code can be read off another phone
+        // at leisure.
+        if (/EditText|AutoCompleteTextView|SearchView/.test(aim.cls || '')) {
+          openTypeBar(aim);
+          return;
+        }
         // No overlays and no sentences for a tap: the screen dims and
         // shimmers until its successor arrives, the way a native app treats
         // a moment of work as a state rather than an event.
@@ -126,6 +134,35 @@
         socket.send(JSON.stringify({ type: 'tap', frame: frameId, element: aim }));
       });
     }
+  }
+
+  // The type bar: one short plain code into the field she aimed at. Exists
+  // for the OTP moment — a verification code lands on a family member's
+  // phone and gets typed here. Letters and digits, capped short; the
+  // server enforces the same and refuses if the field moved.
+  let typeAim = null;
+  function openTypeBar(aim) {
+    typeAim = aim;
+    const bar = document.getElementById('typebar');
+    if (!bar) return;
+    bar.hidden = false;
+    const box = document.getElementById('typebox');
+    box.value = '';
+    setTimeout(() => box.focus(), 50);
+  }
+  function closeTypeBar() {
+    typeAim = null;
+    const bar = document.getElementById('typebar');
+    if (bar) { bar.hidden = true; }
+  }
+  function sendTyped() {
+    const box = document.getElementById('typebox');
+    const value = (box.value || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 32);
+    if (!value || !typeAim || !socket || socket.readyState !== 1) return;
+    tapping(true);
+    socket.send(JSON.stringify({ type: 'text', frame: frameId,
+                                 element: typeAim, value: value }));
+    closeTypeBar();
   }
 
   // The app's own tab bar, lifted into the control bar. Rebuilt whenever the
@@ -543,6 +580,13 @@
         }
         return;
       }
+      if (msg.type === 'text_result') {
+        if (!msg.ok) {
+          tapping(false);
+          toast(msg.reason === 'stale' ? (i18n.moved || '') : (i18n.failed || ''));
+        }
+        return;
+      }
       if (msg.type === 'device_result') {
         if (!msg.ok) { unbusy(); toast(i18n.devfail || ''); }
         return;
@@ -617,6 +661,15 @@
     try {
       if (sessionStorage.getItem('aptlog-view') === 'screen') view('screen');
     } catch (e) { /* private mode */ }
+
+    const tsend = document.getElementById('typesend');
+    const tcancel = document.getElementById('typecancel');
+    const tbox = document.getElementById('typebox');
+    if (tsend) tsend.addEventListener('click', sendTyped);
+    if (tcancel) tcancel.addEventListener('click', closeTypeBar);
+    if (tbox) tbox.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); sendTyped(); }
+    });
 
     for (const tile of document.querySelectorAll('.tile')) {
       tile.addEventListener('click', () => launch(tile));

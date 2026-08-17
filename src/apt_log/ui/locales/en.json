@@ -215,5 +215,8 @@
   "macro.step.reading": "Reading the page…",
   "scan.title": "The whole page",
   "scan.close": "Close",
-  "scan.empty": "Nothing readable was found on this page."
+  "scan.empty": "Nothing readable was found on this page.",
+  "papp.type.hint": "Type the code, then send it to the phone",
+  "papp.type.send": "Send",
+  "papp.type.cancel": "Cancel"
 }
