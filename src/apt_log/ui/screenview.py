@@ -367,10 +367,17 @@ def build(doc: dict) -> dict | None:
         first = bands[0]
         buttons = [n for n in first if n.get("aim")]
         titles = [n for n in first if not n.get("aim") and n.get("txt")]
+        # A title bar's title is a title, never a paragraph. A page whose top
+        # band is a hint sentence with an inline link ("Encontrará las visitas
+        # anteriores con Visita Buscar", seen on the tablet-density schedule)
+        # is not a nav bar, and letting its hint become the title renamed the
+        # whole page from "HHAeXchange+" to the hint.
         if (buttons
                 and min(n["b"][1] for n in first) <= h * NAV_TOP_MAX
                 and max(n["b"][3] for n in first) <= h * NAV_BAND_BOTTOM
-                and all(n.get("small") for n in buttons)):
+                and all(n.get("small") for n in buttons)
+                and all(len((t["txt"] or "").strip()) <= HEADER_MAX_CHARS
+                        for t in titles)):
             title = max(titles, key=lambda n: len(n["txt"]), default=None)
             nav = {
                 "back": buttons[0],
