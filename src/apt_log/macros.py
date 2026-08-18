@@ -1367,6 +1367,17 @@ def _inmyteam_login(driver, report) -> None:
     wait_for(lambda: field() is not None or start_button() is not None,
              timeout=20.0)
 
+    # Already at the code, from an earlier run or from somebody's own tap.
+    # This is the check that has to come FIRST, because both screens are one
+    # EditText and a button: without it the walk reads the code box as the
+    # number box, clears the code she may be part-way through typing, puts a
+    # phone number in its place, and presses whatever looks like submit. The
+    # code screen is where this macro is trying to get to — arriving to find
+    # it already there is success, not a reason to start over.
+    if _asks_for_a_code(driver):
+        report("macro.step.awaiting_code")
+        return
+
     # ---------------------------------------------------------- the splash
     if field() is None:
         start = start_button()

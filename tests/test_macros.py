@@ -837,7 +837,10 @@ class TestInMyTeamWalksToTheCode:
 
     SPLASH = '<node text="Let’s Get Started"/>'
     NUMBER = '<node text="Enter your cell phone number"/><node text="Sign in"/>'
-    CODE = '<node text="Enter the verification code we sent you"/>'
+    # The app's own words, off the live screen.
+    CODE = ('<node text="Verify Your Account"/>'
+            '<node text="A text with a code was sent to"/>'
+            '<node text="Enter your code"/><node text="Verify"/>')
 
     def _driver(self, state):
         """A phone that advances a screen each time something is clicked."""
@@ -889,6 +892,7 @@ class TestInMyTeamWalksToTheCode:
         box.is_displayed.return_value = True
         state.setdefault("typed", [])
         box.send_keys.side_effect = state["typed"].append
+        state.setdefault("boxes", []).append(box)
         return box
 
     def _run(self, state):
@@ -1034,6 +1038,19 @@ class TestInMyTeamWalksToTheCode:
         self._run(state)
         assert state["at"] == "code"
         assert "dead" not in state
+
+    def test_a_code_screen_already_up_is_arrival_not_a_reason_to_start_over(self):
+        """Both screens are one EditText and a button. Without this check the
+        walk reads the CODE box as the number box, clears whatever she is
+        part-way through typing, puts a phone number in its place, and
+        presses submit. Found by leaving the phone on the code screen and
+        asking what the macro would do next."""
+        state = {"at": "code"}
+        self._run(state)
+        assert state["at"] == "code"
+        assert state.get("typed", []) == []
+        # And the box she may be part-way through typing into is untouched.
+        assert all(not box.clear.called for box in state.get("boxes", []))
 
     def test_it_never_signs_itself_in(self):
         """Pressing it sends a text message to a real phone. Automatic would
