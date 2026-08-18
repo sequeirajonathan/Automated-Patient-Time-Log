@@ -81,6 +81,38 @@ HEADER_MAX_CHARS = 32
 NAV_TITLE_MAX_CHARS = 48
 
 
+# A word in a box far too small to show it is not being shown: it is an
+# ACCESSIBILITY ANNOTATION riding on the icon that occupies that box. The
+# HHAeXchange+ schedule puts "Contraído"/"Expandido" — the chevron's state —
+# in a five-pixel square beside each visit, and rendered as words it printed
+# "Expandido" under every patient's name, which is what a screen reader says
+# and not what the phone shows.
+#
+# Measured PER CHARACTER, and against the screen rather than in pixels: the
+# phone's density changes underneath this, and box and text scale together.
+# An absolute width was the first attempt and was not a signal — it left
+# "Menú" in a 20px box sitting a whisker from the cut.
+#
+# The threshold is set between two populations of REAL measurements, not
+# chosen. At 720 wide: the annotation runs 0.56 px per character, and the
+# tightest genuine text anybody has seen is Mobile Caregiver+'s "Visitas"
+# tab caption at 2.43 — a caption whose box is drawn tighter than its own
+# text, which is how a tab bar is built and which the existing tab-bar tests
+# already carried. 1.44 sits between them with room on both sides.
+#
+# Four characters minimum, so a mark or a badge is never touched: a check is
+# one character in a box just as narrow, and "54" is two.
+ANNOTATION_WIDTH_PER_CHAR = 0.002
+ANNOTATION_MIN_CHARS = 4
+
+
+def _is_annotation(txt: str, b: list[int], screen_w: int) -> bool:
+    txt = txt.strip()
+    if len(txt) < ANNOTATION_MIN_CHARS or not screen_w:
+        return False
+    return (b[2] - b[0]) / len(txt) < screen_w * ANNOTATION_WIDTH_PER_CHAR
+
+
 def _is_spelled_out(txt: str) -> bool:
     """Text a screen reader was meant to say letter by letter.
 
@@ -386,7 +418,8 @@ def build(doc: dict) -> dict | None:
     elements = [dict(e, b=e.get("vb") or e["b"], aim_b=e["b"])
                 for e in doc.get("elements") or [] if e.get("b")]
     statics = [dict(s, b=s.get("vb") or s["b"], dev_b=s["b"])
-               for s in doc.get("statics") or [] if s.get("b")]
+               for s in doc.get("statics") or [] if s.get("b")
+               and not _is_annotation(s.get("txt", ""), s["b"], w)]
 
     # ------------------------------------------------------------- overlays
     # An app can slide a full-screen surface OVER the page without removing

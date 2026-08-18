@@ -951,6 +951,61 @@ class TestTheTitleIsAName:
         assert screenview._is_honest_title("A B Smith") is True
 
 
+class TestAccessibilityAnnotationsAreNotWords:
+    """"Expandido" under every patient's name.
+
+    The HHAeXchange+ schedule puts the chevron's state — "Contraído" /
+    "Expandido" — in a five-pixel square beside each visit. It is what a
+    screen reader says about the arrow, not anything the phone shows, and
+    rendered as text it printed a mystery word under each patient.
+
+    The signal is that the box cannot possibly be showing the word. Numbers
+    below are the real ones, read off the live schedule at density 84.
+    """
+
+    W = 720
+
+    def test_a_word_in_a_five_pixel_box_is_not_being_shown(self):
+        assert screenview._is_annotation("Contraído", [700, 160, 705, 169],
+                                         self.W) is True
+
+    def test_every_real_string_on_that_screen_survives(self):
+        for txt, b in [("Visita Buscar", [407, 105, 459, 116]),
+                       ("LUCRESIA L PUPO", [20, 158, 104, 171]),
+                       ("agosto 18, 2026 (Hoy)", [7, 130, 108, 143]),
+                       ("Ayuda", [691, 69, 718, 93]),
+                       ("Programación", [94, 1553, 143, 1562]),
+                       ("Pacientes", [343, 1553, 378, 1562]),
+                       ("Menú", [591, 1553, 611, 1562])]:
+            assert screenview._is_annotation(txt, b, self.W) is False, txt
+
+    def test_the_tightest_real_caption_anybody_has_seen_survives(self):
+        """Mobile Caregiver+ draws its tab captions in boxes tighter than
+        their own text — "Visitas" at 2.43px per character against the
+        annotation's 0.56. The first threshold sat between the wrong pair of
+        numbers and swallowed it; the tab-bar tests caught that."""
+        assert screenview._is_annotation("Visitas", [262, 1556, 279, 1565],
+                                         self.W) is False
+
+    def test_a_mark_in_an_equally_narrow_box_is_untouched(self):
+        """The EVV check's own box is this narrow. A mark is one character;
+        an annotation is a word, which is what the minimum length is for."""
+        assert screenview._is_annotation("", [686, 160, 693, 169],
+                                         self.W) is False
+        assert screenview._is_annotation("54", [700, 160, 705, 169],
+                                         self.W) is False
+
+    def test_the_visit_row_reads_as_the_phone_shows_it(self):
+        m = screenview.build(doc(
+            elements=[el("", "View", [20, 158, 705, 184])],
+            statics=[st([20, 158, 104, 171], "LUCRESIA L PUPO"),
+                     st([20, 171, 100, 184], "6:00 a. m. - 9:00 a. m."),
+                     st([700, 160, 705, 169], "Contraído")],
+        ))
+        cell = m["rows"][0]["items"][0]
+        assert cell["lines"] == ["LUCRESIA L PUPO", "6:00 a. m. - 9:00 a. m."]
+
+
 class TestMapOverlay:
     """The GPS confirm slides a full-screen map OVER the visit page and
     the tree still reports the page beneath — the portal rendered both at
