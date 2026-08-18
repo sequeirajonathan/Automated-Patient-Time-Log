@@ -1443,7 +1443,15 @@ def _inmyteam_login(driver, report) -> None:
 # Where the notification sends her. The tailnet name rather than an address:
 # addresses change, and this string ends up on a lock screen where a wrong
 # one is a dead end nobody can debug from.
-PORTAL_URL = os.environ.get("APTLOG_PORTAL_URL", "https://aptlog-fl/app")
+#
+# FULLY QUALIFIED, which the first version was not. `tailscale serve` publishes
+# this portal at the node's whole MagicDNS name and holds a certificate for
+# exactly that name, so the bare host fails validation rather than resolving to
+# something friendlier — a tap that goes nowhere, on the one notification whose
+# entire job is to be tapped. Read off `tailscale serve status` on the live
+# machine rather than assumed a second time.
+PORTAL_URL = os.environ.get(
+    "APTLOG_PORTAL_URL", "https://aptlog-fl.tailf012c7.ts.net/app")
 
 # The sentence itself. Deliberately says nothing about which patient, which
 # agency, or what the code is — it goes to a public relay and lands on a lock

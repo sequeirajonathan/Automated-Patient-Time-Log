@@ -1206,6 +1206,20 @@ class TestTheCodeIsAnnounced:
         assert "code" in message.lower()
         assert url.endswith("/app")          # tappable, straight to the field
 
+    def test_the_link_is_a_name_a_phone_can_actually_open(self):
+        """It was a bare host first, and `tailscale serve` holds a
+        certificate for the node's WHOLE MagicDNS name — so the bare one
+        fails validation instead of resolving to something friendlier. A tap
+        that goes nowhere, on the one notification whose entire job is to be
+        tapped."""
+        from urllib.parse import urlparse
+
+        parsed = urlparse(macros.PORTAL_URL)
+        assert parsed.scheme == "https"
+        assert parsed.hostname and parsed.hostname.count(".") >= 2, (
+            f"{parsed.hostname!r} is not fully qualified")
+        assert parsed.path == "/app"
+
     def test_it_carries_no_patient_and_no_code(self):
         """It goes to a public relay and lands on a lock screen. Neither is a
         place for a name, and there is no code to carry — that is the point
