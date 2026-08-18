@@ -444,3 +444,94 @@ class TestRotatedPaths:
             sign.execute({"id": "r", "strokes": STROKES, "aspect": 2.2},
                          tmp_path / "s.json")
         assert built.get("rotate") is False
+
+
+class TestAppButtons:
+    """The signature pages draw Borrar and Salvar in a rotated pass the
+    tree never shows — the field test's recordings hold the full
+    underlying visit page and not one signature control. Their place is
+    derived from the canvas the finder CAN see: the strip left of it, at
+    its foot. A press is her tap relayed; off the signature moment there
+    is nothing to press and the answer is a refusal."""
+
+    LEGACY = "com.hhaexchange.caregiver"
+    PAGE = ('<node class="android.widget.FrameLayout" '
+            'resource-id="app:id/gestureSignature" text="" '
+            'bounds="[28,90][700,1560]" />'
+            '<node class="android.widget.TextView" text="Sadia Amselem" '
+            'bounds="[0,1151][358,1164]" />')
+
+    def test_targets_sit_in_the_strip_at_the_canvas_foot(self):
+        t = sign.button_targets(self.PAGE, self.LEGACY)
+        assert t is not None
+        for x, y in t.values():
+            assert 0 < x < 28          # the strip left of the canvas
+            assert y < 1560            # above the canvas foot
+        assert t["clear"][1] < t["confirm"][1]   # Borrar rides above Salvar
+
+    def test_off_the_moment_there_is_nothing_to_press(self):
+        assert sign.button_targets(self.PAGE, "com.hhaexchange.uma") is None
+        assert sign.button_targets(
+            '<node class="android.widget.Button" text="Registrar" '
+            'bounds="[5,148][354,174]" />'
+            '<node class="android.widget.TextView" text="footer" '
+            'bounds="[0,1550][720,1568]" />', self.LEGACY) is None
+
+    def test_a_canvas_flush_to_the_edge_leaves_no_strip(self):
+        flush = ('<node class="android.widget.FrameLayout" '
+                 'resource-id="app:id/gestureSignature" text="" '
+                 'bounds="[0,90][720,1560]" />')
+        assert sign.button_targets(flush, self.LEGACY) is None
+
+    def test_action_round_trip(self, tmp_path):
+        target = tmp_path / "act.json"
+        rid = sign.request_action("clear", path=target)
+        taken = sign.take_action(target)
+        assert taken["id"] == rid and taken["kind"] == "clear"
+        assert not target.exists()
+
+    def test_a_stale_action_is_ignored(self, tmp_path):
+        target = tmp_path / "act.json"
+        sign.request_action("confirm", path=target)
+        payload = json.loads(target.read_text())
+        payload["at"] = time.time() - sign.ACTION_MAX_AGE - 1
+        target.write_text(json.dumps(payload))
+        assert sign.take_action(target) is None
+
+    def test_garbage_kinds_are_refused(self, tmp_path):
+        with pytest.raises(ValueError):
+            sign.request_action("press_save_forever",
+                                path=tmp_path / "act.json")
+
+    def test_do_action_presses_exactly_the_target(self, tmp_path):
+        driver = MagicMock()
+        driver.current_package = self.LEGACY
+        driver.page_source = self.PAGE
+        performed = []
+        with patch.object(sign, "_perform",
+                          side_effect=lambda _d, paths:
+                          performed.extend(paths)), \
+             patch("apt_log.resident.run", side_effect=lambda w: w(driver)):
+            status = sign.do_action({"id": "a1", "kind": "clear"},
+                                    tmp_path / "s.json")
+        assert status.state == "done" and status.kind == "clear"
+        (path,) = performed
+        (point,) = path
+        assert tuple(point) == tuple(
+            sign.button_targets(self.PAGE, self.LEGACY)["clear"])
+
+    def test_do_action_refuses_off_the_signature_screen(self, tmp_path):
+        driver = MagicMock()
+        driver.current_package = self.LEGACY
+        driver.page_source = CANVAS + CHROME    # upright, not the moment
+        with patch.object(sign, "_perform") as perform, \
+             patch("apt_log.resident.run", side_effect=lambda w: w(driver)):
+            status = sign.do_action({"id": "a2", "kind": "confirm"},
+                                    tmp_path / "s.json")
+        assert status.state == "failed" and status.reason == "no_canvas"
+        perform.assert_not_called()
+
+    def test_the_status_kind_survives_the_file(self, tmp_path):
+        sign.write_status(sign.Status(id="a3", state="done", kind="confirm"),
+                          tmp_path / "s.json")
+        assert sign.read_status(tmp_path / "s.json").kind == "confirm"

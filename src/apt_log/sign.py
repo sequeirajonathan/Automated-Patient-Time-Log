@@ -97,6 +97,7 @@ class Status:
     state: str = "idle"       # idle | running | done | failed
     reason: str = ""          # no_canvas | ambiguous | wrong_app | replay_failed
     digest: str = ""          # sha256 of the strokes, for the audit trail
+    kind: str = ""            # "" for a replay; "clear"/"confirm" for a press
     at: str = field(default_factory=lambda: datetime.now().isoformat())
 
 
@@ -432,6 +433,117 @@ def build_paths(strokes, bounds: list[int],
         if path:
             paths.append(path)
     return paths
+
+
+# ------------------------------------------------------------ app buttons
+# The signature pages draw their own Borrar and Salvar in the same rotated
+# pass that hides the captions: the tree holds NO trace of either button —
+# the first field test's recordings show the full underlying visit page
+# and not one signature control. So the portal cannot aim at them as
+# elements; their place is derived from the one thing the finder does
+# see, the canvas. On the observed full-page layout the pair sits in the
+# strip LEFT of the canvas at its foot (the page's bottom-right corner,
+# read sideways): Borrar centred ~62px above the canvas foot, Salvar
+# ~22px, both at the strip's midline.
+ACTION_PATH = STATE_DIR / "sign-action.json"
+# A button press answers a screen someone is looking at right now.
+ACTION_MAX_AGE = 20.0
+ACTIONS = ("clear", "confirm")
+
+_BUTTON_CLEAR_LIFT = 62
+_BUTTON_CONFIRM_LIFT = 22
+_MIN_STRIP = 12
+
+
+def button_targets(xml: str, package: str = "") -> dict | None:
+    """Where the app's own clear and save sit, or None off the moment.
+
+    Only on a sideways signature moment, and only when the canvas leaves
+    the strip the buttons live in — everywhere else there is nothing to
+    press and the answer is a refusal, not a guess.
+    """
+    if not sideways(xml, package):
+        return None
+    bounds, _ = find_canvas(xml, dump=False)
+    if bounds is None:
+        return None
+    x1, _y1, _x2, y2 = bounds
+    if x1 < _MIN_STRIP:
+        return None
+    x = max(x1 // 2, 4)
+    return {"clear": [x, y2 - _BUTTON_CLEAR_LIFT],
+            "confirm": [x, y2 - _BUTTON_CONFIRM_LIFT]}
+
+
+def request_action(kind: str, path: Path | None = None) -> str:
+    """Ask for one press of the app's own clear or save. Returns the id."""
+    if kind not in ACTIONS:
+        raise ValueError("that is not a signature action")
+    target = path or ACTION_PATH
+    rid = uuid.uuid4().hex[:12]
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"id": rid, "kind": kind, "at": time.time()}),
+                   encoding="utf-8")
+    os.replace(tmp, target)
+    log.info("signature %s requested (%s)", kind, rid)
+    return rid
+
+
+def take_action(path: Path | None = None) -> dict | None:
+    """Claim a pending action; deleted before anything is tried."""
+    target = path or ACTION_PATH
+    try:
+        payload = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    try:
+        target.unlink()
+    except OSError:
+        pass
+    if time.time() - float(payload.get("at", 0)) > ACTION_MAX_AGE:
+        log.info("ignoring a stale signature action")
+        return None
+    if payload.get("kind") not in ACTIONS:
+        return None
+    return payload
+
+
+def do_action(payload: dict, status_path: Path | None = None) -> Status:
+    """Press the app's own clear or save, on her explicit ask.
+
+    The replay itself still never commits — this is her tap on a screen
+    she is looking at, relayed. Same finder, same refusals: off the
+    signature moment there is nothing to press.
+    """
+    from apt_log import resident
+
+    kind = payload["kind"]
+    status = Status(id=payload.get("id", ""), state="running", kind=kind)
+    write_status(status, status_path)
+
+    def work(driver) -> None:
+        package = driver.current_package
+        if package not in APP_PACKAGES:
+            status.state, status.reason = "failed", "wrong_app"
+            return
+        targets = button_targets(driver.page_source or "", package)
+        if not targets:
+            status.state, status.reason = "failed", "no_canvas"
+            return
+        _perform(driver, [[tuple(targets[kind])]])
+        status.state = "done"
+
+    try:
+        resident.run(work)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("signature %s failed: %s", kind, exc)
+        status.state, status.reason = "failed", "replay_failed"
+
+    status.at = datetime.now().isoformat()
+    write_status(status, status_path)
+    log.info("signature %s %s (%s)", kind, status.state, status.reason or "ok")
+    return status
 
 
 def digest(strokes) -> str:

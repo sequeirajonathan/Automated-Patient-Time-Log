@@ -218,5 +218,10 @@
   "scan.empty": "No se encontró nada legible en esta página.",
   "papp.type.hint": "Escriba aquí y envíelo al teléfono",
   "papp.type.send": "Enviar",
-  "papp.type.cancel": "Cancelar"
+  "papp.type.cancel": "Cancelar",
+  "sign.onphone": "En el teléfono:",
+  "sign.appclear": "Borrar firma",
+  "sign.appsave": "Salvar firma",
+  "sign.state.clear.done": "Borrada — la casilla de firma del teléfono quedó vacía.",
+  "sign.state.confirm.done": "Salvada en el teléfono."
 }

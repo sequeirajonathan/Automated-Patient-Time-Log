@@ -218,5 +218,10 @@
   "scan.empty": "Nothing readable was found on this page.",
   "papp.type.hint": "Type here, then send it to the phone",
   "papp.type.send": "Send",
-  "papp.type.cancel": "Cancel"
+  "papp.type.cancel": "Cancel",
+  "sign.onphone": "On the phone:",
+  "sign.appclear": "Clear signature",
+  "sign.appsave": "Save signature",
+  "sign.state.clear.done": "Cleared — the phone's signature box is empty again.",
+  "sign.state.confirm.done": "Saved on the phone."
 }

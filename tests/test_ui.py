@@ -103,7 +103,13 @@ class TestWritePaths:
             if getattr(r, "methods", None) and "POST" in r.methods
         }
         assert posts == {"/language", "/signature", "/relay", "/device", "/tap",
-                         "/macro", "/acknowledge", "/control", "/sign"}
+                         "/macro", "/acknowledge", "/control", "/sign",
+                         # The app's own clear/save on the signature screen,
+                         # pressed on her explicit ask. Takes a kind from an
+                         # allow-list, never a coordinate — the spot is
+                         # derived server-side from the canvas the finder
+                         # sees, and off the signature moment it refuses.
+                         "/sign-action"}
 
     def test_no_route_accepts_a_raw_coordinate_or_keycode(self, client):
         """/tap takes an element from a named frame; /device takes an action

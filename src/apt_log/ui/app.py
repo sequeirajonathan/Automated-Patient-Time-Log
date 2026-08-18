@@ -566,6 +566,12 @@ async def live(ws: WebSocket):
                     "blocked": screen_doc.get("blocked", ""),
                     "notice": screen_doc.get("notice", ""),
                     "landscape": bool(screen_doc.get("landscape")),
+                    # A signature moment: canvas in front AND drawn
+                    # sideways. The sign sheet shows its app-side Borrar
+                    # and Salvar only here — they press real pixels, and
+                    # off this screen there is nothing to press.
+                    "canvas": bool(screen_doc.get("canvas")
+                                   and screen_doc.get("landscape")),
                     # The app's own tab bar, lifted out of the list to ride
                     # the control bar beside Back and Home. Empty on screens
                     # without one.
@@ -598,8 +604,15 @@ async def live(ws: WebSocket):
             from apt_log import sign as sign_mod
 
             sig = sign_mod.read_status()
+            # An app-button press ("clear"/"confirm") finishing must not
+            # borrow the replay's "now press the app's save" sentence —
+            # the press WAS the save. Kind-specific done-sentences win
+            # when the status carries a kind.
+            sig_kind = getattr(sig, "kind", "")
             sig_state = {"id": sig.id, "state": sig.state,
                          "text": (t(f"sign.{sig.reason}") if sig.reason
+                                  else t(f"sign.state.{sig_kind}.done")
+                                  if sig_kind and sig.state == "done"
                                   else t(f"sign.state.{sig.state}"))}
             if sig_state != last.get("sign"):
                 payload["sign"] = last["sign"] = sig_state
@@ -863,6 +876,28 @@ async def sign_current_screen(request: Request):
         aspect = 1.0
     rid = sign_mod.request(strokes, aspect=aspect)
     log.info("signature replay queued (%s)", rid)
+    return JSONResponse({"ok": True, "id": rid})
+
+
+@app.post("/sign-action")
+async def sign_action(request: Request):
+    """Press the app's own clear or save on the signature screen.
+
+    The signature pages draw Borrar and Salvar in the same rotated pass
+    that hides their captions — the tree holds no trace of either, so the
+    portal cannot aim at them as elements. This is her tap on a screen she
+    is looking at, relayed: the runner presses at a spot derived from the
+    one thing the finder does see, the canvas, and refuses anywhere that
+    is not a signature moment. The replay itself still never commits.
+    """
+    from apt_log import sign as sign_mod
+
+    payload = await request.json()
+    kind = payload.get("kind")
+    if kind not in sign_mod.ACTIONS:
+        return JSONResponse({"error": "unknown"}, status_code=400)
+    rid = sign_mod.request_action(kind)
+    log.info("signature %s queued (%s)", kind, rid)
     return JSONResponse({"ok": True, "id": rid})
 
 

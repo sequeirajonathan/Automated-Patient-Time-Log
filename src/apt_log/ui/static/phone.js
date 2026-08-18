@@ -282,6 +282,10 @@
     // on the transition, so she is never stranded staring at a dead end.
     // A sideways screen (the signature moment) turns the peek upright.
     body.classList.toggle('sideways', !!meta.landscape);
+    // The app-side Borrar/Salvar only exist while a signature canvas is
+    // in front — the buttons press real pixels there and nothing else.
+    const approw = document.getElementById('sign-approw');
+    if (approw) approw.hidden = !meta.canvas;
     const onLauncher = meta.name === 'launcher';
     // While a macro is working — and for a grace period after it ends —
     // the launcher is not a destination, it is scenery: the sign-in path
@@ -779,6 +783,26 @@
     });
     const send = document.getElementById('sign-send');
     if (send) send.addEventListener('click', padSend);
+
+    // The app's own Borrar/Salvar, relayed. The outcome rides the same
+    // sign-status push the replay uses, so the toast comes back rendered
+    // ("done" / "this screen has no signature box") without new plumbing.
+    const appAction = (kind) => {
+      busy(i18n.signSending || '');
+      fetch('/sign-action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: kind })
+      }).then(async (r) => {
+        const out = await r.json().catch(() => ({}));
+        if (!r.ok) { unbusy(); toast(i18n.failed || ''); return; }
+        pad.waitingId = out.id || '';
+      }).catch(() => { unbusy(); toast(i18n.failed || ''); });
+    };
+    const appClear = document.getElementById('app-clear');
+    if (appClear) appClear.addEventListener('click', () => appAction('clear'));
+    const appSave = document.getElementById('app-save');
+    if (appSave) appSave.addEventListener('click', () => appAction('confirm'));
 
     for (const btn of document.querySelectorAll('[data-act]')) {
       btn.addEventListener('click', () => {

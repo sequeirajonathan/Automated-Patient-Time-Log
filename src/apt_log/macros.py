@@ -1440,6 +1440,9 @@ class Runner:
                 signature = sign.take_request()
                 if signature is not None:
                     sign.execute(signature)
+                action = sign.take_action()
+                if action is not None:
+                    sign.do_action(action)
                 self.maybe_auto_auth()
                 self.maybe_warm()
                 self.maybe_stitch()
