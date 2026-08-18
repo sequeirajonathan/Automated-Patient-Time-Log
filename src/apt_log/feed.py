@@ -759,11 +759,18 @@ def write_screen(target: Path, frame: dict, screen: str, reason: str,
         # Sideways (the signature screens are the one place a care app goes
         # landscape): the peek photograph needs turning to be readable.
         # Two shapes of sideways exist — a truly rotated display (wide
-        # bounds) and the legacy signature page, which draws its content
-        # turned a quarter turn inside a portrait activity (rotated labels
-        # betray it). The peek needs the same turn for both.
+        # bounds) and the legacy signature pages, which draw their content
+        # turned a quarter turn inside a portrait activity. The tree shows
+        # none of that turn (the sideways captions are laid out as
+        # ordinary wide boxes), so for the apps that do it, a signature
+        # canvas on a portrait screen IS the evidence. Same rule the
+        # stroke replay turns by — the peek and the ink must agree.
         "landscape": (_looks_landscape(hierarchy)
-                      or sign_mod.presentation_rotated(hierarchy or "")),
+                      or sign_mod.sideways(
+                          hierarchy or "",
+                          package=(hierarchy_package(hierarchy)
+                                   or (hierarchy_focus or "").split("/")[0]),
+                          has_canvas=_has_canvas(hierarchy))),
         # A signature canvas is in front. The walker must not swipe (a
         # swipe on a canvas is ink), and the portal can dress the page
         # for signing instead of reading.

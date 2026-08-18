@@ -310,6 +310,43 @@ class TestSidewaysPresentation:
         assert not sign.presentation_rotated(wide + SIDEWAYS_LABELS)
 
 
+class TestSidewaysCanvasApps:
+    """The tree shows NONE of the legacy app's quarter turn: the sideways
+    captions are laid out as ordinary wide boxes and rotated only in the
+    drawing pass uiautomator cannot see — a real signature replayed
+    unturned past the label heuristic (seen live, first field test). For
+    these apps, a signature canvas on a portrait screen IS the evidence."""
+
+    PORTRAIT_CANVAS = (
+        '<node class="android.widget.FrameLayout" '
+        'resource-id="app:id/gestureSignature" text="" '
+        'bounds="[28,90][700,1560]" />'
+        '<node class="android.widget.TextView" text="Sadia Amselem" '
+        'bounds="[0,1151][358,1164]" />')
+
+    def test_a_portrait_canvas_in_the_legacy_app_is_sideways(self):
+        assert sign.sideways(self.PORTRAIT_CANVAS,
+                             package="com.hhaexchange.caregiver",
+                             has_canvas=True) is True
+
+    def test_the_truly_landscape_variant_needs_no_turn(self):
+        wide = ('<node class="android.view.View" '
+                'resource-id="a:id/signature" text="" '
+                'bounds="[0,0][1600,720]" />')
+        assert sign.sideways(wide, package="com.hhaexchange.caregiver",
+                             has_canvas=True) is False
+
+    def test_other_apps_are_not_turned_by_the_canvas_alone(self):
+        assert sign.sideways(self.PORTRAIT_CANVAS,
+                             package="com.hhaexchange.uma",
+                             has_canvas=True) is False
+
+    def test_no_canvas_means_no_turn(self):
+        assert sign.sideways(self.PORTRAIT_CANVAS,
+                             package="com.hhaexchange.caregiver",
+                             has_canvas=False) is False
+
+
 class TestRotatedPaths:
     def test_a_pad_horizontal_stroke_runs_down_the_device(self):
         """Writing left-to-right on the pad must travel top-to-bottom on the

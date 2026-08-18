@@ -325,6 +325,39 @@ def presentation_rotated(xml: str) -> bool:
     return max_x < max_y and tall_labels >= 2
 
 
+# The legacy app draws its signature pages turned a quarter turn inside a
+# portrait activity, and the tree shows NONE of it: the sideways captions
+# are laid out as ordinary wide boxes and rotated only in the drawing pass
+# uiautomator cannot see. The label heuristic above found nothing tall and
+# a real signature replayed unturned (seen live, first field test, on the
+# night's second attempt). For these apps the page itself is the evidence:
+# a signature canvas on a portrait screen is a sideways canvas, always —
+# the app's truly-landscape variant announces itself with wide bounds and
+# needs no turn.
+ROTATED_CANVAS_APPS = ("com.hhaexchange.caregiver",)
+
+
+def _portrait_extent(xml: str) -> bool:
+    max_x = max_y = 0
+    for raw in _NODE.findall(xml or ""):
+        m = _BOUNDS.search(_attr(raw, "bounds"))
+        if not m:
+            continue
+        x1, y1, x2, y2 = (int(g) for g in m.groups())
+        if x2 > x1 and y2 > y1:
+            max_x, max_y = max(max_x, x2), max(max_y, y2)
+    return bool(max_x) and max_x < max_y
+
+
+def sideways(xml: str, package: str = "", has_canvas: bool = False) -> bool:
+    """Whether ink replayed onto this screen must turn a quarter turn."""
+    if presentation_rotated(xml):
+        return True
+    return (has_canvas
+            and package in ROTATED_CANVAS_APPS
+            and _portrait_extent(xml))
+
+
 # --------------------------------------------------------------------- paths
 def build_paths(strokes, bounds: list[int],
                 aspect: float = 1.0,
@@ -445,7 +478,8 @@ def execute(payload: dict, status_path: Path | None = None) -> Status:
             return
         _perform(driver, build_paths(strokes, bounds,
                                      payload.get("aspect", 1.0),
-                                     rotate=presentation_rotated(xml)))
+                                     rotate=sideways(xml, package,
+                                                     has_canvas=True)))
         status.state = "done"
 
     try:
