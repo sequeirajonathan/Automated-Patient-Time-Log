@@ -1274,6 +1274,133 @@ def _open_app(package: str):
     return run
 
 
+def _inmyteam_login(driver, report) -> None:
+    """inMyTeam — get as far as the code, and stop there.
+
+    This app had no sign-in macro at all, so its tile ran the open-only one:
+    the app came to the front, landed on its marketing splash, and waited for
+    a tap nobody was going to give it. Reported from the field as "it should
+    have entered a phone number waiting for the OTP but it's not getting me
+    to that step".
+
+    Three screens, and the third is the point:
+
+    1. **The splash.** "THE FUTURE of home care agencies" with one control,
+       "Let's Get Started". No id, no text on the node itself — the caption
+       is a separate view inside it — so it is found by the words it
+       contains.
+    2. **The number.** One EditText ("Enter your cell phone number") and a
+       "Sign in" button. The number comes from INMYTEAM_PHONE.
+    3. **The code.** Pressing Sign in sends a real SMS, and this macro stops
+       here on purpose. The portal's type bar exists for this moment — she
+       aims at the code field and types the code herself, which is the same
+       contract every other short credential goes through. A macro cannot
+       invent a code, and pretending otherwise would mean retrying, which
+       means a second text to a real person and a walk toward a rate limit.
+
+    Auth only, like the others: if the app opens onto anything but this
+    walk, the session is alive and there is nothing to do.
+    """
+    from apt_log.secrets import (INMYTEAM_PHONE, FileSecretProvider,
+                                 SecretNotFound)
+
+    package = "com.inmyteam.inmyteam"
+    report("macro.step.launching")
+    wake_display()
+    driver.activate_app(package)
+    wait_for(lambda: bool(driver.current_activity), timeout=15.0)
+
+    def field():
+        """The number box, if this screen has one."""
+        found = [e for e in driver.find_elements(
+            "xpath", '//*[@class="android.widget.EditText"]')
+            if e.is_displayed()]
+        return found[0] if found else None
+
+    def by_words(*words):
+        """A control identified by the words inside it. Compose gives these
+        screens no ids and hangs the caption on a child view, so the text of
+        a descendant is the only handle there is."""
+        for word in words:
+            hits = driver.find_elements(
+                "xpath",
+                f'//*[@clickable="true"][contains(@text,"{word}")'
+                f' or .//*[contains(@text,"{word}")]]')
+            shown = [e for e in hits if e.is_displayed()]
+            if shown:
+                return shown[0]
+        return None
+
+    # ---------------------------------------------------------- the splash
+    if field() is None:
+        start = by_words("Get Started", "Comenzar", "Empezar")
+        if start is not None:
+            report("macro.step.starting")
+            start.click()
+            wait_for(lambda: field() is not None, timeout=15.0)
+
+    box = field()
+    if box is None:
+        # Already past the walk. The app is signed in, or somewhere this
+        # macro has no business touching — either way it is not auth.
+        report("macro.step.finished")
+        return
+
+    # ---------------------------------------------------------- the number
+    report("macro.step.signing_in")
+    try:
+        number = FileSecretProvider().get(INMYTEAM_PHONE)
+    except SecretNotFound as exc:
+        raise RuntimeError(
+            "no phone number is stored for inMyTeam") from exc
+
+    # Cleared first: the app remembers the last number, and typing into a
+    # prefilled box appends to it — the trap the HHAeXchange+ web form
+    # already sprang once.
+    box.clear()
+    box.send_keys(number)
+
+    submit = by_words("Sign in", "Iniciar")
+    if submit is None:
+        raise RuntimeError("the sign-in button is not on this screen")
+    submit.click()
+
+    # ------------------------------------------------------------ the code
+    # Done means the number was accepted and the app is asking for the code.
+    # Not "the screen changed": a rejected number also changes the screen,
+    # and reporting success over an error message is how a macro teaches
+    # somebody to distrust it.
+    report("macro.step.awaiting_code")
+    if not wait_for(lambda: _asks_for_a_code(driver), timeout=25.0):
+        raise RuntimeError("the app did not ask for a code")
+
+
+# The words every version of this screen uses. Matched loosely because the
+# app switches language with the phone and this is the one screen nobody has
+# a second chance at: getting it wrong strands the walk one step from done.
+_CODE_WORDS = ("code", "código", "codigo", "verification", "verificación",
+               "otp", "sms")
+
+
+def _asks_for_a_code(driver) -> bool:
+    """Whether the screen in front is asking for the texted code.
+
+    A field plus the words for one. The field alone is not enough — the
+    number screen has a field too, and the two look identical to anything
+    that only counts boxes.
+    """
+    try:
+        boxes = [e for e in driver.find_elements(
+            "xpath", '//*[@class="android.widget.EditText"]')
+            if e.is_displayed()]
+        if not boxes:
+            return False
+        words = (driver.page_source or "").lower()
+    except Exception:  # noqa: BLE001
+        return False
+    return any(w in words for w in _CODE_WORDS)
+
+
 # --------------------------------------------------------------- operations
 # The sign-in macros above are the ones that took the most work and the ones
 # nobody presses any more: they run themselves, when a session expires. What a
@@ -1409,6 +1536,7 @@ MACROS: dict[str, Macro] = {
               _open_app("com.hhaexchange.uma")),
         Macro("open_mobile_caregiver", "macro.open_mobile_caregiver",
               _open_app("com.tellus.evv.v2")),
+        Macro("inmyteam_login", "macro.inmyteam_login", _inmyteam_login),
         Macro("open_inmyteam", "macro.open_inmyteam",
               _open_app("com.inmyteam.inmyteam")),
         Macro("read_page", "macro.read_page", _read_page),
@@ -1534,6 +1662,14 @@ def auth_macro_for(app: str, provider=None, doc: dict | None = None) -> str | No
         return ("mobile_caregiver_pin"
                 if have(secrets_mod.MC_PIN) or have(secrets_mod.MC_PASSWORD)
                 else None)
+    # inMyTeam is deliberately absent, and this is the note saying so rather
+    # than a silence somebody has to re-derive. Its sign-in macro exists and
+    # its tile runs it — but pressing it SENDS A TEXT MESSAGE to a real
+    # phone. Automatic means the phone idling on that splash would text
+    # somebody every ninety seconds for as long as anyone was watching, walk
+    # into the app's rate limit, and hand her a stream of codes she never
+    # asked for. This is the one auth walk that has to be somebody's
+    # decision, so it stays a press.
     return None
 
 

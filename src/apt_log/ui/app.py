@@ -635,7 +635,11 @@ PHONE_APPS = (
      "accent": "#0c8f5a"},
     {"id": "inmyteam", "name": "inMyTeam", "mark": "iMT",
      "package": "com.inmyteam.inmyteam",
-     "macro": "open_inmyteam", "open": "open_inmyteam",
+     # The tile signs in; `open` only brings it forward. inMyTeam is the one
+     # app whose sign-in ends in a text message, so a deliberate press is
+     # exactly the right trigger for it — and the press is what was missing:
+     # the tile ran the open-only macro and parked on the marketing splash.
+     "macro": "inmyteam_login", "open": "open_inmyteam",
      "accent": "#c2452e"},
 )
 

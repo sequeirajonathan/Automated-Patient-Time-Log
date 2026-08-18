@@ -248,5 +248,7 @@
   "macro.sure": "¿Reiniciar el teléfono? Nada funciona durante un minuto mientras vuelve.",
   "macro.reboot_note": "Reiniciar el teléfono tarda como un minuto, y mientras tanto nada de esto funciona. Vuelve solo.",
   "macro.step.closing": "Cerrando la aplicación…",
-  "macro.step.restarting": "Reiniciando el teléfono…"
+  "macro.step.restarting": "Reiniciando el teléfono…",
+  "macro.inmyteam_login": "Iniciar sesión en inMyTeam",
+  "macro.step.awaiting_code": "Esperando a que la aplicación pida el código…"
 }

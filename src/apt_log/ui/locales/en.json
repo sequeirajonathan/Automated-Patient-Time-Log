@@ -248,5 +248,7 @@
   "macro.sure": "Restart the phone? Nothing works for about a minute while it comes back.",
   "macro.reboot_note": "Restarting the phone takes about a minute, during which nothing here works. It comes back on its own.",
   "macro.step.closing": "Closing the app…",
-  "macro.step.restarting": "Restarting the phone…"
+  "macro.step.restarting": "Restarting the phone…",
+  "macro.inmyteam_login": "Sign in to inMyTeam",
+  "macro.step.awaiting_code": "Waiting for the app to ask for the code…"
 }

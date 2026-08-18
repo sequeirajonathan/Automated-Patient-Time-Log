@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -820,6 +820,166 @@ class TestMobileCaregiverPin:
             macros.MACROS["mobile_caregiver_pin"].run(driver, lambda _k: None)
         provider_cls.assert_not_called()
         driver.find_elements.assert_not_called()
+
+
+class TestInMyTeamWalksToTheCode:
+    """Reported from the field: "it should have entered a phone number
+    waiting for the OTP but it's not getting me to that step on app launch".
+
+    It never was. inMyTeam had no sign-in macro, so its tile ran the
+    open-only one: the app came to the front, landed on its marketing splash
+    — "THE FUTURE of home care agencies", one "Let's Get Started" button —
+    and waited for a tap nobody was going to give it.
+
+    The walk stops at the code screen on purpose. A macro cannot invent a
+    texted code, and the portal's type bar was built for this moment.
+    """
+
+    SPLASH = '<node text="Let’s Get Started"/>'
+    NUMBER = '<node text="Enter your cell phone number"/><node text="Sign in"/>'
+    CODE = '<node text="Enter the verification code we sent you"/>'
+
+    def _driver(self, state):
+        """A phone that advances a screen each time something is clicked."""
+        driver = MagicMock()
+        driver.current_activity = "com.inmyteam.inmyteam.MainActivity"
+
+        def page():
+            return {"splash": self.SPLASH, "number": self.NUMBER,
+                    "code": self.CODE}[state["at"]]
+
+        def find_elements(_by, selector):
+            if "EditText" in selector:
+                return [self._box(state)] if state["at"] in ("number",
+                                                             "code") else []
+            for word in ("Get Started", "Comenzar", "Empezar"):
+                if word in selector and state["at"] == "splash":
+                    return [self._tap(state, "number")]
+            for word in ("Sign in", "Iniciar"):
+                if word in selector and state["at"] == "number":
+                    return [self._tap(state, "code")]
+            return []
+
+        driver.find_elements.side_effect = find_elements
+        type(driver).page_source = PropertyMock(side_effect=page)
+        return driver
+
+    def _tap(self, state, goes_to):
+        control = MagicMock()
+        control.is_displayed.return_value = True
+        control.click.side_effect = lambda: state.update(at=goes_to)
+        return control
+
+    def _box(self, state):
+        box = MagicMock()
+        box.is_displayed.return_value = True
+        state.setdefault("typed", [])
+        box.send_keys.side_effect = state["typed"].append
+        return box
+
+    def _run(self, state):
+        import itertools
+
+        from apt_log.secrets import INMYTEAM_PHONE, MemorySecretProvider
+
+        driver = self._driver(state)
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider",
+                   return_value=MemorySecretProvider(
+                       **{INMYTEAM_PHONE: "3055550123"})), \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            macros.MACROS["inmyteam_login"].run(driver, lambda _k: None)
+        return driver
+
+    def test_it_presses_through_the_splash_and_types_the_number(self):
+        state = {"at": "splash"}
+        self._run(state)
+        assert state["at"] == "code"
+        assert state["typed"] == ["3055550123"]
+
+    def test_the_box_is_cleared_before_the_number_goes_in(self):
+        """The app remembers the last number, and typing into a prefilled
+        box appends to it — the trap the HHAeXchange+ web form sprang once."""
+        state = {"at": "number"}
+        self._run(state)
+        assert state["typed"] == ["3055550123"]
+
+    def test_it_stops_at_the_code_rather_than_reporting_signed_in(self):
+        """Success here means "now she types the code", and the macro has to
+        actually see the app ask for one."""
+        steps = []
+        state = {"at": "splash"}
+        import itertools
+
+        from apt_log.secrets import INMYTEAM_PHONE, MemorySecretProvider
+
+        driver = self._driver(state)
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider",
+                   return_value=MemorySecretProvider(
+                       **{INMYTEAM_PHONE: "3055550123"})), \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            macros.MACROS["inmyteam_login"].run(driver, steps.append)
+        assert steps[-1] == "macro.step.awaiting_code"
+
+    def test_a_signed_in_app_is_left_alone(self):
+        import itertools
+
+        driver = MagicMock()
+        driver.current_activity = "com.inmyteam.inmyteam.MainActivity"
+        driver.find_elements.return_value = []
+        type(driver).page_source = PropertyMock(return_value="<node/>")
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider") as provider_cls, \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            macros.MACROS["inmyteam_login"].run(driver, lambda _k: None)
+        provider_cls.assert_not_called()
+
+    def test_a_number_the_app_will_not_take_is_a_failure_not_a_success(self):
+        """A rejected number changes the screen too. Reporting success over
+        an error message is how a macro teaches somebody to distrust it."""
+        import itertools
+
+        from apt_log.secrets import INMYTEAM_PHONE, MemorySecretProvider
+
+        state = {"at": "number"}
+        driver = self._driver(state)
+        # The app bounces back to the number screen with an error instead of
+        # asking for a code.
+        self.CODE = '<node text="That number is not registered"/>'
+        try:
+            with patch("apt_log.macros.wake_display"), \
+                 patch("apt_log.secrets.FileSecretProvider",
+                       return_value=MemorySecretProvider(
+                           **{INMYTEAM_PHONE: "3055550123"})), \
+                 patch("apt_log.macros.time.sleep"), \
+                 patch("apt_log.macros.time.monotonic",
+                       side_effect=itertools.count(step=0.5)):
+                with pytest.raises(RuntimeError, match="did not ask for a code"):
+                    macros.MACROS["inmyteam_login"].run(driver, lambda _k: None)
+        finally:
+            del self.CODE
+
+    def test_it_never_signs_itself_in(self):
+        """Pressing it sends a text message to a real phone. Automatic would
+        text somebody every ninety seconds for as long as anyone watched."""
+        from apt_log.secrets import INMYTEAM_PHONE, MemorySecretProvider
+
+        provider = MemorySecretProvider(**{INMYTEAM_PHONE: "3055550123"})
+        assert macros.auth_macro_for("com.inmyteam.inmyteam", provider) is None
+
+    def test_the_tile_is_what_runs_it(self):
+        from apt_log.ui.app import PHONE_APPS
+
+        tile = next(a for a in PHONE_APPS if a["id"] == "inmyteam")
+        assert tile["macro"] == "inmyteam_login"
+        assert tile["open"] == "open_inmyteam"
 
 
 class TestUmaWebFormIsTheAsk:
