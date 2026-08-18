@@ -61,14 +61,30 @@ while read -r _old new ref; do
     sudo -n env DEPLOY_REMOTE=push DEPLOY_REF="$DEPLOY_REF" \
         "$APP_DIR/scripts/manager.sh"
     rc=$?
+    live="$(git --git-dir="$APP_DIR/.git" rev-parse HEAD)"
     if [[ $rc -eq 0 ]]; then
-        echo "[deploy] live: $(git --git-dir="$APP_DIR/.git" rev-parse --short HEAD)"
+        echo "[deploy] live: ${live:0:7}"
     else
         # The manager has already rolled back and alerted by here. Saying so
         # again in the pusher's terminal is the point: a deploy that failed
         # must not look like a deploy that worked.
         echo "[deploy] REFUSED — the gate rejected ${new:0:8}; the machine is"
-        echo "[deploy] still on $(git --git-dir="$APP_DIR/.git" rev-parse --short HEAD)"
+        echo "[deploy] still on ${live:0:7}"
+        # And the BRANCH must not claim otherwise. Git ignores what a
+        # post-receive hook exits with — the refs are already written by the
+        # time it runs, so `git push` reports success even for a revision
+        # that was refused. The exit status cannot be made honest from here;
+        # the repository can. Winding the branch back to what is actually
+        # running means `git ls-remote pi release` answers the question the
+        # exit code cannot, and a second push of a fixed revision is an
+        # ordinary fast-forward rather than a force.
+        if [[ -n "$_old" && "$_old" != "0000000000000000000000000000000000000000" ]]; then
+            git update-ref "$ref" "$_old" "$new" \
+                && echo "[deploy] $branch wound back to ${_old:0:7} — nothing here is live"
+        else
+            git update-ref -d "$ref" \
+                && echo "[deploy] $branch removed — nothing here is live"
+        fi
     fi
     exit $rc
 done

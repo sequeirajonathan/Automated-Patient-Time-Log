@@ -30,7 +30,28 @@ not return until the deploy has finished:
 ```
 
 A push whose tests fail is refused, the machine stays on the revision it
-was already running, and the push says so rather than returning quietly.
+was already running, and the push says so:
+
+```
+[deploy] REFUSED — the gate rejected 77702c86; the machine is
+[deploy] still on 601a682
+[deploy] release wound back to 601a682 — nothing here is live
+```
+
+One caveat worth knowing, because it cannot be fixed from this side: **git
+ignores what a post-receive hook exits with.** The refs are written before
+the hook runs, so `git push` reports success even for a revision the gate
+refused — the loud REFUSED above is in the output, not in the exit status.
+So the branch is wound back instead, which means the state can be trusted
+even though the status cannot:
+
+```
+git ls-remote pi release      # what actually deployed
+```
+
+If that matches what you pushed, it is live. If it is the older revision,
+the push was refused. (A scripted deploy should check that rather than
+`$?`.)
 
 Requires access to the tailnet — the Pi has no address on the open
 internet, which is also why this is a push rather than a GitHub webhook: a
