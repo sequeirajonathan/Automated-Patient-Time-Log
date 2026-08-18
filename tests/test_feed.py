@@ -1782,6 +1782,47 @@ class TestContentDescriptionIsALabel:
         assert feed.statics(typed) == []
 
 
+class TestAPicturesDescriptionIsNotAStatement:
+    """Alt text is written for somebody who cannot see the image.
+
+    Read as words on the screen it produced the app's own logo announcing
+    itself in the page title — "Logotipo de H H AeXchange +", the brand
+    spelled out letter by letter for a screen reader — in the one slot
+    somebody reads without looking for it.
+    """
+
+    LOGO = ('<node class="android.widget.ImageView" resource-id="com.x:id/logo" '
+            'clickable="false" text="" content-desc="Logotipo de H H '
+            'AeXchange +" bounds="[40,60][300,120]"/>')
+
+    def test_a_logos_alt_text_is_not_words_on_the_screen(self):
+        assert [s["txt"] for s in feed.statics(self.LOGO)] == [""]
+
+    def test_the_image_still_rides_along_by_its_name(self):
+        """The EVV check marks are recognised by resource-id, and dropping
+        the description must not drop the image with it."""
+        (st,) = feed.statics(self.LOGO)
+        assert st["rid"] == "logo"
+
+    def test_an_anonymous_decoration_still_stays_out(self):
+        bare = self.LOGO.replace('resource-id="com.x:id/logo"', 'resource-id=""')
+        assert feed.statics(bare) == []
+
+    def test_a_tappable_image_keeps_its_description(self):
+        """On something clickable the same attribute names the control —
+        Back, Search, the tab you are on — and that is a real label."""
+        button = ('<node class="android.widget.ImageButton" clickable="true" '
+                  'text="" content-desc="Atrás" bounds="[0,0][60,60]"/>')
+        (el,) = feed.elements(button, label=True)
+        assert el["txt"] == "Atrás"
+
+    def test_an_image_that_really_does_carry_text_keeps_it(self):
+        """`text=` on an ImageView is not alt text; it is text."""
+        odd = self.LOGO.replace('text=""', 'text="Agosto 18"')
+        (st,) = feed.statics(odd)
+        assert st["txt"] == "Agosto 18"
+
+
 class TestTheBarSurvivesTruncation:
     """A pinned tab bar is the LAST thing in the tree, and truncation used
     to cut the tail: the 370-message inbox spent its whole budget on

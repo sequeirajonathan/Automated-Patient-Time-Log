@@ -904,6 +904,53 @@ class TestNavTitleLength:
         assert m["nav"] is None
 
 
+class TestTheTitleIsAName:
+    """What may sit in the header, which is the one string somebody reads
+    without looking for it.
+
+    The schedule renamed itself **"Logotipo de H H AeXchange +"** — the logo
+    ImageView's alt text, the brand spelled out letter by letter for a screen
+    reader — because it was the longest thing in the title bar. Two guards
+    now: a picture's description never becomes words at all (see
+    feed.statics), and a title that reads like spelling is rejected here.
+    Rejected leaves the title empty, and the client falls through to the app's
+    own name, which is always true.
+    """
+
+    def test_a_spelled_out_brand_is_not_a_title(self):
+        m = screenview.build(doc(
+            elements=[el("btn_left", "Button", [0, 67, 42, 87], "Atrás")],
+            statics=[st([42, 65, 684, 89], "Logotipo de H H AeXchange +")],
+        ))
+        assert m["nav"] is not None            # it is still a nav bar
+        assert m["nav"]["title"] == ""         # with nothing worth saying
+
+    def test_the_real_title_wins_over_the_logo_beside_it(self):
+        """A title bar usually carries both, and the logo was winning on
+        length — which is exactly how the page got renamed."""
+        m = screenview.build(doc(
+            elements=[el("btn_left", "Button", [0, 67, 42, 87], "Atrás")],
+            statics=[st([42, 65, 300, 89], "Logotipo de H H AeXchange +"),
+                     st([310, 65, 600, 89], "Horario")],
+        ))
+        assert m["nav"]["title"] == "Horario"
+
+    def test_an_icon_glyph_is_not_a_title(self):
+        m = screenview.build(doc(
+            elements=[el("btn_left", "Button", [0, 67, 42, 87], "Atrás")],
+            statics=[st([42, 65, 684, 89], "")],
+        ))
+        assert m["nav"]["title"] == ""
+
+    def test_initials_a_person_actually_wrote_are_left_alone(self):
+        """The guard is for spelling, not for short words. A patient's name
+        on a visit-detail title is the whole point of that title."""
+        assert screenview._is_spelled_out("Detalle de Visita") is False
+        assert screenview._is_spelled_out("CARIDAD ROJAS BATISTA") is False
+        assert screenview._is_spelled_out("A B Smith") is False
+        assert screenview._is_honest_title("A B Smith") is True
+
+
 class TestMapOverlay:
     """The GPS confirm slides a full-screen map OVER the visit page and
     the tree still reports the page beneath — the portal rendered both at

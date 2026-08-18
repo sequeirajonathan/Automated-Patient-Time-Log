@@ -81,6 +81,26 @@ HEADER_MAX_CHARS = 32
 NAV_TITLE_MAX_CHARS = 48
 
 
+def _is_spelled_out(txt: str) -> bool:
+    """Text a screen reader was meant to say letter by letter.
+
+    Apps write alt text for the ear, not the eye: "H H AeXchange +" is the
+    logo's description spelling the brand out, and rendered as words it is
+    gibberish wearing a title's clothes.
+
+    FOUR or more tokens, half of them a single character. Four rather than
+    three because three is where real names live — "A B Smith" is two initials
+    and a surname, which this test wrongly flagged when it asked for three,
+    and a caught patient name is a worse outcome than a missed logo. Spelling
+    is long by nature; a name with initials is short.
+    """
+    tokens = txt.split()
+    if len(tokens) < 4:
+        return False
+    singles = sum(1 for t in tokens if len(t.strip(".·-")) <= 1)
+    return singles * 2 >= len(tokens)
+
+
 def _is_icon_text(txt: str) -> bool:
     """Text that is an icon font's private glyph, not a word.
 
@@ -91,6 +111,25 @@ def _is_icon_text(txt: str) -> bool:
     """
     return bool(txt) and all(
         0xE000 <= ord(c) <= 0xF8FF or c.isspace() for c in txt)
+
+
+def _is_honest_title(txt: str) -> bool:
+    """Whether this is a name for the page, or something that landed there.
+
+    The header is the one string on the screen somebody reads without looking
+    for it, so what may sit in it is worth stating: not a spelled-out brand,
+    not a paragraph, not a bare symbol, and not nothing. Anything rejected
+    falls through to the app's own name, which is always true.
+
+    A title must contain a LETTER OR DIGIT. That is what rules out the glyph
+    case, and it rules it out at the right end: an icon that translates to a
+    real mark (the EVV check) is meaningful in a row and still says nothing as
+    the name of a page.
+    """
+    txt = (txt or "").strip()
+    return bool(txt) and any(c.isalnum() for c in txt) and not (
+        _is_spelled_out(txt)
+        or len(txt) > NAV_TITLE_MAX_CHARS)
 
 
 # Icon glyphs that are STATE, not decoration. The visits list marks each
@@ -746,7 +785,15 @@ def build(doc: dict) -> dict | None:
                 and all(n.get("small") for n in buttons)
                 and all(len((t["txt"] or "").strip()) <= NAV_TITLE_MAX_CHARS
                         for t in titles)):
-            title = max(titles, key=lambda n: len(n["txt"]), default=None)
+            # Longest of the HONEST candidates. A title bar often carries a
+            # logo beside its title, and the logo's description was winning on
+            # length: the schedule renamed itself "Logotipo de H H AeXchange +"
+            # — the brand spelled out for a screen reader, in the one slot
+            # somebody reads without looking for it. What is rejected here
+            # leaves the title empty, and an empty title falls through to the
+            # app's own name, which is always true.
+            honest = [n for n in titles if _is_honest_title(n["txt"])]
+            title = max(honest, key=lambda n: len(n["txt"]), default=None)
             nav = {
                 "back": buttons[0],
                 "title": title["txt"] if title else "",

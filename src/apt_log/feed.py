@@ -148,6 +148,13 @@ CREDENTIAL_REFUSALS = (LOGIN_ACTIVITY, PASSWORD_FIELD)
 # on any screen, under any rule below: this is where a password lives.
 EDITABLE = ("EditText", "AutoCompleteTextView", "SearchView")
 
+# Classes whose content-desc is a picture's ALT TEXT rather than a label.
+# Alt text is written for somebody who cannot see the image; read as a
+# statement it produces the app's logo announcing itself where the page title
+# belongs. On a clickable node the same attribute names a control and is kept
+# — see statics(), which is the only place this applies.
+DECORATIVE = ("ImageView", "ImageButton")
+
 # A label longer than this is not a label. Bounds the damage if some screen
 # turns out to put a paragraph where this expects a sentence.
 MAX_TEXT = 240
@@ -1381,7 +1388,20 @@ def statics(xml: str) -> list[dict]:
             continue
         text = _clean(_label(raw))
         rid = _attr(raw, "resource-id").split("/")[-1]
-        if not text and not (cls == "ImageView" and rid):
+        if cls in DECORATIVE and not _attr(raw, "text"):
+            # A picture's description is ALT TEXT — what a screen reader says
+            # in place of an image somebody can see. It is not a statement the
+            # screen is making, and treating it as one put the HHAeXchange+
+            # logo's own alt text where the page title goes: "Logotipo de H H
+            # AeXchange +", spelled out letter by letter for a reader that is
+            # not us. The image still rides along by resource-id below, which
+            # is how the EVV check marks are recognised.
+            #
+            # Only the description is dropped, and only on a NON-CLICKABLE
+            # image: a description on something tappable names the control
+            # (Back, Search, the tab you are on), and that is a real label.
+            text = ""
+        if not text and not (cls in DECORATIVE and rid):
             continue
         m = _BOUNDS.search(_attr(raw, "bounds"))
         if not m:
