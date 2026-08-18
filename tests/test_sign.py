@@ -176,3 +176,33 @@ class TestExecute:
         raw = (tmp_path / "s.json").read_text()
         assert "0.1" not in raw and "strokes" not in raw
         assert sign.read_status(tmp_path / "s.json").digest
+
+
+class TestCanvasClassHints:
+    """The only replay ever attempted against the real screen refused with
+    no_canvas — consistent with a canvas shipped as a CUSTOM CLASS with no
+    resource-id (SignatureView, SignaturePad), which the id hints never
+    see and the bare-View rule rejects. The class's own name now counts,
+    and a refusal keeps the screen's textless structure so one failed
+    attempt hands over the fix."""
+
+    def test_a_custom_signature_class_is_the_canvas(self):
+        xml = ('<node class="com.hhaexchange.caregiver.ui.SignatureView" '
+               'bounds="[100,60][1500,660]" clickable="true"/>'
+               '<node class="android.widget.Button" text="Salvar" '
+               'bounds="[20,600][120,660]"/>')
+        bounds, reason = sign.find_canvas(xml)
+        assert reason == ""
+        assert bounds == [100, 60, 1500, 660]
+
+    def test_a_refusal_records_the_structure_without_text(self, tmp_path,
+                                                          monkeypatch):
+        monkeypatch.setattr(sign, "DEBUG_PATH", tmp_path / "sign-debug.json")
+        xml = ('<node class="android.widget.TextView" text="CARIDAD R" '
+               'bounds="[10,10][200,40]"/>')
+        bounds, reason = sign.find_canvas(xml)
+        assert bounds is None and reason == "no_canvas"
+        doc = json.loads((tmp_path / "sign-debug.json").read_text())
+        assert doc["reason"] == "no_canvas"
+        assert doc["nodes"][0]["cls"] == "TextView"
+        assert "CARIDAD" not in json.dumps(doc)

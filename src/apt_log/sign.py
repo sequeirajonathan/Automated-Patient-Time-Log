@@ -73,6 +73,13 @@ APP_PACKAGES = (
 # rather refuse than guess, because "no signature box here" costs a retry and a
 # wrong rectangle costs ink on the wrong control.
 CANVAS_ID_HINTS = ("signature", "firma", "sign_pad", "draw")
+# Apps as often ship the canvas as a CUSTOM CLASS with no resource-id at
+# all — SignatureView, SignaturePad, DrawingView — which the id hints
+# never see and the bare-View shape rule rejects. The class's own name is
+# as strong a signal as an id. The only live refusal so far (no_canvas,
+# Aug 14, the one replay ever attempted against the real screen) is
+# consistent with exactly this shape.
+CANVAS_CLASS_HINTS = ("signature", "signpad", "drawing", "sketch")
 CANVAS_CLASSES = ("View",)
 CANVAS_MIN_SHARE = 0.22
 
@@ -221,6 +228,9 @@ def find_canvas(xml: str) -> tuple[list[int] | None, str]:
         if any(hint in rid for hint in CANVAS_ID_HINTS):
             named.append(b)
             continue
+        if any(hint in cls.lower() for hint in CANVAS_CLASS_HINTS):
+            named.append(b)
+            continue
         if (cls in CANVAS_CLASSES
                 and not _attr(raw, "text")
                 and _attr(raw, "clickable") != "true"
@@ -229,11 +239,42 @@ def find_canvas(xml: str) -> tuple[list[int] | None, str]:
 
     pool = named or shaped
     if not pool:
+        _dump_refusal(nodes, "no_canvas")
         return None, "no_canvas"
     if len(pool) > 1:
         log.info("signature finder: %d candidates, refusing", len(pool))
+        _dump_refusal(nodes, "ambiguous")
         return None, "ambiguous"
     return pool[0], ""
+
+
+DEBUG_PATH = STATE_DIR / "sign-debug.json"
+
+
+def _dump_refusal(nodes, reason: str) -> None:
+    """The screen's structure, kept when the finder refuses.
+
+    The only signature screen this system ever faced was seen once, at
+    night, and its hierarchy was gone by morning — the flight recorder
+    had rolled and the refusal reason alone said nothing. One failed
+    attempt should hand over the fix: class, id, bounds and clickability
+    for every node, and not one character of text (the flight recorder's
+    own discipline — a signature screen shows patient and caregiver
+    names).
+    """
+    try:
+        doc = {"reason": reason, "at": datetime.now().isoformat(),
+               "nodes": [{"cls": (_attr(raw, "class") or "").rsplit(".", 1)[-1],
+                          "rid": _attr(raw, "resource-id").split("/")[-1],
+                          "clickable": _attr(raw, "clickable"),
+                          "b": b}
+                         for raw, b in nodes]}
+        tmp = DEBUG_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(doc), encoding="utf-8")
+        tmp.replace(DEBUG_PATH)
+        log.info("signature refusal recorded for repair (%s)", reason)
+    except OSError as exc:
+        log.warning("could not record the refusal (%s)", exc)
 
 
 # --------------------------------------------------------------------- paths
