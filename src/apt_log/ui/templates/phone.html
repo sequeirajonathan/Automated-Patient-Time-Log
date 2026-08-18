@@ -913,7 +913,10 @@
       login_activity: {{ t('phone.blocked.login_activity')|tojson }},
       password_field: {{ t('phone.blocked.password_field')|tojson }},
       secure_screen:  {{ t('phone.blocked.secure_screen')|tojson }},
-      capture_failed: {{ t('phone.blocked.capture_failed')|tojson }}
+      capture_failed: {{ t('phone.blocked.capture_failed')|tojson }},
+      {# The one refusal whose sentence does NOT end "and they still work":
+         a wedged app answers no tap, and this screen carries no buttons. #}
+      app_not_responding: {{ t('phone.blocked.app_not_responding')|tojson }}
     },
     blockedOther: {{ t('phone.blocked.other')|tojson }}
   };

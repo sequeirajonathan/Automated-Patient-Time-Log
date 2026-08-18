@@ -108,6 +108,17 @@ LOGIN_ACTIVITY_MARKERS = (
 )
 
 _FOCUS = re.compile(r"mCurrentFocus=Window\{[^}]*\s+(\S+)\}")
+# Android's "<app> isn't responding — Close app / Wait" dialog owns the focus
+# while it is up, and its window title names the wedged package. This is the
+# ONLY reliable signal for it: the dialog is a system window the accessibility
+# tree does not hand over, and an ANR takes UiAutomator2 down with it — the
+# feed logged "Appium did not open a session within 40s" on repeat while the
+# app hung. So detection cannot depend on a tree; it rides the dumpsys read
+# the focus already costs. Seen live: the legacy app wedged on its own
+# inactivity dialog, and the portal went on publishing that dialog's buttons
+# as if they worked.
+_ANR = re.compile(
+    r"mCurrentFocus=Window\{[^}]*Application Not Responding:\s*([\w.]+)")
 # The display's own state, from the same dump. Android keeps mCurrentFocus
 # while the screen is off, so "no focus" catches only some sleeps — observed
 # on the owner's phone as a green Live over a photograph of a black screen.
@@ -123,6 +134,11 @@ LOGIN_ACTIVITY = "login_activity"
 PASSWORD_FIELD = "password_field"
 SECURE_SCREEN = "secure_screen"
 CAPTURE_FAILED = "capture_failed"
+# The app is wedged behind Android's not-responding dialog. Unlike every other
+# refusal here, this one means the buttons DO NOT work — the other messages all
+# end "and they still work", and saying that here would be a lie she would
+# discover by tapping.
+APP_NOT_RESPONDING = "app_not_responding"
 
 # The two refusals that mean "a credential can be typed here" -- as opposed to
 # FLAG_SECURE, which is the app's own choice and can be any screen at all.
@@ -205,24 +221,30 @@ def _adb(args: list[str], serial: str | None = None, timeout: float = 15.0):
     return subprocess.run(cmd, capture_output=True, timeout=timeout)
 
 
-def window_state(serial: str | None = None) -> tuple[str, bool]:
-    """(focused window `package/activity`, display awake) — one dumpsys read.
+def window_state(serial: str | None = None) -> tuple[str, bool, str]:
+    """(focused window `package/activity`, display awake, wedged package).
 
-    Both from the same dump because they answer the same question — "what is
-    on the screen right now?" — and the second half is not optional: a
+    All three from one dumpsys read because they answer the same question —
+    "what is on the screen right now?" — and none of them is optional. A
     sleeping phone keeps its focused window, so focus alone reports an app on
-    a screen that is showing nobody anything.
+    a screen that is showing nobody anything. And an app behind the
+    not-responding dialog looks, through the focus alone, exactly like that
+    app running normally: the dialog's window title ends in the package name,
+    so the focus pattern reads it as a bare package and every check downstream
+    waves it through. The third value is what makes the difference visible.
     """
     try:
         out = _adb(["shell", "dumpsys", "window"], serial).stdout.decode(
             "utf-8", "replace")
     except (OSError, subprocess.SubprocessError) as exc:
         log.warning("cannot read the focused window (%s)", exc)
-        return "", True
+        return "", True, ""
     m = _FOCUS.search(out)
     awake = _AWAKE.search(out)
+    anr = _ANR.search(out)
     return (m.group(1) if m else "",
-            awake.group(1) == "true" if awake else True)
+            awake.group(1) == "true" if awake else True,
+            anr.group(1) if anr else "")
 
 
 def current_focus(serial: str | None = None) -> str:
@@ -461,6 +483,75 @@ def _watch_containment(focus: str, serial: str | None = None) -> None:
         log.warning("could not return to the care app (%s)", exc)
 
 
+# How long a wedged app is given to come back on its own. Android dismisses
+# its own dialog if the app catches up, and a slow app mid-visit is worth a
+# short wait before its screen is thrown away. Short, because the dialog does
+# not time out: the one seen live sat there for minutes, blocking everything,
+# with nobody in the room to answer it.
+ANR_GRACE = 20.0
+# And how long before the same app may be restarted again. A second wedge
+# right after a restart is a deeper fault than a restart can fix; thrashing
+# the app would only keep the screen unusable while looking busy.
+ANR_COOLDOWN = 120.0
+# Packages never force-stopped, whatever they do. Killing the system UI or the
+# system process is a bigger hammer than any screen is worth, and an ANR there
+# is not something this controller should be swinging at.
+ANR_UNTOUCHABLE = ("com.android.systemui", "android", "system")
+_anr_since: dict[str, float] = {}
+_anr_last_fix: dict[str, float] = {}
+
+
+def _watch_anr(pkg: str, serial: str | None = None) -> None:
+    """Clear Android's not-responding dialog by restarting the wedged app.
+
+    The dialog offers "Wait" and "Close app", and neither is reachable: it is
+    a system window the tree does not publish, and the ANR takes the Appium
+    session down with it, so there is nothing to drive and nothing to tap.
+    What still answers is adb, and the recipe is the one the expired-session
+    dialog already proved — force-stop, then relaunch through the launcher
+    intent, never through the wedged driver. Verified against the live wedge:
+    force-stop cleared the dialog, the relaunch came up on the sign-in screen,
+    and auto-auth carried it from there.
+
+    Restarting is the whole of the cure and it is destructive, so it waits out
+    ANR_GRACE first and never repeats inside ANR_COOLDOWN.
+    """
+    now = time.time()
+    first = _anr_since.get(pkg)
+    if first is None:
+        _anr_since[pkg] = now
+        log.warning("%s is not responding", pkg)
+        return
+    if now - first < ANR_GRACE:
+        return
+    if now - _anr_last_fix.get(pkg, 0.0) < ANR_COOLDOWN:
+        return
+    if pkg in ANR_UNTOUCHABLE:
+        log.error("%s is not responding and will not be restarted from here",
+                  pkg)
+        _anr_last_fix[pkg] = now
+        return
+    _anr_last_fix[pkg] = now
+    _anr_since.pop(pkg, None)
+    log.warning("restarting %s to clear the not-responding dialog", pkg)
+    try:
+        _adb(["shell", "am", "force-stop", pkg], serial, timeout=30.0)
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("could not stop the wedged app (%s)", exc)
+        return
+    # Only the apps this portal exists to drive are put back up. Anything else
+    # wedged is cleared and left closed; the containment watchdog is what
+    # decides where the phone belongs.
+    if pkg not in CARE_APPS:
+        return
+    try:
+        _adb(["shell", "monkey", "-p", pkg,
+              "-c", "android.intent.category.LAUNCHER", "1"], serial,
+             timeout=30.0)
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("could not relaunch %s (%s)", pkg, exc)
+
+
 def _watch_focus(focus: str, awake: bool, serial: str | None = None) -> None:
     """Track awake-but-focusless ticks and nudge when they persist."""
     if focus or not awake:
@@ -490,8 +581,18 @@ def capture(serial: str | None = None,
     password check and the overlay, which halves the adb work and removes a
     race two callers of the old version had against each other.
     """
-    focus, awake = window_state(serial)
+    focus, awake, anr = window_state(serial)
     _watch_focus(focus, awake, serial)
+    if anr:
+        # Nothing else is worth doing while the phone is wedged: the density
+        # and the notification shade are cosmetics on a screen that answers
+        # no taps, and the containment watchdog would see a care app in front
+        # and be satisfied. The refusal is what keeps the page honest —
+        # without it the portal publishes the wedged app's own dialog as live
+        # buttons, which is exactly what it did the first time this happened.
+        _watch_anr(anr, serial)
+        return None, focus, APP_NOT_RESPONDING
+    _anr_since.clear()
     if awake:
         _watch_shade(hierarchy, serial)
         _watch_containment(focus, serial)
@@ -822,6 +923,14 @@ def write_frame(path: Path, serial: str | None = None,
     speak = text_is_disclosable(reason)
     els = elements(hierarchy, label=speak) if hierarchy else []
 
+    # A wedged app publishes NOTHING to aim at. Its last tree is still there
+    # and still parses — the legacy app was wedged on its own inactivity
+    # dialog, and that dialog's "DE ACUERDO" went on being published as a live
+    # button nobody could press. Boxes that answer no tap are worse than no
+    # boxes: she taps, nothing happens, and the fault looks like the portal's.
+    if reason == APP_NOT_RESPONDING:
+        els = []
+
     # The whole page, when the runner has walked it: while the stitched
     # document's first capture still matches what is in front, the portal
     # renders and aims at everything, not just the viewport. The moment the
@@ -986,7 +1095,7 @@ class _Hierarchy:
             try:
                 fresh = read_hierarchy(self._serial)
                 if fresh is not None:
-                    focus, awake = window_state(self._serial)
+                    focus, awake, _ = window_state(self._serial)
                     with self._lock:
                         self._read_at = time.time()
                         if self._accept(fresh, focus, awake):

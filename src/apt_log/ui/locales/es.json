@@ -223,5 +223,6 @@
   "sign.appclear": "Borrar firma",
   "sign.appsave": "Salvar firma",
   "sign.state.clear.done": "Borrada — la casilla de firma del teléfono quedó vacía.",
-  "sign.state.confirm.done": "Salvada en el teléfono."
+  "sign.state.confirm.done": "Salvada en el teléfono.",
+  "phone.blocked.app_not_responding": "La aplicación dejó de responder. Nada en esta pantalla se puede tocar — el controlador está reiniciando la aplicación, toma unos segundos."
 }

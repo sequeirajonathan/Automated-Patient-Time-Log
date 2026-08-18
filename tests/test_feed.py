@@ -42,13 +42,13 @@ class TestLoginDetection:
 class TestCaptureRefusals:
     def test_refuses_when_the_focus_cannot_be_read(self):
         """Knowing nothing is not permission."""
-        with patch.object(feed, "window_state", return_value=("", True)):
+        with patch.object(feed, "window_state", return_value=("", True, "")):
             png, _, reason = feed.capture()
         assert png is None
         assert reason == feed.NO_FOCUS
 
     def test_refuses_on_a_login_screen(self):
-        with patch.object(feed, "window_state", return_value=(SIGNIN, True)):
+        with patch.object(feed, "window_state", return_value=(SIGNIN, True, "")):
             png, _, reason = feed.capture()
         assert png is None
         assert reason == feed.LOGIN_ACTIVITY
@@ -56,7 +56,7 @@ class TestCaptureRefusals:
     def test_refuses_when_a_password_field_is_anywhere_on_screen(self):
         """Anywhere, not merely focused. This runs on a timer with no idea what
         is about to happen, and the picture ends up on a web page."""
-        with patch.object(feed, "window_state", return_value=(HOME, True)):
+        with patch.object(feed, "window_state", return_value=(HOME, True, "")):
             png, _, reason = feed.capture(
                 hierarchy='<node password="true" bounds="[0,0][1,1]"/>')
         assert png is None
@@ -65,7 +65,7 @@ class TestCaptureRefusals:
     def test_captures_when_the_hierarchy_is_unreadable_but_activity_is_safe(self):
         """The documented weak point: UiAutomator2 holds the dump service during
         an Appium session, which is exactly when watching matters most."""
-        with patch.object(feed, "window_state", return_value=(HOME, True)), \
+        with patch.object(feed, "window_state", return_value=(HOME, True, "")), \
              patch.object(feed, "_adb") as adb:
             adb.return_value.returncode = 0
             adb.return_value.stdout = PNG
@@ -73,7 +73,7 @@ class TestCaptureRefusals:
         assert png == PNG and reason == feed.CAPTURED
 
     def test_a_refused_capture_is_reported_not_silent(self):
-        with patch.object(feed, "window_state", return_value=(HOME, True)), \
+        with patch.object(feed, "window_state", return_value=(HOME, True, "")), \
              patch.object(feed, "_adb") as adb:
             adb.return_value.returncode = 0
             adb.return_value.stdout = b""
@@ -210,7 +210,7 @@ class TestRun:
         h = feed._Hierarchy(None, every=0.01)
         with patch.object(feed, "read_hierarchy",
                           side_effect=[good] + [None] * 50), \
-             patch.object(feed, "window_state", return_value=("com.x/.Home", True)):
+             patch.object(feed, "window_state", return_value=("com.x/.Home", True, "")):
             h.start()
             deadline = time.monotonic() + 5
             while h.xml is None and time.monotonic() < deadline:
@@ -378,7 +378,7 @@ class TestBlindScreens:
 
     def test_the_frame_carries_the_reason_and_the_words(self, tmp_path):
         shot = tmp_path / "screen.png"
-        with patch.object(feed, "window_state", return_value=(SIGNIN, True)), \
+        with patch.object(feed, "window_state", return_value=(SIGNIN, True, "")), \
              patch.object(feed, "screen_size", return_value=[720, 1600]), \
              patch.object(feed.mirror_mod, "publish"):
             feed.write_frame(shot, hierarchy=self.ALERT)
@@ -945,12 +945,12 @@ class TestSleepIsNotLive:
         out = f"  mCurrentFocus=Window{{abc u0 {HOME}}}\n  mAwake=false\n"
         with patch.object(feed, "_adb") as adb:
             adb.return_value.stdout = out.encode()
-            focus, awake = feed.window_state()
+            focus, awake, _ = feed.window_state()
         assert focus == HOME and awake is False
 
     def test_capture_refuses_while_the_display_is_off(self):
         """The focused app of a black screen is not what anyone is seeing."""
-        with patch.object(feed, "window_state", return_value=(HOME, False)):
+        with patch.object(feed, "window_state", return_value=(HOME, False, "")):
             png, focus, reason = feed.capture()
         assert png is None and reason == feed.NO_FOCUS
 
@@ -1604,3 +1604,123 @@ class TestAnonymousAim:
             out = feed.tap("somewhere-else-entirely", dict(self.NAMED),
                            frame_path=path)
         assert out["tapped"]["rid"] == "btn_go"
+
+
+ANR_DUMP = ("  mCurrentFocus=Window{64be9f9 u0 Application Not Responding: "
+            "com.hhaexchange.caregiver}\n  mAwake=true\n")
+LIVE_DUMP = ("  mCurrentFocus=Window{d617003 u0 com.hhaexchange.caregiver/"
+             "com.hhaexchange.caregiver.HomeActivity}\n  mAwake=true\n")
+
+
+class TestNotResponding:
+    """Android's "<app> isn't responding" dialog, seen live on the legacy app.
+
+    It is invisible three ways at once: the dialog is a system window the
+    accessibility tree does not publish, the ANR takes the Appium session
+    down with it, and the dialog's window title ends in the package name —
+    so the focus reads as that app running normally. Meanwhile the wedged
+    app's own last dialog goes on being published as live buttons. The
+    dumpsys read the focus already costs is what tells the truth.
+    """
+
+    def setup_method(self):
+        feed._anr_since.clear()
+        feed._anr_last_fix.clear()
+
+    teardown_method = setup_method
+
+    def _state(self, dump):
+        with patch.object(feed, "_adb") as adb:
+            adb.return_value.stdout = dump.encode()
+            return feed.window_state()
+
+    def test_the_wedged_package_is_read_from_the_dialog(self):
+        focus, awake, anr = self._state(ANR_DUMP)
+        assert anr == "com.hhaexchange.caregiver"
+        assert awake is True
+
+    def test_a_healthy_screen_names_no_wedge(self):
+        focus, _awake, anr = self._state(LIVE_DUMP)
+        assert anr == ""
+        assert focus.endswith("HomeActivity")
+
+    def test_capture_refuses_and_names_the_fault(self):
+        with patch.object(feed, "window_state",
+                          return_value=("com.hhaexchange.caregiver", True,
+                                        "com.hhaexchange.caregiver")), \
+             patch.object(feed, "_watch_anr") as watch, \
+             patch.object(feed, "_adb") as adb:
+            png, _focus, reason = feed.capture()
+        assert reason == feed.APP_NOT_RESPONDING
+        assert png is None
+        watch.assert_called_once()
+        adb.assert_not_called()          # no screencap of a dead screen
+
+    def test_the_grace_period_is_waited_out_before_anything_is_killed(self):
+        with patch.object(feed, "_adb") as adb:
+            feed._watch_anr("com.hhaexchange.caregiver")
+            adb.assert_not_called()      # first sighting only starts the clock
+
+    def test_after_the_grace_the_app_is_restarted(self):
+        pkg = "com.hhaexchange.caregiver"
+        feed._anr_since[pkg] = time.time() - feed.ANR_GRACE - 1
+        with patch.object(feed, "_adb") as adb:
+            feed._watch_anr(pkg)
+        sent = [call.args[0] for call in adb.call_args_list]
+        assert ["shell", "am", "force-stop", pkg] in sent
+        assert any(c[:3] == ["shell", "monkey", "-p"] and c[3] == pkg
+                   for c in sent), "the app must come back up"
+
+    def test_a_second_wedge_is_not_thrashed(self):
+        pkg = "com.hhaexchange.caregiver"
+        feed._anr_since[pkg] = time.time() - feed.ANR_GRACE - 1
+        feed._anr_last_fix[pkg] = time.time()
+        with patch.object(feed, "_adb") as adb:
+            feed._watch_anr(pkg)
+            adb.assert_not_called()
+
+    def test_the_system_ui_is_never_force_stopped(self):
+        pkg = "com.android.systemui"
+        feed._anr_since[pkg] = time.time() - feed.ANR_GRACE - 1
+        with patch.object(feed, "_adb") as adb:
+            feed._watch_anr(pkg)
+            adb.assert_not_called()
+
+    def test_a_stranger_is_cleared_but_not_relaunched(self):
+        """Only the apps this portal drives are put back up; where the phone
+        belongs is the containment watchdog's decision, not this one's."""
+        pkg = "com.android.settings"
+        feed._anr_since[pkg] = time.time() - feed.ANR_GRACE - 1
+        with patch.object(feed, "_adb") as adb:
+            feed._watch_anr(pkg)
+        sent = [call.args[0] for call in adb.call_args_list]
+        assert ["shell", "am", "force-stop", pkg] in sent
+        assert not any("monkey" in c for c in sent)
+
+    def test_a_wedged_screen_publishes_nothing_to_aim_at(self, tmp_path):
+        """The legacy app wedged on its own inactivity dialog, and that
+        dialog's button went on being published as pressable."""
+        xml = ('<node class="android.widget.Button" resource-id="a:id/'
+               'btn_negative" text="DE ACUERDO" bounds="[6,843][713,864]"/>')
+        frame = {"id": "x", "img": "", "at": "now", "size": [720, 1600]}
+        feed.write_screen(tmp_path / "screen.json", frame, "unknown",
+                          feed.APP_NOT_RESPONDING, xml,
+                          focus="com.hhaexchange.caregiver")
+        doc = json.loads((tmp_path / "screen.json").read_text())
+        assert doc["elements"] == []
+        assert doc["blocked"] == feed.APP_NOT_RESPONDING
+
+    def test_recovery_forgets_the_wedge(self):
+        """So a later ANR waits out its own grace instead of inheriting an
+        expired one and being killed on sight."""
+        feed._anr_since["com.hhaexchange.caregiver"] = time.time() - 999
+        with patch.object(feed, "window_state",
+                          return_value=("com.x/.Home", True, "")), \
+             patch.object(feed, "_watch_shade"), \
+             patch.object(feed, "_watch_containment"), \
+             patch.object(feed, "_watch_density"), \
+             patch.object(feed, "_adb") as adb:
+            adb.return_value.returncode = 0
+            adb.return_value.stdout = b"\x89PNG"
+            feed.capture()
+        assert feed._anr_since == {}

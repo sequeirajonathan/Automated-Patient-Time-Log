@@ -223,5 +223,6 @@
   "sign.appclear": "Clear signature",
   "sign.appsave": "Save signature",
   "sign.state.clear.done": "Cleared — the phone's signature box is empty again.",
-  "sign.state.confirm.done": "Saved on the phone."
+  "sign.state.confirm.done": "Saved on the phone.",
+  "phone.blocked.app_not_responding": "The app stopped responding. Nothing on this screen can be tapped — the controller is restarting the app, which takes a few seconds."
 }
