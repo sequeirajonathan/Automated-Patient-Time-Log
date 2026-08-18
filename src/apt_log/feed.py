@@ -1411,20 +1411,8 @@ class NotOnScreen(RuntimeError):
     """The element posted back is not one this frame offered."""
 
 
-def published_elements(path: Path | None = None) -> list[dict]:
-    """The overlay the page is actually showing, from the feed's own frame file.
-
-    Reading the device again here was wrong twice over. It was slow -- the tap
-    runs in the UI process, which would have to open a second Appium session
-    while the feed holds the only one UiAutomator2 allows, and the contention
-    cost 14 seconds a tap. And it answered the wrong question: a fresh read tells
-    you what is on the screen *now*, when what makes a tap safe is that it was on
-    the screen *she was looking at*.
-
-    So this reads the same file the page drew its boxes from. If the feed has
-    stopped, the frame ages out and taps refuse -- which is the correct answer,
-    because an overlay nobody is updating is one she cannot trust either.
-    """
+def published_frame(path: Path | None = None) -> dict:
+    """The whole published frame, freshness-checked. See published_elements."""
     from apt_log.ui.state import STATE_DIR
 
     target = path or (STATE_DIR / FRAME_NAME)
@@ -1440,6 +1428,24 @@ def published_elements(path: Path | None = None) -> list[dict]:
 
     if age > TAP_FRAME_MAX_AGE:
         raise StaleAim(f"the screen on your page is {age:.0f}s old — look again")
+    return frame
+
+
+def published_elements(path: Path | None = None) -> list[dict]:
+    """The overlay the page is actually showing, from the feed's own frame file.
+
+    Reading the device again here was wrong twice over. It was slow -- the tap
+    runs in the UI process, which would have to open a second Appium session
+    while the feed holds the only one UiAutomator2 allows, and the contention
+    cost 14 seconds a tap. And it answered the wrong question: a fresh read tells
+    you what is on the screen *now*, when what makes a tap safe is that it was on
+    the screen *she was looking at*.
+
+    So this reads the same file the page drew its boxes from. If the feed has
+    stopped, the frame ages out and taps refuse -- which is the correct answer,
+    because an overlay nobody is updating is one she cannot trust either.
+    """
+    frame = published_frame(path)
     return frame.get("elements") or []
 
 
@@ -1459,11 +1465,20 @@ def tap(claimed_frame: str, element: dict, serial: str | None = None,
     there -- a tap at arbitrary coordinates being exactly what this is built not
     to be.
 
-    `claimed_frame` is carried for the log rather than enforced. It was enforced
-    once; see read_stable_hierarchy for the measurement that changed it.
+    `claimed_frame` is carried for the log on NAMED aims rather than enforced —
+    it was enforced for everything once, and a ticking clock re-hashing the
+    frame refused almost every legitimate tap (see read_stable_hierarchy).
+    For an ANONYMOUS aim — no resource-id — it is enforced again: bounds and
+    class are not identity there. The legacy home's menu rows are nameless
+    twins, and while the app finished loading, its layout shifted one slot —
+    "Horario para hoy" was tapped and "Visita no programada" opened, an
+    unscheduled-visit screen nobody asked for (seen live, first field test).
+    The words she read live in the frame's structure hash; if the structure
+    moved on, an anonymous tap refuses and she aims at a fresh frame.
     """
 
-    current = published_elements(frame_path)
+    frame = published_frame(frame_path)
+    current = frame.get("elements") or []
     bounds = list(element.get("b") or [])
     match = next(
         (e for e in current
@@ -1472,6 +1487,11 @@ def tap(claimed_frame: str, element: dict, serial: str | None = None,
          and e["cls"] == element.get("cls", "")),
         None,
     )
+    if (match is not None
+            and not (element.get("rid") or "")
+            and claimed_frame and frame.get("id")
+            and claimed_frame != frame.get("id")):
+        raise StaleAim("the screen changed under that button — look again")
     if match is not None and int(match.get("step") or 0) > 0:
         # Below the fold: the runner replays the scroll, re-verifies the
         # element against a fresh dump at its step, and taps the FOUND

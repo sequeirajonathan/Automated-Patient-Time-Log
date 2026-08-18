@@ -1545,3 +1545,62 @@ class TestSignatureDensity:
                 'text="Sadia Amselem" bounds="[20,95][36,160]" />')
         assert feed._looks_landscape(page) is False
         assert sign.presentation_rotated(page) is True
+
+
+class TestAnonymousAim:
+    """Bounds and class are not identity for a nameless element. The legacy
+    home's menu rows are anonymous twins, and while the app finished
+    loading its layout shifted one slot — "Horario para hoy" was tapped
+    and the unscheduled-visit screen opened instead (seen live, first
+    field test). For an aim with no resource-id, the claimed frame is
+    enforced: if the tappable structure moved, the tap refuses and she
+    aims at the fresh frame. Named aims keep the relaxed rule — and the
+    frame id hashes only tappable structure, so a ticking clock still
+    invalidates nothing."""
+
+    ROW = {"rid": "", "cls": "LinearLayout", "b": [0, 158, 720, 194],
+           "step": 0}
+    NAMED = {"rid": "btn_go", "cls": "Button", "b": [0, 300, 720, 340],
+             "step": 0}
+
+    def _frame(self, tmp_path, els, fid=None):
+        import datetime as dt
+        path = tmp_path / "frame.json"
+        path.write_text(json.dumps({
+            "at": dt.datetime.now().isoformat(),
+            "id": fid if fid is not None else feed.frame_id(els),
+            "elements": els,
+        }), encoding="utf-8")
+        return path
+
+    def test_an_anonymous_aim_from_a_moved_frame_refuses(self, tmp_path):
+        """The screen she aimed from had an extra loading row; by tap time
+        a DIFFERENT anonymous row occupies the same rectangle."""
+        old = [{"rid": "", "cls": "LinearLayout", "b": [0, 122, 720, 158],
+                "step": 0}, dict(self.ROW), dict(self.NAMED)]
+        now = [dict(self.ROW), dict(self.NAMED)]
+        path = self._frame(tmp_path, now)
+        with patch.object(feed, "_adb") as adb:
+            with pytest.raises(feed.StaleAim):
+                feed.tap(feed.frame_id(old), dict(self.ROW), frame_path=path)
+            adb.assert_not_called()
+
+    def test_an_anonymous_aim_from_the_current_frame_taps(self, tmp_path):
+        els = [dict(self.ROW), dict(self.NAMED)]
+        path = self._frame(tmp_path, els)
+        with patch.object(feed, "_adb") as adb:
+            adb.return_value.returncode = 0
+            out = feed.tap(feed.frame_id(els), dict(self.ROW),
+                           frame_path=path)
+        assert out["tapped"]["cls"] == "LinearLayout"
+
+    def test_a_named_aim_keeps_the_relaxed_rule(self, tmp_path):
+        """A resource-id IS identity; whole-frame equality refusing named
+        taps is the measurement that relaxed this in the first place."""
+        els = [dict(self.ROW), dict(self.NAMED)]
+        path = self._frame(tmp_path, els)
+        with patch.object(feed, "_adb") as adb:
+            adb.return_value.returncode = 0
+            out = feed.tap("somewhere-else-entirely", dict(self.NAMED),
+                           frame_path=path)
+        assert out["tapped"]["rid"] == "btn_go"
