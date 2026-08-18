@@ -58,6 +58,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+from apt_log import sign as sign_mod
 from apt_log.ui import mirror as mirror_mod
 
 log = logging.getLogger(__name__)
@@ -741,9 +742,14 @@ def write_screen(target: Path, frame: dict, screen: str, reason: str,
         # Whether the page scrolls: the offer to read it end to end only
         # makes sense when there is something below the fold to read.
         "scrollable": bool(hierarchy and 'scrollable="true"' in hierarchy),
-        # Sideways (the signature screen is the one place a care app goes
+        # Sideways (the signature screens are the one place a care app goes
         # landscape): the peek photograph needs turning to be readable.
-        "landscape": _looks_landscape(hierarchy),
+        # Two shapes of sideways exist — a truly rotated display (wide
+        # bounds) and the legacy signature page, which draws its content
+        # turned a quarter turn inside a portrait activity (rotated labels
+        # betray it). The peek needs the same turn for both.
+        "landscape": (_looks_landscape(hierarchy)
+                      or sign_mod.presentation_rotated(hierarchy or "")),
         # Whether this document is the WHOLE page (a stitched walk) or the
         # viewport. Full documents leave nothing to wonder about.
         "full": bool(stitched),

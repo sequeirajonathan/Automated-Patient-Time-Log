@@ -269,3 +269,93 @@ class TestStrokeSeparation:
         _, slept = self._replay([[(10, 10)], [(20, 20)], [(30, 30)]])
         assert slept.call_count == 2
         slept.assert_called_with(sign.STROKE_GAP)
+
+
+# The legacy caregiver-signature page, as photographed live: a portrait
+# activity whose whole UI is drawn turned a quarter turn — the baseline up
+# the left edge, "Firma del cuidador" down the right, name label sideways.
+# Rotated single-line labels sit in boxes taller than they are wide.
+SIDEWAYS_LABELS = (
+    '<node class="android.widget.TextView" resource-id="" clickable="false"'
+    ' text="Firma del cuidador" bounds="[700,90][716,160]" />'
+    '<node class="android.widget.TextView" resource-id="" clickable="false"'
+    ' text="Sadia Amselem" bounds="[20,95][36,160]" />')
+SIDEWAYS_CANVAS = (
+    '<node class="android.view.View" resource-id="app:id/gestureSignature"'
+    ' text="" clickable="false" bounds="[28,90][700,1560]" />')
+
+
+class TestSidewaysPresentation:
+    def test_rotated_labels_on_a_portrait_screen_mean_sideways(self):
+        assert sign.presentation_rotated(SIDEWAYS_CANVAS + SIDEWAYS_LABELS)
+
+    def test_an_ordinary_portrait_page_is_not_sideways(self):
+        assert not sign.presentation_rotated(CANVAS + CHROME)
+
+    def test_one_tall_label_alone_is_not_enough(self):
+        one = SIDEWAYS_LABELS.split("/>")[0] + "/>"
+        assert not sign.presentation_rotated(SIDEWAYS_CANVAS + one)
+
+    def test_a_truly_landscape_screen_needs_no_turn(self):
+        wide = ('<node class="android.view.View" resource-id="a:id/signature"'
+                ' text="" clickable="false" bounds="[0,0][1600,720]" />')
+        assert not sign.presentation_rotated(wide + SIDEWAYS_LABELS)
+
+
+class TestRotatedPaths:
+    def test_a_pad_horizontal_stroke_runs_down_the_device(self):
+        """Writing left-to-right on the pad must travel top-to-bottom on the
+        device, holding one x — that is the stroke the sideways page reads
+        as horizontal."""
+        line = [[[0.0, 0.5, 0], [1.0, 0.5, 1]]]
+        (a, b), = sign.build_paths(line, [0, 0, 720, 1440],
+                                   aspect=2.0, rotate=True)
+        assert a[0] == b[0]
+        assert a[1] < b[1]
+
+    def test_pad_top_lands_on_the_device_right(self):
+        """The page's caption runs down the device's right edge — pad-top
+        (v=0) must map nearer that edge than pad-bottom (v=1)."""
+        tops = [[[0.5, 0.0, 0]], [[0.5, 1.0, 1]]]
+        (top,), (bottom,) = sign.build_paths(tops, [0, 0, 720, 1440],
+                                             aspect=2.0, rotate=True)
+        assert top[0] > bottom[0]
+
+    def test_rotation_still_confines_ink_to_the_canvas(self):
+        corners = [[[0.0, 0.0, 0], [1.0, 1.0, 1], [1.0, 0.0, 2],
+                    [0.0, 1.0, 3]]]
+        for path in sign.build_paths(corners, [28, 90, 700, 1560],
+                                     aspect=2.2, rotate=True):
+            for x, y in path:
+                assert 28 <= x <= 700 and 90 <= y <= 1560
+
+    def test_execute_turns_strokes_for_the_sideways_page(self, tmp_path):
+        driver = MagicMock()
+        driver.current_package = "com.hhaexchange.caregiver"
+        driver.page_source = SIDEWAYS_CANVAS + SIDEWAYS_LABELS
+        built = {}
+        real = sign.build_paths
+        with patch.object(sign, "_perform"), \
+             patch.object(sign, "build_paths",
+                          side_effect=lambda *a, **kw: built.update(kw) or
+                          real(*a, **kw)), \
+             patch("apt_log.resident.run", side_effect=lambda w: w(driver)):
+            status = sign.execute({"id": "r", "strokes": STROKES,
+                                   "aspect": 2.2}, tmp_path / "s.json")
+        assert status.state == "done"
+        assert built.get("rotate") is True
+
+    def test_execute_leaves_an_upright_page_unturned(self, tmp_path):
+        driver = MagicMock()
+        driver.current_package = "com.hhaexchange.caregiver"
+        driver.page_source = CANVAS + CHROME
+        built = {}
+        real = sign.build_paths
+        with patch.object(sign, "_perform"), \
+             patch.object(sign, "build_paths",
+                          side_effect=lambda *a, **kw: built.update(kw) or
+                          real(*a, **kw)), \
+             patch("apt_log.resident.run", side_effect=lambda w: w(driver)):
+            sign.execute({"id": "r", "strokes": STROKES, "aspect": 2.2},
+                         tmp_path / "s.json")
+        assert built.get("rotate") is False

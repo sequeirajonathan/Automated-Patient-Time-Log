@@ -290,9 +290,45 @@ def _dump_refusal(nodes, reason: str) -> None:
         log.warning("could not record the refusal (%s)", exc)
 
 
+# ----------------------------------------------------------------- sideways
+# The legacy signature page draws its whole UI rotated a quarter turn while
+# the activity stays portrait: the baseline runs up the device's left edge,
+# the caption down its right, and the phone is meant to be turned sideways
+# to sign. The hierarchy betrays it — single-line labels ("Firma del
+# cuidador") occupy boxes taller than they are wide, which horizontal text
+# never does. Two such labels and a portrait extent mean the presentation
+# is rotated; a truly landscape screen (wide bounds) needs no help, because
+# injected coordinates already follow the rotated display.
+_ROT_LABEL_MIN_CHARS = 6
+_ROT_LABEL_MAX_W = 40
+_ROT_LABEL_MIN_H = 60
+
+
+def presentation_rotated(xml: str) -> bool:
+    """Whether this screen draws its content turned 90° inside a portrait
+    activity — the shape strokes must be turned to match."""
+    max_x = max_y = 0
+    tall_labels = 0
+    for raw in _NODE.findall(xml or ""):
+        m = _BOUNDS.search(_attr(raw, "bounds"))
+        if not m:
+            continue
+        x1, y1, x2, y2 = (int(g) for g in m.groups())
+        if x2 <= x1 or y2 <= y1:
+            continue
+        max_x, max_y = max(max_x, x2), max(max_y, y2)
+        w, h = x2 - x1, y2 - y1
+        if (len(_attr(raw, "text")) >= _ROT_LABEL_MIN_CHARS
+                and w <= _ROT_LABEL_MAX_W
+                and h >= max(_ROT_LABEL_MIN_H, 3 * w)):
+            tall_labels += 1
+    return max_x < max_y and tall_labels >= 2
+
+
 # --------------------------------------------------------------------- paths
 def build_paths(strokes, bounds: list[int],
-                aspect: float = 1.0) -> list[list[tuple[int, int]]]:
+                aspect: float = 1.0,
+                rotate: bool = False) -> list[list[tuple[int, int]]]:
     """Device-pixel stroke paths, confined to the canvas rectangle.
 
     `aspect` is the pad's own width over height. The pad normalises each axis
@@ -302,8 +338,15 @@ def build_paths(strokes, bounds: list[int],
     she drew. Every point is clamped to the inset rectangle besides; the
     mapping should never produce an outside point, and the clamp is for the
     day something does.
+
+    `rotate` turns the signature a quarter turn for the sideways-drawn
+    page: pad top goes to the device's right edge, pad left to its top —
+    (u, v) becomes (1-v, u) — so the ink reads correctly when the content
+    is viewed the way the app draws it. The pad's aspect inverts with it.
     """
     aspect = min(max(float(aspect or 1.0), 0.2), 8.0)
+    if rotate:
+        aspect = 1.0 / aspect
     x1, y1, x2, y2 = bounds
     inset_x = (x2 - x1) * CANVAS_INSET
     inset_y = (y2 - y1) * CANVAS_INSET
@@ -321,8 +364,11 @@ def build_paths(strokes, bounds: list[int],
         points = stroke.get("points") if isinstance(stroke, dict) else stroke
         path = []
         for p in points:
-            px = off_x + p[0] * draw_w
-            py = off_y + p[1] * draw_h
+            u, v = p[0], p[1]
+            if rotate:
+                u, v = 1.0 - v, u
+            px = off_x + u * draw_w
+            py = off_y + v * draw_h
             px = min(max(px, left), left + width)
             py = min(max(py, top), top + height)
             path.append((int(px), int(py)))
@@ -392,12 +438,14 @@ def execute(payload: dict, status_path: Path | None = None) -> Status:
         if package not in APP_PACKAGES:
             status.state, status.reason = "failed", "wrong_app"
             return
-        bounds, refusal = find_canvas(driver.page_source)
+        xml = driver.page_source
+        bounds, refusal = find_canvas(xml)
         if bounds is None:
             status.state, status.reason = "failed", refusal
             return
         _perform(driver, build_paths(strokes, bounds,
-                                     payload.get("aspect", 1.0)))
+                                     payload.get("aspect", 1.0),
+                                     rotate=presentation_rotated(xml)))
         status.state = "done"
 
     try:

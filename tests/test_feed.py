@@ -1499,3 +1499,19 @@ class TestSignatureDensity:
     def test_the_flag_is_published_with_the_screen(self):
         assert feed._looks_landscape(self.SIDEWAYS) is True
         assert feed._looks_landscape(self.UPRIGHT) is False
+
+    def test_the_quarter_turned_portrait_page_also_counts_as_sideways(self):
+        """The legacy caregiver-signature page never rotates its activity —
+        it draws the UI turned inside a portrait screen, betrayed by
+        single-line labels in boxes taller than wide. The peek needs the
+        same turn as the truly-landscape screen."""
+        from apt_log import sign
+        page = ('<node class="android.view.View" text="" '
+                'resource-id="a:id/gestureSignature" '
+                'bounds="[28,90][700,1560]" />'
+                '<node class="android.widget.TextView" '
+                'text="Firma del cuidador" bounds="[700,90][716,160]" />'
+                '<node class="android.widget.TextView" '
+                'text="Sadia Amselem" bounds="[20,95][36,160]" />')
+        assert feed._looks_landscape(page) is False
+        assert sign.presentation_rotated(page) is True
