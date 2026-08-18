@@ -338,6 +338,20 @@ def digest(strokes) -> str:
 
 
 # -------------------------------------------------------------------- replay
+# A touch pointer that is up cannot hover, so the move that positions the pen
+# before pointer_down is not guaranteed to land before the down does — the
+# first live replay drew a connector line from the previous stroke's end into
+# the next stroke's start. The pauses pin the ordering: position, settle,
+# touch, settle, draw. The gap between strokes keeps the canvas from reading
+# two quick gestures as one.
+PEN_SETTLE = 0.06
+STROKE_GAP = 0.30
+# Per-move duration. The W3C default is 250ms per point, which turns a real
+# signature (hundreds of points) into minutes of drawing; a dozen ms keeps a
+# stroke fluid without outrunning injection.
+MOVE_MS = 12
+
+
 def _perform(driver, paths) -> None:
     """Drive the strokes through W3C pointer actions. Thin on purpose — the
     logic worth testing lives in build_paths and find_canvas."""
@@ -345,15 +359,21 @@ def _perform(driver, paths) -> None:
     from selenium.webdriver.common.actions.action_builder import ActionBuilder
     from selenium.webdriver.common.actions.pointer_input import PointerInput
 
-    for path in paths:
+    for i, path in enumerate(paths):
+        if i:
+            time.sleep(STROKE_GAP)
         actions = ActionBuilder(driver,
                                 mouse=PointerInput(interaction.POINTER_TOUCH,
-                                                   "touch"))
+                                                   "touch"),
+                                duration=MOVE_MS)
         pen = actions.pointer_action
         pen.move_to_location(*path[0])
+        pen.pause(PEN_SETTLE)
         pen.pointer_down()
+        pen.pause(PEN_SETTLE)
         for x, y in path[1:]:
             pen.move_to_location(x, y)
+        pen.pause(PEN_SETTLE)
         pen.pointer_up()
         actions.perform()
 

@@ -226,3 +226,46 @@ class TestNestedSignatureWrappers:
         bounds, reason = sign.find_canvas(xml)
         assert reason == ""
         assert bounds == [0, 492, 720, 1142]
+
+
+class TestStrokeSeparation:
+    """The first live replay drew a connector line between strokes: a touch
+    pointer cannot hover, so the positioning move was not guaranteed to land
+    before the down, and ACTION_DOWN fired at the previous stroke's end.
+    The sequence that prevents it: position, settle, down, settle, draw —
+    and a real gap between strokes so the canvas sees distinct gestures."""
+
+    @staticmethod
+    def _replay(paths):
+        driver = MagicMock()
+        calls = []
+        driver.execute = lambda cmd, params=None: calls.append(params)
+        with patch.object(sign.time, "sleep") as slept:
+            sign._perform(driver, paths)
+        return calls, slept
+
+    @staticmethod
+    def _pointer_actions(call):
+        (device,) = [d for d in call["actions"] if d["type"] == "pointer"]
+        return device["actions"]
+
+    def test_each_stroke_is_its_own_performed_chain(self):
+        calls, _ = self._replay([[(10, 10), (20, 20)], [(50, 50), (60, 60)]])
+        assert len(calls) == 2
+
+    def test_the_pen_settles_between_positioning_and_touching(self):
+        calls, _ = self._replay([[(10, 10), (20, 20)]])
+        kinds = [a["type"] for a in self._pointer_actions(calls[0])]
+        assert kinds[:4] == ["pointerMove", "pause", "pointerDown", "pause"]
+        assert kinds[-2:] == ["pause", "pointerUp"]
+
+    def test_moves_are_fast_not_the_w3c_default(self):
+        calls, _ = self._replay([[(10, 10), (20, 20), (30, 30)]])
+        moves = [a for a in self._pointer_actions(calls[0])
+                 if a["type"] == "pointerMove"]
+        assert all(m["duration"] == sign.MOVE_MS for m in moves)
+
+    def test_strokes_are_separated_by_a_gap_in_time(self):
+        _, slept = self._replay([[(10, 10)], [(20, 20)], [(30, 30)]])
+        assert slept.call_count == 2
+        slept.assert_called_with(sign.STROKE_GAP)
