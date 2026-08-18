@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 import pytest
 
 from apt_log import macros
+from apt_log.macros import AUTO_AUTH_COOLDOWN
 
 
 class TestRegistry:
@@ -413,6 +414,69 @@ class TestAutoAuth:
         with patch.object(runner, "execute"):
             assert runner.maybe_auto_auth() is True
             assert runner.maybe_auto_auth() is False
+
+    def test_one_apps_sign_in_does_not_silence_another(self, tmp_path):
+        """Seen on the live phone: Mobile Caregiver+ signed itself in, and
+        inMyTeam then sat on its splash with somebody watching and nothing
+        happened — because the per-macro cooldown fell back to the shared
+        timestamp the other app had just set. Different apps, different
+        credentials, different clocks."""
+        from apt_log.secrets import (APP_PASSWORD, APP_USERNAME,
+                                     INMYTEAM_PHONE, MC_PIN,
+                                     MemorySecretProvider)
+
+        runner = macros.Runner(
+            tmp_path / "req.json", tmp_path / "status.json",
+            screen_path=tmp_path / "screen.json",
+            viewers_path=self._watching(tmp_path),
+            secrets=MemorySecretProvider(**{APP_USERNAME: "u",
+                                            APP_PASSWORD: "p",
+                                            MC_PIN: "2580",
+                                            INMYTEAM_PHONE: "3055550123"}))
+        ran = []
+        with patch.object(runner, "execute", side_effect=lambda n, r: ran.append(n)):
+            self._doc(tmp_path, app="com.tellus.evv.v2")
+            assert runner.maybe_auto_auth() is True
+            # Now the other app's sign-in screen, immediately after.
+            path = tmp_path / "screen.json"
+            import datetime as dt
+
+            path.write_text(json.dumps({
+                "app": "com.inmyteam.inmyteam", "screen": "unknown",
+                "blocked": "", "at": dt.datetime.now().isoformat(),
+                "statics": [{"txt": "Let’s Get Started"}], "elements": []}))
+            assert runner.maybe_auto_auth() is True
+        assert ran == ["mobile_caregiver_pin", "inmyteam_login"]
+
+    def test_a_macro_that_texts_somebody_waits_much_longer(self, tmp_path):
+        """Its own cooldown, because its retry costs a message on a real
+        person's phone rather than a wasted second."""
+        import datetime as dt
+
+        from apt_log.secrets import INMYTEAM_PHONE, MemorySecretProvider
+
+        runner = macros.Runner(
+            tmp_path / "req.json", tmp_path / "status.json",
+            screen_path=tmp_path / "screen.json",
+            viewers_path=self._watching(tmp_path),
+            secrets=MemorySecretProvider(**{INMYTEAM_PHONE: "3055550123"}))
+
+        def splash():
+            (tmp_path / "screen.json").write_text(json.dumps({
+                "app": "com.inmyteam.inmyteam", "screen": "unknown",
+                "blocked": "", "at": dt.datetime.now().isoformat(),
+                "statics": [{"txt": "Let’s Get Started"}], "elements": []}))
+
+        with patch.object(runner, "execute"):
+            splash()
+            assert runner.maybe_auto_auth() is True
+            # Past the ordinary cooldown, nowhere near this one.
+            runner._auto_auth_seen["inmyteam_login"] -= AUTO_AUTH_COOLDOWN + 5
+            splash()
+            assert runner.maybe_auto_auth() is False
+            runner._auto_auth_seen["inmyteam_login"] -= macros.SMS_AUTH_COOLDOWN
+            splash()
+            assert runner.maybe_auto_auth() is True
 
     def test_a_stale_sighting_is_not_a_landing(self, tmp_path):
         """Screens flash through login during startup, and an old document

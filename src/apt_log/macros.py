@@ -2209,7 +2209,12 @@ class Runner:
         # never gates a fast one.
         cooldown = (SMS_AUTH_COOLDOWN if macro_name in SENDS_A_MESSAGE
                     else AUTO_AUTH_COOLDOWN)
-        last = self._auto_auth_seen.get(macro_name, self._auto_auth_at)
+        # Per macro and ONLY per macro. Falling back to the shared timestamp
+        # was the first version and it defeated the whole point: Mobile
+        # Caregiver+ signing itself in put inMyTeam's fifteen minutes on the
+        # clock, so inMyTeam sat on its splash with somebody watching and
+        # nothing happened. Seen exactly that way on the live phone.
+        last = self._auto_auth_seen.get(macro_name)
         if last is not None and time.monotonic() - last < cooldown:
             return False
 
