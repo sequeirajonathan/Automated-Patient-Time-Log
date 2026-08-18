@@ -131,6 +131,20 @@ class TestDevices:
         # They merged, and the survivor answers for the fingerprint.
         assert len(prefs.devices()) == 1
 
+    def test_rows_written_before_fingerprints_existed_heal_too(self, store):
+        """Found on the live machine: the duplicates that made this worth
+        fixing predate the fix, carry no fingerprint, and would have been the
+        only rows that never merged."""
+        import time
+
+        now = time.time()
+        store.write_text(json.dumps({"devices": {
+            "old-a": {"agent": "curl/8.14.1", "seen": now - 40, "name": ""},
+            "old-b": {"agent": "curl/8.14.1", "seen": now - 20, "name": ""},
+        }, "density": {}}), encoding="utf-8")
+        prefs.seen("old-b", agent="curl/8.14.1", where="/console")
+        assert len(prefs.devices()) == 1
+
     def test_duplicates_already_in_the_file_heal_themselves(self, store):
         """The store is fixed on the next write rather than needing anybody to
         go and tidy it."""

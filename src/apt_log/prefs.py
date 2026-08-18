@@ -169,6 +169,11 @@ def _merge_duplicates(doc: dict[str, Any]) -> None:
     for did, dev in sorted(doc["devices"].items(),
                            key=lambda kv: kv[1].get("seen") or 0, reverse=True):
         mark = dev.get("mark")
+        if not mark and dev.get("agent"):
+            # Written before fingerprints existed. Backfilled here rather than
+            # left alone, or the rows that made duplicates a problem would be
+            # the only ones that never heal.
+            mark = dev["mark"] = fingerprint(dev["agent"])
         if not mark:
             continue
         keeper = by_mark.get(mark)
