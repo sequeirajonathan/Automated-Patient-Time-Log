@@ -1402,3 +1402,54 @@ class TestContainment:
     def test_nowhere_to_return_means_nothing_happens(self):
         out = self._run([self.SETTINGS, self.SETTINGS, self.SETTINGS])
         assert out == []
+
+
+class TestPerAppDensity:
+    """Every app is different (the owner's observation): HHAeXchange+
+    needs 84 so its week fits one capture, while inMyTeam's sparse pages
+    gain nothing from tiny text — and during the signature moment humans
+    handle the physical phone, where bigger is a better pen. Density
+    follows the app in front, never mid-scan, never mid-macro."""
+
+    def _run(self, focuses, current="84", scan=False, macro="idle"):
+        feed._density_now[0] = 0
+        calls = []
+
+        def adb(a, *_, **__):
+            calls.append(a)
+            m = MagicMock(returncode=0)
+            m.stdout = f"Physical density: 320\nOverride density: {current}\n".encode()
+            return m
+
+        import apt_log.macros as macros_mod
+
+        class S:
+            state = macro
+
+        with patch.object(feed, "_adb", side_effect=adb), \
+             patch.object(macros_mod, "read_status", return_value=S()), \
+             patch.object(macros_mod.SCAN_ACTIVE, "is_set",
+                          return_value=scan):
+            for f in focuses:
+                feed._watch_density(f)
+        return [c for c in calls if c[:3] == ["shell", "wm", "density"]
+                and len(c) == 4]
+
+    UMA = "com.hhaexchange.uma/.HomeActivity"
+    IMT = "com.inmyteam.inmyteam/.MainActivity"
+
+    def test_the_apps_density_is_applied_when_it_comes_forward(self):
+        sets = self._run([self.UMA, self.IMT])
+        assert sets == [["shell", "wm", "density", "105"]]
+
+    def test_an_already_right_density_is_left_alone(self):
+        assert self._run([self.UMA, self.UMA]) == []
+
+    def test_never_mid_scan(self):
+        assert self._run([self.IMT], scan=True) == []
+
+    def test_never_mid_macro(self):
+        assert self._run([self.IMT], macro="running") == []
+
+    def test_a_foreign_app_changes_nothing(self):
+        assert self._run(["com.android.settings/.Settings"]) == []

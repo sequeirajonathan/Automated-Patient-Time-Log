@@ -330,6 +330,58 @@ def _watch_shade(hierarchy: str | None, serial: str | None = None) -> None:
         log.warning("could not collapse the shade (%s)", exc)
 
 
+# Density, PER APP. One global density (84) was chosen for HHAeXchange+,
+# whose six-day schedule only fits one capture that small — but every app
+# is different (the owner's observation), and inMyTeam's sparse pages
+# gain nothing from tiny text while losing something real: during the
+# signature moment the sister and the patient handle the PHYSICAL phone,
+# and a bigger UI is a better pen. The watcher applies each care app's
+# density as it comes to the front — never mid-scan, never mid-macro,
+# and only when the value actually changes.
+DEFAULT_DENSITY = 84
+APP_DENSITY = {
+    "com.inmyteam.inmyteam": 105,
+}
+_density_now = [0]
+
+
+def _watch_density(focus: str, serial: str | None = None) -> None:
+    pkg = (focus or "").split("/")[0]
+    if pkg not in CARE_APPS:
+        return
+    want = APP_DENSITY.get(pkg, DEFAULT_DENSITY)
+    if _density_now[0] == want:
+        return
+    try:
+        from apt_log import macros as macros_mod
+
+        if macros_mod.SCAN_ACTIVE.is_set():
+            return
+        if macros_mod.read_status().state == "running":
+            return
+    except Exception:  # noqa: BLE001
+        pass
+    if not _density_now[0]:
+        # First sight since this process started: learn what the device
+        # is actually set to, so an already-right value is not re-applied
+        # (each application re-lays-out every app on the phone).
+        try:
+            out = _adb(["shell", "wm", "density"], serial).stdout.decode(
+                "utf-8", "replace")
+            m = re.search(r"Override density: (\d+)", out)
+            _density_now[0] = int(m.group(1)) if m else -1
+        except (OSError, subprocess.SubprocessError, ValueError):
+            _density_now[0] = -1
+        if _density_now[0] == want:
+            return
+    log.info("density %d for %s", want, pkg)
+    try:
+        _adb(["shell", "wm", "density", str(want)], serial)
+        _density_now[0] = want
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("could not set density (%s)", exc)
+
+
 # Containment: no command from the portal should ever LEAVE her anywhere
 # but the four care apps. Taps are verified against the published frame,
 # but a verified tap can still fire an intent — a phone number opens the
@@ -425,6 +477,7 @@ def capture(serial: str | None = None,
     if awake:
         _watch_shade(hierarchy, serial)
         _watch_containment(focus, serial)
+        _watch_density(focus, serial)
     if not focus or not awake:
         # A dark display and a missing focus are the same fact for the page:
         # the phone is not showing anyone anything. Publishing the focused
