@@ -121,6 +121,12 @@ ICON_LABELS = {
 # is good news (green); a cross or a warning is not. The medical context
 # makes this worth the colour: a caregiver scanning her day wants the
 # confirmed check-ins to read as confirmed at a glance.
+MARK_TONE = {
+    "\u2713": "ok",       # check -> green
+    "\u2715": "bad",      # cross -> red
+    "\u26a0": "warn",     # warning -> amber
+}
+
 # A row whose only words are a GENERATED DESCRIPTION — the sentence a screen
 # reader would say, which is all a custom-drawn list gives the tree. Mobile
 # Caregiver+ builds its visits that way: "La visita está programada para
@@ -166,13 +172,6 @@ def _shape_description(text: str) -> list[str] | None:
     # somewhere else in the sentence.
     name = max(names, key=len).strip()
     return [name, f"{clocks[0]} – {clocks[1]}", status]
-
-
-MARK_TONE = {
-    "\u2713": "ok",       # check -> green
-    "\u2715": "bad",      # cross -> red
-    "\u26a0": "warn",     # warning -> amber
-}
 
 # Text the app itself presents as a PRIMARY BUTTON \u2014 the filled calls to
 # action a screen is built around. Matched at the start of a label so
@@ -848,6 +847,34 @@ def _app_tabs(elements: list[dict], statics: list[dict],
     consumed: set[int] = set()
     tabs: list[dict] = []
 
+    def _sweep(consumed: set[int], chosen: list[dict]) -> set[int]:
+        """The bar's own furniture, beside the captions it is named by.
+
+        Consuming only the captions left the rest of the strip to fall into
+        the page: Mobile Caregiver+ labels each tab cell with a description
+        AS WELL as a caption, and hangs an unread count on one — so the
+        patients list ended its body with a stray "Beneficiarios" and a bare
+        "370".
+
+        Narrow on purpose. Anything standing in the bottom band was tried
+        first and swept the page's own last row with it: at a dense layout
+        the content runs to within a few pixels of the pinned bar, and
+        "Detalles del paciente" is content, not navigation. Only two things
+        are furniture — a word the bar has already said, and a bare count —
+        and neither can be mistaken for a row of the page.
+        """
+        said = {(t.get("txt") or "").strip().lower() for t in chosen}
+        for node in statics:
+            if id(node) in consumed:
+                continue
+            txt = (node.get("txt") or "").strip()
+            if not txt or _dev(node)[3] < reach:
+                continue
+            if txt.lower() in said or txt.isdigit():
+                consumed.add(id(node))
+        return consumed
+
+
     # Compose-shaped bar: every tab has a caption, and the selected one has
     # no clickable container. Detect from captions so that slot survives.
     # THREE or more: a two-item bottom bar is a page's action pair — the
@@ -864,7 +891,7 @@ def _app_tabs(elements: list[dict], statics: list[dict],
                          "aim": _aim(holder) if holder else None,
                          "current": holder is None})
             consumed.add(id(s))
-        return tabs, consumed
+        return tabs, _sweep(consumed, tabs)
 
     # Icon-tab bar (inMyTeam): three or more equal containers hugging the
     # bottom, captions optional. Each container is a tab; a stray caption
@@ -880,7 +907,7 @@ def _app_tabs(elements: list[dict], statics: list[dict],
                 consumed.add(id(cap))
             tabs.append({"txt": txt, "aim": _aim(e), "current": False})
             consumed.add(id(e))
-        return tabs, consumed
+        return tabs, _sweep(consumed, tabs)
 
     return [], set()
 

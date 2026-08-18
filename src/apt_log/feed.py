@@ -1312,9 +1312,43 @@ def statics(xml: str) -> list[dict]:
         if not text:
             entry["rid"] = rid
         out.append(entry)
-        if len(out) >= MAX_STATICS:
+        if len(out) >= STATICS_CEILING:
             break
-    return out
+    return _keep_the_bar(out)
+
+
+# A hard stop while reading, so a pathological tree cannot be walked forever.
+# Well above MAX_STATICS: what is read past the cap is not published, it is
+# only looked at long enough to find the bar pinned at the bottom.
+STATICS_CEILING = 600
+
+
+# How much of the tail is held back from the cap for the app's own bottom
+# bar. Five tabs with captions and an unread badge is the widest bar these
+# apps ship; a little more costs nothing and guessing short costs the
+# navigation.
+BAR_TAIL = 8
+
+
+def _keep_the_bar(found: list[dict]) -> list[dict]:
+    """Trim to MAX_STATICS without dropping the app's own bottom bar.
+
+    Truncation used to cut the tail, and a pinned bar is the LAST thing in
+    the tree — so the 370-message inbox, which spends its whole budget on
+    messages, published no captions at all and the portal lost the app's
+    navigation. She could read the inbox and had no way back to the visits
+    list except the phone's own Back button.
+
+    The tail is kept by POSITION IN THE TREE rather than by where it sits on
+    the screen. A long list is exactly the case this exists for, and a long
+    list is also where a node's bounds stop being a reliable guide: the rows
+    below the fold carry coordinates that run off the bottom of the screen,
+    so "whatever is lowest" points into the list, not at the bar pinned over
+    it.
+    """
+    if len(found) <= MAX_STATICS:
+        return found
+    return found[:MAX_STATICS - BAR_TAIL] + found[-BAR_TAIL:]
 
 
 # ------------------------------------------------------------------- alerts

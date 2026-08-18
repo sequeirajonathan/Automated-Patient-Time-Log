@@ -1008,3 +1008,36 @@ class TestGeneratedDescriptions:
                    if i["kind"] == "row"]
         assert cell["lines"][0] == "ATANASIO MEDEROS TORRIEN"
         assert cell["lines"][1] == "9:05 AM – 11:05 AM"
+
+
+class TestTabBarFurniture:
+    """Mobile Caregiver+ labels each tab cell with a description as well as
+    a caption, and hangs an unread count on one — so the patients list
+    ended its body with a stray "Beneficiarios" and a bare "370"."""
+
+    def _model(self, extra):
+        return screenview.build(doc(
+            elements=[el("action_tab_home", "FrameLayout", [226, 1539, 315, 1568]),
+                      el("action_tab_messages", "FrameLayout", [404, 1539, 493, 1568])],
+            statics=[st([262, 1556, 279, 1565], "Visitas"),
+                     st([337, 1555, 381, 1565], "Beneficiarios"),
+                     st([436, 1556, 460, 1565], "Mensajes")] + extra,
+        ))
+
+    def _body(self, m):
+        return [t for r in m["rows"] for i in r["items"]
+                for t in ([i.get("txt")] + (i.get("lines") or [])) if t]
+
+    def test_a_word_the_bar_already_said_is_not_a_row(self):
+        m = self._model([st([315, 1539, 404, 1568], "Beneficiarios")])
+        assert [t["txt"] for t in m["apptabs"]] == ["Visitas", "Beneficiarios",
+                                                    "Mensajes"]
+        assert "Beneficiarios" not in self._body(m)
+
+    def test_an_unread_count_is_not_a_row(self):
+        m = self._model([st([447, 1539, 463, 1548], "370")])
+        assert "370" not in self._body(m)
+
+    def test_a_number_ABOVE_the_bar_is_still_content(self):
+        m = self._model([st([10, 400, 60, 420], "370")])
+        assert "370" in self._body(m)

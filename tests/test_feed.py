@@ -1769,3 +1769,40 @@ class TestContentDescriptionIsALabel:
         (el,) = feed.elements(typed, label=True)
         assert el.get("txt") is None or el["txt"] == ""
         assert feed.statics(typed) == []
+
+
+class TestTheBarSurvivesTruncation:
+    """A pinned tab bar is the LAST thing in the tree, and truncation used
+    to cut the tail: the 370-message inbox spent its whole budget on
+    messages and published no captions at all, so the portal lost the app's
+    navigation. She could read the inbox and had no way back to the visits
+    list except the phone's own Back button."""
+
+    def _screen(self, messages: int) -> str:
+        rows = "".join(
+            f'<node class="android.widget.TextView" clickable="false" '
+            f'text="Planned Downtime {i}" '
+            f'bounds="[0,{100 + i * 10}][720,{108 + i * 10}]"/>'
+            for i in range(messages))
+        bar = "".join(
+            f'<node class="android.widget.TextView" clickable="false" '
+            f'text="{cap}" bounds="[{x},1556][{x + 40},1565]"/>'
+            for cap, x in (("Visitas", 259), ("Beneficiarios", 337),
+                           ("Mensajes", 436)))
+        return rows + bar
+
+    def test_the_captions_outlive_a_flood_of_content(self):
+        found = feed.statics(self._screen(300))
+        assert len(found) <= feed.MAX_STATICS
+        assert [s["txt"] for s in found[-3:]] == ["Visitas", "Beneficiarios",
+                                                  "Mensajes"]
+
+    def test_the_content_is_what_gets_cut(self):
+        """The head is kept, so the top of the page still reads normally."""
+        found = feed.statics(self._screen(300))
+        assert found[0]["txt"] == "Planned Downtime 0"
+
+    def test_a_short_screen_is_untouched(self):
+        found = feed.statics(self._screen(5))
+        assert len(found) == 8
+        assert found[0]["txt"] == "Planned Downtime 0"
