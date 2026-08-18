@@ -297,6 +297,33 @@ def build(doc: dict) -> dict | None:
     statics = [dict(s, b=s.get("vb") or s["b"], dev_b=s["b"])
                for s in doc.get("statics") or [] if s.get("b")]
 
+    # ------------------------------------------------------------- overlays
+    # An app can slide a full-screen surface OVER the page without removing
+    # the page: the GPS confirm draws its map across everything, and the
+    # tree still reports the visit page beneath — tabs, buttons, the whole
+    # care plan — so the portal rendered both pages at once (seen live,
+    # first field test). Document order is z-order: an ANONYMOUS container
+    # spanning most of the screen that arrives AFTER interactive content it
+    # covers is an overlay, where a stitched page's wrapper (an ancestor)
+    # arrives BEFORE its children. Everything beneath an overlay is
+    # invisible on the phone and drops; whatever rides on it or sits
+    # outside it (its own controls, the confirm strip below) stays. A NAMED
+    # container is a control in its own right — the signature canvas —
+    # never an overlay.
+    covers = [i for i, e in enumerate(elements)
+              if not (e.get("rid") or "")
+              and _kind(e.get("cls", "")) == "row"
+              and (e["b"][3] - e["b"][1]) >= h * CURTAIN_MIN_HEIGHT
+              and (e["b"][2] - e["b"][0]) >= w * 0.9
+              and any(j < i and _contains(e["b"], o["b"])
+                      for j, o in enumerate(elements))]
+    if covers:
+        c = covers[-1]
+        cov = elements[c]["b"]
+        elements = [e for j, e in enumerate(elements)
+                    if j > c or (j != c and not _contains(cov, e["b"]))]
+        statics = [s for s in statics if not _contains(cov, s["b"])]
+
     # The app's own bottom tab bar comes out first, before anything is
     # folded or banded: its captions and the containers under them are
     # chrome, lifted to the control bar, not content for the list. Detected

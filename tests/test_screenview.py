@@ -902,3 +902,63 @@ class TestNavTitleLength:
                         "Buscar")],
         ))
         assert m["nav"] is None
+
+
+class TestMapOverlay:
+    """The GPS confirm slides a full-screen map OVER the visit page and
+    the tree still reports the page beneath — the portal rendered both at
+    once. Document order is z-order: an anonymous full-screen container
+    arriving AFTER content it covers is an overlay, and what it covers is
+    invisible on the phone. A page's own wrapper arrives BEFORE its
+    children and is no overlay."""
+
+    def _model(self):
+        return screenview.build(doc(
+            elements=[
+                el("btn_clock_out", "Button", [365, 148, 715, 174],
+                   "Registrar Salida"),
+                el("", "FrameLayout", [0, 128, 720, 1501]),
+                el("btn_confirm", "Button", [312, 1529, 407, 1555],
+                   "Confirmar"),
+            ],
+            statics=[st([5, 224, 710, 234], "106 - Hair Care-Shampoo"),
+                     st([620, 1492, 720, 1501], "©2026 Google"),
+                     st([0, 1506, 720, 1519],
+                        "Se encuentra a 47 metros del paciente")],
+        ))
+
+    def test_covered_content_disappears(self):
+        texts = [(i.get("txt") or "") for r in self._model()["rows"]
+                 for i in r["items"]]
+        assert "Registrar Salida" not in texts
+        assert "106 - Hair Care-Shampoo" not in texts
+        assert "©2026 Google" not in texts
+
+    def test_the_overlays_own_strip_survives(self):
+        texts = [(i.get("txt") or "") for r in self._model()["rows"]
+                 for i in r["items"]]
+        assert "Confirmar" in texts
+        assert any("47 metros" in t for t in texts)
+
+    def test_a_pages_own_wrapper_is_not_an_overlay(self):
+        m = screenview.build(doc(
+            elements=[
+                el("", "FrameLayout", [0, 90, 720, 1568]),
+                el("go", "Button", [10, 600, 700, 660], "Entrar"),
+            ],
+            statics=[st([10, 300, 700, 340], "Bienvenida")],
+        ))
+        texts = [(i.get("txt") or "") for r in m["rows"] for i in r["items"]]
+        assert "Entrar" in texts
+        assert "Bienvenida" in texts
+
+    def test_a_named_full_screen_container_is_a_control_not_an_overlay(self):
+        m = screenview.build(doc(
+            elements=[
+                el("btn_borrar", "Button", [4, 1480, 22, 1515], "Borrar"),
+                el("gestureSignature", "FrameLayout", [28, 90, 700, 1560]),
+            ],
+            statics=[],
+        ))
+        texts = [(i.get("txt") or "") for r in m["rows"] for i in r["items"]]
+        assert "Borrar" in texts
