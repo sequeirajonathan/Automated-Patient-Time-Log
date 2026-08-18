@@ -611,6 +611,20 @@ def _folded_count(statics: list[dict] | None) -> int:
     return n
 
 
+# The marks of a signature canvas in a raw hierarchy. Narrower than the
+# finder's own hints on purpose — "draw" is left out because "drawer" would
+# match every navigation drawer in every app; the ids and classes the care
+# apps actually ship all carry one of these.
+_CANVAS_MARK = re.compile(
+    r'(?:resource-id|class)="[^"]*(?:signature|firma|sign_?pad|sketch)',
+    re.IGNORECASE)
+
+
+def _has_canvas(hierarchy: str | None) -> bool:
+    """Whether the screen in front holds a signature canvas."""
+    return bool(hierarchy and _CANVAS_MARK.search(hierarchy))
+
+
 def _fresh_stitch(directory: Path, viewport_id: str,
                   els: list[dict] | None = None,
                   app: str = "", sts: list[dict] | None = None) -> dict | None:
@@ -800,10 +814,16 @@ def write_frame(path: Path, serial: str | None = None,
     # document's first capture still matches what is in front, the portal
     # renders and aims at everything, not just the viewport. The moment the
     # screen moves on, the match fails and the viewport is the truth again.
+    # A signature screen is never served from the cache: the canvas overlay
+    # lives inside the same activity as the page beneath it and shares most
+    # of that page's tree, so the near-match dressed the live canvas in the
+    # task list's stitched walk — no clear button, no save, no box to sign
+    # (seen live, first field test). A canvas moment is one viewport; there
+    # is nothing a stitch could add and everything it could hide.
     stitched = (_fresh_stitch(path.parent, frame_id(els), els=els,
                               app=(focus or "").split("/")[0],
                               sts=statics(hierarchy) if hierarchy else [])
-                if not reason else None)
+                if not reason and not _has_canvas(hierarchy) else None)
     frame = {
         "id": frame_id(els),
         # Why there is no picture, so the page can say something better than

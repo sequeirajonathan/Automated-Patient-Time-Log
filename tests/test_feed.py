@@ -1212,6 +1212,36 @@ class TestFreshStitch:
         assert got is not None and got["step0"] == "aaaa"
 
 
+class TestCanvasNeverCached:
+    """A signature screen is never dressed from the stitch cache. The
+    canvas overlay lives inside the same activity as the page beneath it
+    and shares most of that page's tree, so the near-match served the
+    task list's stitched walk over the live canvas — no clear button, no
+    save, no box to sign (seen live, first field test)."""
+
+    def test_a_signature_canvas_is_recognised(self):
+        for rid in ("gesturePatientSignature", "firma_view", "sign_pad",
+                    "signpad", "layout_tab_content_signature"):
+            xml = f'<node resource-id="a:id/{rid}" bounds="[0,0][720,650]"/>'
+            assert feed._has_canvas(xml) is True
+
+    def test_a_canvas_class_counts_too(self):
+        xml = ('<node class="com.app.SignatureView" resource-id="" '
+               'bounds="[0,0][720,650]"/>')
+        assert feed._has_canvas(xml) is True
+
+    def test_a_navigation_drawer_is_not_a_canvas(self):
+        xml = ('<node class="androidx.drawerlayout.widget.DrawerLayout" '
+               'resource-id="a:id/drawer_layout" bounds="[0,0][720,1600]"/>')
+        assert feed._has_canvas(xml) is False
+
+    def test_an_ordinary_page_is_not_a_canvas(self):
+        assert feed._has_canvas(None) is False
+        assert feed._has_canvas(
+            '<node resource-id="a:id/btn_clock_out" text="Registrar" '
+            'bounds="[0,0][720,60]"/>') is False
+
+
 class TestHierarchyPackage:
     """The tree's own package attributes outrank the focus recorded at
     read time: through an app switch the window manager names the new app

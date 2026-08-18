@@ -26,6 +26,14 @@ CHROME = ('<node class="android.widget.Button" resource-id="com.x:id/btn_save"'
 STROKES = [[[0.1, 0.2, 0], [0.5, 0.5, 40], [0.9, 0.3, 90]]]
 
 
+@pytest.fixture(autouse=True)
+def _debug_dump_stays_out_of_production(tmp_path, monkeypatch):
+    """Refusals in these tests must not overwrite the live evidence file —
+    the deploy gate runs this suite on the Pi, and a test refusal clobbered
+    the recording of a real one mid-field-test."""
+    monkeypatch.setattr(sign, "DEBUG_PATH", tmp_path / "sign-debug.json")
+
+
 class TestValidate:
     def test_a_signature_shape_passes(self):
         assert sign.validate(STROKES) is True
