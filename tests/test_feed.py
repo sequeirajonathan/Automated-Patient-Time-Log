@@ -1802,6 +1802,33 @@ class TestTheBarSurvivesTruncation:
         found = feed.statics(self._screen(300))
         assert found[0]["txt"] == "Planned Downtime 0"
 
+    def test_a_real_bar_survives_whole(self):
+        """A tab is not one node. This app spends three on each — the cell's
+        description, the icon, the caption — and hangs an unread count
+        beside one, so its three-tab bar runs to ten. Reserving less than
+        the bar is worth loses the caption that ends up first in line."""
+        rows = "".join(
+            f'<node class="android.widget.TextView" clickable="false" '
+            f'text="msg {i}" bounds="[0,{100 + i}][720,{108 + i}]"/>'
+            for i in range(300))
+        bar = ""
+        for cap, x in (("Visitas", 226), ("Beneficiarios", 315),
+                       ("Mensajes", 404)):
+            bar += (f'<node class="android.widget.FrameLayout" '
+                    f'clickable="false" text="" content-desc="{cap}" '
+                    f'bounds="[{x},1539][{x + 89},1568]"/>'
+                    f'<node class="android.widget.ImageView" '
+                    f'resource-id="app:id/icon_{cap}" clickable="false" '
+                    f'text="" bounds="[{x + 30},1542][{x + 43},1555]"/>'
+                    f'<node class="android.widget.TextView" '
+                    f'clickable="false" text="{cap}" '
+                    f'bounds="[{x + 20},1556][{x + 60},1565]"/>')
+        bar += ('<node class="android.widget.TextView" clickable="false" '
+                'text="370" bounds="[447,1539][463,1548]"/>')
+        published = [s["txt"] for s in feed.statics(rows + bar)]
+        for cap in ("Visitas", "Beneficiarios", "Mensajes"):
+            assert published.count(cap) >= 1, f"{cap} was truncated away"
+
     def test_a_short_screen_is_untouched(self):
         found = feed.statics(self._screen(5))
         assert len(found) == 8

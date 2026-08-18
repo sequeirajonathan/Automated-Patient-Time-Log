@@ -1324,10 +1324,12 @@ STATICS_CEILING = 600
 
 
 # How much of the tail is held back from the cap for the app's own bottom
-# bar. Five tabs with captions and an unread badge is the widest bar these
-# apps ship; a little more costs nothing and guessing short costs the
-# navigation.
-BAR_TAIL = 8
+# bar. A tab is not one node: Mobile Caregiver+ spends three on each — the
+# cell's own description, the icon, and the caption — and hangs an unread
+# count beside one, so its three-tab bar alone runs to ten. Sized for five
+# tabs at that rate, because guessing short costs the navigation and the
+# content gives up sixteen rows it has over a hundred of.
+BAR_TAIL = 16
 
 
 def _keep_the_bar(found: list[dict]) -> list[dict]:

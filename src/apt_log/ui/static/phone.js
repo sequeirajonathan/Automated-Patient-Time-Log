@@ -116,7 +116,10 @@
     for (const el of root.querySelectorAll('[data-aim]')) {
       el.addEventListener('click', (ev) => {
         ev.preventDefault();
-        if (!socket || socket.readyState !== 1) return;
+        if (!socket || socket.readyState !== 1) {
+          toast(i18n.explainOffline || '');
+          return;
+        }
         let aim;
         try { aim = JSON.parse(el.dataset.aim); } catch (e) { return; }
         // The type bar exists for ONE moment: a screen asking for a
@@ -806,7 +809,15 @@
 
     for (const btn of document.querySelectorAll('[data-act]')) {
       btn.addEventListener('click', () => {
-        if (!socket || socket.readyState !== 1) return;
+        // Back is the way out of a page she did not mean to be on, so a
+        // Back that quietly does nothing is the worst of the offline
+        // failures: she presses, the screen does not move, and the portal
+        // looks broken rather than disconnected. Home needs no socket and
+        // still works — the picker is pure navigation.
+        if (!socket || socket.readyState !== 1) {
+          toast(i18n.explainOffline || '');
+          return;
+        }
         // Back is always the phone's own Back — it closes slide-overs and
         // backs out of pages, and guessing which press is the last one
         // proved impossible (HHAeXchange+ keeps its whole app under one
