@@ -502,9 +502,17 @@ def build(doc: dict) -> dict | None:
             narrow = (e["b"][2] - e["b"][0]) <= w * 0.6
             left_anchored = e["b"][0] <= w * 0.08
             line_shaped = (e["b"][3] - e["b"][1]) <= h * 0.03
-            item["info"] = (narrow and left_anchored and line_shaped
-                            and not item["cta"] and not badge
-                            and len(lines) <= 1 and bool(lines or marks))
+            # A row the app itself marks disabled is a statement whatever
+            # its shape — HHAeXchange+ marks its EVV record lines that way
+            # ("Registros de entrada de EVV 6:00 a. m."), which is the app
+            # saying outright what the shape rules above infer. Dimming
+            # those to a greyed control would have hidden the very fact
+            # they exist to show; they read as information instead.
+            item["info"] = (
+                (not item["enabled"] and bool(lines or marks))
+                or (narrow and left_anchored and line_shaped
+                    and not item["cta"] and not badge
+                    and len(lines) <= 1 and bool(lines or marks)))
             item["tone"] = (item["marks"][0]["tone"]
                             if item["info"] and item["marks"] else "")
         elif kind == "button":

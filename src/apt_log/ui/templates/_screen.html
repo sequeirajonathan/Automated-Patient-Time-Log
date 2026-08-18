@@ -84,6 +84,8 @@
         <button type="button" class="a-cell{% if it.cta %} cta{% endif %}{% if not it.enabled %} off{% endif %}"
                 {% if not it.enabled %}disabled aria-disabled="true"{% endif %}
                 data-aim='{{ it.aim | tojson }}'>
+        {# A disabled row that carries words became an info row above; what
+           reaches here disabled is a control with nothing to say. #}
           {% if it.txt %}<span class="a-line">{{ it.txt }}</span>{% endif %}
           {% for line in it.lines %}
           <span class="a-line{% if not loop.first or it.txt %} sub{% endif %}">{{ line }}</span>

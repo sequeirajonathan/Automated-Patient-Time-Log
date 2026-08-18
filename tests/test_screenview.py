@@ -1077,3 +1077,56 @@ class TestDisabledRendersDisabled:
         (btn,) = [i for r in m["rows"] for i in r["items"]
                   if i["kind"] == "button"]
         assert btn["enabled"] is True
+
+
+class TestDisabledRowsAreStatements:
+    """HHAeXchange+ marks its EVV record lines disabled — "Registros de
+    entrada de EVV 6:00 a. m." is a fact the app is stating, not a control.
+    Dimming those to a greyed button would have hidden the very thing they
+    exist to show, so a disabled row reads as information instead. A
+    disabled BUTTON is a different case: a real call to action that is not
+    available yet, and it stays a dimmed button."""
+
+    def test_a_disabled_row_becomes_information(self):
+        m = screenview.build(doc(
+            elements=[dict(el("", "View", [20, 217, 201, 242]),
+                           enabled=False)],
+            statics=[st([35, 223, 195, 236],
+                        "Registros de entrada de EVV 6:00 a. m.")],
+        ))
+        (row,) = [i for r in m["rows"] for i in r["items"]
+                  if i["kind"] == "row"]
+        assert row["info"] is True, "a stated fact, not a door"
+
+    def test_a_wide_disabled_row_is_information_too(self):
+        """Wider than the shape rules would call informational: the app
+        saying so outranks the shape."""
+        m = screenview.build(doc(
+            elements=[dict(el("", "View", [11, 1400, 709, 1440]),
+                           enabled=False)],
+            statics=[st([20, 1410, 700, 1430],
+                        "La visita se registró correctamente")],
+        ))
+        (row,) = [i for r in m["rows"] for i in r["items"]
+                  if i["kind"] == "row"]
+        assert row["info"] is True
+
+    def test_an_enabled_row_is_still_a_door(self):
+        m = screenview.build(doc(
+            elements=[el("schedule_screen_edit_visit", "View",
+                         [22, 271, 704, 296])],
+            statics=[st([339, 278, 388, 289], "Ver detalles")],
+        ))
+        (row,) = [i for r in m["rows"] for i in r["items"]
+                  if i["kind"] == "row"]
+        assert row["info"] is False
+
+    def test_a_disabled_button_stays_a_dimmed_button(self):
+        m = screenview.build(doc(
+            elements=[dict(el("save", "Button", [11, 1532, 709, 1557],
+                              "Salvar"), enabled=False)],
+            statics=[],
+        ))
+        (btn,) = [i for r in m["rows"] for i in r["items"]
+                  if i["kind"] == "button"]
+        assert btn["enabled"] is False
