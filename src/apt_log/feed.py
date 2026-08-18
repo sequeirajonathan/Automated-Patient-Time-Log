@@ -342,14 +342,31 @@ DEFAULT_DENSITY = 84
 APP_DENSITY = {
     "com.inmyteam.inmyteam": 105,
 }
+# The signature moment gets its own value, found by its fingerprint: the
+# legacy app is the only care app that goes LANDSCAPE, and it does so for
+# exactly one thing — the signature canvas, where the sister and then the
+# patient draw with a finger on the physical phone. 105 is the density
+# the one proven signature landed at; the sweet spot is tuned here.
+SIGNATURE_DENSITY = 105
+_LANDSCAPE_X = re.compile(r"\[(?:8\d{2}|9\d{2}|1\d{3}),")
 _density_now = [0]
 
 
-def _watch_density(focus: str, serial: str | None = None) -> None:
+def _looks_landscape(hierarchy: str | None) -> bool:
+    """A bounds x-coordinate past the portrait width means the screen is
+    sideways — the reflow has recognised the signature screen this way
+    since its first real clock-out."""
+    return bool(hierarchy and _LANDSCAPE_X.search(hierarchy))
+
+
+def _watch_density(focus: str, serial: str | None = None,
+                   hierarchy: str | None = None) -> None:
     pkg = (focus or "").split("/")[0]
     if pkg not in CARE_APPS:
         return
     want = APP_DENSITY.get(pkg, DEFAULT_DENSITY)
+    if pkg == "com.hhaexchange.caregiver" and _looks_landscape(hierarchy):
+        want = SIGNATURE_DENSITY
     if _density_now[0] == want:
         return
     try:
@@ -477,7 +494,7 @@ def capture(serial: str | None = None,
     if awake:
         _watch_shade(hierarchy, serial)
         _watch_containment(focus, serial)
-        _watch_density(focus, serial)
+        _watch_density(focus, serial, hierarchy)
     if not focus or not awake:
         # A dark display and a missing focus are the same fact for the page:
         # the phone is not showing anyone anything. Publishing the focused
@@ -724,6 +741,9 @@ def write_screen(target: Path, frame: dict, screen: str, reason: str,
         # Whether the page scrolls: the offer to read it end to end only
         # makes sense when there is something below the fold to read.
         "scrollable": bool(hierarchy and 'scrollable="true"' in hierarchy),
+        # Sideways (the signature screen is the one place a care app goes
+        # landscape): the peek photograph needs turning to be readable.
+        "landscape": _looks_landscape(hierarchy),
         # Whether this document is the WHOLE page (a stitched walk) or the
         # viewport. Full documents leave nothing to wonder about.
         "full": bool(stitched),

@@ -280,6 +280,8 @@
     // from an app (one Back too many, or the Home button) means she left
     // the app, and leaving an app here means the picker: flip to it once,
     // on the transition, so she is never stranded staring at a dead end.
+    // A sideways screen (the signature moment) turns the peek upright.
+    body.classList.toggle('sideways', !!meta.landscape);
     const onLauncher = meta.name === 'launcher';
     // While a macro is working — and for a grace period after it ends —
     // the launcher is not a destination, it is scenery: the sign-in path

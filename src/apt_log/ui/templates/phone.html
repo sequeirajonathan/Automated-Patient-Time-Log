@@ -499,6 +499,17 @@
      outright, there is no fight to win. */
   body.peeking #screenwrap { visibility:hidden; }
   #peek { width:100%; height:auto; display:block; }
+  /* The signature screen is the one place a care app goes sideways, and
+     its photograph arrived sideways too — read with a tilted head during
+     the first live signature test. The frame turns upright here: rotate
+     the portrait photograph (720x1600) a quarter turn and scale it back
+     to the page's width (720/1600 = 0.45); the negative block margins
+     trim the empty flow box the transform leaves behind
+     ((1600/720 - 720/1600) / 2 = 88.6% of the width). */
+  body.sideways #peek {
+      transform: rotate(-90deg) scale(0.45);
+      transform-origin: center;
+      margin: -88.6% 0; }
   #peek-cap { position:absolute; left:50%; transform:translateX(-50%);
               bottom:14px; z-index:5; display:none; background:rgb(0 0 0/.65);
               color:#fff; font-size:12.5px; padding:6px 12px;

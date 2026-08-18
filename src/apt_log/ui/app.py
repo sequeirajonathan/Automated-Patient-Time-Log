@@ -565,6 +565,7 @@ async def live(ws: WebSocket):
                     "h_app": screen_doc.get("h_app", ""),
                     "blocked": screen_doc.get("blocked", ""),
                     "notice": screen_doc.get("notice", ""),
+                    "landscape": bool(screen_doc.get("landscape")),
                     # The app's own tab bar, lifted out of the list to ride
                     # the control bar beside Back and Home. Empty on screens
                     # without one.

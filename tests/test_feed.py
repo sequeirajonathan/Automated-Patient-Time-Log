@@ -1453,3 +1453,49 @@ class TestPerAppDensity:
 
     def test_a_foreign_app_changes_nothing(self):
         assert self._run(["com.android.settings/.Settings"]) == []
+
+
+class TestSignatureDensity:
+    """The legacy app goes landscape for exactly one thing — the
+    signature canvas, where humans draw with a finger on the physical
+    phone. That moment gets its own density; portrait pages keep the
+    app default."""
+
+    LEGACY = "com.hhaexchange.caregiver/.VisitDetailActivity"
+    SIDEWAYS = '<node bounds="[1400,600][1580,700]" class="Button"/>'
+    UPRIGHT = '<node bounds="[10,600][700,700]" class="Button"/>'
+
+    def _run(self, focus, hierarchy, current="84"):
+        feed._density_now[0] = 0
+        calls = []
+
+        def adb(a, *_, **__):
+            calls.append(a)
+            m = MagicMock(returncode=0)
+            m.stdout = f"Override density: {current}\n".encode()
+            return m
+
+        import apt_log.macros as macros_mod
+
+        class S:
+            state = "idle"
+
+        with patch.object(feed, "_adb", side_effect=adb), \
+             patch.object(macros_mod, "read_status", return_value=S()), \
+             patch.object(macros_mod.SCAN_ACTIVE, "is_set",
+                          return_value=False):
+            feed._watch_density(focus, hierarchy=hierarchy)
+        return [c for c in calls if c[:3] == ["shell", "wm", "density"]
+                and len(c) == 4]
+
+    def test_the_sideways_screen_gets_the_signature_density(self):
+        sets = self._run(self.LEGACY, self.SIDEWAYS)
+        assert sets == [["shell", "wm", "density",
+                         str(feed.SIGNATURE_DENSITY)]]
+
+    def test_an_upright_legacy_page_keeps_the_default(self):
+        assert self._run(self.LEGACY, self.UPRIGHT) == []
+
+    def test_the_flag_is_published_with_the_screen(self):
+        assert feed._looks_landscape(self.SIDEWAYS) is True
+        assert feed._looks_landscape(self.UPRIGHT) is False
