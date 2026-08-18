@@ -96,6 +96,7 @@
          margin-right:7px; vertical-align:baseline; background:var(--muted); }
   .dot.ok { background:var(--ok); } .dot.bad { background:var(--bad); }
   .dot.unknown { background:var(--unknown); }
+  .dot.off { background:var(--muted); opacity:.45; }
   .chip { font-size:12px; font-weight:600; padding:3px 9px; border-radius:999px;
           background:var(--track); color:var(--muted); white-space:nowrap; }
   .chip.ok { background:color-mix(in srgb, var(--ok) 16%, transparent); color:var(--ok); }
@@ -506,9 +507,14 @@
     {% for svc in m.services %}
     <div class="row">
       <div class="k"><b><span class="dot {{ svc.state }}"></span>{{ svc.unit }}</b></div>
+      {# "Off" is its own word and its own colour. A unit somebody disabled on
+         purpose shown in the same red as one that crashed is how a red light
+         stops meaning anything. #}
       <span class="chip {{ svc.state }}">
-        {{ t('health.ok') if svc.state == 'ok' else t('health.bad')
-           if svc.state == 'bad' else t('common.unknown') }}</span>
+        {% if svc.state == 'ok' %}{{ t('health.ok') }}
+        {% elif svc.state == 'bad' %}{{ t('health.bad') }}
+        {% elif svc.state == 'off' %}{{ t('console.services.off') }}
+        {% else %}{{ t('common.unknown') }}{% endif %}</span>
     </div>
     {% endfor %}
     <p class="sub">{{ t('common.updated_at', time=t.time(s.generated_at)) }}</p>

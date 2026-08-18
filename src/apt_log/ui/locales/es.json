@@ -250,5 +250,6 @@
   "console.pi.uptime": "Encendido desde hace",
   "console.pi.days": "{d} días y {h} horas",
   "console.pi.tailnet": "Red privada",
-  "console.services.title": "Servicios"
+  "console.services.title": "Servicios",
+  "console.services.off": "Apagado"
 }

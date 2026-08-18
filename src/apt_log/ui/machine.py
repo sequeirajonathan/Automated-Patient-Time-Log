@@ -29,11 +29,17 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-# The three the deploy gate restarts, plus the one that carries this page to
-# Texas. tailscaled is not ours and is not restarted by anything here, which
-# is exactly why it is worth showing: when it is down the portal is simply
-# unreachable, and the person who would notice cannot see this page to find out.
-UNITS = ("aptlog-agent", "aptlog-appium", "aptlog-ui", "tailscaled")
+# The three that have to be up for the portal to do anything, plus the one
+# that carries it to Texas. tailscaled is not ours and is not restarted by
+# anything here, which is exactly why it is worth showing: when it is down the
+# portal is simply unreachable, and the person who would notice cannot see this
+# page to find out.
+#
+# aptlog-agent is deliberately absent. It is the scheduler — the machine
+# deciding on its own when to record a visit — and it is disabled on purpose.
+# A unit somebody turned off is not a fault, and a row that is red every day is
+# a row people stop reading.
+UNITS = ("aptlog-feed", "aptlog-appium", "aptlog-ui", "tailscaled")
 
 CACHE_TTL = 5.0
 _cache: dict = {"at": 0.0, "doc": None}
@@ -105,20 +111,33 @@ def _cpu_count() -> int:
 
 
 def _unit(unit: str) -> str:
-    """ok / bad / unknown, in the vocabulary the health panel already uses."""
+    """ok / bad / off / unknown.
+
+    "off" is the one worth having and the reason this asks two questions in one
+    call: a unit that is stopped BECAUSE SOMEBODY DISABLED IT is not a fault,
+    and showing it in the same red as a crash teaches whoever is looking to
+    ignore the colour. Stopped while still enabled is a real failure and stays
+    red.
+    """
     try:
-        out = subprocess.run(["systemctl", "is-active", unit],
-                             capture_output=True, text=True, timeout=4,
-                             check=False)
+        out = subprocess.run(
+            ["systemctl", "show", unit, "-p", "ActiveState", "-p", "UnitFileState"],
+            capture_output=True, text=True, timeout=4, check=False)
     except (OSError, subprocess.SubprocessError):
         return "unknown"
-    state = out.stdout.strip()
+    fields = {}
+    for line in out.stdout.splitlines():
+        name, _, value = line.partition("=")
+        fields[name.strip()] = value.strip()
+    state = fields.get("ActiveState", "")
     if state == "active":
         return "ok"
     if state in ("activating", "reloading"):
         return "unknown"
     if not state:
         return "unknown"
+    if fields.get("UnitFileState") in ("disabled", "masked"):
+        return "off"
     return "bad"
 
 
@@ -246,7 +265,10 @@ def worst(doc: dict | None = None) -> str:
     arm's length: bad if anything is bad or nearly out of something, unknown
     if anything is unsettled, ok otherwise."""
     doc = doc or read()
-    states = {s["state"] for s in doc.get("services", ())}
+    # "off" is not in this set on purpose: a unit somebody turned off is a
+    # decision, not a symptom, and it must not colour the whole machine.
+    states = {s["state"] for s in doc.get("services", ())
+              if s["state"] != "off"}
     phone = (doc.get("phone") or {}).get("attached", "unknown")
     states.add(phone)
     states.add((doc.get("net") or {}).get("up", "unknown"))

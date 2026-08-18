@@ -217,6 +217,27 @@ class TestMetrics:
         assert doc["mem"] is None
         assert doc["temp_c"] is None
 
+    def test_a_unit_somebody_turned_off_is_not_a_fault(self):
+        """The scheduler is disabled on purpose — the machine deciding when to
+        record a visit is the thing that was abandoned. Shown in the same red
+        as a crash it would be red every day, and a row that is red every day
+        is a row people stop reading."""
+        doc = {"services": [{"unit": "aptlog-agent", "state": "off"},
+                            {"unit": "aptlog-ui", "state": "ok"}],
+               "phone": {"attached": "ok", "battery": 80},
+               "net": {"up": "ok"}}
+        assert machine_mod.worst(doc) == "ok"
+
+    def test_a_unit_that_stopped_while_still_enabled_is_a_fault(self, monkeypatch):
+        calls = []
+
+        class Done:
+            stdout = "ActiveState=failed\nUnitFileState=enabled\n"
+
+        monkeypatch.setattr(machine_mod.subprocess, "run",
+                            lambda *a, **k: calls.append(a) or Done())
+        assert machine_mod._unit("aptlog-ui") == "bad"
+
     def test_the_summary_is_bad_when_anything_is_nearly_full(self):
         doc = {"services": [{"unit": "x", "state": "ok"}],
                "phone": {"attached": "ok", "battery": 80},

@@ -250,5 +250,6 @@
   "console.pi.uptime": "Running for",
   "console.pi.days": "{d} days, {h} hours",
   "console.pi.tailnet": "Private network",
-  "console.services.title": "Services"
+  "console.services.title": "Services",
+  "console.services.off": "Turned off"
 }
