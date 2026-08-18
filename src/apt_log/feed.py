@@ -766,11 +766,12 @@ def write_screen(target: Path, frame: dict, screen: str, reason: str,
         # canvas on a portrait screen IS the evidence. Same rule the
         # stroke replay turns by — the peek and the ink must agree.
         "landscape": (_looks_landscape(hierarchy)
-                      or sign_mod.sideways(
-                          hierarchy or "",
-                          package=(hierarchy_package(hierarchy)
-                                   or (hierarchy_focus or "").split("/")[0]),
-                          has_canvas=_has_canvas(hierarchy))),
+                      or (_has_canvas(hierarchy)
+                          and sign_mod.sideways(
+                              hierarchy or "",
+                              package=(hierarchy_package(hierarchy)
+                                       or (hierarchy_focus or "")
+                                       .split("/")[0])))),
         # A signature canvas is in front. The walker must not swipe (a
         # swipe on a canvas is ink), and the portal can dress the page
         # for signing instead of reading.

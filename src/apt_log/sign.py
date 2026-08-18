@@ -192,7 +192,7 @@ def read_status(path: Path | None = None) -> Status:
 
 
 # -------------------------------------------------------------------- finder
-def find_canvas(xml: str) -> tuple[list[int] | None, str]:
+def find_canvas(xml: str, dump: bool = True) -> tuple[list[int] | None, str]:
     """The signature canvas on this screen, or why there is none.
 
     Returns (bounds, "") or (None, reason). Exactly one candidate is the only
@@ -252,11 +252,13 @@ def find_canvas(xml: str) -> tuple[list[int] | None, str]:
 
     pool = named or shaped
     if not pool:
-        _dump_refusal(nodes, "no_canvas")
+        if dump:
+            _dump_refusal(nodes, "no_canvas")
         return None, "no_canvas"
     if len(pool) > 1:
-        log.info("signature finder: %d candidates, refusing", len(pool))
-        _dump_refusal(nodes, "ambiguous")
+        if dump:
+            log.info("signature finder: %d candidates, refusing", len(pool))
+            _dump_refusal(nodes, "ambiguous")
         return None, "ambiguous"
     return pool[0], ""
 
@@ -337,7 +339,7 @@ def presentation_rotated(xml: str) -> bool:
 ROTATED_CANVAS_APPS = ("com.hhaexchange.caregiver",)
 
 
-def _portrait_extent(xml: str) -> bool:
+def _extent(xml: str) -> tuple[int, int]:
     max_x = max_y = 0
     for raw in _NODE.findall(xml or ""):
         m = _BOUNDS.search(_attr(raw, "bounds"))
@@ -346,16 +348,38 @@ def _portrait_extent(xml: str) -> bool:
         x1, y1, x2, y2 = (int(g) for g in m.groups())
         if x2 > x1 and y2 > y1:
             max_x, max_y = max(max_x, x2), max(max_y, y2)
-    return bool(max_x) and max_x < max_y
+    return max_x, max_y
 
 
-def sideways(xml: str, package: str = "", has_canvas: bool = False) -> bool:
-    """Whether ink replayed onto this screen must turn a quarter turn."""
+# The share of the screen a canvas must claim before the page counts as a
+# signature MOMENT rather than a page that merely remembers one. The
+# completed visit detail keeps the saved signatures' wrappers in its tree,
+# and mere canvas marks held the portal's peek sideways on an upright page
+# (seen live, first field test). Both live signature screens clear these
+# comfortably: the full page at ~94% of the height, the tab variant at 41%.
+CANVAS_DOMINANT_W = 0.6
+CANVAS_DOMINANT_H = 0.35
+
+
+def sideways(xml: str, package: str = "") -> bool:
+    """Whether ink replayed onto this screen must turn a quarter turn.
+
+    True only for a signature MOMENT: the replay's own finder accepts the
+    screen (exactly one canvas) and that canvas dominates it. The peek and
+    the ink turn by this same answer — they must never disagree.
+    """
     if presentation_rotated(xml):
         return True
-    return (has_canvas
-            and package in ROTATED_CANVAS_APPS
-            and _portrait_extent(xml))
+    if package not in ROTATED_CANVAS_APPS:
+        return False
+    max_x, max_y = _extent(xml)
+    if not max_x or max_x >= max_y:
+        return False
+    bounds, _ = find_canvas(xml, dump=False)
+    if bounds is None:
+        return False
+    return ((bounds[2] - bounds[0]) >= CANVAS_DOMINANT_W * max_x
+            and (bounds[3] - bounds[1]) >= CANVAS_DOMINANT_H * max_y)
 
 
 # --------------------------------------------------------------------- paths
@@ -478,8 +502,7 @@ def execute(payload: dict, status_path: Path | None = None) -> Status:
             return
         _perform(driver, build_paths(strokes, bounds,
                                      payload.get("aspect", 1.0),
-                                     rotate=sideways(xml, package,
-                                                     has_canvas=True)))
+                                     rotate=sideways(xml, package)))
         status.state = "done"
 
     try:

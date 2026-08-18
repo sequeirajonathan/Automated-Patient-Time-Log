@@ -315,7 +315,11 @@ class TestSidewaysCanvasApps:
     captions are laid out as ordinary wide boxes and rotated only in the
     drawing pass uiautomator cannot see — a real signature replayed
     unturned past the label heuristic (seen live, first field test). For
-    these apps, a signature canvas on a portrait screen IS the evidence."""
+    these apps, a signature MOMENT is the evidence: the finder accepts the
+    screen and the canvas dominates it. A page that merely REMEMBERS its
+    signatures (the completed visit detail keeps their wrappers in its
+    tree) held the peek sideways on an upright page — marks alone are not
+    a moment."""
 
     PORTRAIT_CANVAS = (
         '<node class="android.widget.FrameLayout" '
@@ -324,27 +328,63 @@ class TestSidewaysCanvasApps:
         '<node class="android.widget.TextView" text="Sadia Amselem" '
         'bounds="[0,1151][358,1164]" />')
 
+    LEGACY = "com.hhaexchange.caregiver"
+
     def test_a_portrait_canvas_in_the_legacy_app_is_sideways(self):
-        assert sign.sideways(self.PORTRAIT_CANVAS,
-                             package="com.hhaexchange.caregiver",
-                             has_canvas=True) is True
+        assert sign.sideways(self.PORTRAIT_CANVAS, package=self.LEGACY) \
+            is True
+
+    def test_the_tab_variant_canvas_is_also_sideways(self):
+        tab = ('<node class="android.widget.FrameLayout" '
+               'resource-id="app:id/gesturePatientSignature" text="" '
+               'bounds="[0,492][720,1142]" />'
+               '<node class="android.widget.TextView" text="footer" '
+               'bounds="[0,1550][720,1568]" />')
+        assert sign.sideways(tab, package=self.LEGACY) is True
 
     def test_the_truly_landscape_variant_needs_no_turn(self):
         wide = ('<node class="android.view.View" '
                 'resource-id="a:id/signature" text="" '
                 'bounds="[0,0][1600,720]" />')
-        assert sign.sideways(wide, package="com.hhaexchange.caregiver",
-                             has_canvas=True) is False
+        assert sign.sideways(wide, package=self.LEGACY) is False
 
     def test_other_apps_are_not_turned_by_the_canvas_alone(self):
         assert sign.sideways(self.PORTRAIT_CANVAS,
-                             package="com.hhaexchange.uma",
-                             has_canvas=True) is False
+                             package="com.hhaexchange.uma") is False
 
     def test_no_canvas_means_no_turn(self):
-        assert sign.sideways(self.PORTRAIT_CANVAS,
-                             package="com.hhaexchange.caregiver",
-                             has_canvas=False) is False
+        page = ('<node class="android.widget.Button" text="Registrar" '
+                'bounds="[5,148][354,174]" />'
+                '<node class="android.widget.TextView" text="footer" '
+                'bounds="[0,1550][720,1568]" />')
+        assert sign.sideways(page, package=self.LEGACY) is False
+
+    def test_an_ambiguous_screen_is_not_a_signature_moment(self):
+        """Two side-by-side canvases (the completed page remembering both
+        signatures) refuse the finder — and an upright peek follows."""
+        two = ('<node class="android.widget.FrameLayout" '
+               'resource-id="app:id/gestureSignature" text="" '
+               'bounds="[10,200][710,800]" />'
+               '<node class="android.widget.FrameLayout" '
+               'resource-id="app:id/gesturePatientSignature" text="" '
+               'bounds="[10,900][710,1500]" />')
+        assert sign.sideways(two, package=self.LEGACY) is False
+
+    def test_a_small_remembered_thumbnail_does_not_turn_the_page(self):
+        thumb = ('<node class="android.widget.FrameLayout" '
+                 'resource-id="app:id/signature_preview" text="" '
+                 'bounds="[500,1400][700,1500]" />'
+                 '<node class="android.widget.TextView" text="footer" '
+                 'bounds="[0,1550][720,1568]" />')
+        assert sign.sideways(thumb, package=self.LEGACY) is False
+
+    def test_feed_cadence_refusals_do_not_touch_the_evidence_file(self,
+                                                                  tmp_path):
+        import unittest.mock as mock
+        with mock.patch.object(sign, "_dump_refusal") as dump:
+            sign.find_canvas("<node class='x' bounds='[0,0][720,100]'/>",
+                             dump=False)
+        dump.assert_not_called()
 
 
 class TestRotatedPaths:
