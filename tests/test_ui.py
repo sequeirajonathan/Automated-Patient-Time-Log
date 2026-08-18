@@ -782,6 +782,58 @@ class TestShellNeverGoesStale:
             assert "aptlog-reloaded" in js     # and the loop guard with it
 
 
+class TestTheCodeBarClearsThePhonesControls:
+    """Reported from the field: the OTP input sat so close to the controls
+    that Cancel pressed Home, which leaves the app view — and with it the
+    screen the code was for.
+
+    The cause was two constants standing in for one measurement. The pill
+    alone is one height; the pill under the app's own tab row is another, and
+    the tab row comes and goes with the screen. Both numbers were written
+    from the no-tabs case, so on the schedule — which has tabs every day —
+    the type bar landed on the pill and the content ran under both.
+    """
+
+    SCRIPT = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/static/phone.js")
+
+    def test_the_bar_is_placed_from_a_measurement(self, client):
+        """Comments are stripped first: the rule's own comment quotes the
+        constant it replaced in order to explain it, and a guard that cannot
+        tell code from prose forbids describing the bug it prevents — the
+        same trap the form.action guard already documents."""
+        import re
+
+        body = client.get("/app").text
+        assert "var(--chrome-h" in body
+        css = re.sub(r"/\*.*?\*/", "", body, flags=re.S)
+        assert "bottom:88px" not in css
+
+    def test_the_content_tail_clears_the_same_measurement(self, client):
+        body = client.get("/app").text
+        assert "padding:2px 0 calc(var(--chrome-h" in body
+
+    def test_the_measurement_follows_the_tab_row_appearing(self):
+        """The tab row is what changes the height, so the height has to be
+        re-read when it does — not once at load."""
+        source = self.SCRIPT.read_text(encoding="utf-8")
+        assert "ResizeObserver" in source
+        assert "--chrome-h" in source
+
+    def test_the_phones_controls_go_inert_while_she_types(self, client):
+        """The real guarantee. Spacing makes a mis-tap unlikely; this makes
+        it harmless — Cancel is the only live control down there while the
+        bar is open."""
+        body = client.get("/app").text
+        assert "body.typing .navbar" in body
+        assert "pointer-events:none" in body
+
+    def test_the_client_sets_and_clears_that_state(self):
+        source = self.SCRIPT.read_text(encoding="utf-8")
+        assert "classList.add('typing')" in source
+        assert "classList.remove('typing')" in source
+
+
 class TestPhoneBoundaries:
     """Every page respects the device's own chrome.
 

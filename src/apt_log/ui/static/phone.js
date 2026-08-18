@@ -161,6 +161,9 @@
     const hint = bar.querySelector('.typehint');
     if (hint) hint.textContent = label || i18n.typeHint || '';
     bar.hidden = false;
+    // The phone's own controls step back while she types: Cancel is the way
+    // out of this bar, and it used to sit right on top of Home.
+    body.classList.add('typing');
     const box = document.getElementById('typebox');
     box.value = '';
     setTimeout(() => box.focus(), 50);
@@ -169,6 +172,7 @@
     typeAim = null;
     const bar = document.getElementById('typebar');
     if (bar) { bar.hidden = true; }
+    body.classList.remove('typing');
   }
   function sendTyped() {
     const box = document.getElementById('typebox');
@@ -846,6 +850,28 @@
     bindWire();
     wireForms(document);
   });
+
+  // How tall the floating chrome actually is, published to CSS so the
+  // content's tail and the type bar can clear it instead of guessing.
+  //
+  // It is not one height. The pill alone is one; the pill under the app's
+  // own tab row is taller, and the tab row comes and goes with the screen.
+  // Two constants were written for it — 104px of padding under the content
+  // and a type bar 88px up — and both were the no-tabs measurement, so on
+  // the schedule the last visit hid behind the tabs and the type bar's
+  // Cancel button sat on top of Home.
+  function measureChrome() {
+    const nav = document.querySelector('.navbar');
+    if (!nav) return;
+    const h = Math.round(nav.getBoundingClientRect().height);
+    if (h > 0) document.documentElement.style.setProperty('--chrome-h', h + 'px');
+  }
+  if (window.ResizeObserver) {
+    const nav = document.querySelector('.navbar');
+    if (nav) new ResizeObserver(measureChrome).observe(nav);
+  }
+  window.addEventListener('resize', measureChrome);
+  measureChrome();
 
   // Failsafe for the splash: 2.8s and it lifts no matter what.
   setTimeout(() => body.classList.add('ready'), 2800);
