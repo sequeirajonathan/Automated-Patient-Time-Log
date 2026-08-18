@@ -640,6 +640,22 @@ def _hhax_uma_login(driver, report) -> None:
         raise RuntimeError("the app came back but did not land signed in")
 
 
+# The form's controls are found by the TAIL of their resource-id, never by a
+# bare id. UiAutomator2 prefixes a bare id with the app's package, and this
+# app's package is not the namespace its ids live in: the application is
+# com.tellus.evv.v2 while its classes and resources are com.tellus.evv, so
+# every bare-id lookup came back empty ("the sign-in form is not where it was
+# walked") on a form that was plainly there. The same trap the HHAeXchange+
+# web form documented, sprung a second way. Anchoring on ":id/" keeps the
+# match to a whole id segment, so login_button cannot catch its neighbours.
+_MC_USERNAME_BOX = ('//android.widget.EditText'
+                    '[contains(@resource-id, ":id/login_username_input")]')
+_MC_PASSWORD_BOX = ('//android.widget.EditText'
+                    '[contains(@resource-id, ":id/login_password_input")]')
+_MC_SIGN_IN = ('//android.widget.Button'
+               '[contains(@resource-id, ":id/login_button")]')
+
+
 def _mobile_caregiver_pin(driver, report) -> None:
     """Mobile Caregiver+ — answer whichever of its two locks is up.
 
@@ -721,12 +737,12 @@ def _mobile_caregiver_pin(driver, report) -> None:
             "Mobile Caregiver+ wants its password and none is stored")
 
     report("macro.step.signing_in")
-    fields = driver.find_elements("id", "login_password_input")
+    fields = driver.find_elements("xpath", _MC_PASSWORD_BOX)
     if not fields:
         raise RuntimeError("the sign-in form is not where it was walked")
     # The username is remembered between sessions; it is only typed when the
     # app has forgotten it, and only if one is stored.
-    for box in driver.find_elements("id", "login_username_input"):
+    for box in driver.find_elements("xpath", _MC_USERNAME_BOX):
         if not (box.text or "").strip():
             try:
                 box.clear()
@@ -736,7 +752,7 @@ def _mobile_caregiver_pin(driver, report) -> None:
         break
     fields[0].clear()
     fields[0].send_keys(password)
-    for button in driver.find_elements("id", "login_button"):
+    for button in driver.find_elements("xpath", _MC_SIGN_IN):
         button.click()
         break
 

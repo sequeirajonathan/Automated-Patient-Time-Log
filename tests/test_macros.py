@@ -1963,17 +1963,17 @@ class TestMobileCaregiverExpiredSession:
         typed, boxes = [], {}
 
         def find_elements(by, selector):
-            if selector == "login_password_input":
+            if "login_password_input" in selector:
                 box = MagicMock()
                 box.send_keys.side_effect = lambda v: typed.append(v)
                 boxes["pw"] = box
                 return [box]
-            if selector == "login_username_input":
+            if "login_username_input" in selector:
                 box = MagicMock()
                 box.text = "SSequeira"          # remembered between sessions
                 box.send_keys.side_effect = lambda v: typed.append(v)
                 return [box]
-            if selector == "login_button":
+            if "login_button" in selector:
                 button = MagicMock()
                 button.click.side_effect = lambda: state.update(
                     activity="com.tellus.evv.activities.DashboardActivity")
@@ -1991,12 +1991,13 @@ class TestMobileCaregiverExpiredSession:
         typed = []
 
         def find_elements(by, selector):
-            if selector in ("login_password_input", "login_username_input"):
+            if ("login_password_input" in selector
+                    or "login_username_input" in selector):
                 box = MagicMock()
                 box.text = ""
                 box.send_keys.side_effect = lambda v: typed.append(v)
                 return [box]
-            if selector == "login_button":
+            if "login_button" in selector:
                 button = MagicMock()
                 button.click.side_effect = lambda: state.update(
                     activity="com.tellus.evv.activities.DashboardActivity")
@@ -2049,11 +2050,12 @@ class TestMobileCaregiverExpiredSession:
                     state["activity"] = self.FORM
                 button.click.side_effect = click
                 return [button]
-            if selector in ("login_password_input", "login_username_input"):
+            if ("login_password_input" in selector
+                    or "login_username_input" in selector):
                 box = MagicMock()
                 box.text = "SSequeira"
                 return [box]
-            if selector == "login_button":
+            if "login_button" in selector:
                 button = MagicMock()
                 button.click.side_effect = lambda: state.update(
                     activity="com.tellus.evv.activities.DashboardActivity")
@@ -2063,6 +2065,52 @@ class TestMobileCaregiverExpiredSession:
         driver.find_elements.side_effect = find_elements
         self._run(driver, **{MC_PASSWORD: "hunter2"})
         assert clicked == [1]
+
+
+    def test_the_form_is_found_under_a_foreign_id_namespace(self):
+        """The live failure: UiAutomator2 prefixes a bare id with the app's
+        package, and this app's package is not the namespace its ids live
+        in — application com.tellus.evv.v2, resources com.tellus.evv. Every
+        bare-id lookup came back empty on a form that was plainly there."""
+        from apt_log.secrets import MC_PASSWORD
+
+        driver, state = self._driver(self.FORM)
+        typed = []
+        # Only ids under the FOREIGN namespace exist here. A locator that
+        # assumes the application package finds nothing.
+        tree = {"com.tellus.evv:id/login_username_input": "SSequeira",
+                "com.tellus.evv:id/login_password_input": "",
+                "com.tellus.evv:id/login_button": None}
+
+        def find_elements(by, selector):
+            if by != "xpath":
+                return []
+            found = []
+            for rid, text in tree.items():
+                needle = selector.split('":id/')[-1].split('"')[0] \
+                    if '":id/' in selector else None
+                if needle and rid.endswith(":id/" + needle):
+                    box = MagicMock()
+                    box.text = text
+                    box.send_keys.side_effect = lambda v: typed.append(v)
+                    box.click.side_effect = lambda: state.update(
+                        activity="com.tellus.evv.activities.DashboardActivity")
+                    found.append(box)
+            return found
+
+        driver.find_elements.side_effect = find_elements
+        self._run(driver, **{MC_PASSWORD: "hunter2"})
+        assert typed == ["hunter2"]
+
+    def test_the_sign_in_button_does_not_catch_its_neighbours(self):
+        """login_passwordhelp_button and login_forgotusername_button sit
+        beside it; anchoring on ":id/" keeps the match to a whole segment."""
+        from apt_log import macros as m
+        for rid in ("com.tellus.evv:id/login_passwordhelp_button",
+                    "com.tellus.evv:id/login_forgotusername_button"):
+            assert ':id/login_button' not in rid
+        assert ':id/login_button' in "com.tellus.evv:id/login_button"
+        assert ':id/login_button"' in m._MC_SIGN_IN
 
     def test_the_macro_is_offered_on_a_password_alone(self):
         """The app locks two ways; either secret makes it worth offering."""
