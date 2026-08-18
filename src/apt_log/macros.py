@@ -1319,7 +1319,13 @@ def _inmyteam_login(driver, report) -> None:
     report("macro.step.launching")
     wake_display()
     driver.activate_app(package)
-    wait_for(lambda: bool(driver.current_activity), timeout=15.0)
+    # Wait for THIS app to be in front, not merely for some activity to be
+    # reported. `current_activity` answers the moment the driver knows
+    # anything, including the app the phone is leaving — and the first live
+    # run read Mobile Caregiver+'s tree, found no field in it, and reported
+    # "already signed in" over an inMyTeam splash that had not drawn yet.
+    if not wait_for(lambda: driver.current_package == package, timeout=20.0):
+        raise RuntimeError("the app did not come to the front")
 
     def field():
         """The number box, if this screen has one."""
@@ -1351,9 +1357,19 @@ def _inmyteam_login(driver, report) -> None:
                 return min(hits, key=_area)
         return None
 
+    def start_button():
+        return by_words("Get Started", "Comenzar", "Empezar")
+
+    # A freshly launched app exposes almost nothing for a second or two, and
+    # an empty tree must never read as "signed in" — the trap the
+    # HHAeXchange+ macro was bitten by and wrote down, sprung here anyway.
+    # Wait for one of the two screens this walk knows before deciding.
+    wait_for(lambda: field() is not None or start_button() is not None,
+             timeout=20.0)
+
     # ---------------------------------------------------------- the splash
     if field() is None:
-        start = by_words("Get Started", "Comenzar", "Empezar")
+        start = start_button()
         if start is not None:
             report("macro.step.starting")
             start.click()
@@ -1361,8 +1377,12 @@ def _inmyteam_login(driver, report) -> None:
 
     box = field()
     if box is None:
-        # Already past the walk. The app is signed in, or somewhere this
-        # macro has no business touching — either way it is not auth.
+        # No field and no splash. Either the app is past the walk — signed
+        # in, on its own home screen — or its tree is still unreadable, and
+        # those two must not be confused. A screen with real content has
+        # several tappable nodes; an unready one has none.
+        if len(driver.find_elements("xpath", '//*[@clickable="true"]')) < 2:
+            raise RuntimeError("the app is not showing anything yet")
         report("macro.step.finished")
         return
 

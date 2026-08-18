@@ -843,6 +843,7 @@ class TestInMyTeamWalksToTheCode:
         """A phone that advances a screen each time something is clicked."""
         driver = MagicMock()
         driver.current_activity = "com.inmyteam.inmyteam.MainActivity"
+        driver.current_package = "com.inmyteam.inmyteam"
 
         def page():
             return {"splash": self.SPLASH, "number": self.NUMBER,
@@ -939,20 +940,66 @@ class TestInMyTeamWalksToTheCode:
             macros.MACROS["inmyteam_login"].run(driver, steps.append)
         assert steps[-1] == "macro.step.awaiting_code"
 
-    def test_a_signed_in_app_is_left_alone(self):
-        import itertools
-
+    def _elsewhere(self, tappables):
+        """An app showing something this walk does not recognise."""
         driver = MagicMock()
         driver.current_activity = "com.inmyteam.inmyteam.MainActivity"
-        driver.find_elements.return_value = []
+        driver.current_package = "com.inmyteam.inmyteam"
+
+        def find_elements(_by, selector):
+            if selector == '//*[@clickable="true"]':
+                return [MagicMock() for _ in range(tappables)]
+            return []
+
+        driver.find_elements.side_effect = find_elements
         type(driver).page_source = PropertyMock(return_value="<node/>")
+        return driver
+
+    def _bare_run(self, driver):
+        import itertools
+
         with patch("apt_log.macros.wake_display"), \
              patch("apt_log.secrets.FileSecretProvider") as provider_cls, \
              patch("apt_log.macros.time.sleep"), \
              patch("apt_log.macros.time.monotonic",
                    side_effect=itertools.count(step=0.5)):
             macros.MACROS["inmyteam_login"].run(driver, lambda _k: None)
+        return provider_cls
+
+    def test_a_signed_in_app_is_left_alone(self):
+        provider_cls = self._bare_run(self._elsewhere(tappables=6))
         provider_cls.assert_not_called()
+
+    def test_an_unreadable_tree_is_not_mistaken_for_signed_in(self):
+        """Live: the macro read the tree of the app the phone was LEAVING,
+        found no field in it, and reported done over an inMyTeam splash that
+        had not drawn yet. An empty tree is "not yet", not "nothing to do" —
+        the trap the HHAeXchange+ macro wrote down and this one sprang."""
+        import itertools
+
+        driver = self._elsewhere(tappables=0)
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider"), \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            with pytest.raises(RuntimeError, match="not showing anything"):
+                macros.MACROS["inmyteam_login"].run(driver, lambda _k: None)
+
+    def test_it_waits_for_this_app_and_not_just_any_activity(self):
+        """`current_activity` answers the moment the driver knows anything,
+        including the app the phone is leaving."""
+        import itertools
+
+        driver = self._elsewhere(tappables=6)
+        driver.current_package = "com.tellus.evv.v2"
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider"), \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            with pytest.raises(RuntimeError, match="did not come to the front"):
+                macros.MACROS["inmyteam_login"].run(driver, lambda _k: None)
 
     def test_a_number_the_app_will_not_take_is_a_failure_not_a_success(self):
         """A rejected number changes the screen too. Reporting success over
