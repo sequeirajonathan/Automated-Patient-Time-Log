@@ -41,7 +41,7 @@ def looks_like_phi(resource_id: str) -> bool:
 
 
 # Two or more consecutive all-caps words. This app renders patient names that way
-# ("CARIDAD ROJAS") while its own chrome is title case ("Detalle de Visita",
+# ("PACIENTE FICTICIA") while its own chrome is title case ("Detalle de Visita",
 # "Registrar Entrada"), so the shape separates data from label reasonably well.
 _SHOUTED_NAME = re.compile(r"\b[^\W\d_]{2,}\b(?:\s+\b[^\W\d_]{2,}\b)+")
 

@@ -23,9 +23,20 @@ SECRETS_PATH = Path("/etc/aptlog/secrets.env")
 
 # Keys this system expects. Named here so a typo fails loudly at the call site
 # rather than returning None into a login flow.
-APP_USERNAME = "APP_USERNAME"
+APP_USERNAME = "APP_USERNAME"      # legacy HHAeXchange
 APP_PASSWORD = "APP_PASSWORD"
 PHONE_PIN = "PHONE_PIN"
+
+# The other agency apps, profiled in the first discovery session. Each auth
+# macro exists only if its secrets do — see macros.auth_macro_for.
+UMA_USERNAME = "UMA_USERNAME"      # HHAeXchange+ signs in through a web form
+UMA_PASSWORD = "UMA_PASSWORD"
+MC_PIN = "MC_PIN"                  # Mobile Caregiver+ guards its session
+                                   # with a numeric passcode keypad
+INMYTEAM_PHONE = "INMYTEAM_PHONE"  # inMyTeam signs in with a cell number
+                                   # (walked live: "Sign in with your phone
+                                   # number" — the SMS code lands on the
+                                   # tethered phone itself)
 
 
 class SecretNotFound(KeyError):

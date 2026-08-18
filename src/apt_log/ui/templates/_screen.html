@@ -1,0 +1,139 @@
+{# The phone's current screen, reflowed into a native mobile layout.
+
+   Semantic rows from screenview.build — the device's coordinates decided the
+   order and the grouping and are not used for placement. Every interactive
+   item carries the same rid/class/bounds identity the overlay always posted,
+   and the server re-verifies it against the published frame before anything
+   reaches the phone: the reflow changes where a control is drawn on her page,
+   never what tapping it means.
+
+   Rendered server-side and pushed over the socket, like every sentence. #}
+<div class="wire" data-frame="{{ m.id }}">
+  {% if m.nav %}
+  {# The top band's first button is NOT rendered as a back arrow — it is
+     whatever the app put top-left, and on HHAeXchange+ that was the help
+     button: drawn with a chevron, it read as "back" and took the owner to a
+     documentation site. Navigation is the pill's Back, always. The app's
+     own top-band buttons ride as plain trailing controls, labelled by
+     their text or nothing they can masquerade as. #}
+  <div class="a-nav">
+    <span class="a-title">{{ m.nav.title }}</span>
+    <span class="a-trail">
+      {% for b in [m.nav.back] + m.nav.trailing %}
+      <button type="button" class="a-navbtn" data-aim='{{ b.aim | tojson }}'
+        >{{ b.txt or '···' }}</button>
+      {% endfor %}
+    </span>
+  </div>
+  {% endif %}
+
+  {% if m.notice %}
+  <div class="a-alert" role="alert">{{ m.notice }}</div>
+  {% endif %}
+
+  <div class="a-list">
+  {% for row in m.rows %}
+    {% if row.tabs %}
+    <div class="a-row a-tabs">
+      {% for it in row['items'] %}
+      <button type="button" class="a-tab" data-aim='{{ it.aim | tojson }}'
+              {% if not (it.txt or it.lines) %}aria-label="{{ it.aim.cls }}{% if it.aim.rid %} {{ it.aim.rid }}{% endif %}"{% endif %}
+        >{{ it.txt or (it.lines[0] if it.lines else '·') }}</button>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="a-row n{{ row['items'] | length }}{% if row.keys %} a-keys{% endif %}">
+    {% for it in row['items'] %}
+      {% if it.kind == 'segment' %}
+        <span class="a-seg">
+        {% for part in it.parts %}
+          <button type="button" class="a-segbtn{% if part.checked %} on{% endif %}"
+                  data-aim='{{ part.aim | tojson }}'>{{ part.txt or '·' }}</button>
+        {% endfor %}
+        </span>
+      {% elif it.kind == 'button' %}
+        {# A button with no words still needs a face: a blank pill reads
+           as broken, and the visit detail's icon buttons shipped three. #}
+        <button type="button" class="a-btn{% if it.small %} sm{% elif it.cta %} cta{% endif %}"
+                data-aim='{{ it.aim | tojson }}'
+                {% if not it.txt %}aria-label="{{ it.aim.cls }}{% if it.aim.rid %} {{ it.aim.rid }}{% endif %}"{% endif %}
+          >{{ it.txt or '···' }}</button>
+      {% elif it.kind == 'field' %}
+        <button type="button" class="a-field{% if it.focused %} focus{% endif %}"
+                data-aim='{{ it.aim | tojson }}'
+          >{{ it.txt or '' }}</button>
+      {% elif it.kind == 'toggle' %}
+        <button type="button" class="a-switch{% if it.checked %} on{% endif %}"
+                data-aim='{{ it.aim | tojson }}'
+                aria-label="{{ it.aim.cls }}{% if it.aim.rid %} {{ it.aim.rid }}{% endif %}"
+          ><span class="knob"></span></button>
+      {% elif it.kind == 'row' and it.info %}
+        {# A statement, not a door: a status line the app drew as its own
+           fact — "✓ Registros de entrada de EVV 6:00" — with the mark's
+           colour as a soft chip and no chevron pretending it opens more. #}
+        <span class="a-inforow{% if it.tone %} {{ it.tone }}{% endif %}">
+          {% for m in it.marks %}<span class="a-mark {{ m.tone }}">{{ m.sym }}</span>{% endfor %}
+          <span class="a-infotext">{{ it.txt or (it.lines[0] if it.lines else '') }}</span>
+        </span>
+      {% elif it.kind == 'row' %}
+        {# A call to action ("Continuar visitando") is a filled button, not
+           one more grey row with a chevron. A data row is a list cell: its
+           title on top, details muted below, verified check-ins as green
+           status pills, a chevron saying "opens more". #}
+        <button type="button" class="a-cell{% if it.cta %} cta{% endif %}" data-aim='{{ it.aim | tojson }}'>
+          {% if it.txt %}<span class="a-line">{{ it.txt }}</span>{% endif %}
+          {% for line in it.lines %}
+          <span class="a-line{% if not loop.first or it.txt %} sub{% endif %}">{{ line }}</span>
+          {% endfor %}
+          {% if it.marks %}
+          <span class="a-marks">
+            {% for m in it.marks %}<span class="a-mark {{ m.tone }}">{{ m.sym }}</span>{% endfor %}
+          </span>
+          {% endif %}
+          {% if it.badge %}<span class="a-badge">{{ it.badge }}</span>{% endif %}
+          {% if not it.cta %}
+          <svg class="a-chev" viewBox="0 0 10 16" fill="none"
+               stroke="currentColor" stroke-width="2.2" stroke-linecap="round"
+            ><path d="M2 2 L8 8 L2 14"/></svg>
+          {% endif %}
+        </button>
+      {% elif it.kind == 'image' %}
+        {% if it.aim %}
+        <button type="button" class="a-icon" data-aim='{{ it.aim | tojson }}'
+                aria-label="{{ it.aim.cls }}{% if it.aim.rid %} {{ it.aim.rid }}{% endif %}"
+          >{{ it.txt or '' }}</button>
+        {% endif %}
+      {% elif it.kind == 'text' and it.aim %}
+        <button type="button" class="a-link" data-aim='{{ it.aim | tojson }}'
+          >{{ it.txt or '' }}</button>
+      {% elif it.kind == 'kv' %}
+        {# A field: caption over value, stacked tight. Reads as one datum,
+           not two floating headers. #}
+        <span class="a-kv">
+          <span class="a-kv-cap">{{ it.caption }}</span>
+          <span class="a-kv-val">{{ it.value }}</span>
+        </span>
+      {% else %}
+        <span class="a-label{% if it.header %} hdr{% endif %}">{{ it.txt }}</span>
+      {% endif %}
+    {% endfor %}
+    </div>
+    {% endif %}
+  {% endfor %}
+  {# The page's tail says whether the map is complete, without a sentence:
+     while the scan is still reading, a sweep animates under the list —
+     motion means work in progress. When the page is whole the motion
+     stops and a quiet end-of-page mark takes its place. The owner asked
+     for exactly this trade: an animation over a message. A webview keeps
+     its one honest caveat — its pixels can carry what its tree does not. #}
+  {% if m.full %}
+  <div class="a-pageend" aria-hidden="true"></div>
+  {% else %}
+  <div class="a-scanning" role="status" aria-label="{{ t('papp.scanning') }}"
+    ><span></span></div>
+  {% endif %}
+  {% if m.webview %}
+  <div class="a-webnote">{{ t('papp.web_partial') }}</div>
+  {% endif %}
+  </div>
+</div>

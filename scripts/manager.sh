@@ -63,6 +63,14 @@ if ! git config --system --get-all safe.directory 2>/dev/null | grep -qx "$APP_D
         log "could not mark $APP_DIR safe for root -- git operations will fail"
 fi
 
+# --------------------------------------------------------------- adb identity
+# The phone trusts this box by one RSA key; a deploy must never be the event
+# that loses it (see scripts/adb-identity.sh — vault, restore, one key for
+# every adb server). Guarded so a broken script cannot abort a deploy.
+if [[ -x "$APP_DIR/scripts/adb-identity.sh" ]]; then
+    "$APP_DIR/scripts/adb-identity.sh" || log "adb-identity.sh failed"
+fi
+
 # ------------------------------------------------------------------ is there work
 git fetch --quiet origin "$DEPLOY_REF"
 current="$(git rev-parse HEAD)"

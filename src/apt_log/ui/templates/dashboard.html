@@ -22,22 +22,25 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{{ t('app.title') }}</title>
+{# One token vocabulary for both pages — design.css is the single source of
+   truth the phone view runs on; this page's --accent aliases to the same
+   tint, so the two stop looking like different products. #}
+<link rel="stylesheet" href="/static/design.css?v={{ boot }}">
 <style>
-  :root {
-    --bg:#f6f7f9; --card:#fff; --ink:#16202c; --muted:#5b6875; --line:#dfe4ea;
-    --ok:#137a3f; --bad:#b3261e; --unknown:#8a6d1f; --accent:#1b3f8b;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#11151a; --card:#182029; --ink:#e8edf2; --muted:#9aa7b4;
-            --line:#2a3543; --ok:#4ac07a; --bad:#ff6b60; --unknown:#e3b341; }
-  }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--ink);
          font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
-  header { background:var(--accent); color:#fff; padding:14px 16px;
-           display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  /* The page renders edge-to-edge when opened from the installed app, so the
+     header owns the status-bar region: safe-area padding keeps the title out
+     from under the clock and battery, and sticky keeps that region
+     brand-coloured instead of whatever scrolled beneath it. */
+  header { background:var(--accent); color:#fff;
+           padding:calc(14px + env(safe-area-inset-top)) 16px 14px;
+           display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+           position:sticky; top:0; z-index:20; }
   header h1 { font-size:18px; margin:0; flex:1; }
-  main { padding:12px; max-width:900px; margin:0 auto; }
+  main { padding:12px 12px calc(12px + env(safe-area-inset-bottom));
+         max-width:900px; margin:0 auto; }
   section { background:var(--card); border:1px solid var(--line);
             border-radius:10px; padding:14px 16px; margin-bottom:12px; }
   h2 { font-size:15px; margin:0 0 10px; letter-spacing:.02em; }
@@ -82,9 +85,9 @@
   .overlay { position:absolute; inset:0; pointer-events:none; }
   /* Boxes are buttons so a keyboard and a screen reader can reach them too. */
   .hit { position:absolute; pointer-events:auto; padding:0; margin:0;
-         background:transparent; border:1px solid rgba(27,63,139,.45);
-         border-radius:3px; cursor:pointer; }
-  .hit:hover, .hit:focus { background:rgba(27,63,139,.18);
+         background:transparent; border-radius:3px; cursor:pointer;
+         border:1px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+  .hit:hover, .hit:focus { background:var(--tint-soft);
                            border-color:var(--accent); outline:none; }
   .hit.focused { border-color:var(--ok); border-width:2px; }
   .hit.selected { background:rgba(19,122,63,.16); }
@@ -93,11 +96,40 @@
   body.offline .offline-note { display:block; }
   body.offline .mirror-frame { opacity:.4; }
   body.offline .hit { pointer-events:none; }
+
+  /* No picture allowed of this screen. The last capture is still on disk and
+     still served, and it belongs to a *different screen* -- so showing it under
+     boxes drawn from the current one is not a stale picture, it is a wrong one.
+     The image is hidden rather than removed: it is the only element that knows
+     the device's aspect ratio, and every box is positioned against its width. */
+  .blind-note { display:none; }
+  body.blind .blind-note { display:block; }
+  /* "Taken 08:38 PM" above a picture that is not being shown dates a
+     photograph she cannot see, and reads as if she can. */
+  body.blind #shot-taken { display:none; }
+  body.blind #shot { visibility:hidden; }
+  body.blind .shot.live { display:none; }
+  body.blind .mirror-frame { background:#e8eaee; border:1px dashed var(--line); }
+  /* The hidden picture is still what every box is measured against, so it has
+     to keep occupying the right rectangle. Width and ratio are set from the
+     device's own resolution, which also covers the case where no capture has
+     ever succeeded and the image has no intrinsic size to borrow. */
+  body.blind #shot { width:min(100%, 360px); height:auto; }
+  /* With no picture underneath, a box has to say what it is itself. */
+  body.blind .hit { background:#fff; border-color:var(--accent);
+                    display:flex; align-items:center; justify-content:center;
+                    font:inherit; font-size:13px; color:var(--ink);
+                    overflow:hidden; padding:2px 4px; text-align:center; }
+  .hit .label { display:none; }
+  body.blind .hit .label { display:block; pointer-events:none; }
+  #screen-notice { margin:6px 0; padding:10px 12px; border-radius:6px;
+                   background:#fff5d6; border:1px solid #e3c766; }
+  #screen-notice .said { font-size:16px; margin:2px 0 0; }
 </style>
 </head>
 {# The nonce is what the live stream compares against to notice that the request
    on this page is no longer the one the controller is waiting on. #}
-<body data-relay-nonce="{{ pending.nonce if pending else '' }}">
+<body data-relay-nonce="{{ pending.nonce if pending else '' }}" data-boot="{{ boot }}">
 <header>
   <h1>{{ t('app.title') }}</h1>
   <form method="post" action="/language">
@@ -113,9 +145,10 @@
 </header>
 
 <main>
-  {% if s.paused %}
-    <div class="banner bad">{{ t('control.paused_notice') }}</div>
-  {% endif %}
+  {# Hidden rather than absent, so the live stream can reveal it without having
+     to build the element — and without owning a copy of the sentence. #}
+  <div class="banner bad" id="paused-notice" {% if not s.paused %}hidden{% endif %}>
+    {{ t('control.paused_notice') }}</div>
   {% if s.transport_mode == 'dev' %}
     <div class="banner">{{ t('gate.dev_transport') }}</div>
   {% endif %}
@@ -186,14 +219,29 @@
 
     <h2 style="margin-top:14px">{{ t('phone.title') }}</h2>
     <div class="banner bad offline-note">{{ t('portal.offline') }}</div>
-    {% if s.screenshot_at %}
-      <p class="muted" id="shot-taken">{{ t('phone.stale', time=t.time(s.screenshot_at)) }}</p>
+    {# Rendered whether or not a picture has ever been taken. It used to be
+       conditional, which meant a controller sitting on a sign-in screen since
+       boot showed her "no recent picture" and nothing else — no boxes, no
+       reason, no way to act — on precisely the screen where she most needs a
+       way through. The overlay is the part that has to be there. #}
+      <p class="muted" id="shot-taken">
+        {%- if s.screenshot_at %}{{ t('phone.stale', time=t.time(s.screenshot_at)) }}
+        {%- else %}{{ t('phone.none') }}{% endif -%}
+      </p>
       {# The picture and the hit boxes share one positioned container so the
          overlay stays in register when the image reflows. #}
       {# Two surfaces, one at a time. The still is always there and always
          correct; the canvas covers it once H.264 is decoding. Keeping the still
          underneath rather than swapping it out means a decoder that fails has
          something to fall back to that is already on screen. #}
+      {# Why there is no picture, and — when the app has put a dialog in the way
+         — what it actually says. Both are filled by the live stream; empty and
+         hidden until it has something to put in them. #}
+      <div class="banner blind-note" id="blind-note"></div>
+      <div id="screen-notice" hidden>
+        <span class="muted">{{ t('phone.app_says') }}</span>
+        <p class="said" id="screen-said"></p>
+      </div>
       <div class="mirror-frame">
         <img id="shot" class="shot {% if s.mirror.stale %}stale{% endif %}"
              src="/screen.jpg" alt="">
@@ -206,12 +254,22 @@
         window.APTLOG_PORTAL = {
           sending: {{ t('portal.sending')|tojson }},
           moved:   {{ t('portal.moved')|tojson }},
-          failed:  {{ t('portal.failed')|tojson }}
+          failed:  {{ t('portal.failed')|tojson }},
+          deviceSent:   {{ t('phone.sent')|tojson }},
+          deviceFailed: {{ t('phone.failed')|tojson }},
+          {# Keyed by the feed's refusal codes. A code with no sentence here
+             falls back to the general one rather than showing her nothing. #}
+          blocked: {
+            "": "",
+            no_focus:       {{ t('phone.blocked.no_focus')|tojson }},
+            login_activity: {{ t('phone.blocked.login_activity')|tojson }},
+            password_field: {{ t('phone.blocked.password_field')|tojson }},
+            secure_screen:  {{ t('phone.blocked.secure_screen')|tojson }},
+            capture_failed: {{ t('phone.blocked.capture_failed')|tojson }}
+          },
+          blockedOther: {{ t('phone.blocked.other')|tojson }}
         };
       </script>
-    {% else %}
-      <p class="muted">{{ t('phone.none') }}</p>
-    {% endif %}
 
     {# Offered whether or not a picture exists: a black rectangle and a dead feed
        look identical from Texas, and this is how you tell them apart.
@@ -350,14 +408,22 @@
   </section>
 
   <section>
-    <form method="post" action="/control">
-      <input type="hidden" name="action" value="{{ 'resume' if s.paused else 'pause' }}">
-      <button type="submit">{{ t('control.resume') if s.paused else t('control.pause') }}</button>
+    {# Both labels ship, and the live stream picks which one is showing. It used
+       to render only the current one, so after a Pause the button still said
+       "Pause" and still posted `pause` — pressing it again paused a second time
+       instead of resuming, and there was no way back from that page load. #}
+    <form method="post" action="/control" id="control">
+      <input type="hidden" name="action" value="{{ 'resume' if s.paused else 'pause' }}"
+             data-paused="resume" data-running="pause">
+      <button type="submit"
+              data-paused="{{ t('control.resume') }}"
+              data-running="{{ t('control.pause') }}"
+      >{{ t('control.resume') if s.paused else t('control.pause') }}</button>
     </form>
   </section>
 </main>
 
-<script src="/static/signature.js" defer></script>
-<script src="/static/live.js" defer></script>
+<script src="/static/signature.js?v={{ boot }}" defer></script>
+<script src="/static/live.js?v={{ boot }}" defer></script>
 </body>
 </html>

@@ -43,9 +43,9 @@ class TestPatientIdentifier:
         """REQUIREMENTS §5 — a name never reaches the record, and this file is
         part of the record's surface. The guard has to hold against a caller
         passing the wrong variable, not only a careless one."""
-        frame = publish("today", "working", "CARIDAD ROJAS", path=tmp_path / "m.json")
+        frame = publish("today", "working", "PACIENTE FICTICIA", path=tmp_path / "m.json")
         assert frame.patient_id == "?"
-        assert "CARIDAD" not in (tmp_path / "m.json").read_text(encoding="utf-8")
+        assert "PACIENTE" not in (tmp_path / "m.json").read_text(encoding="utf-8")
 
     def test_the_reader_re_checks_what_is_on_disk(self, tmp_path):
         """The file lives between two processes; the reader should not trust it

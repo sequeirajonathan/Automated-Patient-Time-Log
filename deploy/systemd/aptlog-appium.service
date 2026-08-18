@@ -19,6 +19,11 @@ User=apt
 # Without these two lines the agent cannot drive the phone at all.
 Environment=ANDROID_HOME=/usr/lib/android-sdk
 Environment=ANDROID_SDK_ROOT=/usr/lib/android-sdk
+# The adb server this unit starts presents the ONE key the phone authorized,
+# whoever else ever starts one. Losing that identity mid-visit meant a human
+# tapping "Allow USB debugging" with a patient waiting — never again. See
+# scripts/adb-identity.sh (vault + restore + system-wide export).
+Environment=ADB_VENDOR_KEYS=/home/apt/.android/adbkey
 ExecStartPre=/usr/bin/adb start-server
 ExecStart=/usr/bin/appium --address 127.0.0.1 --port 4723 --log-timestamp
 Restart=always

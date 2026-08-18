@@ -13,7 +13,9 @@ that, and the tests here cover the route not widening it on the way through.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -22,6 +24,7 @@ from fastapi.testclient import TestClient
 from apt_log.ui.app import LANGUAGE_COOKIE, _mirror_payload, app, queue
 from apt_log.ui.i18n import Translator
 from apt_log.ui import mirror as mirror_mod
+from apt_log.ui import state as state_mod
 from apt_log.ui.mirror import Mirror
 from apt_log.ui.relay import KIND_CHOICE, KIND_SIGNATURE, KIND_TOKEN
 from apt_log.ui.state import DashboardState
@@ -100,7 +103,13 @@ class TestWritePaths:
             if getattr(r, "methods", None) and "POST" in r.methods
         }
         assert posts == {"/language", "/signature", "/relay", "/device", "/tap",
-                         "/macro", "/acknowledge", "/control"}
+                         "/macro", "/acknowledge", "/control", "/sign",
+                         # The app's own clear/save on the signature screen,
+                         # pressed on her explicit ask. Takes a kind from an
+                         # allow-list, never a coordinate — the spot is
+                         # derived server-side from the canvas the finder
+                         # sees, and off the signature moment it refuses.
+                         "/sign-action"}
 
     def test_no_route_accepts_a_raw_coordinate_or_keycode(self, client):
         """/tap takes an element from a named frame; /device takes an action
@@ -447,3 +456,448 @@ class TestStaleIsVisible:
         s = DashboardState(screenshot_at=None, mirror=Mirror(at=datetime.now()))
         payload = _mirror_payload(s, Translator("es"))
         assert payload["taken_text"] == Translator("es")("phone.none")
+
+
+class TestBlindScreenIsUsable:
+    """A screen the mirror refuses to photograph still has to be operable.
+
+    The refusal was right and the consequence was not: she was left with one
+    unlabelled rectangle where the app had put a dialog, no words, and the
+    *previous* screen's capture still being served underneath it — so the boxes
+    of this screen sat over the picture of another one.
+    """
+
+    def test_the_page_can_name_every_refusal(self, client):
+        """The reason crosses as a code, so the sentence has to be on the page
+        already. A code with no sentence falls back rather than saying nothing.
+        """
+        body = client.get("/").text
+        for code in ("no_focus", "login_activity", "password_field",
+                     "secure_screen", "capture_failed"):
+            assert code + ":" in body
+        assert "blockedOther" in body
+
+    def test_the_wrong_picture_is_hidden_rather_than_shown(self, client):
+        body = client.get("/").text
+        assert "body.blind #shot { visibility:hidden; }" in body
+
+    def test_a_box_with_no_picture_under_it_carries_its_own_label(self, client):
+        body = client.get("/").text
+        assert "body.blind .hit .label" in body
+
+    def test_the_app_gets_to_say_what_it_said(self, client):
+        body = client.get("/").text
+        assert "screen-said" in body
+        assert "La aplicación muestra este mensaje" in body
+
+    def test_the_overlay_exists_before_any_picture_ever_has(self, client):
+        """A controller on a sign-in screen since boot has never written a
+        capture. That used to render "no recent picture" and nothing else — no
+        boxes and no way through, on the one screen that needs a way through."""
+        # Patched rather than assumed. The first version of this test relied on
+        # no capture existing, which is true on a build machine and false on the
+        # controller — where the suite also runs, as the deploy gate, and where
+        # it duly failed. A test that depends on the machine is testing the
+        # machine.
+        from apt_log.ui import state as state_mod
+
+        with patch.object(state_mod, "SCREENSHOT_PATH",
+                          Path("/nonexistent/never-captured.jpg")):
+            body = client.get("/").text
+        assert 'id="overlay"' in body
+        assert "No hay ninguna imagen reciente" in body
+
+
+class TestDeviceOverTheSocket:
+    """Back, Home, Recents and Wake, without reloading the page.
+
+    They were the last four controls still posting a form and taking a redirect
+    — which is a page navigation by construction. Everything else on this page
+    had been live for a while, so pressing Home threw away her scroll position
+    and the screen she was watching, mid-visit, four floors from the phone.
+    """
+
+    def test_an_allow_listed_action_reaches_the_device_layer(self, client):
+        from apt_log import device as device_mod
+
+        with patch.object(device_mod, "send_ui_action") as send:
+            with client.websocket_connect("/ws") as ws:
+                ws.receive_json()
+                ws.send_json({"type": "device", "action": "home"})
+                while True:
+                    msg = ws.receive_json()
+                    if msg.get("type") == "device_result":
+                        break
+        assert msg["ok"] is True
+        assert send.call_args.args[0] == "home"
+
+    def test_the_socket_is_a_second_door_not_a_second_policy(self, client):
+        """The allow-list is checked where it always was. A keycode arriving
+        over a socket must be refused by the same code that refuses one arriving
+        over a form, or there are two rules and one of them will rot."""
+        with client.websocket_connect("/ws") as ws:
+            ws.receive_json()
+            ws.send_json({"type": "device", "action": "KEYCODE_POWER"})
+            while True:
+                msg = ws.receive_json()
+                if msg.get("type") == "device_result":
+                    break
+        assert msg["ok"] is False
+
+    def test_a_missing_action_is_refused_rather_than_guessed(self, client):
+        with client.websocket_connect("/ws") as ws:
+            ws.receive_json()
+            ws.send_json({"type": "device"})
+            while True:
+                msg = ws.receive_json()
+                if msg.get("type") == "device_result":
+                    break
+        assert msg["ok"] is False
+
+    def test_the_form_post_still_works_without_a_socket(self, client):
+        """She may be on whatever browser her phone has. The form is the
+        fallback, not dead code."""
+        from apt_log import device as device_mod
+
+        with patch.object(device_mod, "send_ui_action"):
+            r = client.post("/device", data={"action": "wake"},
+                            follow_redirects=False)
+        assert r.status_code == 303
+
+
+class TestFormsDoNotNavigate:
+    """The bug that made this a bug report.
+
+    Every /device form carries a hidden <input name="action">, and a form
+    control named "action" shadows the form's own action property. So
+    `form.action` returned that input element, `form.action.endsWith` threw, the
+    submit listener died before preventDefault, and the browser posted the form
+    for real — reloading the page. Pause and Resume had it too, for the same
+    reason. Asserted against the shipped script because the failure was in the
+    one line of it that nothing else can reach.
+    """
+
+    SCRIPT = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/static/live.js")
+
+    def test_the_action_attribute_is_read_not_the_property(self):
+        source = self.SCRIPT.read_text(encoding="utf-8")
+        assert "getAttribute('action')" in source
+
+    def test_the_shadowed_property_is_never_dereferenced(self):
+        """`form.action` is a trap on precisely the forms that most need to be
+        intercepted, so it is not used at all.
+
+        Comments are stripped first — the one above the fix names the trap in
+        order to explain it, and a guard that cannot tell code from prose would
+        forbid describing the bug it exists to prevent.
+        """
+        code = [line for line in self.SCRIPT.read_text(encoding="utf-8").splitlines()
+                if not line.lstrip().startswith(("//", "*", "/*"))]
+        source = "\n".join(code)
+        for trap in ("form.action.", "form.action)", "form.action,"):
+            assert trap not in source
+
+    def test_every_form_that_names_a_field_action_is_covered(self, client):
+        """Names the forms this applies to, so a new one cannot quietly join
+        them. Any form posting a field called "action" hits the same trap."""
+        body = client.get("/").text
+        # Four device buttons, and pause/resume — which renders one form whose
+        # value flips, not two.
+        assert body.count('name="action"') == 5
+
+
+class TestPauseSurvivesItsOwnPress:
+    """One button whose meaning inverts, and nothing was inverting it.
+
+    The server had been pushing `paused` over the socket the whole time and no
+    client code listened. So after a Pause the button still read "Pause" and
+    still posted `pause`: pressing it again paused a second time, and there was
+    no way to resume without reloading the page — the one thing this page is
+    supposed to have stopped needing. Verified against the live controller,
+    which is how it was found.
+    """
+
+    def test_the_socket_carries_the_paused_state(self, client):
+        with client.websocket_connect("/ws") as ws:
+            seen = None
+            for _ in range(4):
+                msg = ws.receive_json()
+                if msg.get("type") == "state" and "paused" in msg:
+                    seen = msg["paused"]
+                    break
+        assert seen is not None
+
+    def test_both_labels_ship_so_the_client_never_writes_one(self, client):
+        """The rule the whole live stream is built on: a page that renders in
+        Spanish until it updates itself into English is worse than one that
+        never updates. So the server sends both words and the client picks."""
+        body = client.get("/").text
+        assert 'data-paused="Reanudar"' in body
+        assert 'data-running="Pausar"' in body
+
+    def test_the_notice_is_hidden_rather_than_absent(self, client):
+        """It has to be revealable without the client building the element,
+        which would mean the client owning the sentence."""
+        body = client.get("/").text
+        assert 'id="paused-notice"' in body
+        assert "El programa está en pausa" in body
+
+    def test_the_client_listens_for_it(self):
+        source = (Path(__file__).resolve().parents[1]
+                  / "src/apt_log/ui/static/live.js").read_text(encoding="utf-8")
+        assert "applyPaused" in source
+        assert "msg.paused" in source
+
+
+class TestPhoneAppView:
+    """The full-screen view she bookmarks. A skin, not a capability.
+
+    Everything here rides machinery the dashboard already has — same socket,
+    same tap verification, same macro allow-list — so these tests are about the
+    skin keeping the rules, not about new rules.
+    """
+
+    def test_it_renders_in_her_language(self, client):
+        body = client.get("/app").text
+        assert "Registro de Horas de Pacientes" in body
+        assert "Aplicaciones" in body
+
+    def test_all_four_apps_are_offered(self, client):
+        body = client.get("/app").text
+        for name in ("HHAeXchange", "HHAeXchange+", "Mobile Caregiver+",
+                     "inMyTeam"):
+            assert name in body
+
+    def test_every_tile_runs_an_allow_listed_macro(self, client):
+        """The tile posts a name; the name must be one macros.MACROS holds.
+        A tile that invented its own would be remote scripting with a nicer
+        icon."""
+        from apt_log.macros import MACROS
+        from apt_log.ui.app import PHONE_APPS
+
+        for entry in PHONE_APPS:
+            assert entry["macro"] in MACROS
+
+    def test_it_is_installable(self, client):
+        body = client.get("/app").text
+        assert "manifest.webmanifest" in body
+        assert "apple-mobile-web-app-capable" in body
+        r = client.get("/static/manifest.webmanifest")
+        assert r.status_code == 200
+        manifest = json.loads(r.text)
+        assert manifest["start_url"] == "/app"
+        assert client.get("/static/icons/icon-180.png").status_code == 200
+
+    def test_no_service_worker_anywhere(self, client):
+        """Offline caching would keep copies of what the phone's screen said on
+        her phone. This page is a window, not a document."""
+        body = client.get("/app").text
+        assert "serviceWorker" not in body
+        js = (Path(__file__).resolve().parents[1]
+              / "src/apt_log/ui/static/phone.js").read_text(encoding="utf-8")
+        assert "serviceWorker" not in js
+
+    def test_the_client_owns_no_action_sentences(self):
+        """phone.js may hold choreography, not prose: everything readable
+        arrives rendered from the catalog."""
+        js = (Path(__file__).resolve().parents[1]
+              / "src/apt_log/ui/static/phone.js").read_text(encoding="utf-8")
+        assert "getAttribute('action')" in js       # the shadowing trap, again
+
+
+class TestWireframeOverTheSocket:
+    def _screen_doc(self, tmp_path):
+        doc = {
+            "id": "abc123", "img": "", "at": "2026-08-15T10:00:00",
+            "size": [720, 1600], "screen": "login", "blocked": "login_activity",
+            "notice": "Debes de iniciar sesión.",
+            "elements": [{"rid": "btn_login", "cls": "Button",
+                          "b": [19, 744, 731, 804], "focused": False,
+                          "selected": False, "checked": False,
+                          "has_text": True, "txt": "Iniciar sesión"}],
+            "statics": [{"cls": "TextView", "b": [0, 100, 720, 160],
+                         "txt": "Bienvenida"}],
+        }
+        (tmp_path / "screen.json").write_text(json.dumps(doc))
+        return doc
+
+    def test_the_wireframe_is_pushed_as_rendered_html(self, client, tmp_path):
+        with patch.object(state_mod, "STATE_DIR", tmp_path):
+            self._screen_doc(tmp_path)
+            with client.websocket_connect("/ws") as ws:
+                msg = ws.receive_json()
+        assert "screen_html" in msg
+        assert "Iniciar sesión" in msg["screen_html"]
+        assert "Bienvenida" in msg["screen_html"]
+        assert msg["screen"]["blocked"] == "login_activity"
+
+    def test_a_wireframe_button_carries_the_same_aim_a_tap_posts(self, client, tmp_path):
+        """rid, class, bounds — the identity the server re-verifies. The
+        wireframe changes what she sees, not what a tap may do."""
+        with patch.object(state_mod, "STATE_DIR", tmp_path):
+            self._screen_doc(tmp_path)
+            with client.websocket_connect("/ws") as ws:
+                msg = ws.receive_json()
+        assert 'data-aim=' in msg["screen_html"]
+        assert '"rid": "btn_login"' in msg["screen_html"]
+        assert '[19, 744, 731, 804]' in msg["screen_html"]
+
+    def test_an_unchanged_screen_is_not_re_pushed(self, client, tmp_path):
+        """The timestamp moves on every write; the comparison must not follow
+        it, or "did the screen change" becomes "has a second passed".
+
+        A frame change carries the second message, because a tick with nothing
+        to say sends nothing — which is itself the behaviour under test.
+        """
+        with patch.object(state_mod, "STATE_DIR", tmp_path):
+            doc = self._screen_doc(tmp_path)
+            with client.websocket_connect("/ws") as ws:
+                ws.receive_json()
+                # Screen: timestamp only. Frame: a real change to ride on.
+                doc["at"] = "2026-08-15T10:00:05"
+                (tmp_path / "screen.json").write_text(json.dumps(doc))
+                (tmp_path / "frame.json").write_text(json.dumps(
+                    {"id": "different", "img": "", "size": [720, 1600],
+                     "elements": [], "blocked": "", "notice": ""}))
+                ws.send_json({"type": "noop"})
+                second = ws.receive_json()
+        assert "frame" in second
+        assert "screen_html" not in second
+
+
+class TestSignRoute:
+    def test_strokes_are_queued_for_the_feed(self, client, tmp_path):
+        from apt_log import sign as sign_mod
+
+        with patch.object(sign_mod, "REQUEST_PATH", tmp_path / "req.json"):
+            r = client.post("/sign", json={
+                "strokes": [[[0.1, 0.2, 0], [0.5, 0.5, 40]]], "aspect": 2.2})
+        assert r.status_code == 200
+        assert (tmp_path / "req.json").exists()
+
+    def test_garbage_is_refused_at_the_door(self, client):
+        r = client.post("/sign", json={"strokes": [[[5, 5, 0]]]})
+        assert r.status_code == 400
+        r = client.post("/sign", json={"strokes": []})
+        assert r.status_code == 400
+
+    def test_the_page_offers_the_pad(self, client):
+        body = client.get("/app").text
+        assert 'id="signpad"' in body
+        assert "Firmar" in body
+        # The sentence that keeps the line where it is: the app's own save
+        # button is hers, not the replay's.
+        assert "guardar de la propia aplicación" in body
+
+
+class TestShellNeverGoesStale:
+    """Seen live on an iPhone: a cached page shell from one deploy rendering
+    the next deploy's fragments — new markup, none of the new styles, and it
+    reads as a broken design rather than a cache.
+    """
+
+    def test_the_pages_are_never_cached(self, client):
+        for path in ("/", "/app"):
+            assert client.get(path).headers.get("cache-control") == "no-store"
+
+    def test_the_shell_and_the_socket_share_a_boot_id(self, client, tmp_path):
+        from apt_log.ui.app import BOOT_ID
+
+        body = client.get("/app").text
+        assert f'data-boot="{BOOT_ID}"' in body
+        with patch.object(state_mod, "STATE_DIR", tmp_path):
+            with client.websocket_connect("/ws") as ws:
+                msg = ws.receive_json()
+        assert msg["boot"] == BOOT_ID
+
+    def test_assets_are_stamped_with_it(self, client):
+        from apt_log.ui.app import BOOT_ID
+
+        for path in ("/", "/app"):
+            assert f"?v={BOOT_ID}" in client.get(path).text
+
+    def test_the_clients_reload_on_a_mismatch(self):
+        for name in ("phone.js", "live.js"):
+            js = (Path(__file__).resolve().parents[1]
+                  / "src/apt_log/ui/static" / name).read_text(encoding="utf-8")
+            assert "location.reload()" in js
+            assert "aptlog-reloaded" in js     # and the loop guard with it
+
+
+class TestPhoneBoundaries:
+    """Every page respects the device's own chrome.
+
+    Opened from the installed app the dashboard renders edge-to-edge, and its
+    header sat under the iOS status bar — the page title colliding with the
+    clock and battery. Safe-area insets are not an /app nicety; they are what
+    keeps any page out from under hardware it does not own.
+    """
+
+    def test_every_page_pads_for_the_status_bar(self, client):
+        for path in ("/", "/app"):
+            body = client.get(path).text
+            assert "env(safe-area-inset-top)" in body, path
+            assert "env(safe-area-inset-bottom)" in body, path
+            assert "viewport-fit=cover" in body, path
+
+
+class TestSketchMismatchIsStale:
+    """`app` is the focus of this moment; `h_app` is whose screen the
+    rendered elements were read under. When they disagree an app switch is
+    in progress and the sketch on the page is the old app's — amber and
+    dimmed, never a green Live with the launcher's rows dressed in the new
+    app's name."""
+
+    def _doc(self, **over):
+        import time as _t
+        from datetime import datetime as _dt
+        doc = {"at": _dt.now().isoformat(), "h_at": _t.time(),
+               "app": "com.hhaexchange.caregiver",
+               "h_app": "com.hhaexchange.caregiver"}
+        doc.update(over)
+        return doc
+
+    def test_a_sketch_of_another_app_is_never_live(self):
+        from apt_log.ui.app import _screen_is_stale
+        assert _screen_is_stale(
+            self._doc(h_app="com.android.launcher3")) is True
+
+    def test_agreement_is_live(self):
+        from apt_log.ui.app import _screen_is_stale
+        assert _screen_is_stale(self._doc()) is False
+
+    def test_a_doc_from_before_the_field_is_not_condemned(self):
+        """Old documents carry no h_app; unknown is not a mismatch, or the
+        first minute after every deploy would open on amber."""
+        from apt_log.ui.app import _screen_is_stale
+        assert _screen_is_stale(self._doc(h_app="")) is False
+
+
+class TestScreenChurnDoesNotRepaint:
+    """h_at moves on every hierarchy read and img on any repainted pixel —
+    the phone's own clock is enough. Comparing the raw document re-sent the
+    wireframe every second over an unchanged screen: a steady shimmer, and
+    a scrolled page snapping back to the top."""
+
+    def _doc(self, **over):
+        doc = {"id": "abc", "at": "2026-08-16T00:00:00", "h_at": 1.0,
+               "img": "aaa", "app": "com.hhaexchange.uma",
+               "h_app": "com.hhaexchange.uma", "screen": "home",
+               "blocked": "", "notice": "", "elements": [], "statics": []}
+        doc.update(over)
+        return doc
+
+    def test_churn_alone_does_not_change_the_render_key(self):
+        from apt_log.ui.app import _render_key
+        a = self._doc()
+        b = self._doc(at="2026-08-16T00:00:02", h_at=3.4, img="bbb")
+        assert _render_key(a) == _render_key(b)
+
+    def test_a_real_change_does(self):
+        from apt_log.ui.app import _render_key
+        a = self._doc()
+        for changed in (self._doc(blocked="password_field"),
+                        self._doc(h_app="com.android.chrome"),
+                        self._doc(elements=[{"rid": "x"}])):
+            assert _render_key(a) != _render_key(changed)

@@ -172,3 +172,43 @@ class TestUnlock:
         flat = [c.args for c in adb.call_args_list]
         assert not any("text" in a for a in flat)
         assert call("shell", "input", "keyevent", "82") in adb.call_args_list
+
+
+class TestScrollActions:
+    """Scrolling the physical screen: the reflow can only draw what the
+    hierarchy dump sees, and the dump sees the viewport — content below the
+    fold was unreachable. A mid-screen swipe moves the page and cannot
+    press anything."""
+
+    def test_scroll_down_is_an_upward_swipe(self):
+        from unittest.mock import patch
+        from apt_log import device
+
+        with patch.object(device.subprocess, "run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = b"Physical size: 720x1600"
+            device.send_ui_action("scroll_down")
+        cmd = run.call_args_list[-1].args[0]
+        assert cmd[:4] == ["adb", "shell", "input", "swipe"]
+        x1, y1, x2, y2 = (int(v) for v in cmd[4:8])
+        assert x1 == x2 == 360
+        assert y1 > y2          # the finger travels up; the page moves down
+
+    def test_scroll_up_is_the_reverse(self):
+        from unittest.mock import patch
+        from apt_log import device
+
+        with patch.object(device.subprocess, "run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = b"Physical size: 720x1600"
+            device.send_ui_action("scroll_up")
+        cmd = run.call_args_list[-1].args[0]
+        y1, y2 = int(cmd[5]), int(cmd[7])
+        assert y1 < y2
+
+    def test_unknown_actions_are_still_refused(self):
+        from apt_log import device
+        import pytest as pytest_mod
+
+        with pytest_mod.raises(device.DeviceUnavailable):
+            device.send_ui_action("swipe:sideways")

@@ -15,6 +15,7 @@ decrypt user storage after a cold boot and that has to be scripted (§1.4).
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 import time
 from collections.abc import Callable
@@ -56,6 +57,13 @@ UI_ACTIONS = {
     # wide margin.
     "back": KEYCODE_BACK,
     "home": KEYCODE_HOME,
+    # Scrolling the physical screen: the reflow can only draw what the
+    # hierarchy dump can see, and the dump only sees the viewport — content
+    # below the fold was unreachable from a thousand miles away. A swipe in
+    # the middle of the screen moves the page and cannot press anything;
+    # the coordinates are fractions of the screen, computed at send time.
+    "scroll_down": "swipe:down",
+    "scroll_up": "swipe:up",
     "recents": KEYCODE_RECENTS,
     "enter": KEYCODE_ENTER,
 }
@@ -63,6 +71,20 @@ UI_ACTIONS = {
 
 class DeviceUnavailable(RuntimeError):
     """The ladder ran to the end without recovering the device."""
+
+
+def _screen_dimensions(serial: str | None = None) -> tuple[int, int]:
+    """The device resolution from `wm size`, with a sane portrait fallback."""
+    cmd = ["adb"] + (["-s", serial] if serial else []) + ["shell", "wm", "size"]
+    try:
+        out = subprocess.run(cmd, capture_output=True, timeout=10
+                             ).stdout.decode("utf-8", "replace")
+        m = re.search(r"(\d+)x(\d+)", out)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return 720, 1600
 
 
 def send_ui_action(action: str, serial: str | None = None) -> None:
@@ -73,8 +95,16 @@ def send_ui_action(action: str, serial: str | None = None) -> None:
             f"{action!r} is not an action this page may send; "
             f"known: {sorted(UI_ACTIONS)}"
         )
-    cmd = ["adb"] + (["-s", serial] if serial else []) + \
-          ["shell", "input", "keyevent", keycode]
+    base = ["adb"] + (["-s", serial] if serial else [])
+    if keycode.startswith("swipe:"):
+        w, h = _screen_dimensions(serial)
+        x = str(w // 2)
+        top, bottom = str(int(h * 0.33)), str(int(h * 0.62))
+        # "Scroll down" means the finger travels up.
+        y1, y2 = (bottom, top) if keycode == "swipe:down" else (top, bottom)
+        cmd = base + ["shell", "input", "swipe", x, y1, x, y2, "260"]
+    else:
+        cmd = base + ["shell", "input", "keyevent", keycode]
     result = subprocess.run(cmd, capture_output=True, timeout=20)
     if result.returncode != 0:
         raise DeviceUnavailable(

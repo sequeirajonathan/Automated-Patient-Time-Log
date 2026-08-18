@@ -106,13 +106,13 @@ class TestContentScrubbing:
     """
 
     HEADER_SOURCE = f'''
-    <android.widget.TextView class="android.widget.TextView" resource-id="{P}lbl_header" clickable="false" text="Detalle de Visita &#10;CARIDAD ROJAS" bounds="[0,0][750,60]"/>
+    <android.widget.TextView class="android.widget.TextView" resource-id="{P}lbl_header" clickable="false" text="Detalle de Visita &#10;PACIENTE FICTICIA" bounds="[0,0][750,60]"/>
     '''
 
     def test_name_after_a_newline_is_not_printed(self):
         out = inspect_source(self.HEADER_SOURCE, text_for=("lbl_header",)).render()
-        assert "CARIDAD" not in out
-        assert "ROJAS" not in out
+        assert "PACIENTE" not in out
+        assert "FICTICIA" not in out
 
     def test_the_label_half_is_still_shown(self):
         out = inspect_source(self.HEADER_SOURCE, text_for=("lbl_header",)).render()
@@ -123,9 +123,9 @@ class TestContentScrubbing:
         assert "lbl_header" in report.reduced
 
     def test_a_shouted_name_alone_is_redacted_entirely(self):
-        src = f'<android.widget.TextView class="android.widget.TextView" resource-id="{P}lbl_thing" text="CARIDAD ROJAS"/>'
+        src = f'<android.widget.TextView class="android.widget.TextView" resource-id="{P}lbl_thing" text="PACIENTE FICTICIA"/>'
         out = inspect_source(src, text_for=("lbl_thing",)).render()
-        assert "CARIDAD" not in out
+        assert "PACIENTE" not in out
 
     def test_title_case_app_chrome_is_untouched(self):
         src = f'<android.widget.Button class="android.widget.Button" resource-id="{P}btn_clock_in" text="Registrar Entrada"/>'
@@ -140,7 +140,7 @@ class TestContentScrubbing:
     def test_explicit_override_still_shows_everything(self):
         out = inspect_source(self.HEADER_SOURCE, text_for=("lbl_header",),
                              allow_phi_text=True).render()
-        assert "CARIDAD" in out
+        assert "PACIENTE" in out
 
 
 class TestDistinctValuesSurvivedCollapsing:

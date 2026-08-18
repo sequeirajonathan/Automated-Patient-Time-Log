@@ -60,6 +60,38 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 LANGUAGE_COOKIE = "aptlog_lang"
 
 app = FastAPI(title="APT Log", docs_url=None, redoc_url=None)
+
+# Identity of this running process, baked into every page shell and carried on
+# every socket message. A deploy restarts the server; a page whose shell came
+# from the previous one is a stale skin rendering fresh fragments — seen live
+# as the new markup arriving into a cached page with none of the new styles,
+# which reads as a broken design rather than a cache. When the client notices
+# the mismatch it reloads itself once, so every open page follows a deploy
+# instead of quietly rotting.
+import uuid as _uuid
+
+BOOT_ID = _uuid.uuid4().hex[:12]
+
+# How many sockets are watching, published for the feed process. Auto sign-in
+# reads it: a phone signing itself in at 3 AM with nobody watching is not a
+# service, it is churn — the app's inactivity timer signs it back out and the
+# two of them loop until morning. The file's mtime doubles as a liveness
+# signal, refreshed on the slow tick, so a crashed UI cannot leave a stale
+# "someone is watching" on disk.
+VIEWERS_PATH = state_mod.STATE_DIR / "viewers.json"
+_viewers = 0
+
+
+def _publish_viewers() -> None:
+    try:
+        VIEWERS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = VIEWERS_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"n": _viewers}), encoding="utf-8")
+        tmp.replace(VIEWERS_PATH)
+    except OSError as exc:
+        log.warning("cannot publish viewer count (%s)", exc)
+
+
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 queue = RelayQueue()
@@ -116,8 +148,12 @@ def dashboard(request: Request):
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
+        # no-store: a cached shell rendering a newer server's fragments is a
+        # broken-looking page nobody can explain from their armchair.
+        headers={"Cache-Control": "no-store"},
         context={
             "t": t,
+            "boot": BOOT_ID,
             "lang": t.language,
             "languages": SUPPORTED,
             "s": state_mod.collect(),
@@ -135,6 +171,62 @@ def dashboard(request: Request):
             "macro_status": macros_mod.read_status(),
         },
     )
+
+
+@app.get("/app", response_class=HTMLResponse)
+def phone_app(request: Request):
+    """The full-screen phone view — the one she bookmarks to her home screen.
+
+    A launcher of four tiles, then a live wireframe of whatever the phone
+    shows: the screen's real structure, rendered as components instead of
+    photographed. It rides the same socket, the same tap verification and the
+    same macro allow-list as the dashboard; this route adds a skin, not a
+    capability. The dashboard at / keeps everything else — health, today,
+    reconciliation — and is one link away.
+    """
+    t = _translator(request)
+    screen_doc = _read_json(state_mod.STATE_DIR / "screen.json", None)
+    model = _screen_model(screen_doc) if screen_doc else None
+    return templates.TemplateResponse(
+        request=request,
+        name="phone.html",
+        headers={"Cache-Control": "no-store"},
+        context={
+            "t": t,
+            "boot": BOOT_ID,
+            "lang": t.language,
+            "apps": PHONE_APPS,
+            "m": model,
+            "screen_doc": screen_doc or {},
+            "pending": queue.current(),
+            "KIND_SIGNATURE": KIND_SIGNATURE,
+            "KIND_TOKEN": KIND_TOKEN,
+            "KIND_CHOICE": KIND_CHOICE,
+            "KIND_OTP": KIND_OTP,
+        },
+    )
+
+
+@app.get("/scan", response_class=HTMLResponse)
+def page_reading(request: Request):
+    """The last full-page reading, as a rendered fragment for the sheet.
+
+    Text lines only — the read_page macro walked the page and wrote them.
+    Same exposure class as screen.json: the page's own words, served over
+    the tailnet to the same viewer.
+    """
+    t = _translator(request)
+    doc = _read_json(state_mod.STATE_DIR / "scan.json", None) or {}
+    lines = [str(line) for line in (doc.get("lines") or []) if str(line).strip()]
+    if not lines:
+        return HTMLResponse(
+            f'<p class="scan-empty">{t("scan.empty")}</p>',
+            headers={"Cache-Control": "no-store"})
+    from markupsafe import escape
+
+    body = "".join(f'<p class="scan-line">{escape(line)}</p>'
+                   for line in lines)
+    return HTMLResponse(body, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/screen.jpg")
@@ -269,8 +361,113 @@ def _read_json(path, fallback):
         return fallback
 
 
-EMPTY_FRAME = {"id": "", "img": "", "size": [0, 0], "elements": []}
+def _sans_at(doc: dict) -> dict:
+    """The document minus its timestamp, for change comparison."""
+    return {k: v for k, v in doc.items() if k != "at"}
+
+
+def _render_key(doc: dict) -> dict:
+    """What the rendered wireframe actually depends on — nothing that churns.
+
+    `h_at` moves on every hierarchy read and `img` on any repainted pixel
+    (the phone's own clock is enough), so comparing the raw document re-sent
+    the HTML and swapped the DOM every second over an unchanged screen —
+    watched live as a steady shimmer, and on a scrolled page as the scroll
+    snapping back to the top. Staleness rides its own flag; the photograph
+    rides the frame payload; neither belongs in this comparison.
+    """
+    return {k: v for k, v in doc.items() if k not in ("at", "h_at", "img")}
+
+
+# The feed writes every 1-2 seconds when alive; a document this old means
+# nobody is writing, whatever it says.
+SCREEN_STALE_AFTER = 8.0
+
+# The document can be stamped fresh every second while the hierarchy inside it
+# is a kept copy from minutes ago — seen live as a dismissed modal rendered
+# under a green "Live" while the resident session was down. The sketch's age
+# is the hierarchy's age, not the file's.
+HIERARCHY_STALE_AFTER = 25.0
+
+
+def _screen_age(doc: dict | None) -> float:
+    from datetime import datetime as _dt
+
+    if not doc:
+        return float("inf")
+    try:
+        return (_dt.now() - _dt.fromisoformat(doc["at"])).total_seconds()
+    except (KeyError, TypeError, ValueError):
+        return float("inf")
+
+
+def _screen_is_stale(doc: dict | None) -> bool:
+    import time as _time
+
+    if _screen_age(doc) > SCREEN_STALE_AFTER:
+        return True
+    h_at = (doc or {}).get("h_at") or 0
+    # Docs from before the field existed carry 0; treat that as unknown
+    # rather than ancient, or every deploy would open on amber.
+    if h_at and _time.time() - h_at > HIERARCHY_STALE_AFTER:
+        return True
+    # The sketch belongs to a different app than the one in front: an app
+    # switch is in progress and the elements on the page are the *old*
+    # screen's. Amber, dimmed, untappable — never the launcher's rows under
+    # the new app's name with a green Live beside them.
+    app = (doc or {}).get("app") or ""
+    h_app = (doc or {}).get("h_app") or ""
+    if app and h_app and app != h_app:
+        return True
+    return False
+
+
+EMPTY_FRAME = {"id": "", "img": "", "size": [0, 0], "elements": [],
+               "blocked": "", "notice": ""}
 SLOW_EVERY = 10.0
+
+# The four apps her patients are spread across, verified against
+# `pm list packages` on the device. Names are the vendors' own brands, which is
+# why they are not in the catalog: a brand does not translate.
+#
+# `macro` is what the tile runs. Only the legacy app has a proven sign-in
+# sequence; the other three run their open-only macro, which brings the app to
+# the front and touches nothing — the most a button may honestly do on screens
+# nobody has mapped yet.
+PHONE_APPS = (
+    # `open` is the app's open-only macro — activate and wait, touch
+    # nothing. The client uses it to bounce an app back when a Back press
+    # turns out to have exited it to the launcher.
+    {"id": "hhax_legacy", "name": "HHAeXchange", "mark": "HX",
+     "package": "com.hhaexchange.caregiver",
+     "macro": "hhax_legacy_login", "open": "open_hhax_legacy",
+     "accent": "#1b6ed6"},
+    {"id": "hhax_uma", "name": "HHAeXchange+", "mark": "HX+",
+     "package": "com.hhaexchange.uma",
+     "macro": "hhax_uma_login", "open": "open_hhax_uma",
+     "accent": "#7a3fd1"},
+    {"id": "mobile_caregiver", "name": "Mobile Caregiver+", "mark": "MC",
+     "package": "com.tellus.evv.v2",
+     "macro": "mobile_caregiver_pin", "open": "open_mobile_caregiver",
+     "accent": "#0c8f5a"},
+    {"id": "inmyteam", "name": "inMyTeam", "mark": "iMT",
+     "package": "com.inmyteam.inmyteam",
+     "macro": "open_inmyteam", "open": "open_inmyteam",
+     "accent": "#c2452e"},
+)
+
+def _screen_model(doc: dict) -> dict | None:
+    """Semantic render model for _screen.html — see ui/screenview.py.
+
+    The first version reproduced the screen's geometry: absolute boxes at
+    device coordinates, fonts scaled to fit rectangles. Faithful, and it
+    looked broken. The reflow keeps what matters — controls, words, order,
+    grouping, tap identity — and hands layout to a design system built for
+    the width it is actually read at.
+    """
+    from apt_log.ui import screenview
+
+    return screenview.build(doc)
 
 # From the SPS the device actually emits: profile_idc 0x64 (High), level 0x29
 # (4.1). Read off the stream rather than assumed, because a wrong codec string
@@ -305,12 +502,16 @@ async def live(ws: WebSocket):
     someone's kitchen.
     """
     await ws.accept()
+    global _viewers
+    _viewers += 1
+    _publish_viewers()
     chosen = ws.cookies.get(LANGUAGE_COOKIE)
     if chosen not in SUPPORTED:
         chosen = normalise(ws.headers.get("accept-language"))
     t = Translator(chosen)
 
     frame_path = state_mod.STATE_DIR / "frame.json"
+    screen_path = state_mod.STATE_DIR / "screen.json"
     last: dict = {}
     slow_at = 0.0
     watching_video = False
@@ -339,14 +540,82 @@ async def live(ws: WebSocket):
         while True:
             payload: dict = {}
 
+            # Compared without the timestamp, which moves on every write and
+            # would turn "did the screen change" into "has a second passed".
             frame = _read_json(frame_path, EMPTY_FRAME)
-            if frame != last.get("frame"):
-                payload["frame"] = last["frame"] = frame
+            if _sans_at(frame) != last.get("frame"):
+                last["frame"] = _sans_at(frame)
+                payload["frame"] = frame
+
+            # The wireframe rides the same tick as the frame, rendered
+            # server-side like every other sentence this socket sends. Compared
+            # whole rather than by id: a checkbox flipping changes no target
+            # and no id, and the wireframe still has to redraw it.
+            screen_doc = _read_json(screen_path, None)
+            if screen_doc is not None and _render_key(screen_doc) != last.get("screen_doc"):
+                last["screen_doc"] = _render_key(screen_doc)
+                model = _screen_model(screen_doc)
+                payload["screen"] = {
+                    "id": screen_doc.get("id", ""),
+                    "name": screen_doc.get("screen", "unknown"),
+                    "app": screen_doc.get("app", ""),
+                    # Whose screen the rendered sketch is — the launch
+                    # overlay must hold until the *content* is the asked-for
+                    # app's, not merely the focus.
+                    "h_app": screen_doc.get("h_app", ""),
+                    "blocked": screen_doc.get("blocked", ""),
+                    "notice": screen_doc.get("notice", ""),
+                    "landscape": bool(screen_doc.get("landscape")),
+                    # A signature moment: canvas in front AND drawn
+                    # sideways. The sign sheet shows its app-side Borrar
+                    # and Salvar only here — they press real pixels, and
+                    # off this screen there is nothing to press.
+                    "canvas": bool(screen_doc.get("canvas")
+                                   and screen_doc.get("landscape")),
+                    # The app's own tab bar, lifted out of the list to ride
+                    # the control bar beside Back and Home. Empty on screens
+                    # without one.
+                    "apptabs": (model or {}).get("apptabs") or [],
+                }
+                payload["screen_html"] = (
+                    "" if model is None
+                    else templates.get_template("_screen.html").render(
+                        m=model, t=t))
+
+            # "Live" is a claim, and the page must not keep making it over a
+            # document nobody is refreshing. The feed restarting, the resident
+            # session rebuilding, the phone unplugged — all leave the last
+            # screen on disk looking current. Seen on the owner's phone as a
+            # sign-in screen labelled Live while the photograph showed home.
+            payload_stale = _screen_is_stale(screen_doc)
+            if payload_stale != last.get("screen_stale"):
+                last["screen_stale"] = payload_stale
+                payload["screen_stale"] = payload_stale
 
             pending = queue.current()
             macro = macros_mod.read_status()
             macro_state = {"state": macro.state, "step": macro.step,
-                           "name": macro.name, "error": macro.error}
+                           "name": macro.name, "error": macro.error,
+                           # Sentences rendered here, as everywhere on this
+                           # socket — the loading screen shows these verbatim.
+                           "text": t(macro.step) if macro.step else "",
+                           "state_text": t(f"macro.state.{macro.state}")}
+
+            from apt_log import sign as sign_mod
+
+            sig = sign_mod.read_status()
+            # An app-button press ("clear"/"confirm") finishing must not
+            # borrow the replay's "now press the app's save" sentence —
+            # the press WAS the save. Kind-specific done-sentences win
+            # when the status carries a kind.
+            sig_kind = getattr(sig, "kind", "")
+            sig_state = {"id": sig.id, "state": sig.state,
+                         "text": (t(f"sign.{sig.reason}") if sig.reason
+                                  else t(f"sign.state.{sig_kind}.done")
+                                  if sig_kind and sig.state == "done"
+                                  else t(f"sign.state.{sig.state}"))}
+            if sig_state != last.get("sign"):
+                payload["sign"] = last["sign"] = sig_state
             if macro_state != last.get("macro"):
                 payload["macro"] = last["macro"] = macro_state
 
@@ -365,6 +634,9 @@ async def live(ws: WebSocket):
             now = asyncio.get_event_loop().time()
             if now - slow_at >= SLOW_EVERY:
                 slow_at = now
+                # Refreshes the mtime, which is the liveness half of the
+                # viewer signal the feed reads.
+                _publish_viewers()
                 s = await asyncio.to_thread(state_mod.collect)
                 mirror = _mirror_payload(s, t)
                 if mirror != last.get("mirror"):
@@ -373,7 +645,9 @@ async def live(ws: WebSocket):
                     payload["paused"] = last["paused"] = s.paused
 
             if payload:
-                await ws.send_json({"type": "state", **payload})
+                # `boot` rides every message so a shell from a previous server
+                # can notice it is stale and reload itself.
+                await ws.send_json({"type": "state", "boot": BOOT_ID, **payload})
 
             while outbox:
                 await ws.send_bytes(outbox.pop(0))
@@ -387,6 +661,10 @@ async def live(ws: WebSocket):
 
             if msg.get("type") == "tap":
                 await ws.send_json(await _do_tap(msg))
+            elif msg.get("type") == "text":
+                await ws.send_json(await _do_text(msg))
+            elif msg.get("type") == "device":
+                await ws.send_json(await _do_device(msg))
             elif msg.get("type") == "video":
                 want = bool(msg.get("on"))
                 if want and not watching_video:
@@ -413,6 +691,8 @@ async def live(ws: WebSocket):
         # Socket closed underneath us mid-send; nothing to clean up.
         return
     finally:
+        _viewers = max(0, _viewers - 1)
+        _publish_viewers()
         if watching_video:
             _release()
             await asyncio.to_thread(_video.detach)
@@ -436,6 +716,68 @@ async def _do_tap(msg: dict) -> dict:
         log.warning("tap refused: %s", exc)
         return {"type": "tap_result", "ok": False, "reason": "stale"}
     return {"type": "tap_result", "ok": True}
+
+
+async def _do_text(msg: dict) -> dict:
+    """Type a short code into a field she aimed at.
+
+    Exists for exactly one shape of moment: a verification code lands on a
+    family member's phone and someone types it into the app's field from
+    the portal. Same aim verification as a tap (refuse-if-moved), fields
+    only, letters and digits only, capped short — a token channel, not a
+    message pipe. The value never appears in a log on either end.
+    """
+    from apt_log.feed import NotOnScreen, StaleAim, type_into
+
+    element = msg.get("element") or {}
+    frame = msg.get("frame") or ""
+    value = msg.get("value")
+    if not frame or not isinstance(element, dict) or not isinstance(value, str):
+        return {"type": "text_result", "ok": False, "reason": "malformed"}
+    try:
+        await asyncio.to_thread(type_into, frame, element, value)
+    except ValueError:
+        return {"type": "text_result", "ok": False, "reason": "malformed"}
+    except (StaleAim, NotOnScreen) as exc:
+        log.info("text refused: %s", exc)
+        return {"type": "text_result", "ok": False, "reason": "stale"}
+    return {"type": "text_result", "ok": True}
+
+
+async def _do_device(msg: dict) -> dict:
+    """Back, Home, Recents, Wake — over the socket rather than a form post.
+
+    Same allow-list as the POST route, checked in the same place: `send_ui_action`
+    refuses anything that is not a name in `device.UI_ACTIONS`. This is a second
+    door onto that function, not a second policy, which is the only way to add a
+    door to something whose safety argument lives in the routing.
+    """
+    from apt_log.device import DeviceUnavailable, send_ui_action
+
+    action = msg.get("action")
+    if not isinstance(action, str) or not action:
+        return {"type": "device_result", "ok": False}
+    try:
+        # adb round trip. On the event loop it would stall every viewer's
+        # frames, the same reason a tap does not run there.
+        await asyncio.to_thread(send_ui_action, action)
+    except DeviceUnavailable as exc:
+        log.warning("device action refused: %s", exc)
+        return {"type": "device_result", "ok": False}
+    log.info("device action %s sent over the socket", action)
+
+    # Back and Home change the screen; wake the hierarchy watcher so the
+    # wireframe follows without waiting out its interval.
+    try:
+        import time as _time
+
+        from apt_log.feed import POKE_NAME
+
+        (state_mod.STATE_DIR / POKE_NAME).write_text(str(_time.time()),
+                                                     encoding="utf-8")
+    except OSError:
+        pass
+    return {"type": "device_result", "ok": True}
 
 
 @app.get("/events")
@@ -504,6 +846,59 @@ async def submit_signature(request: Request):
 
     log.info("signature accepted for nonce %s (sha256 %s…)", nonce, digest[:8])
     return JSONResponse({"ok": True})
+
+
+@app.post("/sign")
+async def sign_current_screen(request: Request):
+    """Accept strokes drawn on the portal's pad, for replay onto the app.
+
+    The other half of the signature story. /signature answers a relay request
+    the controller opened; this one is hers to start — she has driven the app
+    to its own signature screen through the portal and needs ink to land on a
+    canvas she cannot physically touch. Drawing through the mirror was tried
+    on a real clock-out and is not drawable: every stroke crosses the network
+    twice before the ink appears.
+
+    The strokes are validated for shape here and handed to the feed process,
+    which replays them onto exactly one signature-canvas element or refuses
+    (see sign.py for the whole argument). Nothing here presses the app's save
+    button — that stays her tap.
+    """
+    from apt_log import sign as sign_mod
+
+    payload = await request.json()
+    strokes = payload.get("strokes")
+    if not sign_mod.validate(strokes):
+        return JSONResponse({"error": "empty"}, status_code=400)
+    try:
+        aspect = float(payload.get("aspect", 1.0))
+    except (TypeError, ValueError):
+        aspect = 1.0
+    rid = sign_mod.request(strokes, aspect=aspect)
+    log.info("signature replay queued (%s)", rid)
+    return JSONResponse({"ok": True, "id": rid})
+
+
+@app.post("/sign-action")
+async def sign_action(request: Request):
+    """Press the app's own clear or save on the signature screen.
+
+    The signature pages draw Borrar and Salvar in the same rotated pass
+    that hides their captions — the tree holds no trace of either, so the
+    portal cannot aim at them as elements. This is her tap on a screen she
+    is looking at, relayed: the runner presses at a spot derived from the
+    one thing the finder does see, the canvas, and refuses anywhere that
+    is not a signature moment. The replay itself still never commits.
+    """
+    from apt_log import sign as sign_mod
+
+    payload = await request.json()
+    kind = payload.get("kind")
+    if kind not in sign_mod.ACTIONS:
+        return JSONResponse({"error": "unknown"}, status_code=400)
+    rid = sign_mod.request_action(kind)
+    log.info("signature %s queued (%s)", kind, rid)
+    return JSONResponse({"ok": True, "id": rid})
 
 
 @app.post("/relay")

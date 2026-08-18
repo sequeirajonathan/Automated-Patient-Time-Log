@@ -69,6 +69,13 @@ if tailscale status >/dev/null 2>&1; then
     tailscale serve --bg 8080 2>/dev/null || log "serve failed — check HTTPS is enabled on the tailnet"
 fi
 
+# --------------------------------------------------------------- adb identity
+# Vault the phone-trusted RSA key and point every adb server at it, so a
+# rebuilt or restored box keeps the identity the phone already authorized.
+if [[ -x /opt/aptlog/scripts/adb-identity.sh ]]; then
+    /opt/aptlog/scripts/adb-identity.sh || log "adb-identity.sh failed"
+fi
+
 # ----------------------------------------------------------------- services up
 log "enabling services"
 systemctl daemon-reload

@@ -1,0 +1,45 @@
+/* The design tokens — the whole vocabulary, in one file both pages import.
+ *
+ * The phone view and the dashboard each grew their own palette; the owner
+ * felt the seam ("we need something more uniform") without needing to see
+ * the two :root blocks. This is the single source of truth: the iOS-grouped
+ * palette the phone view was rebuilt around, plus the two names only the
+ * dashboard uses, aliased into the same system. No build step, no library —
+ * the uniformity was never a tooling problem.
+ */
+:root {
+  --bg: hsl(220 23% 96%);
+  --card: hsl(0 0% 100%);
+  --ink: hsl(222 47% 11%);
+  --muted: hsl(215 16% 47%);
+  --line: hsl(214 32% 91%);
+  --tint: hsl(243 75% 59%);
+  --tint-soft: hsl(243 75% 59% / .1);
+  --ok: hsl(142 71% 40%);
+  --bad: hsl(0 72% 51%);
+  --unknown: hsl(38 60% 33%);
+  --track: hsl(240 6% 47% / .12);
+  --chrome: hsl(220 23% 96% / .85);
+  --shadow-card: 0 1px 2px 0 rgb(0 0 0 / .04), 0 8px 24px -12px rgb(0 0 0 / .12);
+  --shadow-pill: 0 8px 30px -8px rgb(0 0 0 / .35);
+  --spring: cubic-bezier(.22, 1, .36, 1);
+  /* The dashboard's brand colour is the same tint, not a second blue. */
+  --accent: var(--tint);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: hsl(222 47% 4.5%);
+    --card: hsl(222 40% 11%);
+    --ink: hsl(210 40% 98%);
+    --muted: hsl(215 20% 65%);
+    --line: hsl(217 33% 19%);
+    --tint: hsl(243 75% 66%);
+    --tint-soft: hsl(243 75% 66% / .14);
+    --ok: hsl(142 69% 55%);
+    --bad: hsl(0 72% 62%);
+    --unknown: hsl(43 74% 57%);
+    --track: hsl(240 6% 60% / .18);
+    --chrome: hsl(222 47% 4.5% / .85);
+    --shadow-card: 0 1px 2px 0 rgb(0 0 0 / .3), 0 8px 24px -12px rgb(0 0 0 / .5);
+  }
+}

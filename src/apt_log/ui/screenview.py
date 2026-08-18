@@ -1,0 +1,895 @@
+"""Reflow an Android screen into rows a phone-first page can render natively.
+
+The first wireframe reproduced the screen's *geometry*: every node absolutely
+positioned at the device's own coordinates, fonts scaled to fit their boxes.
+It was faithful and it looked broken — overlapping headers, orphaned toggles,
+text shrunk to fit rectangles that were never meant to be read at this width.
+Geometry is the one thing about the source screen not worth keeping.
+
+What is worth keeping is everything else: which controls exist, what they say,
+what belongs beside what, and the order she reads them in. So this module
+linearizes the screen — sorts the nodes into horizontal bands, folds labels
+into the tappable rows that contain them, pairs adjacent small buttons into
+segments — and hands the template semantic rows. The template renders them as
+a native mobile list; the device's coordinates decide *order and grouping* and
+are never used for placement again.
+
+Tap identity is untouched. Every interactive item carries the same rid, class
+and bounds the overlay always posted, and the server re-verifies them against
+the published frame before anything reaches the phone. Reflowing changes
+where a control is drawn on her page, never what tapping it means.
+"""
+
+from __future__ import annotations
+
+# Widget classes with a meaning of their own. Anything else that is clickable
+# is a container row — the shape Android lists are made of.
+BUTTONS = ("Button", "ImageButton")
+FIELDS = ("EditText", "AutoCompleteTextView", "SearchView")
+TOGGLES = ("CheckBox", "Switch", "CompoundButton", "ToggleButton", "RadioButton")
+IMAGES = ("ImageView",)
+TEXTS = ("TextView",)
+
+# Two nodes share a band when their vertical spans overlap by at least this
+# share of the smaller one. Android rows are not perfectly aligned; half is
+# enough to keep a label with its toggles without merging neighbouring rows.
+BAND_OVERLAP = 0.5
+
+# A pair of small same-sized buttons sitting flush against each other is a
+# segmented choice (the care plan's ✓/✗ pairs). "Small" is relative to the
+# screen, "flush" is a gap smaller than this share of the screen width.
+SEGMENT_MAX_WIDTH = 0.18
+SEGMENT_MAX_GAP = 0.02
+
+# The top of the screen, where an app keeps its own navigation bar: the
+# first band is a nav when it STARTS at the very top, ENDS above the
+# content, and every tappable in it is a small utility button — a back
+# chevron, an info dot, a badge — never a wide call to action. The band
+# bottom alone was the old test, and each app's header missed it by its
+# own margin: the agency picker's title block at 0.123, the legacy home's
+# logo-and-agency block at 0.19, both rendered as boxed rows instead of
+# title bars. Smallness is what actually separates chrome from content.
+NAV_TOP_MAX = 0.12
+NAV_BAND_BOTTOM = 0.20
+
+# A tappable container this flat is a scrim edge or a divider — a 5px strip
+# nobody could hit with a finger on the real phone — not a row. Rendering
+# one produced a full-height empty cell with a chevron pointing at nothing.
+SLIVER_MAX_HEIGHT = 0.02
+
+# An anonymous container spanning at least this share of the screen's height
+# is a curtain — a slide-over's scrim, a drawer edge — not a row.
+CURTAIN_MIN_HEIGHT = 0.55
+
+# Orphaned list dots. The reflow keeps a list's items, not its typography.
+BULLETS = {"•", "·", "◦", "‣", "∙", "*", "-"}
+
+# A loose label this short reads as a section heading; longer is prose. The
+# header treatment (uppercase, small, muted) applied to whole paragraphs
+# turned the migration pitch into a wall of shouting.
+HEADER_MAX_CHARS = 32
+
+# A nav bar's title runs longer than a section heading: the visit detail
+# titles itself with the page name AND the patient ("Detalle de Visita
+# CARIDAD ROJAS BATISTA", 39 chars), and holding the title to the heading
+# cap demoted the whole title bar to a boxed row (seen live, first field
+# test). Still short of a sentence — the tablet-density schedule's hint
+# line ("Encontrará las visitas anteriores con Visita Buscar", 51 chars)
+# must keep failing, or the page renames itself to the hint.
+NAV_TITLE_MAX_CHARS = 48
+
+
+def _is_icon_text(txt: str) -> bool:
+    """Text that is an icon font's private glyph, not a word.
+
+    Android apps ship icon fonts whose characters live in Unicode's private
+    use area; the dump hands them over as text and rendering them raw shows a
+    tofu box or a stray hamburger where the app showed a drawn icon. Words are
+    words; glyphs are decoration.
+    """
+    return bool(txt) and all(
+        0xE000 <= ord(c) <= 0xF8FF or c.isspace() for c in txt)
+
+
+# Icon glyphs that are STATE, not decoration. The visits list marks each
+# EVV check-in and check-out with a drawn check, shipped as an icon font's
+# private character — dropping it with the chevrons and hamburgers erased
+# the one thing the row exists to say. Known state glyphs translate to real
+# symbols; everything else in the private use area stays decoration.
+ICON_MARKS = {
+    "\uf00c": "\u2713",   # check
+    "\uf058": "\u2713",   # circled check
+    "\uf00d": "\u2715",   # cross
+    "\uf057": "\u2715",   # circled cross
+    "\uf071": "\u26a0",   # warning triangle
+}
+
+# Glyphs that NAME A BUTTON rather than mark state. On a clickable these
+# keep their meaning (the agency picker's info button rendered as an empty
+# box until its glyph translated); as loose statics they stay decoration \u2014
+# an \u2139 beside a paragraph says nothing the paragraph doesn't.
+ICON_LABELS = {
+    **ICON_MARKS,
+    "\uf059": "?",        # circled question \u2014 the info button
+    "\uf05a": "\u2139",   # circled info
+    "\uf060": "\u2190",   # left arrow \u2014 the visit-details back button
+}
+
+# What a state mark MEANS, so the template can colour it. A verified check
+# is good news (green); a cross or a warning is not. The medical context
+# makes this worth the colour: a caregiver scanning her day wants the
+# confirmed check-ins to read as confirmed at a glance.
+MARK_TONE = {
+    "\u2713": "ok",       # check -> green
+    "\u2715": "bad",      # cross -> red
+    "\u26a0": "warn",     # warning -> amber
+}
+
+# Text the app itself presents as a PRIMARY BUTTON \u2014 the filled calls to
+# action a screen is built around. Matched at the start of a label so
+# "Continuar visitando", "Iniciar visita no programada", "Guardar
+# cambios" all read as calls to action and earn the filled, coloured
+# treatment instead of looking like one more grey row. Spanish first
+# because that is the caregiver's app language; the English forms cover the
+# apps that mix locales. "Ver detalles" is here although it navigates:
+# the schedule's expanded card draws it as its one filled button, and the
+# owner named it the card's only real call to action \u2014 the app's own
+# visual weight is the standard, not the tap's side effect.
+ACTION_WORDS = (
+    "continuar", "iniciar sesi\u00f3n", "iniciar visita", "guardar",
+    "confirmar", "enviar", "comenzar", "empezar", "aceptar",
+    "registrar entrada", "registrar salida", "ver detalles",
+    "clock in", "clock out", "sign in", "start visit", "save", "submit",
+    "confirm", "continue", "view details", "see details",
+    "let's get started", "get started",
+)
+
+
+# Actions the app itself plays DOWN, whatever their verb. "Iniciar
+# visita no programada" starts the exception workflow — creating an
+# UNSCHEDULED visit — and the app draws it as small plain text under
+# today's cards while "Ver detalles" gets the filled pill (checked
+# against the phone's own pixels). The portal must not out-shout the
+# app on a record-creating path: these render as ordinary rows.
+DEMOTED_HINTS = ("no programada", "unscheduled")
+
+
+def _looks_like_cta(text: str) -> bool:
+    # The curly apostrophe is the one apps actually ship ("Let\u2019s Get
+    # Started"); the word list is written with the plain one.
+    t = (text or "").strip().lower().replace("\u2019", "'")
+    if any(h in t for h in DEMOTED_HINTS):
+        return False
+    return bool(t) and any(t.startswith(w) for w in ACTION_WORDS)
+
+# Some apps draw their state marks as ImageViews instead \u2014 no text at all,
+# identity carried by the resource-id alone. The legacy visits list shows a
+# drawable check per verified EVV record under exactly these ids; the image
+# only exists on rows where the record is confirmed.
+IMAGE_MARKS = {
+    "imgstarttime": "\u2713",
+    "imgendtime": "\u2713",
+}
+
+
+def _mark_for(s: dict) -> str:
+    """The state symbol a static stands for, or ''. Text glyphs and named
+    state images are the two shapes marks arrive in."""
+    txt = (s.get("txt") or "").strip()
+    if txt:
+        return ICON_MARKS.get(txt, "")
+    return IMAGE_MARKS.get((s.get("rid") or "").lower(), "")
+
+
+def _fold_label(cell_b: list[int], s: dict) -> tuple[str, str]:
+    """How a label folded into a cell should be carried: as a line, a badge,
+    or not at all.
+
+    A short number's meaning is its position, learned from the real agency
+    home screen: on the left it decorates an icon (the day inside the calendar
+    glyph — the date is already in the subtitle); on the right it is a count
+    riding in a bubble. Words are lines wherever they sit.
+    """
+    txt = s.get("txt", "")
+    mark = _mark_for(s)
+    if mark:
+        return "mark", mark
+    if not txt:
+        return "drop", ""      # an unrecognised image: decoration
+    if txt.strip() in BULLETS:
+        # A lone list dot: the list's structure does not survive the
+        # reflow, and the orphaned glyph rendered as a row of its own
+        # with a ten-character gap where flex stretched it.
+        return "drop", ""
+    if _is_icon_text(txt):
+        return "drop", ""
+    if len(txt) <= 3 and txt.strip().isdigit():
+        cx = (s["b"][0] + s["b"][2]) / 2
+        width = cell_b[2] - cell_b[0] or 1
+        share = (cx - cell_b[0]) / width
+        if share < 0.33:
+            return "drop", ""
+        if share > 0.6:
+            return "badge", txt.strip()
+    return "line", txt
+
+
+def _kind(cls: str) -> str:
+    if cls in BUTTONS:
+        return "button"
+    if cls in FIELDS:
+        return "field"
+    if cls in TOGGLES:
+        return "toggle"
+    if cls in IMAGES:
+        return "image"
+    if cls in TEXTS:
+        return "text"
+    return "row"
+
+
+def _effective_size(doc: dict) -> tuple[int, int]:
+    """The screen's real orientation, inferred from the bounds themselves.
+
+    The app forces landscape on some screens while `wm size` keeps reporting
+    portrait; the coordinates are what everything here sorts by, so they are
+    also what decides which way up the screen is.
+    """
+    w, h = (doc.get("size") or [0, 0])[:2]
+    everything = (doc.get("elements") or []) + (doc.get("statics") or [])
+    max_x = max((e["b"][2] for e in everything if e.get("b")), default=0)
+    if max_x > w and max_x <= max(w, h):
+        w, h = h, w
+    return w, h
+
+
+def _contains(outer: list[int], inner: list[int]) -> bool:
+    ox1, oy1, ox2, oy2 = outer
+    ix1, iy1, ix2, iy2 = inner
+    # Centre containment rather than full: Android labels routinely overhang
+    # their row by a pixel or two of padding.
+    cx, cy = (ix1 + ix2) / 2, (iy1 + iy2) / 2
+    return ox1 <= cx <= ox2 and oy1 <= cy <= oy2
+
+
+def _overlap(a: list[int], b: list[int]) -> float:
+    top = max(a[1], b[1])
+    bottom = min(a[3], b[3])
+    if bottom <= top:
+        return 0.0
+    smaller = min(a[3] - a[1], b[3] - b[1]) or 1
+    return (bottom - top) / smaller
+
+
+def _item(node: dict, kind: str) -> dict:
+    out = {
+        "kind": kind,
+        "txt": node.get("txt", ""),
+        "checked": bool(node.get("checked")),
+        "focused": bool(node.get("focused")),
+        "b": node["b"],
+    }
+    if "rid" in node:
+        # The aim carries the bounds AS CAPTURED at the element's scroll
+        # step — tap truth — while node["b"] may be the virtual page
+        # position — layout truth. A below-the-fold aim also carries its
+        # step, so the tap machinery knows to replay the scroll first.
+        out["aim"] = {"rid": node.get("rid", ""), "cls": node.get("cls", ""),
+                      "b": node.get("aim_b") or node["b"]}
+        if node.get("step"):
+            out["aim"]["step"] = node["step"]
+    return out
+
+
+def build(doc: dict) -> dict | None:
+    """The semantic model: a nav bar (maybe) and a list of rows."""
+    w, h = _effective_size(doc)
+    if not w or not h:
+        return None
+
+    # Stitched documents carry two coordinate systems: `vb` is the item's
+    # place on the page as a whole (layout truth, what everything below
+    # sorts and groups by) and `b` is where it sat on the device when
+    # captured (tap truth, preserved in aim_b). Viewport documents have
+    # only `b`, and the two roles coincide.
+    elements = [dict(e, b=e.get("vb") or e["b"], aim_b=e["b"])
+                for e in doc.get("elements") or [] if e.get("b")]
+    statics = [dict(s, b=s.get("vb") or s["b"], dev_b=s["b"])
+               for s in doc.get("statics") or [] if s.get("b")]
+
+    # ------------------------------------------------------------- overlays
+    # An app can slide a full-screen surface OVER the page without removing
+    # the page: the GPS confirm draws its map across everything, and the
+    # tree still reports the visit page beneath — tabs, buttons, the whole
+    # care plan — so the portal rendered both pages at once (seen live,
+    # first field test). Document order is z-order: an ANONYMOUS container
+    # spanning most of the screen that arrives AFTER interactive content it
+    # covers is an overlay, where a stitched page's wrapper (an ancestor)
+    # arrives BEFORE its children. Everything beneath an overlay is
+    # invisible on the phone and drops; whatever rides on it or sits
+    # outside it (its own controls, the confirm strip below) stays. A NAMED
+    # container is a control in its own right — the signature canvas —
+    # never an overlay.
+    covers = [i for i, e in enumerate(elements)
+              if not (e.get("rid") or "")
+              and _kind(e.get("cls", "")) == "row"
+              and (e["b"][3] - e["b"][1]) >= h * CURTAIN_MIN_HEIGHT
+              and (e["b"][2] - e["b"][0]) >= w * 0.9
+              and any(j < i and _contains(e["b"], o["b"])
+                      for j, o in enumerate(elements))]
+    if covers:
+        c = covers[-1]
+        cov = elements[c]["b"]
+        elements = [e for j, e in enumerate(elements)
+                    if j > c or (j != c and not _contains(cov, e["b"]))]
+        statics = [s for s in statics if not _contains(cov, s["b"])]
+
+    # The app's own bottom tab bar comes out first, before anything is
+    # folded or banded: its captions and the containers under them are
+    # chrome, lifted to the control bar, not content for the list. Detected
+    # from the captions (every tab has one) so the selected tab — which
+    # Compose leaves without a clickable container — is not lost.
+    apptabs, tab_ids = _app_tabs(elements, statics, w, h)
+    elements = [e for e in elements if id(e) not in tab_ids]
+    statics = [s for s in statics if id(s) not in tab_ids]
+
+    # Labels inside a tappable container belong to it: they are the row's own
+    # text, not free-floating captions. This is what turns "an unlabelled
+    # rectangle above three orphaned words" back into a list cell.
+    #
+    # Containment is judged WITHIN a capture, never across the stitch. The
+    # virtual bounds carry the scroll offset's accumulated error, so on a
+    # long page a day divider from one capture drifted inside a visit card
+    # from another and folded in as a bogus subtitle (seen live: "agosto
+    # 19/20/21" stuck under a visit row). Only a label captured at the same
+    # scroll step as the container was really inside it.
+    # A tall container with other interactive elements INSIDE it is a
+    # WRAPPER, not a row: the inMyTeam sign-in hangs one clickable View
+    # over the whole page, and letting it fold labels swallowed the
+    # title, the field's caption and the submit's text into one giant
+    # "button" — while the real Sign in control rendered empty. A tall
+    # card that holds nothing but the page's text is still content and
+    # keeps its labels; scaffolding folds nothing.
+    def _wraps_others(e: dict) -> bool:
+        return any(o is not e and _contains(e["b"], o["b"])
+                   for o in elements)
+
+    containers = [e for e in elements
+                  if _kind(e.get("cls", "")) == "row"
+                  and not ((e["b"][3] - e["b"][1]) >= h * CURTAIN_MIN_HEIGHT
+                           and _wraps_others(e))]
+    folded: set[int] = set()
+    labels: dict[int, list[dict]] = {}
+    for i, s in enumerate(statics):
+        for c in containers:
+            if s.get("step", 0) == c.get("step", 0) and _contains(c["b"], s["b"]):
+                labels.setdefault(id(c), []).append(s)
+                folded.add(i)
+                break
+
+    items: list[dict] = []
+    for e in elements:
+        kind = _kind(e.get("cls", ""))
+        item = _item(e, kind)
+        # A narrow button is a utility — a badge, a hamburger, an info dot —
+        # and rendering it at full width promotes it to a call to action it
+        # never was. Width relative to the screen is the only signal needed.
+        item["small"] = (e["b"][2] - e["b"][0]) <= w * 0.22
+        if _is_icon_text(item["txt"]):
+            # A drawn icon, not a word (see _is_icon_text) — but a KNOWN
+            # glyph keeps its meaning: the agency picker's info button
+            # rendered as an empty box until its glyph translated.
+            item["txt"] = ICON_LABELS.get(item["txt"].strip(), "")
+        if kind == "row":
+            own = sorted(labels.get(id(e), []),
+                         key=lambda s: (s["b"][1], s["b"][0]))
+            lines, badge, marks = [], "", []
+            for s in own:
+                how, value = _fold_label(e["b"], s)
+                # No line twice: the legacy home repeats a subtitle node in
+                # its own hierarchy, and a cell reading the same sentence
+                # two times looks broken even when the tree really does.
+                if how == "line" and value and value not in lines:
+                    lines.append(value)
+                elif how == "badge":
+                    badge = value
+                elif how == "mark":
+                    marks.append(value)
+            # An avatar chip's initial folded in among the row's first
+            # lines ("H" beside the agency's name on the visits list): a
+            # stub of capitals among real lines is the app's decoration,
+            # the folded twin of the loose "LP" beside a patient's name.
+            # It sorts first or second depending on which baseline sits a
+            # pixel higher, so both leading slots are checked.
+            if len(lines) >= 3:
+                for k in (0, 1):
+                    if (len(lines[k].strip()) <= 2
+                            and lines[k].strip().isupper()):
+                        lines.pop(k)
+                        break
+            item["lines"] = lines
+            item["badge"] = badge
+            # A row whose only content is a KNOWN glyph is named by it —
+            # the visit-details back button carries nothing but the drawn
+            # arrow, and stripping that as decoration left an empty
+            # sliver the row filter then swallowed: no back control.
+            if not lines and not item["txt"]:
+                item["txt"] = next(
+                    (ICON_LABELS[t] for s in own
+                     if (t := (s.get("txt") or "").strip()) in ICON_LABELS),
+                    "")
+            # State marks stay their own field — a verified EVV check-in is
+            # a green tick the caregiver scans for, not a "✓" buried in a
+            # subtitle line. The template draws them as coloured status pills.
+            item["marks"] = [{"sym": m, "tone": MARK_TONE.get(m, "")}
+                             for m in marks]
+            item["cta"] = _looks_like_cta(lines[0] if lines else "")
+            # A content-hugging row carrying one status line is the app
+            # STATING something, not offering a door: the expanded visit
+            # card's "✓ Registros de entrada de EVV" hugs its text at a
+            # third of the screen while every genuinely navigable cell
+            # spans it. Compose marks these clickable anyway, and drawing
+            # them as chevroned cells made the whole card look like it
+            # kept expanding ("makes it look like the individual elements
+            # can continue to expand"). They render as status lines — the
+            # check keeps its colour, the chevron and button dress go.
+            # Anchored at the left content margin, where statements start:
+            # a narrow tappable floating mid-screen ("Visita Buscar", the
+            # schedule's search) is a utility button, and dressing it as
+            # information would hide a real control. And LINE-shaped: the
+            # visit-details "Funciones" tile is narrow, left-anchored and
+            # single-captioned too, but it is a tall icon tile — a real
+            # button, and dressing it as information hid its tap.
+            narrow = (e["b"][2] - e["b"][0]) <= w * 0.6
+            left_anchored = e["b"][0] <= w * 0.08
+            line_shaped = (e["b"][3] - e["b"][1]) <= h * 0.03
+            item["info"] = (narrow and left_anchored and line_shaped
+                            and not item["cta"] and not badge
+                            and len(lines) <= 1 and bool(lines or marks))
+            item["tone"] = (item["marks"][0]["tone"]
+                            if item["info"] and item["marks"] else "")
+        elif kind == "button":
+            item["cta"] = _looks_like_cta(item["txt"])
+        items.append(item)
+    # The loose text of the screen — everything not folded into a row. Marks
+    # peel off first; the rest are captions, values, headings and prose.
+    loose: list[dict] = []
+    loose_marks: list[dict] = []
+    for i, s in enumerate(statics):
+        if i in folded:
+            continue
+        if _mark_for(s):
+            loose_marks.append(s)
+        elif (s.get("txt") and not _is_icon_text(s["txt"])
+                and s["txt"].strip() not in BULLETS):
+            loose.append(s)
+
+    # A loose mark with a sentence right beside it is one statement, not
+    # two strays: the visit-details screen draws its EVV chips with no
+    # container at all, and "✓" floating a line above "Registros de
+    # entrada…" read as debris. Pair them into the same status line the
+    # schedule's chips get; a mark with no neighbour stays a lone label.
+    paired: set[int] = set()
+    for s in loose_marks:
+        mark = _mark_for(s)
+        mate = next(
+            (t for t in loose
+             if id(t) not in paired
+             and 0 <= t["b"][0] - s["b"][2] <= 24
+             and _overlap(t["b"], s["b"]) >= 0.5), None)
+        if mate is None:
+            items.append(_item({**s, "txt": mark}, "label"))
+            continue
+        paired.add(id(mate))
+        chip = _item({k: v for k, v in s.items() if k != "rid"}, "row")
+        chip["b"] = [s["b"][0], min(s["b"][1], mate["b"][1]),
+                     mate["b"][2], max(s["b"][3], mate["b"][3])]
+        chip.update({"txt": "", "lines": [mate["txt"].strip()], "badge": "",
+                     "marks": [{"sym": mark,
+                                "tone": MARK_TONE.get(mark, "")}],
+                     "cta": False, "info": True,
+                     "tone": MARK_TONE.get(mark, "")})
+        items.append(chip)
+    loose = [t for t in loose if id(t) not in paired]
+
+    # Initials drawn as an avatar chip: a stub of capitals hugging the
+    # left of a real name ("LP" beside "LUCRESIA L PUPO") is the app's
+    # decoration, and rendering it as a section heading shouted noise.
+    # The chip is taller than the name line it decorates (the name's
+    # subtitle rides beside it too), so the overlap bar sits low.
+    def _beside(t, s):
+        return (0 <= t["b"][0] - s["b"][2] <= 24
+                and _overlap(t["b"], s["b"]) >= 0.25)
+
+    def _beneath(t, s):
+        return (0 <= t["b"][1] - s["b"][3] <= 30
+                and t["b"][0] < s["b"][2] and t["b"][2] > s["b"][0])
+
+    loose = [s for s in loose
+             if not (len(s["txt"].strip()) <= 3
+                     and s["txt"].strip().isupper()
+                     and any(t is not s
+                             and len(t["txt"].strip()) > 3
+                             and (_beside(t, s) or _beneath(t, s))
+                             for t in loose))]
+
+    # A field is a caption stacked tight above its value: the patient detail
+    # renders "Identificación de admisión" and "XOR-900196" a pixel apart,
+    # and rendering both as muted section headings made a value read as
+    # another label with a wall of space around it. Two short loose labels,
+    # left-aligned and nearly touching, are one field — caption over value.
+    # A caption over a CARD (its value being a tappable row) is not here:
+    # that value folded into a container, so the caption stays a heading.
+    loose.sort(key=lambda s: (s["b"][1], s["b"][0]))
+
+    # A RUN of loose labels — three or more single lines sharing a left
+    # edge and a steady rhythm — is the app's list, not a stack of
+    # headings: the visit detail's care plan is fourteen task lines, and
+    # every one of them short enough to be "caption shaped", so the whole
+    # plan rendered as a wall of muted small-caps section titles (seen
+    # live, first field test). List members read as body lines.
+    run_ids: set[int] = set()
+    k = 0
+    while k < len(loose):
+        m = k + 1
+        while m < len(loose):
+            prev, cur = loose[m - 1], loose[m]
+            line_h = max(cur["b"][3] - cur["b"][1], 1)
+            if (abs(cur["b"][0] - loose[k]["b"][0]) <= max(8, 0.02 * w)
+                    and 0 <= cur["b"][1] - prev["b"][3] <= 2.5 * line_h):
+                m += 1
+            else:
+                break
+        if m - k >= 3:
+            run_ids.update(id(loose[t]) for t in range(k, m))
+        k = m
+
+    j = 0
+    while j < len(loose):
+        s = loose[j]
+        nxt = loose[j + 1] if j + 1 < len(loose) else None
+        height = s["b"][3] - s["b"][1]
+        caption_shaped = (len(s["txt"].strip()) <= HEADER_MAX_CHARS
+                          and id(s) not in run_ids)
+        # A caption sits a hair above its value (a field), not a heading a
+        # line above a paragraph. Tight gap, left-aligned, and the value is
+        # a datum — a phone number, an ID, an office — never prose.
+        if (nxt is not None and caption_shaped
+                and 0 <= nxt["b"][1] - s["b"][3] <= 0.5 * height
+                and abs(nxt["b"][0] - s["b"][0]) <= max(8, 0.06 * w)
+                and len((nxt["txt"] or "").strip()) <= 80):
+            field = _item(s, "kv")
+            field["caption"] = s["txt"]
+            field["value"] = nxt["txt"]
+            items.append(field)
+            j += 2
+            continue
+        label = _item(s, "label")
+        # Short reads as a heading; longer is prose and must never wear the
+        # uppercase header treatment — a paragraph in small caps is a wall
+        # of shouting, not a section title.
+        label["header"] = caption_shaped
+        items.append(label)
+        j += 1
+
+    # A curtain — an anonymous, label-less container spanning most of the
+    # screen's height (the sliver of dimmed screen beside a slide-over
+    # panel, a drawer's edge) — is a surface, not a row. Banding goes by
+    # vertical overlap, so one curtain overlaps every real row on the
+    # screen and magnetizes them all into a single band — seen live as the
+    # patient-details page rendered as sixteen strips of vertically
+    # crushed letters. It says nothing, folds nothing, and is dropped.
+    # A row with a RESOURCE ID is a real control whatever its size: the
+    # visit-details back button is a 25px-tall strip at tablet density,
+    # and the sliver rule swallowed it — no way back. Anonymity is part
+    # of what makes a scrim a scrim. But a name does not make a 1px strip
+    # tappable: the agency picker's "viewtop" divider is id'd and one
+    # pixel tall, and it rendered as an empty tappable row. Below a
+    # finger's reach, the id no longer saves it.
+    def _sliver(n: dict) -> bool:
+        height = n["b"][3] - n["b"][1]
+        if height >= h * CURTAIN_MIN_HEIGHT:
+            return True
+        if height <= h * 0.005:
+            return True
+        return (height <= h * SLIVER_MAX_HEIGHT
+                and not (n.get("aim") or {}).get("rid"))
+
+    items = [n for n in items
+             if not (n["kind"] == "row"
+                     and not n.get("lines")
+                     and not n.get("txt")
+                     and _sliver(n))]
+
+    items.sort(key=lambda n: (n["b"][1], n["b"][0]))
+
+    # ------------------------------------------------------------------ bands
+    bands: list[list[dict]] = []
+    for item in items:
+        if bands and any(_overlap(item["b"], other["b"]) >= BAND_OVERLAP
+                         for other in bands[-1]):
+            bands[-1].append(item)
+        else:
+            bands.append([item])
+
+    # A WIDE button with no label sitting beside labelled buttons is a
+    # dead tab slot, not a control: the visit detail's tab strip keeps an
+    # empty third slot, and rendering it as a full-width '···' button put
+    # a nameless call to action in the middle of the tab bar (seen live,
+    # first field test). A small empty button is still an icon — kept.
+    for band in bands:
+        texted = [n for n in band
+                  if n["kind"] == "button" and (n["txt"] or "").strip()]
+        if len(texted) >= 2:
+            band[:] = [n for n in band
+                       if not (n["kind"] == "button"
+                               and not (n["txt"] or "").strip()
+                               and not n.get("small"))]
+    bands = [band for band in bands if band]
+
+    # A band that is nothing but section headings is the scroll stitch's
+    # day dividers ("agosto 18", "19", "20") landing a few pixels apart and
+    # magnetizing into one row — where they lose the header treatment and
+    # render as boxed cells. Split them back to one heading per line. A
+    # short label sitting WITH controls (a care-plan row's "127 - Toilet
+    # Use" beside its ✓/✗, a nav title beside its buttons) is not an
+    # all-header band, so it is left whole.
+    def _is_header(it: dict) -> bool:
+        return it["kind"] == "label" and it.get("header")
+
+    split: list[list[dict]] = []
+    for band in bands:
+        if len(band) > 1 and all(_is_header(it) for it in band):
+            for it in sorted(band, key=lambda n: (n["b"][1], n["b"][0])):
+                split.append([it])
+        else:
+            split.append(band)
+    bands = split
+    for band in bands:
+        band.sort(key=lambda n: n["b"][0])
+
+    # Side-by-side rows are CONTROLS, not statements: the visit detail's
+    # "Visits | Plan of care" section switch is two half-width rows in one
+    # band, and the left one matched the info-row shape. A statement
+    # stands alone on its line.
+    for band in bands:
+        rows_here = [it for it in band if it["kind"] == "row"]
+        if len(rows_here) >= 2:
+            for it in rows_here:
+                it["info"] = False
+
+    # --------------------------------------------------------------- segments
+    for band in bands:
+        _pair_segments(band, w)
+
+    # -------------------------------------------------------------------- nav
+    nav = None
+    if bands:
+        first = bands[0]
+        buttons = [n for n in first if n.get("aim")]
+        titles = [n for n in first if not n.get("aim") and n.get("txt")]
+        # A title bar's title is a title, never a paragraph. A page whose top
+        # band is a hint sentence with an inline link ("Encontrará las visitas
+        # anteriores con Visita Buscar", seen on the tablet-density schedule)
+        # is not a nav bar, and letting its hint become the title renamed the
+        # whole page from "HHAeXchange+" to the hint.
+        if (buttons
+                and min(n["b"][1] for n in first) <= h * NAV_TOP_MAX
+                and max(n["b"][3] for n in first) <= h * NAV_BAND_BOTTOM
+                and all(n.get("small") for n in buttons)
+                and all(len((t["txt"] or "").strip()) <= NAV_TITLE_MAX_CHARS
+                        for t in titles)):
+            title = max(titles, key=lambda n: len(n["txt"]), default=None)
+            nav = {
+                "back": buttons[0],
+                "title": title["txt"] if title else "",
+                "trailing": buttons[1:],
+            }
+            bands = bands[1:]
+
+    rows = []
+    for band in bands:
+        shape = _band_shape(band, h)
+        rows.append({"items": band, **shape})
+    return {"id": doc.get("id", ""), "nav": nav, "rows": rows,
+            "apptabs": apptabs,
+            "notice": doc.get("notice", ""), "blocked": doc.get("blocked", ""),
+            "webview": bool(doc.get("webview")),
+            "scrollable": bool(doc.get("scrollable")),
+            # Whether the rows above are the WHOLE page (a stitched walk)
+            # or just the viewport — the footnote reads opposite ways.
+            "full": bool(doc.get("full"))}
+
+
+def _fold_tab_captions(band: list[dict]) -> list[dict]:
+    """Give each tab the caption sitting over it, and drop the strays.
+
+    A tab's label often escapes the centre-containment fold — it hangs a few
+    pixels outside its container's box. In a recognised tab bar the x-overlap
+    is authority enough.
+    """
+    tabs = [i for i in band if i.get("aim")]
+    for loose in band:
+        if loose.get("aim") or not loose.get("txt"):
+            continue
+        cx = (loose["b"][0] + loose["b"][2]) / 2
+        for tab in tabs:
+            if tab["b"][0] <= cx <= tab["b"][2] and not tab.get("txt"):
+                tab["txt"] = loose["txt"]
+                break
+    return tabs
+
+
+# The bottom strip of a screen, where an app keeps its own tab bar.
+TAB_BAND_TOP = 0.88
+# And the bar must actually HUG the bottom edge: its nodes reach into the
+# screen's last twentieth. The schedule's list runs to within 8% of the
+# bottom, and on a stitched page the tail's own rows (a page's virtual
+# bottom runs on past the pinned bar) matched the loose band test —
+# watched live: 'agosto 21', patient names and their times consumed as a
+# sixteen-tab bar, and the page's last two days vanished from the portal.
+TAB_REACH = 0.95
+
+
+def _dev(item: dict) -> list[int]:
+    """Where the node sat on the DEVICE when captured.
+
+    Stitched pages give every item a virtual position too, and chrome
+    must be judged where it was drawn: the tab bar is pinned to the
+    screen's bottom while the page's virtual bottom runs on past it.
+    """
+    return item.get("dev_b") or item.get("aim_b") or item["b"]
+
+
+def _app_tabs(elements: list[dict], statics: list[dict],
+              w: int, h: int) -> tuple[list[dict], set[int]]:
+    """The app's own bottom tab bar as {txt, aim, current}, and the ids of
+    every node it consumed.
+
+    Detected from the CAPTIONS, not the clickable containers: Compose does
+    not mark the selected tab clickable, so a container-only detector loses
+    a slot (the schedule's 'Programación' when it is the tab in front).
+    Every tab has a caption; the caption's container, when there is one, is
+    the tap point, and the caption with none is the tab already selected —
+    shown lit, not tappable, since tapping the current tab does nothing.
+    """
+    band = h * TAB_BAND_TOP
+    reach = h * TAB_REACH
+    narrow = w * 0.5
+    holders = [e for e in elements
+               if _dev(e)[3] > band and _dev(e)[3] >= reach
+               and (e["b"][2] - e["b"][0]) < narrow
+               and _kind(e.get("cls", "")) == "row"]
+    caps = [s for s in statics
+            if _dev(s)[1] > band and _dev(s)[3] >= reach
+            and (s.get("txt") or "").strip()
+            and not _is_icon_text(s["txt"])
+            and (s["b"][2] - s["b"][0]) < narrow
+            and len(s["txt"].strip()) <= HEADER_MAX_CHARS]
+    # The bar's captions share ONE baseline. At a dense-enough layout the
+    # page's last card runs to within a few pixels of the pinned bar, and
+    # its own short lines passed every test above — consumed live as a
+    # five-tab bar ('Detalles del paciente' riding next to 'Programación').
+    # Content sits on its own lines; the bar's captions align. Keep only
+    # the bottom-most aligned run of two or more.
+    caps.sort(key=lambda s: _dev(s)[1])
+    groups: list[list[dict]] = []
+    for s in caps:
+        if groups and abs(_dev(s)[1] - _dev(groups[-1][0])[1]) <= 6:
+            groups[-1].append(s)
+        else:
+            groups.append([s])
+    caps = next((g for g in reversed(groups) if len(g) >= 2), [])
+    caps.sort(key=lambda s: s["b"][0])
+
+    def _aim(holder):
+        aim = {"rid": holder.get("rid", ""), "cls": holder.get("cls", ""),
+               "b": holder.get("aim_b") or holder["b"]}
+        if holder.get("step"):
+            aim["step"] = holder["step"]
+        return aim
+
+    consumed: set[int] = set()
+    tabs: list[dict] = []
+
+    # Compose-shaped bar: every tab has a caption, and the selected one has
+    # no clickable container. Detect from captions so that slot survives.
+    # THREE or more: a two-item bottom bar is a page's action pair — the
+    # visit detail's "Check in" / "Note & Check out" rode the control bar
+    # dressed as navigation, which a commit action must never do.
+    if len(caps) >= 3:
+        for s in caps:
+            cx = (s["b"][0] + s["b"][2]) / 2
+            holder = next((e for e in holders
+                           if e["b"][0] <= cx <= e["b"][2]), None)
+            if holder is not None:
+                consumed.add(id(holder))
+            tabs.append({"txt": s["txt"].strip(),
+                         "aim": _aim(holder) if holder else None,
+                         "current": holder is None})
+            consumed.add(id(s))
+        return tabs, consumed
+
+    # Icon-tab bar (inMyTeam): three or more equal containers hugging the
+    # bottom, captions optional. Each container is a tab; a stray caption
+    # folds into the one above it.
+    holders.sort(key=lambda e: e["b"][0])
+    if len(holders) >= 3:
+        for e in holders:
+            cx = (e["b"][0] + e["b"][2]) / 2
+            cap = next((s for s in caps
+                        if s["b"][0] <= cx <= s["b"][2]), None)
+            txt = cap["txt"].strip() if cap else ""
+            if cap is not None:
+                consumed.add(id(cap))
+            tabs.append({"txt": txt, "aim": _aim(e), "current": False})
+            consumed.add(id(e))
+        return tabs, consumed
+
+    return [], set()
+
+
+def _band_shape(band: list[dict], height: int) -> dict:
+    """Row-level shapes learned from the flight recorder's first session.
+
+    A keypad (Mobile Caregiver+ asks for its PIN on one) is bands of small
+    digit buttons — left-aligned list rows made it usable but not a keypad;
+    centring is what makes it read as one. A tab bar (inMyTeam keeps one at
+    the bottom) is a band of equal containers hugging the screen's bottom
+    edge — as list cells it crammed four labels and four chevrons into one
+    row.
+    """
+    interactive = [i for i in band if i.get("aim")]
+    if not interactive:
+        return {}
+    if (len(interactive) == len(band) and len(band) >= 2
+            and all(i.get("small") and i["kind"] in ("button", "toggle",
+                                                     "image")
+                    for i in band)):
+        return {"keys": True}
+    # A couple of loose captions ride along in a real tab bar — their labels
+    # hang outside the containers they belong to. More than that is a list.
+    if (len(interactive) >= 3
+            and len(band) - len(interactive) <= 2
+            and all(i["kind"] in ("row", "image") for i in interactive)
+            and all((i["aim"]["b"][3] >= height * TAB_BAND_TOP
+                     and i["aim"]["b"][3] >= height * TAB_REACH)
+                    for i in interactive)):
+        return {"tabs": True}
+    return {}
+
+
+def _pair_segments(band: list[dict], width: int) -> None:
+    """Fuse runs of small flush buttons into one segmented control, in place."""
+    out: list[dict] = []
+    run: list[dict] = []
+
+    def flush() -> None:
+        if len(run) >= 2:
+            out.append({"kind": "segment", "b": [run[0]["b"][0], run[0]["b"][1],
+                                                 run[-1]["b"][2], run[-1]["b"][3]],
+                        "parts": list(run)})
+        else:
+            out.extend(run)
+        run.clear()
+
+    for item in band:
+        small = (item["b"][2] - item["b"][0]) <= width * SEGMENT_MAX_WIDTH
+        pairable = item.get("aim") and small and item["kind"] in ("button",
+                                                                  "toggle")
+        if pairable and run:
+            gap = item["b"][0] - run[-1]["b"][2]
+            same_size = abs((item["b"][2] - item["b"][0])
+                            - (run[-1]["b"][2] - run[-1]["b"][0])) \
+                <= width * 0.04
+            if gap <= width * SEGMENT_MAX_GAP and same_size:
+                run.append(item)
+                continue
+            flush()
+        if pairable:
+            run.append(item)
+        else:
+            flush()
+            out.append(item)
+    flush()
+    band[:] = out

@@ -1,0 +1,924 @@
+<!doctype html>
+{# The full-screen phone view, built to the standard of the owner's own iOS-web
+   app (budget-dashboard) and borrowing its specific techniques:
+
+   - a locked body with one internal scroll surface, so iOS cannot rubber-band
+     the chrome; touch-action:manipulation so taps fire without the double-tap
+     wait; 16px inputs so focus never zooms the page
+   - iOS systemGroupedBackground tokens, light and dark, with cards separated
+     by depth rather than borders in the dark scheme
+   - a launch splash that owns the moment while the socket connects
+   - a large-title header whose hairline appears only once content scrolls
+   - a floating pill tab bar, inset from the edges, riding the safe area
+   - one spring curve for everything: cubic-bezier(.22,1,.36,1)
+
+   Same machinery as the dashboard underneath — same socket, same tap
+   verification, same macro allow-list. No service worker on purpose: offline
+   caching would keep copies of what the phone's screen said, and this page is
+   a window, not a document. #}
+<html lang="{{ lang }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="{{ t('app.title') }}">
+<meta name="theme-color" content="#f1f3f7">
+<link rel="manifest" href="/static/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/static/icons/icon-180.png">
+<title>{{ t('app.title') }}</title>
+<link rel="stylesheet" href="/static/design.css?v={{ boot }}">
+<style>
+  * { box-sizing:border-box; border-color:var(--line);
+      -webkit-tap-highlight-color:transparent; }
+  html, body { height:100dvh; }
+  /* iOS paints the strip under the home indicator with the page background,
+     not with any fixed element covering it. So the page background follows
+     the visible surface: wallpaper-dark on the launcher, canvas on the screen
+     view — and the strip disappears into whichever is showing. */
+  body[data-view="launcher"] { background:#0b0f1d; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:17px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text",
+              system-ui, Roboto, sans-serif;
+         -webkit-font-smoothing:antialiased;
+         overflow:hidden; overscroll-behavior:none;
+         touch-action:manipulation; }
+  /* iOS zooms the page on focusing any input under 16px. Never. */
+  input, select, textarea { font-size:16px !important; }
+  button { font:inherit; color:inherit; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration:.01ms !important;
+                             transition-duration:.01ms !important; }
+  }
+
+  /* --------------------------------------------------------------- splash */
+  #splash { position:fixed; inset:0; z-index:100; display:flex;
+            align-items:center; justify-content:center; background:var(--bg);
+            transition:opacity .45s ease-out; pointer-events:none; }
+  body.ready #splash { opacity:0; visibility:hidden;
+                       transition:opacity .45s ease-out, visibility 0s .5s; }
+  #splash .glow { position:absolute; width:280px; height:280px;
+                  border-radius:50%; background:var(--tint-soft);
+                  filter:blur(70px); }
+  #splash .mark { position:relative; width:88px; height:88px;
+                  border-radius:26px; display:flex; align-items:center;
+                  justify-content:center; color:#fff;
+                  background:linear-gradient(135deg, hsl(243 75% 58%),
+                             hsl(263 70% 55%) 55%, hsl(280 65% 52%));
+                  box-shadow:0 0 0 1px hsl(243 75% 59% / .25),
+                             0 12px 40px -12px hsl(243 75% 59% / .35);
+                  animation:splash-mark .6s var(--spring) both; }
+  #splash .ring { position:absolute; inset:0; border-radius:26px;
+                  border:2px solid hsl(243 75% 59% / .4);
+                  animation:splash-ring 1.8s ease-out infinite; }
+  #splash .ring.late { animation-delay:.6s; }
+  #splash svg { width:44px; height:44px; }
+  @keyframes splash-mark { from { opacity:0; transform:scale(.82); }
+                           to { opacity:1; transform:scale(1); } }
+  @keyframes splash-ring { 0% { opacity:.5; transform:scale(.72); }
+                           100% { opacity:0; transform:scale(2.1); } }
+
+  .view { position:fixed; inset:0; display:flex; flex-direction:column;
+          transition: transform .38s var(--spring), opacity .3s ease;
+          will-change: transform, opacity; }
+
+  /* ------------------------------------------------------------- launcher */
+  #launcher { background:
+      radial-gradient(120% 90% at 20% 0%, #2b3f86 0%, #161e3a 55%, #0b0f1d 100%);
+      color:#fff; padding: calc(52px + env(safe-area-inset-top)) 28px
+                          calc(22px + env(safe-area-inset-bottom)); }
+  #launcher time { font-size:46px; font-weight:250; letter-spacing:.01em;
+                   display:block; text-align:center; }
+  #launcher .date { text-align:center; color:rgba(255,255,255,.72);
+                    font-size:14px; font-weight:500; margin-top:2px; }
+  .springboard { display:grid; grid-template-columns:repeat(2, 1fr);
+                 gap:28px 12px; margin-top:46px; justify-items:center; }
+  .tile { border:none; background:none; padding:0; cursor:pointer;
+          display:flex; flex-direction:column; align-items:center; gap:9px;
+          color:#fff; width:100%;
+          transition: transform .22s var(--spring); }
+  .tile:active { transform:scale(.88); transition-duration:.06s; }
+  .tile .mark { width:66px; height:66px; border-radius:16px;
+                display:flex; align-items:center; justify-content:center;
+                font-weight:700; font-size:20px; color:#fff; position:relative;
+                overflow:hidden;
+                box-shadow:0 10px 24px -8px rgb(0 0 0 / .55); }
+  /* The gradient every real app icon has and a flat swatch does not. */
+  .tile .mark::after { content:""; position:absolute; inset:0;
+      background:linear-gradient(160deg, rgba(255,255,255,.28), transparent 42%,
+                 rgba(0,0,0,.18)); }
+  .tile .name { font-size:12px; font-weight:500; letter-spacing:.01em;
+                color:rgba(255,255,255,.95); text-align:center; }
+  #launcher footer { margin-top:auto; text-align:center; }
+  #launcher footer a { color:rgba(255,255,255,.5); font-size:13px;
+                       text-decoration:none; }
+
+  /* ---------------------------------------------------------- screen view */
+  #screenview { background:var(--bg); }
+  body[data-view="launcher"] #screenview { transform:translateX(102%);
+                                           opacity:0; pointer-events:none; }
+  body[data-view="screen"] #launcher { transform:scale(.92); opacity:0;
+                                       pointer-events:none; }
+
+  /* iOS large-title header: action row, then the title; the hairline appears
+     only once content has scrolled beneath it. */
+  .hdr { padding: calc(6px + env(safe-area-inset-top)) 16px 8px;
+         background:var(--chrome); backdrop-filter:blur(18px);
+         -webkit-backdrop-filter:blur(18px); z-index:5; position:relative;
+         transition:box-shadow .2s ease; }
+  body.scrolled .hdr { box-shadow:0 1px 0 var(--line); }
+  .hdr-row { display:flex; align-items:center; min-height:34px; }
+  .hdr-row button { border:none; background:none; color:var(--tint);
+                    padding:6px 8px; cursor:pointer; font-size:17px;
+                    display:flex; align-items:center; gap:1px; }
+  .hdr-row button { transition:opacity .25s ease, transform .3s var(--spring); }
+  .hdr-row button:active { opacity:.35; transform:scale(.92);
+                           transition-duration:.05s, .05s; }
+  .hdr-row .chev { width:12px; height:20px; }
+  .hdr-row .spacer { flex:1; }
+  .hdr-row svg.tool { width:21px; height:21px; }
+  .hdr-title { display:flex; align-items:center; gap:8px; margin-top:2px; }
+  .hdr-title h1 { font-size:28px; font-weight:700; letter-spacing:-.02em;
+                  line-height:1.15; margin:0; overflow:hidden;
+                  text-overflow:ellipsis; white-space:nowrap; }
+  .hdr-title .lock { display:none; width:16px; height:16px;
+                     color:var(--muted); flex:none; }
+  body.blocked .hdr-title .lock { display:block; }
+  .hdr-sub { display:flex; align-items:center; gap:6px; margin-top:2px;
+             font-size:13px; font-weight:500; color:var(--muted); }
+  .hdr-sub .dot { position:relative; width:7px; height:7px; flex:none; }
+  .hdr-sub .dot::before { content:""; position:absolute; inset:0;
+      border-radius:50%; background:var(--ok); }
+  .hdr-sub .dot::after { content:""; position:absolute; inset:0;
+      border-radius:50%; background:var(--ok); opacity:.6;
+      animation:ping 1.8s ease-out infinite; }
+  @keyframes ping { 75%, 100% { transform:scale(2.4); opacity:0; } }
+  body.offline .hdr-sub .dot::before,
+  body.offline .hdr-sub .dot::after { background:var(--bad); }
+  /* The sketch and the phone disagree: amber dot, and the old sketch is
+     NOT shown at all — the owner's rule: better to wait behind a loading
+     page than to look at stale data. A skeleton stands in until the fresh
+     screen arrives; the asleep card and the launcher card outrank it,
+     because each of those states says something truer than "loading". */
+  body.stale .hdr-sub .dot::before,
+  body.stale .hdr-sub .dot::after { background:hsl(38 92% 50%); }
+  body.stale:not(.asleep):not(.offapp) #screenwrap { display:none; }
+  body.stale:not(.asleep):not(.offapp) #syncing { display:block; }
+
+  /* The skeleton: the native loading language — placeholder rows breathing
+     where content is about to be, never a spinner over old data. */
+  #syncing { display:none; padding:8px 16px; }
+  .sk-card { background:var(--card); border-radius:16px; padding:4px 14px;
+             box-shadow:var(--shadow-card); margin-bottom:14px;
+             animation:fade-up .45s var(--spring) both; }
+  .sk-card:nth-child(2) { animation-delay:.08s; }
+  .sk-card:nth-child(3) { animation-delay:.16s; }
+  .sk-row { padding:13px 0; }
+  .sk-row + .sk-row { border-top:.5px solid var(--line); }
+  .sk-line { height:14px; border-radius:7px;
+             background:linear-gradient(100deg, var(--track) 40%,
+                        var(--tint-soft) 50%, var(--track) 60%);
+             background-size:220% 100%;
+             animation:shimmer 1.6s linear infinite; }
+  .sk-line.sub { height:10px; margin-top:8px; opacity:.6; }
+  .sk-line.w80 { width:80%; } .sk-line.w60 { width:60%; }
+  .sk-line.w45 { width:45%; } .sk-line.w30 { width:30%; }
+  .hdr-sub .spin { display:none; width:14px; height:14px; border-radius:50%;
+                   border:2px solid var(--tint-soft);
+                   border-top-color:var(--tint);
+                   animation:spin .7s linear infinite; }
+  body.tapping .hdr-sub .spin { display:inline-block; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+  body.offline #stage { opacity:.5; pointer-events:none; }
+
+  /* The one scroll surface. The body is locked, so nothing rubber-bands —
+     and it runs to the very bottom edge, sliding under the floating pill,
+     so the canvas is continuous instead of ending twice. */
+  #stage { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden;
+           -webkit-overflow-scrolling:touch; position:relative; }
+  #screenwrap { min-height:100%; }
+
+  /* ----------------------------------------------- the reflowed app screen */
+  .wire { padding:2px 0 calc(env(safe-area-inset-bottom) + 104px); }
+  /* The app's own title bar. Its NAME is already worn by the portal's
+     large title (#where reads .a-title from here — see phone.js), so the
+     text stays in the DOM but out of sight: showing it twice, once in the
+     header and again in the wire, was the clunk. What remains visible is
+     the app's utility buttons, riding as small round chips on the right. */
+  .a-nav { display:flex; align-items:center; justify-content:flex-end;
+           min-height:0; gap:8px; padding:0 16px; margin-bottom:2px; }
+  .a-title { position:absolute; width:1px; height:1px; overflow:hidden;
+             clip-path:inset(50%); white-space:nowrap; }
+  .a-trail { display:flex; gap:8px; }
+  .a-navbtn { border:none; background:var(--tint-soft); color:var(--tint);
+              font-size:15px; font-weight:600; min-width:34px; height:34px;
+              padding:0 10px; border-radius:999px; cursor:pointer;
+              transition:transform .25s var(--spring); }
+  .a-navbtn:active { transform:scale(.88); transition-duration:.05s; }
+
+  /* The page's tail: motion while the scan is reading, stillness when it
+     is done. The sweep is a thin track with a tinted comet crossing it;
+     the end-of-page mark is a short quiet dash — no sentences. */
+  .a-scanning { height:4px; border-radius:999px; overflow:hidden;
+                background:var(--tint-soft); margin:10px 56px 16px; }
+  .a-scanning span { display:block; height:100%; width:38%;
+                border-radius:999px;
+                background:linear-gradient(90deg, transparent,
+                            var(--tint), transparent);
+                animation:scan-sweep 1.2s ease-in-out infinite; }
+  @keyframes scan-sweep { from { transform:translateX(-110%); }
+                          to   { transform:translateX(380%); } }
+  @media (prefers-reduced-motion: reduce) {
+    .a-scanning span { animation:none; transform:none; opacity:.6; } }
+  .a-pageend { width:48px; height:3px; border-radius:999px;
+               background:var(--line); margin:12px auto 16px; }
+
+  /* The webview honesty line: a web page's pixels can carry what its
+     accessibility tree does not. */
+  .a-webnote { text-align:center; color:var(--muted); font-size:12.5px;
+               padding:4px 24px 10px; }
+
+  /* The read-the-whole-page offer, and the reading it produces. */
+  .a-scanbtn { display:block; margin:2px auto 16px; border:none;
+               cursor:pointer; color:var(--tint); background:var(--tint-soft);
+               font-size:14px; font-weight:600; padding:10px 18px;
+               border-radius:999px;
+               transition:transform .25s var(--spring); }
+  .a-scanbtn:active { transform:scale(.92); transition-duration:.05s; }
+  body.reading #scansheet { transform:translateY(0); }
+  #scansheet { max-height:75dvh; display:flex; flex-direction:column; }
+  .scan-head { display:flex; align-items:center; justify-content:space-between;
+               padding-bottom:10px; }
+  .scan-head span { font-weight:600; font-size:16px; }
+  .scan-head button { border:none; background:none; color:var(--tint);
+               font-size:16px; cursor:pointer; padding:4px 6px; }
+  #scancontent { overflow-y:auto; -webkit-overflow-scrolling:touch;
+               min-height:120px; }
+  .scan-line { margin:0 0 10px; font-size:15.5px; line-height:1.45; }
+  .scan-empty { color:var(--muted); text-align:center; padding:24px 0; }
+
+  .a-alert { margin:12px 16px 0; padding:14px 16px; border-radius:16px;
+             background:var(--card); box-shadow:var(--shadow-card);
+             text-align:center; font-size:15.5px; }
+
+  /* ---- reflow type scale: mobile-standard, tuned for a data-dense medical
+     list. Titles read at a glance, details step back, nothing shouts. ---- */
+  .a-list { padding:6px 14px 0; font-size:15px; }
+  /* Wrap, never crush, never mid-word: a band with more text than width used
+     to shrink each label to a one-character column. Items wrap at word
+     boundaries and clamp long titles rather than letting them run. */
+  .a-row { display:flex; align-items:center; gap:10px; background:var(--card);
+           padding:11px 14px; min-height:46px; position:relative;
+           flex-wrap:wrap; }
+  .a-row:first-child { border-radius:14px 14px 0 0; }
+  .a-row + .a-row { border-top:.5px solid var(--line); }
+  .a-row:last-child { border-radius:0 0 14px 14px; margin-bottom:10px;
+                      box-shadow:var(--shadow-card); }
+  .a-row:first-child:last-child { border-radius:14px; }
+
+  /* Entrance: his fade-up, staggered a breath per row — and only when the
+     screen actually changed, so a checkbox flip does not re-run it. */
+  #screenwrap.enter .a-row, #screenwrap.enter .a-alert,
+  #screenwrap.enter .a-nav {
+    animation:fade-up .4s var(--spring) both; }
+  #screenwrap.enter .a-row:nth-child(2) { animation-delay:.03s; }
+  #screenwrap.enter .a-row:nth-child(3) { animation-delay:.06s; }
+  #screenwrap.enter .a-row:nth-child(4) { animation-delay:.09s; }
+  #screenwrap.enter .a-row:nth-child(5) { animation-delay:.12s; }
+  #screenwrap.enter .a-row:nth-child(n+6) { animation-delay:.15s; }
+  @keyframes fade-up { from { opacity:0; transform:translateY(8px); }
+                       to { opacity:1; transform:translateY(0); } }
+
+  .a-label { color:var(--ink); font-size:15px; line-height:1.4;
+             min-width:min(10ch, 100%); overflow-wrap:break-word; }
+  /* A short loose label is a section heading; prose stays prose. The
+     uppercase treatment on whole paragraphs was a wall of shouting. */
+  .a-row.n1 > .a-label.hdr:only-child { color:var(--muted); font-size:11.5px;
+             font-weight:700; text-transform:uppercase;
+             letter-spacing:.07em; }
+  .a-row.n1 > .a-label:not(.hdr):only-child { font-size:13.5px;
+             line-height:1.45; color:var(--muted); }
+  .a-row:has(> .a-label:only-child) { background:none; box-shadow:none;
+             border:none; padding:4px 4px 5px; min-height:0; }
+  /* A section heading opens a group: air above it, snug below. */
+  .a-row:has(> .a-label.hdr:only-child) { padding:14px 4px 5px; }
+  .a-label:first-child { flex:1; }
+
+  /* A field: caption above value, one tight unit — a datum, not two
+     floating headers. The caption is a quiet uppercase label; the value
+     is the reading, in full ink. Grouped in a card like list rows. */
+  .a-kv { flex:1; display:flex; flex-direction:column; gap:2px;
+          min-width:0; }
+  .a-kv-cap { font-size:11px; font-weight:700; text-transform:uppercase;
+              letter-spacing:.06em; color:var(--muted); }
+  .a-kv-val { font-size:15px; font-weight:500; color:var(--ink);
+              line-height:1.35; overflow-wrap:break-word; }
+  .a-row:has(> .a-kv) { padding:9px 14px; min-height:0; }
+
+  .a-cell { flex:1; border:none; background:none; text-align:left; padding:0;
+            cursor:pointer; display:flex; flex-direction:column; gap:2px;
+            min-width:0; position:relative; padding-right:20px;
+            transition:opacity .25s ease; }
+  .a-cell:active { opacity:.45; transition-duration:.04s; }
+  /* The row's title: one line by preference, wrapping to two before it
+     ever clips — long patient names stay legible, runaway strings do not
+     blow the row open. Details sit quiet beneath it. */
+  .a-line { font-size:15px; font-weight:500; line-height:1.35;
+            color:var(--ink); overflow-wrap:break-word;
+            display:-webkit-box; -webkit-line-clamp:2;
+            -webkit-box-orient:vertical; overflow:hidden; }
+  .a-line.sub { font-size:12.5px; font-weight:400; color:var(--muted);
+                -webkit-line-clamp:2; }
+  .a-chev { position:absolute; right:0; top:50%; transform:translateY(-50%);
+            width:7px; height:13px; color:hsl(240 6% 47% / .4);
+            flex:none; }
+
+  /* Verified check-ins and other state marks, as coloured pills: green for
+     a confirmed EVV record, amber for a warning, red for a miss. In a
+     medical day the caregiver scans for exactly these. */
+  .a-marks { display:flex; gap:5px; margin-top:3px; }
+  .a-mark { display:inline-flex; align-items:center; justify-content:center;
+            min-width:18px; height:18px; padding:0 5px; border-radius:999px;
+            font-size:11px; font-weight:700; line-height:1; }
+  .a-mark.ok  { background:hsl(142 71% 40% / .16); color:var(--ok); }
+  .a-mark.warn{ background:hsl(38 92% 50% / .16); color:var(--unknown); }
+  .a-mark.bad { background:hsl(0 72% 51% / .14); color:var(--bad); }
+  .a-mark:not(.ok):not(.warn):not(.bad) { background:var(--track);
+            color:var(--muted); }
+
+  /* A statement, not a door: the expanded card's status lines ("✓
+     Registros de entrada de EVV 6:00") render as soft chips in the
+     mark's tone — the phone draws them exactly this way — with no
+     chevron and no button dress. Toneless info rows are plain labels. */
+  .a-inforow { flex:1; display:flex; align-items:center; gap:8px;
+               padding:8px 12px; border-radius:10px; min-width:0; }
+  .a-inforow .a-mark { margin:0; flex:none; }
+  .a-infotext { font-size:13.5px; font-weight:500; color:var(--ink);
+                line-height:1.35; overflow-wrap:break-word; min-width:0;
+                display:-webkit-box; -webkit-line-clamp:2;
+                -webkit-box-orient:vertical; overflow:hidden; }
+  .a-inforow.ok   { background:hsl(142 71% 40% / .10); }
+  .a-inforow.warn { background:hsl(38 92% 50% / .10); }
+  .a-inforow.bad  { background:hsl(0 72% 51% / .08); }
+  .a-row:has(> .a-inforow) { background:none; box-shadow:none; border:none;
+               padding:2px 2px; min-height:0; }
+
+  /* The type bar: floats above the pill when a text field is tapped. One
+     input, one send — the OTP moment, not a keyboard. */
+  .typebar { position:fixed; left:12px; right:12px; bottom:88px; z-index:40;
+             background:var(--card, #fff); border-radius:16px; padding:12px 14px;
+             box-shadow:0 12px 32px -12px rgb(0 0 0 / .35);
+             display:flex; flex-direction:column; gap:8px; }
+  /* Author display beats the UA's [hidden] rule, so hidden must be said
+     here too — without this the bar sat on every page from load, and no
+     amount of closing logic could touch it. */
+  .typebar[hidden] { display:none; }
+  .typehint { font-size:12.5px; color:var(--muted); }
+  .typerow { display:flex; gap:8px; }
+  .typerow input { flex:1; min-width:0; font-size:18px; letter-spacing:2px;
+             padding:10px 12px; border-radius:10px;
+             border:1.5px solid var(--tint); background:var(--bg, #fff);
+             color:var(--ink); }
+  .typerow button { border:none; border-radius:10px; padding:0 16px;
+             font-size:14px; font-weight:600; cursor:pointer; }
+  #typesend { background:var(--tint); color:#fff; }
+  #typecancel { background:var(--track); color:var(--muted); }
+
+  /* A call to action, whether the app drew it as a Button or a plain
+     clickable row: filled accent, centred, no chevron — it commits or
+     advances, it does not "open more". This is the difference the owner
+     missed, where every action looked like one more grey row. */
+  .a-cell.cta { align-items:center; text-align:center; padding:12px 14px;
+                background:var(--tint); color:#fff; border-radius:12px;
+                min-height:44px; justify-content:center;
+                transition:transform .15s var(--spring), filter .15s ease; }
+  .a-cell.cta .a-line { color:#fff; font-weight:600; font-size:15.5px;
+                        -webkit-line-clamp:1; }
+  .a-cell.cta:active { opacity:1; transform:scale(.97); filter:brightness(.9); }
+  .a-row:has(> .a-cell.cta) { background:none; box-shadow:none; border:none;
+            padding:5px 2px; }
+  /* A keypad reads as one when its keys are centred, not listed. */
+  .a-row.a-keys { justify-content:center; gap:18px; }
+  .a-row.a-keys .a-btn.sm, .a-row.a-keys .a-icon { min-width:64px;
+              min-height:52px; font-size:20px; border-radius:16px; }
+  /* The app's own tab bar: evenly spread, labels only, no chevrons. */
+  .a-row.a-tabs { justify-content:space-around; gap:2px; padding:6px 4px; }
+  .a-tab { flex:1; border:none; background:none; cursor:pointer;
+           font-size:12.5px; font-weight:500; color:var(--muted);
+           padding:10px 2px; border-radius:12px; overflow:hidden;
+           text-overflow:ellipsis; white-space:nowrap;
+           transition:transform .3s var(--spring); }
+  .a-tab:active { transform:scale(.9); color:var(--tint);
+                  background:var(--tint-soft); transition-duration:.06s; }
+
+  /* Counts ride in bubbles, the way every native list draws them. */
+  .a-badge { position:absolute; right:14px; top:50%;
+             transform:translateY(-50%); background:var(--bad);
+             color:#fff; font-size:12px; font-weight:700; line-height:1;
+             min-width:20px; padding:3px 6px; border-radius:999px;
+             text-align:center; }
+
+  /* Buttons in three weights: a filled primary CTA, a plain secondary, a
+     small utility chip. The default IS the primary — a lone button on a
+     screen is almost always its purpose. */
+  .a-btn { flex:1; border:none; border-radius:12px; background:var(--tint);
+           color:#fff; font-weight:600; font-size:15.5px; padding:12px 16px;
+           cursor:pointer; min-height:46px; overflow-wrap:break-word;
+           transition:transform .15s var(--spring), filter .15s ease; }
+  .a-btn:active { transform:scale(.97); filter:brightness(.88);
+              transition-duration:.05s, .05s; }
+  .a-btn.cta { box-shadow:0 6px 16px -8px var(--tint); }
+  .a-btn.sm { flex:none; min-width:44px; padding:9px 13px; min-height:36px;
+              background:var(--track); color:var(--tint); font-size:14px;
+              font-weight:600; }
+
+  .a-field { flex:1; border:none; border-radius:10px; background:var(--track);
+             color:var(--ink); text-align:left; padding:11px 14px;
+             min-height:44px; cursor:text; font-size:15px; }
+  .a-field.focus { outline:2px solid var(--tint); }
+
+  /* iOS segmented anatomy: grey track, the chosen part raised on a card. */
+  .a-seg { display:flex; border-radius:9px; background:var(--track);
+           padding:2px; margin-left:auto; flex:none; gap:2px; }
+  .a-segbtn { border:none; border-radius:7px; background:transparent;
+              color:var(--ink); min-width:46px; min-height:34px;
+              padding:5px 12px; cursor:pointer; font-size:15.5px;
+              transition:background .15s ease; }
+  .a-segbtn:active { background:hsl(240 6% 47% / .14);
+              transform:scale(.94); transition-duration:.05s; }
+  .a-segbtn.on { background:var(--card); color:var(--tint); font-weight:600;
+                 box-shadow:0 1px 4px rgb(0 0 0 / .12); }
+
+  .a-switch:active .knob { transform:scale(1.08); }
+  .a-switch { flex:none; margin-left:auto; width:51px; height:31px;
+              border:none; border-radius:999px; background:var(--track);
+              padding:2px; display:flex; justify-content:flex-start;
+              cursor:pointer; transition:background .2s ease; }
+  .a-switch.on { background:var(--ok); justify-content:flex-end; }
+  .a-switch .knob { width:27px; height:27px; border-radius:50%; background:#fff;
+                    box-shadow:0 2px 5px rgb(0 0 0 / .25); }
+
+  .a-icon { flex:none; width:38px; height:38px; border:none; border-radius:11px;
+            background:var(--track); color:var(--tint); cursor:pointer;
+            font-size:16px; }
+  .a-icon:active { opacity:.5; }
+  .a-link { border:none; background:none; color:var(--tint); cursor:pointer;
+            text-align:left; padding:0; font-size:16.5px; }
+  .a-link:active { opacity:.4; }
+
+  /* A tap is in flight: dim and shimmer. A state, not an event. */
+  body.tapping #screenwrap { opacity:.6; }
+  body.tapping #stage::after { content:""; position:absolute; inset:0;
+      background:linear-gradient(100deg, transparent 30%,
+                 hsl(0 0% 100% / .5) 50%, transparent 70%);
+      background-size:220% 100%; animation:shimmer 1.1s ease infinite; }
+  @media (prefers-color-scheme: dark) {
+    body.tapping #stage::after {
+      background:linear-gradient(100deg, transparent 30%,
+                 hsl(0 0% 100% / .08) 50%, transparent 70%);
+      background-size:220% 100%; } }
+  @keyframes shimmer { from { background-position:180% 0; }
+                       to { background-position:-40% 0; } }
+
+  /* The photo, inspectable: full width at its natural height, scrolling
+     vertically — the whole capture is reachable, not a shrunken fit.
+     The stage's own scroll locks while the photo is open: the overlay is
+     anchored to the top of the stage's content, so a pre-scrolled list
+     left it half off-screen with the reflow bleeding through under it. */
+  #peekwrap { position:absolute; inset:0; display:none; z-index:4;
+              background:#000; overflow-y:auto;
+              -webkit-overflow-scrolling:touch; }
+  body.peeking #peekwrap { display:block; }
+  body.peeking #stage { overflow:hidden; }
+  /* The wire has no business showing while the photo is open: any row
+     that wins a stacking-context fight paints ON TOP of the photo —
+     seen live as section headers floating over the screenshot. Hidden
+     outright, there is no fight to win. */
+  body.peeking #screenwrap { visibility:hidden; }
+  #peek { width:100%; height:auto; display:block; }
+  /* The signature screen is the one place a care app goes sideways, and
+     its photograph arrived sideways too — read with a tilted head during
+     the first live signature test. The frame turns upright here: rotate
+     the portrait photograph (720x1600) a quarter turn and scale it back
+     to the page's width (720/1600 = 0.45); the negative block margins
+     trim the empty flow box the transform leaves behind
+     ((1600/720 - 720/1600) / 2 = 88.6% of the width). */
+  body.sideways #peek {
+      transform: rotate(-90deg) scale(0.45);
+      transform-origin: center;
+      margin: -88.6% 0; }
+  #peek-cap { position:absolute; left:50%; transform:translateX(-50%);
+              bottom:14px; z-index:5; display:none; background:rgb(0 0 0/.65);
+              color:#fff; font-size:12.5px; padding:6px 12px;
+              border-radius:999px; }
+  body.peeking #peek-cap:not([hidden]) { display:block; }
+  #peek-cap.old { background:hsl(38 92% 40% / .9); }
+
+  /* The display is off. The last screen stays visible below, dimmed and
+     desaturated and untappable — a memory, labelled as one — so a dark phone
+     reads as a phone that slept, not as something gone wrong. */
+  #asleep { display:none; flex-direction:column; align-items:center;
+            gap:8px; margin:12px 16px; padding:18px 16px;
+            border-radius:16px; background:var(--card);
+            box-shadow:var(--shadow-card); text-align:center;
+            color:var(--muted); }
+  #asleep svg { width:30px; height:30px; opacity:.6; }
+  #asleep p { margin:0; font-size:15.5px; color:var(--ink); }
+  #asleep p.muted { font-size:13px; color:var(--muted); }
+  #asleep .a-btn { margin-top:6px; min-width:170px; }
+  #asleep .last-label { font-size:11.5px; font-weight:600;
+                        letter-spacing:.05em; text-transform:uppercase;
+                        color:var(--muted); margin-top:10px;
+                        align-self:flex-start; }
+  body.asleep #screenwrap { opacity:.4; filter:grayscale(.65);
+                            pointer-events:none; }
+  body.asleep #asleep { display:flex; }
+  body.asleep .hdr-title .lock { display:none; }
+
+  /* The phone drifted onto its own home screen. Its reflow is a grid of
+     icon glyphs — worthless, and rendering it under a care app's title was
+     the lie. A plain card says where the phone is and offers the one useful
+     act; the sketch is hidden outright, not dimmed, because unlike a slept
+     screen it is not a memory worth keeping in view. */
+  #offapp { display:none; flex-direction:column; align-items:center;
+            gap:8px; margin:12px 16px; padding:18px 16px;
+            border-radius:16px; background:var(--card);
+            box-shadow:var(--shadow-card); text-align:center;
+            color:var(--muted); }
+  #offapp svg { width:30px; height:30px; opacity:.6; }
+  #offapp p { margin:0; font-size:15.5px; color:var(--ink); }
+  #offapp p.muted { font-size:13px; color:var(--muted); }
+  #offapp .a-btn { margin-top:6px; min-width:170px; }
+  body.offapp #screenwrap { display:none; }
+  body.offapp #offapp { display:flex; }
+
+  /* The phone-scroll pair lives in the photo view only — the owner's
+     spec: the reflow already lists everything in the phone's viewport, so
+     arrows there are noise; the photo IS the phone's screen, and moving
+     it is exactly what arrows mean on it. */
+  #phone-scroll { position:absolute; right:10px; z-index:6;
+                  bottom:calc(102px + env(safe-area-inset-bottom));
+                  display:none; flex-direction:column; gap:8px; }
+  body.peeking:not(.asleep) #phone-scroll { display:flex; }
+  #phone-scroll button { width:42px; height:42px; border-radius:50%;
+                  border:none; cursor:pointer; color:var(--tint);
+                  background:var(--chrome); backdrop-filter:blur(12px);
+                  -webkit-backdrop-filter:blur(12px);
+                  box-shadow:var(--shadow-card);
+                  display:flex; align-items:center; justify-content:center;
+                  transition:transform .25s var(--spring); }
+  #phone-scroll button:active { transform:scale(.82);
+                                transition-duration:.05s; }
+  #phone-scroll svg { width:20px; height:20px; }
+
+  #busy { position:absolute; inset:0; z-index:6; display:none;
+          background:var(--chrome); backdrop-filter:blur(6px);
+          -webkit-backdrop-filter:blur(6px);
+          flex-direction:column; align-items:center; justify-content:center;
+          gap:14px; text-align:center; padding:20px; }
+  body.busy #busy { display:flex; }
+  .spinner { width:30px; height:30px; border-radius:50%;
+             border:3px solid var(--tint-soft);
+             border-top-color:var(--tint); animation:spin .8s linear infinite; }
+  #busy p { margin:0; color:var(--muted); font-size:15px; }
+
+  /* -------------------------------------- floating pill tab bar (his) */
+  /* Absolute within the view rather than in the flex flow: the content
+     surface runs beneath it (its padding clears the pill), so the pill
+     floats over a continuous canvas the way his does — no dead strip. The
+     view is its containing block, which also means it rides the view's own
+     slide transition instead of being left behind. */
+  .navbar { position:absolute; left:0; right:0; bottom:0; z-index:7;
+            pointer-events:none;
+            padding:0 12px calc(env(safe-area-inset-bottom) + 10px); }
+  .navbar { display:flex; flex-direction:column; align-items:center; gap:8px; }
+  .navbar .pill { pointer-events:auto; display:flex; align-items:stretch;
+                  gap:6px; border-radius:30px; border:.5px solid var(--line);
+                  background:var(--card); padding:8px 10px;
+                  box-shadow:var(--shadow-pill); max-width:420px;
+                  margin:0 auto; width:100%; box-sizing:border-box; }
+
+  /* The app's own tabs, in their own pill above the phone controls: a
+     native-feeling bottom nav for the app's sections, tinted so it reads
+     as the app's chrome rather than ours. Scrolls sideways if an app packs
+     in more tabs than fit. */
+  .navbar .apptabs { pointer-events:auto; display:flex; gap:4px;
+                     border-radius:26px; border:.5px solid var(--line);
+                     background:var(--card); padding:5px;
+                     box-shadow:var(--shadow-pill); max-width:420px;
+                     width:100%; box-sizing:border-box; margin:0 auto;
+                     overflow-x:auto; scrollbar-width:none; }
+  .navbar .apptabs::-webkit-scrollbar { display:none; }
+  .navbar .apptabs[hidden] { display:none; }
+  .navbar .apptab { flex:1 0 auto; min-width:0; border:none;
+                    background:var(--tint-soft); color:var(--tint);
+                    border-radius:20px; padding:9px 14px; cursor:pointer;
+                    font-size:12.5px; font-weight:600; white-space:nowrap;
+                    max-width:none;
+                    transition:transform .3s var(--spring), filter .2s ease; }
+  .navbar .apptab:active { transform:scale(.9); filter:brightness(1.1);
+                    transition-duration:.06s; }
+  /* The tab already in front: filled, the way a native bottom nav lights
+     its current section. Not a control — it points at where you are. */
+  .navbar .apptab.current { background:var(--tint); color:#fff; cursor:default; }
+  .navbar .apptab.current:active { transform:none; filter:none; }
+  /* Press feel, everywhere: snap in fast, spring out slow. A single
+     transition speed makes a press feel laggy going down and abrupt coming
+     up — the native asymmetry is most of what "alive" means. */
+  .navbar button { flex:1; display:flex; flex-direction:column;
+                   align-items:center; gap:3px; border:none; background:none;
+                   border-radius:22px; padding:9px 0 7px; cursor:pointer;
+                   color:var(--muted);
+                   transition:background .3s ease, color .3s ease,
+                              transform .35s var(--spring); }
+  .navbar button:active { transform:scale(.8); background:var(--tint-soft);
+                          color:var(--tint);
+                          transition-duration:.06s, .06s, .06s; }
+  /* The command went: the icon answers with a quick pop. */
+  .navbar button.sent svg { animation:pop .4s var(--spring); }
+  @keyframes pop { 30% { transform:scale(1.3); } }
+  .navbar svg { width:22px; height:22px; display:block; }
+  .navbar span { font-size:10.5px; font-weight:500; line-height:1;
+                 white-space:nowrap; }
+
+  /* ---------------------------------------------------------------- sheets */
+  .sheet { position:fixed; left:0; right:0; bottom:0; z-index:8;
+           background:var(--card); border-radius:20px 20px 0 0; max-height:80%;
+           overflow:auto; box-shadow:0 -10px 40px rgb(0 0 0 / .25);
+           transform:translateY(105%); transition:transform .42s var(--spring);
+           padding:10px 16px calc(18px + env(safe-area-inset-bottom)); }
+  .sheet::before { content:""; display:block; width:36px; height:5px;
+                   border-radius:3px; background:hsl(240 6% 47% / .25);
+                   margin:2px auto 12px; }
+  body.asking #sheet { transform:translateY(0); }
+  body.signing #signsheet { transform:translateY(0); }
+
+  #signpad { width:100%; aspect-ratio:2.2/1; display:block; border-radius:14px;
+             border:1.5px dashed var(--line); background:var(--bg);
+             touch-action:none; color:var(--ink); }
+  #signpreview { width:56%; aspect-ratio:2.6/1; display:block; margin:8px auto 0;
+                 border-radius:8px; background:#fff; color:#1c1c2e;
+                 border:.5px solid var(--line); }
+  .preview-label { font-size:12px; color:var(--muted); text-align:center;
+                   margin:10px 0 0; }
+  .padrow { display:flex; gap:10px; margin-top:12px; }
+  /* Author display beats UA [hidden] — the OTP bar taught this the hard
+     way; the app-side row must actually vanish off the signature moment. */
+  .approw[hidden] { display:none; }
+  .approw { align-items:center; border-top:1px solid var(--hairline, #8884);
+            padding-top:12px; }
+  .approw-label { flex:0 1 auto; font-size:13px; }
+  .padrow button { flex:1; padding:12px; border-radius:13px;
+                   border:none; background:var(--track);
+                   cursor:pointer; font-size:16px;
+                   transition:transform .15s var(--spring); }
+  .padrow .primary { background:var(--tint); color:#fff; font-weight:600; }
+  .padrow button:active { transform:scale(.95); opacity:.8;
+                          transition-duration:.05s; }
+
+  #toast { position:fixed; left:50%; bottom:calc(96px +
+           env(safe-area-inset-bottom)); transform:translateX(-50%)
+           translateY(16px); z-index:9; background:hsl(222 20% 14% / .95);
+           color:#fff; padding:11px 18px; border-radius:16px; font-size:14.5px;
+           opacity:0; transition:.28s var(--spring); pointer-events:none;
+           max-width:86vw; text-align:center;
+           box-shadow:0 8px 30px -8px rgb(0 0 0 / .4); }
+  body.toasting #toast { opacity:1; transform:translateX(-50%); }
+  .muted { color:var(--muted); }
+</style>
+</head>
+<body data-view="launcher" data-boot="{{ boot }}">
+
+{# Launch screen: paints with the first HTML, owns the moment while the socket
+   connects, then fades like an iOS launch image. #}
+<div id="splash" aria-hidden="true">
+  <div class="glow"></div>
+  <div class="mark">
+    <span class="ring"></span><span class="ring late"></span>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+      <circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>
+  </div>
+</div>
+
+<div class="view" id="launcher">
+  <time id="clock"></time>
+  <div class="date">{{ t('app.title') }}</div>
+  <div class="springboard">
+    {% for a in apps %}
+    <button class="tile" data-app="{{ a.id }}" data-macro="{{ a.macro }}"
+            data-open="{{ a.open }}"
+            data-package="{{ a.package }}" data-name="{{ a.name }}">
+      <span class="mark" style="background:{{ a.accent }}">{{ a.mark }}</span>
+      <span class="name">{{ a.name }}</span>
+    </button>
+    {% endfor %}
+  </div>
+  <footer><a href="/">{{ t('papp.full_status') }}</a></footer>
+</div>
+
+<div class="view" id="screenview">
+  <header class="hdr">
+    <div class="hdr-row">
+      <button id="btn-apps">
+        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.4"><path d="M15 5 L8 12 L15 19"/></svg>
+        {{ t('papp.apps') }}</button>
+      <span class="spacer"></span>
+      <button id="btn-sign" aria-label="{{ t('sign.button') }}">
+        <svg class="tool" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.9"><path d="M4 20c1.5-.5 2.5-1 3.5-2L19 6.5a2.1 2.1 0 0 0-3-3L4.5 15c-1 1-1.5 2-2 3.5z"/><path d="M13.5 6.5l3 3"/></svg>
+      </button>
+      <button id="btn-peek" aria-label="{{ t('papp.peek') }}">
+        <svg class="tool" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.9"><circle cx="12" cy="12" r="3.2"/><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/></svg>
+      </button>
+    </div>
+    <div class="hdr-title">
+      <h1 id="where">{{ t('app.title') }}</h1>
+      <svg class="lock" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+    </div>
+    <div class="hdr-sub">
+      <span class="dot"></span><span id="live-label">{{ t('papp.live') }}</span>
+      <span class="spin"></span>
+    </div>
+  </header>
+  <div id="stage">
+    <div id="screenwrap">{% if m %}{% include '_screen.html' %}{% endif %}</div>
+    {# The loading page: shown whole while the sketch and the phone
+       disagree, so nobody ever reads stale rows as current ones. #}
+    <div id="syncing" aria-hidden="true">
+      <div class="sk-card">
+        <div class="sk-row"><div class="sk-line w60"></div>
+          <div class="sk-line sub w45"></div></div>
+        <div class="sk-row"><div class="sk-line w80"></div>
+          <div class="sk-line sub w30"></div></div>
+        <div class="sk-row"><div class="sk-line w45"></div></div>
+      </div>
+      <div class="sk-card">
+        <div class="sk-row"><div class="sk-line w80"></div>
+          <div class="sk-line sub w60"></div></div>
+        <div class="sk-row"><div class="sk-line w30"></div></div>
+      </div>
+      <div class="sk-card">
+        <div class="sk-row"><div class="sk-line w60"></div></div>
+      </div>
+    </div>
+    {# The phone's display is off. The sketch on file describes a screen that
+       is not being shown to anyone; rendering it as current is a lie with
+       boxes. Say the true thing and offer the one useful act. #}
+    <div id="asleep">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.6"><path d="M20.3 14.6A8.5 8.5 0 0 1 9.4 3.7a8.5 8.5 0 1 0 10.9 10.9z"/></svg>
+      <p>{{ t('papp.asleep') }}</p>
+      <p class="muted">{{ t('papp.asleep_hint') }}</p>
+      <button type="button" class="a-btn" data-act="wake"
+              style="flex:none">{{ t('phone.wake') }}</button>
+      <span class="last-label">{{ t('papp.last_seen') }}</span>
+    </div>
+    <div id="offapp">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.6"><path d="M4 11 12 4l8 7"/><path d="M6 9.5V20h12V9.5"/></svg>
+      <p>{{ t('papp.on_launcher') }}</p>
+      <p class="muted">{{ t('papp.on_launcher_hint') }}</p>
+      <button type="button" class="a-btn" id="offapp-apps"
+              style="flex:none">{{ t('papp.apps') }}</button>
+    </div>
+    <div id="peekwrap"><img id="peek" alt=""></div>
+    <div id="peek-cap" hidden></div>
+    <div id="busy"><div class="spinner"></div><p id="busy-text"></p></div>
+  </div>
+  {# Scroll the physical phone: the reflow can only draw what the phone's
+     viewport shows, so content below the fold needs the page itself moved.
+     A swipe in the middle of the screen, as an arrow pair — it moves the
+     page and cannot press anything. #}
+  <div id="phone-scroll">
+    <button data-act="scroll_up" aria-label="{{ t('papp.scroll_up') }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 14.5 L12 8.5 L18 14.5"/></svg></button>
+    <button data-act="scroll_down" aria-label="{{ t('papp.scroll_down') }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 9.5 L12 15.5 L18 9.5"/></svg></button>
+  </div>
+  <nav class="navbar" aria-label="Phone">
+    {# The app's OWN tab bar, lifted out of the scrolled list to ride here —
+       always reachable, the way the native app keeps it, so she can move
+       through the app's sections from where Back and Home already live.
+       Filled by phone.js from the screen payload; hidden when the screen
+       has no tab bar. #}
+    <div id="apptabs" class="apptabs" hidden></div>
+    {# The type bar: one short code into the field she aimed at — the OTP
+       moment. Hidden until a text field is tapped; the server holds the
+       same contract (fields only, short plain token, refuse-if-moved). #}
+    <div id="typebar" class="typebar" hidden>
+      <span class="typehint">{{ t('papp.type.hint') }}</span>
+      <div class="typerow">
+        <input id="typebox" type="text" inputmode="text" autocomplete="one-time-code"
+               maxlength="32" pattern="[A-Za-z0-9]*" />
+        <button id="typesend" type="button">{{ t('papp.type.send') }}</button>
+        <button id="typecancel" type="button">{{ t('papp.type.cancel') }}</button>
+      </div>
+    </div>
+    {# The phone's own three, in Android's shapes, plus wake — riding a
+       floating pill so the chrome reads native instead of edge-to-edge web. #}
+    <div class="pill">
+      <button data-act="back">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5 L8 12 L15 19"/></svg>
+        <span>{{ t('phone.back') }}</span></button>
+      {# Home is HER home — the app picker this portal opens on — not the
+         phone's Android launcher. Sending KEYCODE_HOME parked the phone on
+         an icon grid the reflow rendered as noise, under a title still
+         naming the last app. Pure navigation, no socket, works offline. #}
+      <button id="btn-home">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/></svg>
+        <span>{{ t('phone.home') }}</span></button>
+      {# No Recents, no Wake: for someone who is not technical, fewer
+         controls IS the feature. The picker is the app switcher, waking is
+         automatic (macros wake the display; the asleep card offers its own
+         Wake button exactly when it applies), and two big targets are
+         harder to mispress than four small ones. #}
+    </div>
+  </nav>
+</div>
+
+{# The signature pad. She draws here, on her own screen, where there is no
+   latency at all; the strokes cross once and the controller replays them onto
+   the app's canvas. The app's save button is never pressed by the replay. #}
+<div id="signsheet" class="sheet">
+  <p class="muted" style="margin:0 0 10px; font-size:14px">{{ t('sign.instruction') }}</p>
+  <canvas id="signpad" width="10" height="10"></canvas>
+  <p class="preview-label">{{ t('sign.preview') }}</p>
+  <canvas id="signpreview" width="10" height="10"></canvas>
+  <div class="padrow">
+    <button type="button" id="sign-clear">{{ t('signature.clear') }}</button>
+    <button type="button" id="sign-undo">{{ t('signature.undo') }}</button>
+    <button type="button" id="sign-send" class="primary">{{ t('sign.send') }}</button>
+  </div>
+  {# The app's own Borrar and Salvar, pressed remotely. The signature pages
+     draw both in a rotated pass the accessibility tree never shows, so the
+     runner presses real pixels placed off the canvas it CAN see — and only
+     on a live signature moment; the row hides everywhere else. Salvar is
+     her tap relayed, never the replay's. #}
+  <div class="padrow approw" id="sign-approw" hidden>
+    <span class="muted approw-label">{{ t('sign.onphone') }}</span>
+    <button type="button" id="app-clear">{{ t('sign.appclear') }}</button>
+    <button type="button" id="app-save" class="primary">{{ t('sign.appsave') }}</button>
+  </div>
+</div>
+
+{# The whole page, as a reading: the phone scrolled its own screen end to
+   end and these are every line it showed, in order. Read-only on purpose. #}
+<div id="scansheet" class="sheet">
+  <div class="scan-head">
+    <span>{{ t('scan.title') }}</span>
+    <button type="button" id="scan-close">{{ t('scan.close') }}</button>
+  </div>
+  <div id="scancontent"></div>
+</div>
+
+{# The relay, as a sheet: when the controller stops and asks, the question
+   slides up over whichever view she is in. #}
+<div id="sheet" class="sheet"><div id="relay">
+  {% include '_relay.html' %}
+</div></div>
+
+<div id="toast"></div>
+
+<script>
+  window.APTLOG_APP = {
+    appTitle: {{ t('app.title')|tojson }},
+    opening: {{ t('papp.opening')|tojson }},
+    waiting: {{ t('papp.waiting_screen')|tojson }},
+    moved:   {{ t('portal.moved')|tojson }},
+    failed:  {{ t('portal.failed')|tojson }},
+    typeHint: {{ t('papp.type.hint')|tojson }},
+    sent:    {{ t('phone.sent')|tojson }},
+    devfail: {{ t('phone.failed')|tojson }},
+    signSending: {{ t('sign.state.running')|tojson }},
+    signEmpty:   {{ t('signature.empty')|tojson }},
+    live:    {{ t('papp.live')|tojson }},
+    syncing: {{ t('papp.syncing')|tojson }},
+    webTitle: {{ t('papp.web')|tojson }},
+    scanning: {{ t('papp.scanning')|tojson }},
+    {# The dot, explained on demand: tap the status and the current colour
+       says what it means in a sentence. #}
+    explainLive:    {{ t('papp.explain.live')|tojson }},
+    explainSyncing: {{ t('papp.explain.syncing')|tojson }},
+    explainOffline: {{ t('papp.explain.offline')|tojson }},
+    {# The lock's explanation, one tap away rather than a standing banner. #}
+    blocked: {
+      "": "",
+      no_focus:       {{ t('phone.blocked.no_focus')|tojson }},
+      login_activity: {{ t('phone.blocked.login_activity')|tojson }},
+      password_field: {{ t('phone.blocked.password_field')|tojson }},
+      secure_screen:  {{ t('phone.blocked.secure_screen')|tojson }},
+      capture_failed: {{ t('phone.blocked.capture_failed')|tojson }}
+    },
+    blockedOther: {{ t('phone.blocked.other')|tojson }}
+  };
+</script>
+<script src="/static/signature.js?v={{ boot }}" defer></script>
+<script src="/static/phone.js?v={{ boot }}" defer></script>
+</body>
+</html>
