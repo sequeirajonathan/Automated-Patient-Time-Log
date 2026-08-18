@@ -108,14 +108,39 @@ class TestDensityPanel:
         assert f'min="{prefs.DENSITY_FLOOR}"' in body
         assert f'max="{prefs.DENSITY_CEILING}"' in body
 
-    def test_setting_one_for_this_page_only_leaves_the_app_alone(self, client):
+    def test_it_is_one_slider_and_two_buttons(self, client):
+        """The first version had a three-way scope grid, which is the shape of
+        the STORE, not of the decision. What somebody does here is drag it,
+        look at the phone, and keep it or put it back."""
+        body = client.get("/console").text
+        assert body.count('type="range"') == 1
+        assert "Aplicar" in body and "Volver al valor de siempre" in body
+
+    def test_applying_writes_an_override_for_the_app_in_front(self, client):
         client.post("/settings/density",
-                    data={"scope": "page", "value": "120",
+                    data={"scope": "app", "value": "120",
                           "app_pkg": "com.hhaexchange.caregiver",
-                          "page": ".SignatureActivity", "next": "/console"})
+                          "next": "/console"})
+        assert prefs.density_for("com.hhaexchange.caregiver") == 120
+
+    def test_reset_is_an_empty_value_not_a_number(self, client):
+        """The Reset button posts the same form with no value, which is what
+        "clear this" means in the store. A number would be a different
+        override, not the absence of one."""
+        prefs.set_density("com.hhaexchange.caregiver", 120)
+        client.post("/settings/density",
+                    data={"scope": "app", "value": "",
+                          "app_pkg": "com.hhaexchange.caregiver",
+                          "next": "/console"})
+        assert prefs.density_for("com.hhaexchange.caregiver") is None
+
+    def test_a_page_override_from_before_is_still_honoured(self, client):
+        """The UI stopped offering page scope; the store still reads it, so a
+        value set when it did is not silently dropped."""
+        prefs.set_density("com.hhaexchange.caregiver", 120,
+                          page=".SignatureActivity")
         assert prefs.density_for("com.hhaexchange.caregiver",
                                  page=".SignatureActivity") == 120
-        assert prefs.density_for("com.hhaexchange.caregiver") is None
 
     def test_an_out_of_range_post_is_clamped_not_refused(self, client):
         """Refusing would leave her with a control that appears to do nothing.
@@ -184,6 +209,94 @@ class TestDensityReachesThePhone:
         assert feed._density_wanted("com.android.settings/.Main") is None
         prefs.set_global_density(150)
         assert feed._density_wanted("com.android.settings/.Main") == 150
+
+
+class TestOperations:
+    """The shortcuts somebody actually reaches for from two thousand
+    kilometres away, in place of the four sign-in walks that run themselves."""
+
+    def test_the_page_offers_the_operational_ones(self, client):
+        from apt_log import macros
+
+        body = client.get("/console").text
+        for name in macros.OPERATIONS:
+            assert f'value="{name}"' in body
+
+    def test_closing_refuses_when_the_phone_is_not_in_a_care_app(self, monkeypatch):
+        """Force-stopping the system UI is a bigger hammer than any screen is
+        worth, and this button is reachable from a phone in another state."""
+        from apt_log import feed, macros
+
+        monkeypatch.setattr(feed, "current_focus",
+                            lambda *a, **k: "com.android.settings/.Settings")
+        stopped = []
+        monkeypatch.setattr(macros, "_force_stop", lambda pkg: stopped.append(pkg))
+        with pytest.raises(RuntimeError):
+            macros.MACROS["close_app"].run(None, lambda *a: None)
+        assert stopped == []
+
+    def test_closing_a_care_app_force_stops_it(self, monkeypatch):
+        from apt_log import feed, macros
+
+        monkeypatch.setattr(feed, "current_focus",
+                            lambda *a, **k: "com.inmyteam.inmyteam/.Main")
+        stopped = []
+        monkeypatch.setattr(macros, "_force_stop", lambda pkg: stopped.append(pkg))
+        monkeypatch.setattr(macros, "_forget_stitched", lambda app: None)
+        macros.MACROS["close_app"].run(None, lambda *a: None)
+        assert stopped == ["com.inmyteam.inmyteam"]
+
+    def test_restarting_relaunches_through_the_launcher_not_the_driver(self,
+                                                                      monkeypatch):
+        """After a force-stop the driver's handle on the app is stale, and
+        asking it to activate the app it has just lost is how a recovery
+        hangs. The ANR watchdog learned this the same way."""
+        from apt_log import feed, macros
+
+        monkeypatch.setattr(feed, "current_focus",
+                            lambda *a, **k: "com.inmyteam.inmyteam/.Main")
+        sent = []
+        monkeypatch.setattr(feed, "_adb", lambda args, *a, **k: sent.append(args))
+        monkeypatch.setattr(macros, "_forget_stitched", lambda app: None)
+        monkeypatch.setattr(macros, "wake_display", lambda: None)
+        monkeypatch.setattr(macros.time, "sleep", lambda *_: None)
+        monkeypatch.setattr(macros, "wait_for", lambda *a, **k: True)
+        macros.MACROS["restart_app"].run(None, lambda *a: None)
+        assert ["shell", "am", "force-stop", "com.inmyteam.inmyteam"] in sent
+        assert any("monkey" in a for a in sent)
+
+    def test_rescan_drops_the_cache_before_walking(self, monkeypatch):
+        """The whole point: the page is being rendered from a stitched copy
+        that is no longer true, so trusting the cache is the bug."""
+        from apt_log import feed, macros
+
+        order = []
+        monkeypatch.setattr(feed, "current_focus",
+                            lambda *a, **k: "com.inmyteam.inmyteam/.Main")
+        monkeypatch.setattr(macros, "_forget_stitched",
+                            lambda app: order.append(("forget", app)))
+        monkeypatch.setattr(macros, "_stitch_walk",
+                            lambda d, **k: order.append(("walk",)))
+        macros.MACROS["rescan"].run(None, lambda *a: None)
+        assert order == [("forget", "com.inmyteam.inmyteam"), ("walk",)]
+
+    def test_the_reboot_does_not_hold_the_session_waiting(self, monkeypatch):
+        """It takes the driver with it. A macro sitting for a minute holding a
+        session that is already gone looks wedged while the phone is doing
+        exactly what it was told."""
+        from apt_log import feed, macros
+
+        sent = []
+        monkeypatch.setattr(feed, "_adb", lambda args, *a, **k: sent.append(args))
+        monkeypatch.setattr(macros, "wait_for",
+                            lambda *a, **k: pytest.fail("must not wait"))
+        macros.MACROS["restart_phone"].run(None, lambda *a: None)
+        assert sent == [["reboot"]]
+
+    def test_the_reboot_is_the_only_one_that_asks_first(self):
+        from apt_log import macros
+
+        assert macros.CONFIRM == ("restart_phone",)
 
 
 class TestWhoIsOn:

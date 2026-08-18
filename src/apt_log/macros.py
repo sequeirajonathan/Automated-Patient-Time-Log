@@ -1274,6 +1274,129 @@ def _open_app(package: str):
     return run
 
 
+# --------------------------------------------------------------- operations
+# The sign-in macros above are the ones that took the most work and the ones
+# nobody presses any more: they run themselves, when a session expires. What a
+# person actually reaches for is the short list below — the things you do when
+# something is stuck and you are two thousand kilometres from the phone.
+#
+# All of them are deliberately blunt. A stuck app does not need a clever
+# recovery; it needs the same three or four moves someone in the room would
+# make, available to someone who is not.
+
+def _front_package() -> str:
+    from apt_log import feed as feed_mod
+
+    return (feed_mod.current_focus() or "").split("/")[0]
+
+
+def _force_stop(package: str) -> None:
+    """Kill an app the way the ANR recovery does — through adb, never through
+    the driver, because a wedged app takes the driver down with it."""
+    from apt_log import feed as feed_mod
+
+    feed_mod._adb(["shell", "am", "force-stop", package])
+
+
+def _close_app(driver, report) -> None:
+    """Close the app in front, and leave the phone on the launcher.
+
+    For the state that no amount of tapping fixes: a screen the app will not
+    leave, a spinner that never resolves, a form that has forgotten what it
+    was doing. Restricted to the four care apps — force-stopping the system
+    UI is a bigger hammer than any screen is worth, and this button is
+    reachable from a phone in another state.
+    """
+    from apt_log import feed as feed_mod
+
+    report("macro.step.closing")
+    package = _front_package()
+    if package not in feed_mod.CARE_APPS:
+        raise RuntimeError("the phone is not showing one of the care apps")
+    _force_stop(package)
+    _forget_stitched(package)
+
+
+def _restart_app(driver, report) -> None:
+    """Close the app in front and open it again — the recipe the ANR watchdog
+    uses, on demand rather than on a diagnosis.
+
+    Relaunched through the launcher intent rather than the driver: after a
+    force-stop the driver's handle on the app is stale, and asking it to
+    activate the app it has just lost is how a recovery hangs.
+    """
+    from apt_log import feed as feed_mod
+
+    report("macro.step.closing")
+    package = _front_package()
+    if package not in feed_mod.CARE_APPS:
+        raise RuntimeError("the phone is not showing one of the care apps")
+    _force_stop(package)
+    _forget_stitched(package)
+    time.sleep(1.5)
+    report("macro.step.launching")
+    wake_display()
+    feed_mod._adb(["shell", "monkey", "-p", package,
+                   "-c", "android.intent.category.LAUNCHER", "1"])
+    if not wait_for(lambda: _front_package() == package, timeout=25.0):
+        raise RuntimeError("the app did not come back")
+
+
+def _rescan(driver, report) -> None:
+    """Throw away what the portal thinks this page looks like, and read it
+    again.
+
+    The front end serves a stitched whole-page document from a cache, so a
+    page that changed in a way the tap machinery did not notice can be
+    rendered from a copy that is no longer true. This is the button for "what
+    I am looking at is not what the phone is showing" — the one state where
+    the honest fix is to stop trusting the cache.
+    """
+    report("macro.step.clearing")
+    _forget_stitched(_front_package())
+    report("macro.step.reading")
+    _stitch_walk(driver)
+
+
+def _phone_settings(driver, report) -> None:
+    """Open Android's own Settings.
+
+    Nothing this portal does needs it; the person holding the portal
+    sometimes does — wifi, sound, the phone's own display size. The
+    containment watchdog is told to allow it (see feed.SETTINGS_APPS), or it
+    would bounce the phone back to a care app five seconds after it opened.
+    """
+    from apt_log import feed as feed_mod
+
+    report("macro.step.launching")
+    wake_display()
+    feed_mod._adb(["shell", "am", "start", "-a",
+                   "android.settings.SETTINGS"])
+    wait_for(lambda: "settings" in _front_package(), timeout=15.0)
+
+
+def _restart_phone(driver, report) -> None:
+    """Reboot the phone.
+
+    The last resort, and the reason it is on this page: the alternative is a
+    phone call to somebody in the room. It costs about a minute during which
+    nothing works — adb goes away, the resident Appium session dies with it,
+    and both come back on their own.
+
+    Refused while a visit app is mid-flow is NOT attempted: this code cannot
+    tell a half-finished check-in from a settled screen, and a button that
+    sometimes refuses for reasons nobody can see is worse than one that
+    always does what it says. It is spelled out on the page instead.
+    """
+    from apt_log import feed as feed_mod
+
+    report("macro.step.restarting")
+    feed_mod._adb(["reboot"])
+    # Do not wait for it here. The reboot takes the driver with it, and a
+    # macro that sits for a minute holding the session is a macro that looks
+    # wedged while the phone is doing exactly what it was told.
+
+
 MACROS: dict[str, Macro] = {
     m.name: m for m in (
         Macro("hhax_legacy_login", "macro.hhax_legacy_login", _hhax_legacy_login),
@@ -1289,8 +1412,27 @@ MACROS: dict[str, Macro] = {
         Macro("open_inmyteam", "macro.open_inmyteam",
               _open_app("com.inmyteam.inmyteam")),
         Macro("read_page", "macro.read_page", _read_page),
+        Macro("close_app", "macro.close_app", _close_app),
+        Macro("restart_app", "macro.restart_app", _restart_app),
+        Macro("rescan", "macro.rescan", _rescan),
+        Macro("phone_settings", "macro.phone_settings", _phone_settings),
+        Macro("restart_phone", "macro.restart_phone", _restart_phone),
     )
 }
+
+# What the control centre offers, in the order somebody reaches for them:
+# refresh what I am looking at, restart what is stuck, close it, the phone's
+# own settings, and — last, and last resort — the phone itself.
+#
+# The sign-in macros are deliberately not here. They are battle-tested and
+# they run themselves when a session expires; a button that duplicates what
+# already happens automatically is a button whose only use is pressing it at
+# the wrong moment.
+OPERATIONS = ("rescan", "read_page", "restart_app", "close_app",
+              "phone_settings", "restart_phone")
+
+# The one that cannot be undone by pressing it again. The page asks first.
+CONFIRM = ("restart_phone",)
 
 
 # Session-expiry dialogs, per app. A dialog whose wording is recognised as

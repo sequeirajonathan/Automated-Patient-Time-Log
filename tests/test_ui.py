@@ -456,10 +456,26 @@ class TestMacroRoute:
         assert not (tmp_path / "req.json").exists()
 
     def test_the_page_offers_only_registered_macros(self, client):
+        """Every name the page offers is one the runner knows. Not the
+        converse: the control centre deliberately offers a SUBSET — the
+        operational ones. The sign-in walks run themselves when a session
+        expires, and a button duplicating that is only useful for pressing at
+        a bad moment."""
+        import re
+
         from apt_log import macros
+
         body = client.get("/console").text
-        for name in macros.MACROS:
-            assert f'value="{name}"' in body
+        offered = set(re.findall(r'name="name" value="([a-z_]+)"', body))
+        assert offered
+        assert offered <= set(macros.MACROS)
+        assert offered == set(macros.OPERATIONS)
+
+    def test_the_sign_in_walks_are_not_on_the_page(self, client):
+        body = client.get("/console").text
+        for name in ("hhax_legacy_login", "hhax_uma_login",
+                     "mobile_caregiver_pin"):
+            assert f'value="{name}"' not in body
 
     def test_the_page_says_shortcuts_never_clock_in(self, client):
         """The line, stated where she reads it rather than only in a docstring."""
@@ -645,11 +661,27 @@ class TestConsoleFormsAreOrdinaryForms:
 
     SCRIPT_DIR = Path(__file__).resolve().parents[1] / "src/apt_log/ui/static"
 
-    def test_the_control_centre_ships_no_form_interception(self, client):
+    def test_the_control_centre_never_touches_the_trap(self, client):
+        """One form on the page is intercepted — the reboot, to ask first —
+        and it reaches for a data attribute rather than for `form.action`,
+        which on a form carrying <input name="action"> is the input element."""
         body = client.get("/console").text
-        for trap in ("addEventListener('submit'", 'addEventListener("submit"',
-                     "form.action", "preventDefault"):
-            assert trap not in body
+        assert "form.action" not in body
+        assert body.count("addEventListener('submit'") == 1
+        assert "data-confirm" in body
+
+    def test_the_reboot_is_the_only_thing_that_asks(self, client):
+        """Everything else is one press. A confirmation on a control that can
+        be undone by pressing it again is a step people learn to click
+        through, which is how the one that matters gets clicked through too."""
+        import re
+
+        from apt_log import macros
+
+        body = client.get("/console").text
+        asked = re.findall(r'data-confirm="[^"]*"[^>]*>\s*<input[^>]*value="([a-z_]+)"',
+                           body)
+        assert set(asked) == set(macros.CONFIRM)
 
     def test_the_shadowed_property_is_never_dereferenced_anywhere(self):
         """The phone view does intercept — its controls ride the socket — so

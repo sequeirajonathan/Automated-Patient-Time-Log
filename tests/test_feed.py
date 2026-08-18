@@ -1394,18 +1394,29 @@ class TestContainment:
         return [c for c in calls if c[:2] == ["shell", "monkey"]]
 
     CARE = "com.hhaexchange.uma/com.hhaexchange.carehub.ui.HomeActivity"
+    # A stray app is one nothing here can have asked for. Android's Settings
+    # used to play this part and no longer can: the control centre has a
+    # button that opens it deliberately (see TestSettingsIsSomewhereItWasSent).
+    STRAY = "com.android.vending/.AssetBrowserActivity"
     SETTINGS = "com.android.settings/.Settings"
 
-    def test_a_stray_settings_screen_is_brought_back(self):
-        out = self._run([self.CARE, self.SETTINGS, self.SETTINGS,
-                         self.SETTINGS])
+    def test_a_stray_screen_is_brought_back(self):
+        out = self._run([self.CARE, self.STRAY, self.STRAY, self.STRAY])
         assert len(out) == 1
         assert out[0][2:4] == ["monkey", "-p"] or "-p" in out[0]
         assert "com.hhaexchange.uma" in out[0]
 
     def test_a_momentary_crossing_is_left_alone(self):
         """One sighting inside the dwell is a transition, not a departure."""
-        out = self._run([self.CARE, self.SETTINGS, self.CARE], dt=2.0)
+        out = self._run([self.CARE, self.STRAY, self.CARE], dt=2.0)
+        assert out == []
+
+    def test_settings_is_somewhere_it_was_sent_not_somewhere_it_wandered(self):
+        """The control centre offers a Phone settings button. Without this the
+        watchdog undid it five seconds later, which is a button that appears
+        to work and does not."""
+        out = self._run([self.CARE, self.SETTINGS, self.SETTINGS,
+                         self.SETTINGS])
         assert out == []
 
     def test_chromes_custom_tab_is_part_of_the_flow(self):
@@ -1865,7 +1876,7 @@ class TestPermissionDialogIsNotWandering:
         assert sent == [], "the prompt the app raised must not be bounced"
 
     def test_a_stranger_is_still_bounced(self):
-        sent = self._run("com.android.settings/.Settings")
+        sent = self._run("com.android.vending/.AssetBrowserActivity")
         assert any("monkey" in c for c in sent)
 
 

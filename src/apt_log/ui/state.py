@@ -236,16 +236,14 @@ def collect() -> DashboardState:
         if v.status in ("failed", "skipped") and v.attempt_id not in acked
     ]
 
-    latest = visits[-1] if visits else None
-    gate: list[Signal] = []
-    if latest is not None:
-        gate = [
-            Signal("gate.usb", Health.OK if latest.gate_passed else Health.BAD),
-        ]
-
+    # The location-check panel is gone, and so is the signal that fed it. It
+    # reported one field of the last audited attempt — whether the presence
+    # gate passed — from a scheduler that no longer runs, so on a live machine
+    # it was either absent or describing a visit from weeks ago. The gate
+    # itself is unchanged and still decides whether a visit may be recorded
+    # (REQ-5); what was removed is a stale readout of it, not the gate.
     return DashboardState(
         health=health,
-        gate=gate,
         visits=visits,
         attention=attention,
         transport_mode=mode or _transport_mode(),

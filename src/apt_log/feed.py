@@ -172,6 +172,15 @@ PERMISSION_APPS = (
     "com.android.packageinstaller",
 )
 
+# The phone's own Settings. Somewhere the portal can be ASKED to go — wifi,
+# sound, the phone's own display size — which is different from somewhere it
+# wandered. Without this the watchdog bounced it back to a care app five
+# seconds after the button that opened it did its job.
+SETTINGS_APPS = (
+    "com.android.settings",
+    "com.samsung.android.settings",
+)
+
 # The phone's own home screen. Its reflow is a grid of icon glyphs — noise
 # wearing a care app's clothes. The page shows a plain card for it instead.
 LAUNCHER_APPS = (
@@ -505,6 +514,11 @@ def _watch_containment(focus: str, serial: str | None = None) -> None:
         _out_since[0] = 0.0
         return
     if pkg == "com.android.chrome" and "CustomTabActivity" in (focus or ""):
+        _out_since[0] = 0.0
+        return
+    if pkg in SETTINGS_APPS:
+        # Opened on purpose, from the control centre. The watchdog exists to
+        # stop the phone WANDERING; it must not undo somewhere it was sent.
         _out_since[0] = 0.0
         return
     if pkg in PERMISSION_APPS:

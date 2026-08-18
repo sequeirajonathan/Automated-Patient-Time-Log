@@ -153,8 +153,15 @@ def _device_id(request: Request) -> str:
     """Who is looking. An opaque id in a cookie — not a login, because there
     is nothing here to log into and never will be: the tailnet is the fence,
     and a password on top of it would only be one more thing she cannot get
-    past standing in somebody's kitchen."""
-    return request.cookies.get(DEVICE_COOKIE) or prefs.new_device_id()
+    past standing in somebody's kitchen.
+
+    A cookie that has gone missing does not make a new person. The store is
+    asked to recognise the browser first, so the same phone comes back as
+    itself instead of adding another row to "who is on" every time iOS
+    forgets a jar.
+    """
+    return prefs.resolve(request.cookies.get(DEVICE_COOKIE) or "",
+                         request.headers.get("user-agent", ""))
 
 
 def _remember(response: Response, request: Request, device_id: str,
@@ -243,7 +250,14 @@ def console(request: Request):
             "languages": SUPPORTED,
             "s": state_mod.collect(),
             "Health": state_mod.Health,
-            "macros": list(macros_mod.MACROS.values()),
+            # The operational ones, in the order somebody reaches for them —
+            # not every macro that exists. The sign-in walks are not offered
+            # here: they run themselves when a session expires, and a button
+            # duplicating that is only useful for pressing at a bad moment.
+            "operations": [macros_mod.MACROS[name]
+                           for name in macros_mod.OPERATIONS
+                           if name in macros_mod.MACROS],
+            "confirm": macros_mod.CONFIRM,
             "macro_status": macros_mod.read_status(),
             "m": machine_mod.read(),
             "machine_state": machine_mod.worst(),

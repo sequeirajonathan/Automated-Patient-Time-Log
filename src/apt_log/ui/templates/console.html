@@ -182,9 +182,9 @@
                       height:28px; }
   .scale { display:flex; justify-content:space-between; color:var(--muted);
            font-size:11.5px; font-variant-numeric:tabular-nums; margin-top:-4px; }
-  .scope { display:grid; grid-template-columns:1fr; gap:8px; margin-top:12px; }
-  @media (min-width:520px) { .scope { grid-template-columns:1fr 1fr 1fr; } }
-  .scope button { width:100%; }
+  .two { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px; }
+  .two button { width:100%; }
+  .two button[disabled] { opacity:.4; }
   .ovr { display:flex; align-items:center; justify-content:space-between;
          gap:10px; padding:8px 0; border-bottom:.5px solid var(--line); }
   .ovr:last-child { border-bottom:0; }
@@ -342,48 +342,56 @@
     <div class="dense-now">
       <span class="big" id="dense-value">{{ m.phone.density or '—' }}</span>
       <span class="who" id="dense-who">
-        {% if density.page_override %}{{ t('console.density.from_page') }}
-        {% elif density.app_override %}{{ t('console.density.from_app') }}
-        {% elif density.built_in %}{{ t('console.density.from_built_in') }}
-        {% elif density.global_override %}{{ t('console.density.from_global') }}
+        {% if density.app_override %}{{ t('console.density.from_app') }}
+        {% elif density.global_override and not density.app %}
+          {{ t('console.density.from_global') }}
         {% else %}{{ t('console.density.from_phone') }}{% endif %}
       </span>
     </div>
     <p class="sub" style="margin:0">{{ t('console.density.explain',
         floor=density.floor, ceiling=density.ceiling) }}</p>
 
+    {# One slider and two buttons.
+
+       The first version of this had a three-way scope grid — this page, this
+       app, everything else — which is the shape of the STORE, not the shape
+       of the decision. What somebody actually does here is: drag it, look at
+       the phone, keep it or put it back. So the slider applies to whatever is
+       in front (the phone's own screens when it is not in a care app), the
+       live view above IS the preview, and Reset is always next to Apply.
+
+       The scope it will use is stated in words rather than chosen: guessing
+       wrong is one press away from being fixed, and a control with three
+       buttons is a control you have to think about before touching. #}
     <form method="post" action="/settings/density" id="dense-form">
       <input type="hidden" name="next" value="/console">
       <input type="hidden" name="app_pkg" value="{{ density.app }}">
-      <input type="hidden" name="page" value="{{ density.page }}">
+      <input type="hidden" name="scope" value="{{ 'app' if density.app else 'global' }}">
       <input type="range" name="value" id="dense-range"
              min="{{ density.floor }}" max="{{ density.ceiling }}"
              step="{{ density.step }}"
-             value="{{ density.page_override or density.app_override
-                       or density.built_in or m.phone.density or density.floor }}">
+             value="{{ density.app_override or density.built_in
+                       or m.phone.density or density.floor }}">
       <div class="scale">
-        <span>{{ density.floor }}</span>
+        <span>{{ t('console.density.smaller') }}</span>
         <span>{{ t('console.density.bigger') }}</span>
-        <span>{{ density.ceiling }}</span>
       </div>
-      <div class="scope">
-        <button type="submit" name="scope" value="page" class="primary"
-                {% if not density.page_key %}disabled{% endif %}>
-          {{ t('console.density.this_page') }}</button>
-        <button type="submit" name="scope" value="app"
-                {% if not density.app %}disabled{% endif %}>
-          {{ t('console.density.this_app') }}</button>
-        <button type="submit" name="scope" value="global">
-          {{ t('console.density.everything') }}</button>
+      <div class="two">
+        <button type="submit" class="primary">{{ t('console.density.apply') }}</button>
+        <button type="submit" name="value" value=""
+                {% if not density.app_override and not density.global_override %}disabled{% endif %}>
+          {{ t('console.density.reset') }}</button>
       </div>
     </form>
-    <p class="sub">{{ t('console.density.scope_note') }}</p>
+    <p class="sub">
+      {% if density.app %}{{ t('console.density.applies_to', app=density.app) }}
+      {% else %}{{ t('console.density.applies_to_rest') }}{% endif %}
+      {% if density.built_in %} · {{ t('console.density.default_is',
+                                       value=density.built_in) }}{% endif %}
+    </p>
 
-    <h2 style="margin-top:16px">{{ t('console.density.overrides') }}</h2>
-    {% if not density.overrides %}
-      <p class="sub" style="margin:0">{{ t('console.density.none_set',
-          default=density.built_in or '—') }}</p>
-    {% else %}
+    {% if density.overrides %}
+      <h2 style="margin-top:16px">{{ t('console.density.overrides') }}</h2>
       {% for key, value in density.overrides %}
       <div class="ovr">
         <code>{{ t('console.density.everything') if key == '*' else key }}</code>
@@ -528,33 +536,24 @@
     <p class="sub">{{ t('common.updated_at', time=t.time(s.generated_at)) }}</p>
   </section>
 
-  {# ------------------------------------------------------- 8. is it there? #}
-  {# The location check stays. It is the one panel that answers a question
-     about the record rather than about the machines: whether a visit could
-     have been recorded at all. #}
-  <section>
-    <h2>{{ t('gate.title') }}</h2>
-    <p class="sub" style="margin:0 0 8px">{{ t('gate.explain') }}</p>
-    {% for sig in s.gate %}
-    <div class="row">
-      <div class="k"><b>{{ t(sig.key) }}</b></div>
-      <span class="chip {{ sig.status.value }}">
-        {{ t('gate.signal_ok') if sig.status == Health.OK else t('gate.signal_bad') }}
-      </span>
-    </div>
-    {% else %}
-      <p class="sub" style="margin:0">{{ t('gate.fix_none') }}</p>
-    {% endfor %}
-  </section>
+  {# ------------------------------------------------------------ 8. when it
+     is stuck.
 
-  {# ------------------------------------------------------------ 9. running #}
+     What used to be here was the four sign-in shortcuts. They were the
+     hardest thing in this system to get right and nobody presses them: they
+     run themselves when a session expires. What a person reaches for from two
+     thousand kilometres away is this list — refresh what I am looking at,
+     restart what is stuck, and, last, the phone itself. #}
   <section>
     <h2>{{ t('macro.title') }}</h2>
     <div class="actions">
-      {% for macro in macros %}
-      <form method="post" action="/macro">
+      {% for macro in operations %}
+      <form method="post" action="/macro"
+            {% if macro.name in confirm %}data-confirm="{{ t('macro.sure') }}"{% endif %}>
         <input type="hidden" name="name" value="{{ macro.name }}">
-        <button type="submit" class="small">{{ t(macro.label_key) }}</button>
+        <button type="submit"
+                class="small {{ 'danger' if macro.name in confirm }}">
+          {{ t(macro.label_key) }}</button>
       </form>
       {% endfor %}
     </div>
@@ -568,6 +567,7 @@
        page rather than only in a docstring because it is a promise to the
        person pressing the buttons, and a promise nobody can read is not one. #}
     <p class="sub">{{ t('macro.explain') }}</p>
+    <p class="sub">{{ t('macro.reboot_note') }}</p>
   </section>
 </main>
 
@@ -587,6 +587,19 @@
         if (who) who.textContent = {{ t('console.density.pending')|tojson }};
       });
     }
+
+    // The one control that cannot be undone by pressing it again. Confirmed
+    // in the browser rather than by a second page, because a two-step flow
+    // for a button pressed once a year is a two-step flow nobody remembers
+    // how to finish. With scripts off it simply posts — which is what the
+    // button says it does, and the sentence beside it says what that costs.
+    document.querySelectorAll('form[data-confirm]').forEach(function (form) {
+      form.addEventListener('submit', function (event) {
+        if (!window.confirm(form.getAttribute('data-confirm'))) {
+          event.preventDefault();
+        }
+      });
+    });
 
     var UNITS = [[86400, 'd'], [3600, 'h'], [60, 'm']];
     function ago(seconds) {

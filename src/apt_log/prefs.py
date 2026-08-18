@@ -21,6 +21,7 @@ still underneath. Nothing a slider does can lose the value that works.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import secrets
@@ -104,6 +105,7 @@ def _mutate(fn, path: Path | None = None) -> dict[str, Any]:
         doc = load(path)
         fn(doc)
         _forget_old(doc)
+        _merge_duplicates(doc)
         save(doc, path)
         return doc
 
@@ -116,6 +118,74 @@ def _forget_old(doc: dict[str, Any]) -> None:
 
 
 # ------------------------------------------------------------------ devices
+def fingerprint(agent: str) -> str:
+    """What identifies a browser when its cookie is gone.
+
+    A cookie is the identity; this is how the identity is RECOVERED. Cookies
+    on a phone go missing constantly — a bookmark opened as an app has its own
+    jar, private tabs have another, iOS evicts them from sites you have not
+    opened in a week — and every one of those minted a fresh device, so the
+    list of "who is on" filled up with four rows that were all the same
+    person's phone.
+
+    The user-agent string is coarse and that is the point: it is stable across
+    everything that loses a cookie, and it says nothing about who is holding
+    the phone. Two identical phones on identical browsers do collapse into one
+    row. That is the trade, and it is the right way round — a list with one
+    row too few is readable, and a list with a new row every morning is not.
+    """
+    return hashlib.sha256((agent or "").encode("utf-8")).hexdigest()[:16]
+
+
+def resolve(device_id: str, agent: str = "",
+            path: Path | None = None) -> str:
+    """The id this browser should actually be recorded under.
+
+    Its own, if it has one that is known. Otherwise the id of a device with
+    the same fingerprint — the same browser, back without its cookie. Only
+    then a new one.
+    """
+    doc = load(path)
+    if device_id and device_id in doc["devices"]:
+        return device_id
+    mark = fingerprint(agent)
+    if agent:
+        known = [(dev.get("seen") or 0, did)
+                 for did, dev in doc["devices"].items()
+                 if dev.get("mark") == mark]
+        if known:
+            return max(known)[1]
+    return device_id or new_device_id()
+
+
+def _merge_duplicates(doc: dict[str, Any]) -> None:
+    """Collapse devices that are the same browser, keeping the best of each.
+
+    Runs on every write, so a store that already accumulated duplicates heals
+    itself rather than needing anybody to go and tidy it. A name always
+    survives a merge: it is the only thing here somebody typed.
+    """
+    by_mark: dict[str, str] = {}
+    for did, dev in sorted(doc["devices"].items(),
+                           key=lambda kv: kv[1].get("seen") or 0, reverse=True):
+        mark = dev.get("mark")
+        if not mark:
+            continue
+        keeper = by_mark.get(mark)
+        if keeper is None:
+            by_mark[mark] = did
+            continue
+        kept = doc["devices"][keeper]
+        kept["name"] = kept.get("name") or dev.get("name", "")
+        # The keeper is the more recent, so its language and page are the
+        # current ones; only fill in what it does not have.
+        kept["language"] = kept.get("language") or dev.get("language")
+        if not kept.get("language"):
+            kept.pop("language", None)
+        kept["where"] = kept.get("where") or dev.get("where", "")
+        doc["devices"].pop(did, None)
+
+
 def seen(device_id: str, *, agent: str = "", where: str = "",
          path: Path | None = None) -> dict[str, Any]:
     """Record that a device is here, and return its preferences.
@@ -134,6 +204,7 @@ def seen(device_id: str, *, agent: str = "", where: str = "",
         dev["seen"] = time.time()
         if agent:
             dev["agent"] = agent[:180]
+            dev["mark"] = fingerprint(agent)
         if where:
             dev["where"] = where
     return _mutate(edit, path)["devices"].get(device_id, {})

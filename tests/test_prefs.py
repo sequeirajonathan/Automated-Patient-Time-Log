@@ -111,6 +111,45 @@ class TestDevices:
         prefs.rename("dev-1", "Sadia — iPhone")
         assert prefs.device("dev-1")["name"] == "Sadia — iPhone"
 
+    def test_a_browser_that_lost_its_cookie_comes_back_as_itself(self, store):
+        """Cookies on a phone go missing constantly — a bookmark opened as an
+        app has its own jar, private tabs another, iOS evicts them. Every one
+        of those used to mint a new device, so "who is on" filled up with four
+        rows that were all the same phone."""
+        agent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0) Safari/605.1"
+        prefs.seen("first", agent=agent, where="/app")
+        assert prefs.resolve("", agent) == "first"
+
+    def test_an_unknown_browser_is_a_new_device(self, store):
+        prefs.seen("first", agent="Safari on her phone", where="/app")
+        assert prefs.resolve("", "Firefox on his laptop") not in ("first", "")
+
+    def test_a_known_cookie_is_believed_over_the_fingerprint(self, store):
+        agent = "the same browser string"
+        prefs.seen("first", agent=agent)
+        prefs.seen("second", agent=agent)
+        # They merged, and the survivor answers for the fingerprint.
+        assert len(prefs.devices()) == 1
+
+    def test_duplicates_already_in_the_file_heal_themselves(self, store):
+        """The store is fixed on the next write rather than needing anybody to
+        go and tidy it."""
+        import time
+
+        agent = "one phone, four rows"
+        mark = prefs.fingerprint(agent)
+        now = time.time()
+        store.write_text(json.dumps({"devices": {
+            "a": {"mark": mark, "seen": now - 300, "name": ""},
+            "b": {"mark": mark, "seen": now - 200, "name": "Sadia — iPhone"},
+            "c": {"mark": mark, "seen": now - 100, "name": ""},
+        }, "density": {}}), encoding="utf-8")
+        prefs.seen("c", agent=agent, where="/app")
+        devices = prefs.devices()
+        assert len(devices) == 1
+        # The name survives the merge: it is the only thing here somebody typed.
+        assert devices[0]["name"] == "Sadia — iPhone"
+
     def test_a_device_nobody_has_used_in_a_month_is_forgotten(self, store):
         prefs.seen("ancient")
         doc = prefs.load()
