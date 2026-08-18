@@ -139,8 +139,30 @@ each time:
 | `aptlog_logs` | Recent lines from a service, filterable |
 | `aptlog_run_macro` | Run a macro and report how it ended |
 
-`aptlog_deploy` reports REFUSED by reading what the deploy branch points at
-afterwards, not the push's exit status — see the caveat above.
+`aptlog_deploy` never trusts the push's exit status — see the caveat above. It
+reads the revision **checked out on the machine**, which is the only thing that
+answers "what is running".
+
+Reading the branch instead was wrong in a way worth writing down, because it
+looks right until it isn't. A push with nothing to push is a no-op: the hook
+never runs, and `release` still points wherever an earlier interrupted push
+left it. That combination reports a successful deploy over a machine running
+something else. It also has a second cause — **the ten-minute timer**. The
+timer reconciles the machine to `origin/release`, so a revision push-deployed
+straight to the Pi is rolled *back* within ten minutes unless `origin/release`
+moved too. Both paths, both pointers:
+
+```
+git push pi HEAD:release        # deploy now
+git push origin HEAD:release    # and stop the timer undoing it
+```
+
+When the two disagree, the tool says NOT DEPLOYED and names the fix, which is
+the reconciliation path:
+
+```
+ssh apt@aptlog-fl sudo systemctl start aptlog-manager.service
+```
 
 The tools bring the tailnet daemon up themselves if it has died, which in an
 ephemeral container it does, and which is most of what made these operations

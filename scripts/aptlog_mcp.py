@@ -43,6 +43,9 @@ server = MCPServer(
 HOST = os.environ.get("APTLOG_HOST", "apt@aptlog-fl")
 TAILSCALE_SOCKET = os.environ.get("APTLOG_TS_SOCKET", "/tmp/tailscaled.sock")
 DEPLOY_REF = os.environ.get("APTLOG_DEPLOY_REF", "release")
+# The working tree the services actually run from — the only place that can
+# answer "what is running", as against what some branch points at.
+DEPLOY_TREE = os.environ.get("APTLOG_DEPLOY_TREE", "/opt/aptlog")
 REPO = os.environ.get("APTLOG_REPO", os.getcwd())
 
 # Long enough for the deploy gate: the test suite alone runs about fifty
@@ -129,8 +132,16 @@ def aptlog_deploy(
     and roll back if it does not come up. Takes about a minute.
 
     A refused deploy is a normal answer. Git cannot fail a push from the hook
-    that runs the gate, so the answer here is read from what the deploy branch
-    points at afterwards rather than from the push's exit status.
+    that runs the gate, so the answer here is read from the machine afterwards
+    rather than from the push's exit status.
+
+    Read from the MACHINE, specifically — the revision checked out in the
+    working tree the services run from. Reading the deploy branch instead was
+    wrong in a way that took a while to see: a push with nothing to push is a
+    no-op, the hook never runs, and the branch still points at the revision an
+    earlier interrupted push left it on. That reported DEPLOYED over a machine
+    running something else entirely, which is the exact failure this tool
+    exists to prevent.
     """
     ensure_tailnet()
     env = dict(os.environ)
@@ -153,12 +164,25 @@ def aptlog_deploy(
         capture_output=True, timeout=60, env=env
     ).stdout.decode().split("\t")[0].strip()
 
-    if landed == wanted:
+    # What is actually checked out where the services run. This is the answer.
+    running = _text(ssh(f"git -C {DEPLOY_TREE} rev-parse HEAD")).strip()
+
+    if running == wanted:
         return f"DEPLOYED {wanted[:7]} — live and healthy.\n\n{log}"
+    if landed != wanted:
+        return (
+            f"REFUSED. {wanted[:7]} did not deploy; the controller is still "
+            f"running {running[:7] or 'its previous revision'} and is "
+            f"unchanged.\n\n{log}")
+    # The branch says one thing and the machine another: the push was a no-op,
+    # so the hook that runs the gate never fired. Naming the fix here rather
+    # than leaving a puzzle — the reconciliation path is one command.
     return (
-        f"REFUSED. {wanted[:7]} did not deploy; the controller is still "
-        f"running {landed[:7] or 'its previous revision'} and is unchanged.\n\n"
-        f"{log}")
+        f"NOT DEPLOYED. {DEPLOY_REF} already pointed at {wanted[:7]}, so the "
+        f"push had nothing to send and the gate never ran; the machine is "
+        f"still on {running[:7] or 'an unknown revision'}.\n"
+        f"Reconcile it with: ssh {HOST} sudo systemctl start "
+        f"aptlog-manager.service\n\n{log}")
 
 
 # --------------------------------------------------------------------- status
