@@ -137,7 +137,33 @@ Tests run **before** the restart, so a broken revision never takes the agent dow
 rollback path is verified too — if both revisions come up unhealthy, that's the loudest
 alert the system has.
 
-### 2.4 Deliberate limits
+### 2.4 Reaching a person
+
+`scripts/alert.sh` is the one outbound channel, carrying deploy failures, any unit that
+dies via `OnFailure=`, and — the only thing that is *waiting on a human* — the login code
+inMyTeam texts. It speaks ntfy or Pushover; both reach iOS, which matters because the
+portal is used from an iPhone home-screen bookmark.
+
+```
+sudo scripts/add-alert-channel.sh      # once; writes /etc/aptlog/alert.env, mode 0600
+```
+
+Notifications carry a `--url`, so tapping one opens the portal at the thing it is about.
+They never carry a patient, a visit, or a credential: this goes to a public relay and
+lands on a lock screen, and neither is a place for any of that.
+
+**No web push, and no service worker.** Web push would be a second outbound channel to
+configure, break and forget, for one sentence a year — and the phone view has gone
+without a service worker on purpose since it was written.
+
+Unconfigured, the script says so in the journal rather than failing quietly, because a
+silent alerting path is indistinguishable from a healthy system:
+
+```
+journalctl -t aptlog-alert -n 10 --no-pager
+```
+
+### 2.5 Deliberate limits
 
 - Migrations aren't handled. Any schema change needs a manual step until there's a real
   migration story.
