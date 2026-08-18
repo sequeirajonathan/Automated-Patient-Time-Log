@@ -764,6 +764,10 @@ def write_screen(target: Path, frame: dict, screen: str, reason: str,
         # betray it). The peek needs the same turn for both.
         "landscape": (_looks_landscape(hierarchy)
                       or sign_mod.presentation_rotated(hierarchy or "")),
+        # A signature canvas is in front. The walker must not swipe (a
+        # swipe on a canvas is ink), and the portal can dress the page
+        # for signing instead of reading.
+        "canvas": _has_canvas(hierarchy),
         # Whether this document is the WHOLE page (a stitched walk) or the
         # viewport. Full documents leave nothing to wonder about.
         "full": bool(stitched),

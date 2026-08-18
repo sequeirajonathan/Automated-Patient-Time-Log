@@ -875,6 +875,17 @@ def _stitch_walk(driver, assume_top: bool = False) -> bool:
     # dumps and the live view does not lurch through the scroll.
     SCAN_ACTIVE.set()
     try:
+        # On a signature canvas a swipe is INK. The walk decision reads the
+        # published doc, which can be a page old — the checklist's Salvar
+        # landed on the caregiver signature screen while a walk was already
+        # due, and the scroll gesture drew a straight line down the canvas
+        # she was about to sign (seen live, first field test). The screen
+        # in front at swipe time is the only one that counts.
+        src = driver.page_source
+        if isinstance(src, str) and feed_mod._has_canvas(src):
+            log.info("signature canvas in front; the walker keeps its "
+                     "hands off")
+            return False
         cx, y_top, y_bot = _swipe_geometry(driver)
 
         def capture() -> dict:
@@ -1505,6 +1516,11 @@ class Runner:
             return False
         if (doc.get("blocked") or doc.get("full") or not doc.get("app")
                 or doc.get("screen") == "launcher"):
+            return False
+        # A canvas screen is never walked — a swipe there is ink on the
+        # signature. The walk itself re-checks the live screen besides,
+        # because this doc can be a page old by the time the swipe fires.
+        if doc.get("canvas"):
             return False
         from apt_log import feed as feed_mod
 

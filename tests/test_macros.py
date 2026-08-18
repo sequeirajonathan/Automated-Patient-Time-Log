@@ -1883,3 +1883,38 @@ class TestAccordionScan:
              patch("apt_log.macros._tap_xy") as tapped:
             macros._stitch_walk(driver, assume_top=True)
         tapped.assert_not_called()
+
+
+class TestCanvasNeverWalked:
+    """A swipe on a signature canvas is ink. The walk decision skips
+    canvas screens, and the walk itself re-checks the screen in front at
+    swipe time — the checklist's Salvar landed on the signature screen
+    while a walk was already due, and the scroll gesture drew a straight
+    line down the canvas she was about to sign (seen live, first field
+    test)."""
+
+    def test_the_walk_aborts_on_a_live_canvas(self):
+        from unittest.mock import MagicMock
+        driver = MagicMock()
+        driver.page_source = ('<node resource-id="app:id/gestureSignature" '
+                              'class="android.widget.FrameLayout" '
+                              'bounds="[28,90][700,1560]"/>')
+        assert macros._stitch_walk(driver) is False
+        driver.swipe.assert_not_called()
+        driver.execute_script.assert_not_called()
+
+    def test_the_decision_skips_a_canvas_doc(self, tmp_path):
+        import json as _json
+        doc = {"id": "f1", "app": "com.hhaexchange.caregiver",
+               "activity": "visitdetailactivity", "screen": "visit",
+               "blocked": "", "full": False, "canvas": True,
+               "statics": [], "elements": []}
+        (tmp_path / "screen.json").write_text(_json.dumps(doc),
+                                              encoding="utf-8")
+        (tmp_path / "viewers.json").write_text(_json.dumps({"n": 1}),
+                                               encoding="utf-8")
+        runner = macros.Runner(tmp_path / "req.json",
+                               tmp_path / "status.json",
+                               screen_path=tmp_path / "screen.json",
+                               viewers_path=tmp_path / "viewers.json")
+        assert runner.maybe_stitch() is False
