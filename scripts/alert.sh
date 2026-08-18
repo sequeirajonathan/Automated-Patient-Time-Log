@@ -3,6 +3,7 @@
 #
 #   alert.sh "message"                        # from manager.sh, the agent, anywhere
 #   alert.sh --unit aptlog-agent.service      # from systemd OnFailure=
+#   alert.sh --url https://…/app "message"    # and make it tappable
 #
 # Configure in /etc/aptlog/alert.env (mode 0600):
 #   ALERT_NTFY_TOPIC=https://ntfy.sh/<something-unguessable>
@@ -27,6 +28,15 @@ HOSTNAME_SHORT="$(hostname -s 2>/dev/null || echo aptlog)"
 
 log() { logger -t aptlog-alert "$1" 2>/dev/null || echo "aptlog-alert: $1" >&2; }
 
+# A notification that needs somebody to DO something has to take them there.
+# On a phone the alternative is remembering which bookmark opens the portal,
+# which is exactly the friction the notification exists to remove.
+CLICK=""
+if [[ "${1:-}" == "--url" ]]; then
+    CLICK="${2:-}"
+    shift 2
+fi
+
 # ------------------------------------------------------------------ build message
 if [[ "${1:-}" == "--unit" ]]; then
     unit="${2:-unknown}"
@@ -43,7 +53,10 @@ fi
 delivered=0
 
 if [[ -n "${ALERT_NTFY_TOPIC:-}" ]]; then
+    ntfy_click=()
+    [[ -n "$CLICK" ]] && ntfy_click=(-H "Click: $CLICK")
     if curl -fsS -m 15 -H "Title: APT Log" -H "Priority: high" \
+            "${ntfy_click[@]}" \
             -d "$message" "$ALERT_NTFY_TOPIC" >/dev/null 2>&1; then
         delivered=1
     else
@@ -52,11 +65,17 @@ if [[ -n "${ALERT_NTFY_TOPIC:-}" ]]; then
 fi
 
 if [[ -n "${ALERT_PUSHOVER_TOKEN:-}" && -n "${ALERT_PUSHOVER_USER:-}" ]]; then
+    pushover_click=()
+    if [[ -n "$CLICK" ]]; then
+        pushover_click=(--form-string "url=$CLICK"
+                        --form-string "url_title=Open the portal")
+    fi
     if curl -fsS -m 15 \
             --form-string "token=$ALERT_PUSHOVER_TOKEN" \
             --form-string "user=$ALERT_PUSHOVER_USER" \
             --form-string "title=APT Log" \
             --form-string "message=$message" \
+            "${pushover_click[@]}" \
             https://api.pushover.net/1/messages.json >/dev/null 2>&1; then
         delivered=1
     else

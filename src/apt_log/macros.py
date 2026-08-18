@@ -65,6 +65,14 @@ POLL_EVERY = 1.0
 AUTO_AUTH_APP = "com.hhaexchange.caregiver"
 AUTO_AUTH_MACRO = "hhax_legacy_login"
 AUTO_AUTH_COOLDOWN = 90.0
+# And how long before a macro that TEXTS SOMEBODY may try again. Fifteen
+# minutes rather than ninety seconds, because the cost of a retry here is not
+# a wasted second, it is another message on a real person's phone. The common
+# repeat is free anyway — the walk no-ops once the app is already asking for
+# a code — so this only bounds the case where the app falls back to the
+# number screen with nobody answering.
+SMS_AUTH_COOLDOWN = 15 * 60.0
+SENDS_A_MESSAGE = ("inmyteam_login",)
 # Screens flash through login on their own during app startup; only a login
 # screen the feed has seen *recently and still* is a real landing.
 AUTO_AUTH_FRESH = 6.0
@@ -1425,6 +1433,31 @@ def _inmyteam_login(driver, report) -> None:
     if not wait_for(lambda: _asks_for_a_code(driver), timeout=25.0):
         raise RuntimeError("the app did not ask for a code")
 
+    # The text has been sent, so somebody has to be told. This is the one
+    # step in the whole system that cannot be waited out or refused — the
+    # code exists only on her phone — and a portal that sits there silently
+    # asking is a portal nobody discovers is asking.
+    _say_the_code_is_waiting()
+
+
+# Where the notification sends her. The tailnet name rather than an address:
+# addresses change, and this string ends up on a lock screen where a wrong
+# one is a dead end nobody can debug from.
+PORTAL_URL = os.environ.get("APTLOG_PORTAL_URL", "https://aptlog-fl/app")
+
+# The sentence itself. Deliberately says nothing about which patient, which
+# agency, or what the code is — it goes to a public relay and lands on a lock
+# screen, and neither of those is a place for any of that. It says what to do
+# and where, which is all a notification is for.
+CODE_WAITING = ("inMyTeam texted you a sign-in code. Open the portal and "
+                "type it in — the app is waiting on it.")
+
+
+def _say_the_code_is_waiting() -> None:
+    from apt_log import notify
+
+    notify.send(CODE_WAITING, url=PORTAL_URL)
+
 
 # The words every version of this screen uses. Matched loosely because the
 # app switches language with the phone and this is the one screen nobody has
@@ -1713,15 +1746,49 @@ def auth_macro_for(app: str, provider=None, doc: dict | None = None) -> str | No
         return ("mobile_caregiver_pin"
                 if have(secrets_mod.MC_PIN) or have(secrets_mod.MC_PASSWORD)
                 else None)
-    # inMyTeam is deliberately absent, and this is the note saying so rather
-    # than a silence somebody has to re-derive. Its sign-in macro exists and
-    # its tile runs it — but pressing it SENDS A TEXT MESSAGE to a real
-    # phone. Automatic means the phone idling on that splash would text
-    # somebody every ninety seconds for as long as anyone was watching, walk
-    # into the app's rate limit, and hand her a stream of codes she never
-    # asked for. This is the one auth walk that has to be somebody's
-    # decision, so it stays a press.
+    if app == "com.inmyteam.inmyteam":
+        # It signs itself in like the other three now. It was held back
+        # because pressing it SENDS A TEXT MESSAGE, and automatic meant a
+        # phone idling on that splash texting somebody every ninety seconds.
+        # Two things changed that: the walk is a no-op once the app is
+        # already asking for a code, so the common repeat costs nothing; and
+        # anything that sends a message gets its own long cooldown (see
+        # SMS_AUTH_COOLDOWN) rather than the ordinary one.
+        return "inmyteam_login" if have(secrets_mod.INMYTEAM_PHONE) else None
     return None
+
+
+# The words inMyTeam's own sign-in screens use. This app needs them because
+# it has ONE activity: splash, phone number, code and the signed-in app all
+# live under `mainactivity`, so the atlas cannot tell them apart and the
+# capture refusals never fire — there is no password field anywhere in the
+# walk. Its own words are the only signal it gives.
+_IMT_LOGIN_WORDS = (
+    "get started",            # the marketing splash
+    "sign in with your phone",
+    "enter your cell phone",
+    "iniciar sesión con su",  # the same screens with the phone in Spanish
+    "número de teléfono",
+)
+
+
+def wants_to_sign_in(doc: dict | None) -> bool:
+    """Whether inMyTeam is showing one of its own sign-in screens.
+
+    The code screen is deliberately NOT here. Reaching it is the walk's
+    destination, and treating it as "please sign in" would put the loop back
+    at a screen it had already arrived at.
+    """
+    if not doc or doc.get("app") != "com.inmyteam.inmyteam":
+        return False
+    words = " ".join(
+        (n.get("txt") or "")
+        for n in (doc.get("statics") or []) + (doc.get("elements") or [])
+    ).lower()
+    if any(w in words for w in ("enter your code", "verify your account",
+                                "introduce el código")):
+        return False
+    return any(w in words for w in _IMT_LOGIN_WORDS)
 
 
 # -------------------------------------------------------------------- request
@@ -1822,6 +1889,8 @@ class Runner:
         # freshly recycled container failed three tests a long-lived one had
         # been passing all day.
         self._auto_auth_at: float | None = None
+        # Per macro, so one app's cooldown never gates another's.
+        self._auto_auth_seen: dict[str, float] = {}
         # The frame a stitch walk failed on: not retried until the screen
         # changes, or a stubborn page would be walked forever.
         self._stitch_failed_for: str = ""
@@ -2122,7 +2191,8 @@ class Runner:
 
         if (doc.get("screen") != "login"
                 and doc.get("blocked") not in CREDENTIAL_REFUSALS
-                and not expiry_on_screen(doc)):
+                and not expiry_on_screen(doc)
+                and not wants_to_sign_in(doc)):
             return False
         try:
             age = (datetime.now()
@@ -2131,11 +2201,20 @@ class Runner:
             return False
         if age > AUTO_AUTH_FRESH:
             return False
-        if (self._auto_auth_at is not None
-                and time.monotonic() - self._auto_auth_at < AUTO_AUTH_COOLDOWN):
+        # Two cooldowns, because two costs. The ordinary one keeps a
+        # bad-credential day from becoming a loop. The long one is for a
+        # macro whose every attempt SENDS A TEXT MESSAGE to a person: a
+        # ninety-second retry there is a stream of codes she never asked for
+        # and a walk into the app's rate limit. Kept per macro so a slow one
+        # never gates a fast one.
+        cooldown = (SMS_AUTH_COOLDOWN if macro_name in SENDS_A_MESSAGE
+                    else AUTO_AUTH_COOLDOWN)
+        last = self._auto_auth_seen.get(macro_name, self._auto_auth_at)
+        if last is not None and time.monotonic() - last < cooldown:
             return False
 
         self._auto_auth_at = time.monotonic()
+        self._auto_auth_seen[macro_name] = self._auto_auth_at
         log.info("login screen is up — signing in without being asked")
         self.execute(macro_name, f"auto-{uuid.uuid4().hex[:8]}")
         return True

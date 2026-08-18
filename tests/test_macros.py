@@ -1052,13 +1052,27 @@ class TestInMyTeamWalksToTheCode:
         # And the box she may be part-way through typing into is untouched.
         assert all(not box.clear.called for box in state.get("boxes", []))
 
-    def test_it_never_signs_itself_in(self):
-        """Pressing it sends a text message to a real phone. Automatic would
-        text somebody every ninety seconds for as long as anyone watched."""
+    def test_it_signs_itself_in_like_the_other_three(self):
+        """It was held back because pressing it texts a real person. What
+        changed: the walk is a no-op once the app is already asking for a
+        code, so the common repeat costs nothing."""
         from apt_log.secrets import INMYTEAM_PHONE, MemorySecretProvider
 
         provider = MemorySecretProvider(**{INMYTEAM_PHONE: "3055550123"})
-        assert macros.auth_macro_for("com.inmyteam.inmyteam", provider) is None
+        assert (macros.auth_macro_for("com.inmyteam.inmyteam", provider)
+                == "inmyteam_login")
+
+    def test_no_number_stored_means_no_automatic_anything(self):
+        from apt_log.secrets import MemorySecretProvider
+
+        assert macros.auth_macro_for("com.inmyteam.inmyteam",
+                                     MemorySecretProvider()) is None
+
+    def test_a_macro_that_texts_somebody_gets_the_long_cooldown(self):
+        """Ninety seconds is right for a wasted retry and wrong for one that
+        puts another message on a real person's phone."""
+        assert "inmyteam_login" in macros.SENDS_A_MESSAGE
+        assert macros.SMS_AUTH_COOLDOWN >= 10 * 60
 
     def test_the_tile_is_what_runs_it(self):
         from apt_log.ui.app import PHONE_APPS
@@ -1066,6 +1080,88 @@ class TestInMyTeamWalksToTheCode:
         tile = next(a for a in PHONE_APPS if a["id"] == "inmyteam")
         assert tile["macro"] == "inmyteam_login"
         assert tile["open"] == "open_inmyteam"
+
+
+class TestInMyTeamIsRecognisedByItsWords:
+    """This app has ONE activity. Splash, phone number, code and the
+    signed-in app all live under `mainactivity`, so the atlas cannot tell
+    them apart, and there is no password field anywhere in the walk for the
+    capture refusals to fire on. Its own words are the only signal it gives —
+    the same shape of answer the Chrome rule in auth_macro_for needed."""
+
+    def _doc(self, *words, app="com.inmyteam.inmyteam"):
+        return {"app": app, "statics": [{"txt": w} for w in words],
+                "elements": []}
+
+    def test_the_splash_is_asking_to_be_signed_in(self):
+        assert macros.wants_to_sign_in(
+            self._doc("THE FUTURE of home care agencies",
+                      "Let’s Get Started")) is True
+
+    def test_the_number_screen_is_asking_too(self):
+        assert macros.wants_to_sign_in(
+            self._doc("Sign in with your phone number",
+                      "Enter your cell phone number")) is True
+
+    def test_the_code_screen_is_arrival_not_a_request(self):
+        """Treating it as "please sign in" would put the loop back at a
+        screen it had already reached — and each lap sends a text."""
+        assert macros.wants_to_sign_in(
+            self._doc("Verify Your Account",
+                      "A text with a code was sent to",
+                      "Enter your code", "Verify")) is False
+
+    def test_the_signed_in_app_is_not_asking(self):
+        assert macros.wants_to_sign_in(
+            self._doc("Visitas", "Beneficiarios", "Mensajes")) is False
+
+    def test_another_apps_screen_is_never_matched(self):
+        """The words are loose on purpose; the package is what keeps them
+        from reaching across apps."""
+        assert macros.wants_to_sign_in(
+            self._doc("Sign in with your phone number",
+                      app="com.hhaexchange.uma")) is False
+
+    def test_nothing_published_yet_is_not_asking(self):
+        assert macros.wants_to_sign_in(None) is False
+        assert macros.wants_to_sign_in({}) is False
+
+
+class TestTheCodeIsAnnounced:
+    """The one step in this system nobody can wait out: the code exists only
+    on her phone. A portal that sits there silently asking is a portal nobody
+    discovers is asking."""
+
+    def test_reaching_the_code_screen_sends_a_notification(self):
+        sent = []
+        with patch("apt_log.notify.send",
+                   side_effect=lambda m, url="": sent.append((m, url))):
+            macros._say_the_code_is_waiting()
+        assert len(sent) == 1
+        message, url = sent[0]
+        assert "code" in message.lower()
+        assert url.endswith("/app")          # tappable, straight to the field
+
+    def test_it_carries_no_patient_and_no_code(self):
+        """It goes to a public relay and lands on a lock screen. Neither is a
+        place for a name, and there is no code to carry — that is the point
+        of asking."""
+        message = macros.CODE_WAITING
+        assert not any(ch.isdigit() for ch in message)
+        for leak in ("patient", "paciente", "visit", "visita"):
+            assert leak not in message.lower()
+
+    def test_a_notification_that_cannot_be_sent_never_fails_the_sign_in(self):
+        with patch("apt_log.notify.send", side_effect=OSError("no network")):
+            with pytest.raises(OSError):
+                macros._say_the_code_is_waiting()
+        # ...which is why the real helper swallows it. Proven against the
+        # helper itself rather than assumed of the caller:
+        from apt_log import notify
+
+        with patch("apt_log.notify.subprocess.run",
+                   side_effect=OSError("no curl")):
+            assert notify.send("anything") is False
 
 
 class TestUmaWebFormIsTheAsk:
