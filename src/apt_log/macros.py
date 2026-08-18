@@ -641,40 +641,108 @@ def _hhax_uma_login(driver, report) -> None:
 
 
 def _mobile_caregiver_pin(driver, report) -> None:
-    """Mobile Caregiver+ — type the passcode, only if the keypad is up.
+    """Mobile Caregiver+ — answer whichever of its two locks is up.
 
-    Discovery: an existing session sits behind a PIN keypad ("Introduce un
-    código de acceso", digits 0-9). The keypad's buttons carry their digits
-    as text, so the PIN is typed by tapping them; the screen advances by
-    itself when the last digit lands.
+    The app has TWO, and they are not interchangeable. Discovery found the
+    first: a PIN keypad ("Introduce un código de acceso", four dots, digits
+    0-9), whose buttons carry their digits as text, so the passcode is typed
+    by tapping them and the screen advances by itself on the last one.
+
+    Walking it live found the second. The passcode only unlocks the app on
+    this phone; when the SERVER session lapses the dashboard opens, says
+    "Sesión caducada", and drops to its own username-and-password form —
+    which no number of keypad taps can answer. Landing there with only a PIN
+    stored is how an auth macro spins without ever signing anything in.
+
+    So the screen in front decides. Either lock may be up, and clearing the
+    first can reveal the second, which is why the passcode path falls through
+    to the password path rather than declaring victory.
     """
-    from apt_log.secrets import MC_PIN, FileSecretProvider
+    from apt_log.secrets import (MC_PASSWORD, MC_PIN, MC_USERNAME,
+                                 FileSecretProvider, SecretNotFound)
 
     report("macro.step.launching")
     wake_display()
     driver.activate_app("com.tellus.evv.v2")
     wait_for(lambda: bool(driver.current_activity), timeout=15.0)
 
-    def on_pin_screen():
-        return "pin" in (driver.current_activity or "").lower()
+    def activity() -> str:
+        return (driver.current_activity or "").lower()
 
-    if not wait_for(on_pin_screen, timeout=4.0, poll=0.5):
+    def on_pin_screen() -> bool:
+        return "pin" in activity()
+
+    def on_login_screen() -> bool:
+        return "login" in activity()
+
+    # ------------------------------------------------------------- the PIN
+    if wait_for(on_pin_screen, timeout=4.0, poll=0.5):
+        # Read only once the keypad is actually up, and raised rather
+        # than returned: an unlocked app must not even open the file.
+        pin = FileSecretProvider().get(MC_PIN)
+        report("macro.step.signing_in")
+        for digit in pin:
+            keys = driver.find_elements(
+                "xpath", f'//android.widget.Button[@text="{digit}"]')
+            if not keys:
+                raise RuntimeError("the keypad is not where discovery saw it")
+            keys[0].click()
+        report("macro.step.checking")
+        if not wait_for(lambda: not on_pin_screen(), timeout=15.0):
+            raise RuntimeError(
+                "still on the passcode screen after typing the PIN")
+
+    # ------------------------------------------------- the expired session
+    # "Sesión caducada" has one button and it only acknowledges; the form is
+    # behind it. Dismissing it is not a commitment — it is the only way to
+    # reach the screen that can be answered. But only THAT dialog: pressing
+    # whatever sits at android:id/button1 would press the positive button of
+    # any alert the app happened to be showing, and this system does not
+    # confirm things it cannot read. The wording is checked first, from the
+    # same per-app list the expiry watcher uses.
+    words = (driver.page_source or "").lower()
+    if any(m in words for m in EXPIRY_MARKERS.get("com.tellus.evv.v2", ())):
+        for alert in driver.find_elements(
+                "xpath", '//android.widget.Button[@resource-id='
+                         '"android:id/button1"]'):
+            alert.click()
+            break
+    wait_for(on_login_screen, timeout=6.0, poll=0.5)
+    if not on_login_screen():
         report("macro.step.checking")
         return
 
-    pin = FileSecretProvider().get(MC_PIN)   # raises before any tap if unset
+    try:
+        password = FileSecretProvider().get(MC_PASSWORD)
+    except SecretNotFound:
+        # Nothing typed, nothing half-filled: an unanswerable screen is left
+        # exactly as it was found, for a person to answer.
+        raise RuntimeError(
+            "Mobile Caregiver+ wants its password and none is stored")
 
     report("macro.step.signing_in")
-    for digit in pin:
-        keys = driver.find_elements(
-            "xpath", f'//android.widget.Button[@text="{digit}"]')
-        if not keys:
-            raise RuntimeError("the keypad is not where discovery saw it")
-        keys[0].click()
+    fields = driver.find_elements("id", "login_password_input")
+    if not fields:
+        raise RuntimeError("the sign-in form is not where it was walked")
+    # The username is remembered between sessions; it is only typed when the
+    # app has forgotten it, and only if one is stored.
+    for box in driver.find_elements("id", "login_username_input"):
+        if not (box.text or "").strip():
+            try:
+                box.clear()
+                box.send_keys(FileSecretProvider().get(MC_USERNAME))
+            except SecretNotFound:
+                pass
+        break
+    fields[0].clear()
+    fields[0].send_keys(password)
+    for button in driver.find_elements("id", "login_button"):
+        button.click()
+        break
 
     report("macro.step.checking")
-    if not wait_for(lambda: not on_pin_screen(), timeout=15.0):
-        raise RuntimeError("still on the passcode screen after typing the PIN")
+    if not wait_for(lambda: not on_login_screen(), timeout=30.0):
+        raise RuntimeError("still on the sign-in form after signing in")
 
 
 def _read_page(driver, report) -> None:
@@ -1231,6 +1299,14 @@ EXPIRY_MARKERS = {
         "regresar al inicio de sesión", "regresar al inicio de sesion",
         "logged out due to", "return to login", "back to login",
     ),
+    # Mobile Caregiver+ shows this one AFTER the passcode has already been
+    # accepted: the keypad unlocks the app on the phone, the dashboard opens,
+    # and only then does it admit the server session is gone. Walked live.
+    "com.tellus.evv.v2": (
+        "sesión caducada", "sesion caducada",
+        "sesión ha caducado", "sesion ha caducado",
+        "session has expired",
+    ),
 }
 
 
@@ -1292,7 +1368,14 @@ def auth_macro_for(app: str, provider=None, doc: dict | None = None) -> str | No
             return "hhax_uma_login" if uma_credentialed() else None
         return None
     if app == "com.tellus.evv.v2":
-        return "mobile_caregiver_pin" if have(secrets_mod.MC_PIN) else None
+        # Either secret makes the macro worth offering: the app locks two
+        # different ways and the screen in front decides which one it is
+        # answering. Offering it with only a PIN stored is still right — the
+        # keypad is the lock seen most often — and it fails loudly rather
+        # than silently on the form.
+        return ("mobile_caregiver_pin"
+                if have(secrets_mod.MC_PIN) or have(secrets_mod.MC_PASSWORD)
+                else None)
     return None
 
 

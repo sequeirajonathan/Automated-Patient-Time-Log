@@ -1918,3 +1918,161 @@ class TestCanvasNeverWalked:
                                screen_path=tmp_path / "screen.json",
                                viewers_path=tmp_path / "viewers.json")
         assert runner.maybe_stitch() is False
+
+
+class TestMobileCaregiverExpiredSession:
+    """The second lock, found by walking it live.
+
+    The passcode only unlocks the app on this phone. When the SERVER session
+    lapses the dashboard opens, says "Sesión caducada", and drops to a
+    username-and-password form no number of keypad taps can answer — which is
+    how an auth macro spins forever without signing anything in.
+    """
+
+    FORM = "com.tellus.evv.activities.LoginActivity"
+    EXPIRED = ("<node text='Sesión caducada'/>"
+               "<node text='Su sesión ha caducado, por favor vuelva a "
+               "iniciar sesión.'/>")
+
+    def _driver(self, activity, source=""):
+        from unittest.mock import PropertyMock
+        state = {"activity": activity}
+        driver = MagicMock()
+        type(driver).current_activity = PropertyMock(
+            side_effect=lambda: state["activity"])
+        type(driver).page_source = PropertyMock(side_effect=lambda: source)
+        return driver, state
+
+    def _run(self, driver, **secrets):
+        import itertools
+
+        from apt_log.secrets import MemorySecretProvider
+
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider",
+                   return_value=MemorySecretProvider(**secrets)), \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            macros.MACROS["mobile_caregiver_pin"].run(driver, lambda _k: None)
+
+    def test_the_password_is_typed_into_the_form(self):
+        from apt_log.secrets import MC_PASSWORD
+
+        driver, state = self._driver(self.FORM)
+        typed, boxes = [], {}
+
+        def find_elements(by, selector):
+            if selector == "login_password_input":
+                box = MagicMock()
+                box.send_keys.side_effect = lambda v: typed.append(v)
+                boxes["pw"] = box
+                return [box]
+            if selector == "login_username_input":
+                box = MagicMock()
+                box.text = "SSequeira"          # remembered between sessions
+                box.send_keys.side_effect = lambda v: typed.append(v)
+                return [box]
+            if selector == "login_button":
+                button = MagicMock()
+                button.click.side_effect = lambda: state.update(
+                    activity="com.tellus.evv.activities.DashboardActivity")
+                return [button]
+            return []
+
+        driver.find_elements.side_effect = find_elements
+        self._run(driver, **{MC_PASSWORD: "hunter2"})
+        assert typed == ["hunter2"], "a remembered username is not retyped"
+
+    def test_a_forgotten_username_is_filled_too(self):
+        from apt_log.secrets import MC_PASSWORD, MC_USERNAME
+
+        driver, state = self._driver(self.FORM)
+        typed = []
+
+        def find_elements(by, selector):
+            if selector in ("login_password_input", "login_username_input"):
+                box = MagicMock()
+                box.text = ""
+                box.send_keys.side_effect = lambda v: typed.append(v)
+                return [box]
+            if selector == "login_button":
+                button = MagicMock()
+                button.click.side_effect = lambda: state.update(
+                    activity="com.tellus.evv.activities.DashboardActivity")
+                return [button]
+            return []
+
+        driver.find_elements.side_effect = find_elements
+        self._run(driver, **{MC_USERNAME: "SSequeira", MC_PASSWORD: "hunter2"})
+        assert typed == ["SSequeira", "hunter2"]
+
+    def test_without_a_password_nothing_is_typed_at_all(self):
+        driver, _state = self._driver(self.FORM)
+        driver.find_elements.side_effect = lambda *_a: []
+        with pytest.raises(RuntimeError, match="none is stored"):
+            self._run(driver)
+
+    def test_only_the_expiry_dialog_is_dismissed(self):
+        """Pressing whatever sits at android:id/button1 would press the
+        positive button of any alert the app happened to be showing."""
+        driver, _state = self._driver(
+            "com.tellus.evv.activities.DashboardActivity",
+            source="<node text='¿Borrar esta visita?'/>")
+        clicked = []
+
+        def find_elements(by, selector):
+            if "button1" in selector:
+                button = MagicMock()
+                button.click.side_effect = lambda: clicked.append(1)
+                return [button]
+            return []
+
+        driver.find_elements.side_effect = find_elements
+        self._run(driver)
+        assert clicked == [], "an unrecognised dialog stays untouched"
+
+    def test_the_expiry_dialog_is_dismissed_to_reach_the_form(self):
+        from apt_log.secrets import MC_PASSWORD
+
+        driver, state = self._driver(
+            "com.tellus.evv.activities.DashboardActivity",
+            source=self.EXPIRED)
+        clicked = []
+
+        def find_elements(by, selector):
+            if "button1" in selector:
+                button = MagicMock()
+
+                def click():
+                    clicked.append(1)
+                    state["activity"] = self.FORM
+                button.click.side_effect = click
+                return [button]
+            if selector in ("login_password_input", "login_username_input"):
+                box = MagicMock()
+                box.text = "SSequeira"
+                return [box]
+            if selector == "login_button":
+                button = MagicMock()
+                button.click.side_effect = lambda: state.update(
+                    activity="com.tellus.evv.activities.DashboardActivity")
+                return [button]
+            return []
+
+        driver.find_elements.side_effect = find_elements
+        self._run(driver, **{MC_PASSWORD: "hunter2"})
+        assert clicked == [1]
+
+    def test_the_macro_is_offered_on_a_password_alone(self):
+        """The app locks two ways; either secret makes it worth offering."""
+        from apt_log.secrets import MC_PASSWORD, MC_PIN, MemorySecretProvider
+
+        only_password = MemorySecretProvider(**{MC_PASSWORD: "hunter2"})
+        only_pin = MemorySecretProvider(**{MC_PIN: "2580"})
+        neither = MemorySecretProvider()
+        for provider, expected in ((only_password, "mobile_caregiver_pin"),
+                                   (only_pin, "mobile_caregiver_pin"),
+                                   (neither, None)):
+            assert macros.auth_macro_for(
+                "com.tellus.evv.v2", provider) == expected

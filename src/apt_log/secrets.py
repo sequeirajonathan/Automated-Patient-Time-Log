@@ -33,6 +33,11 @@ UMA_USERNAME = "UMA_USERNAME"      # HHAeXchange+ signs in through a web form
 UMA_PASSWORD = "UMA_PASSWORD"
 MC_PIN = "MC_PIN"                  # Mobile Caregiver+ guards its session
                                    # with a numeric passcode keypad
+MC_USERNAME = "MC_USERNAME"        # ...and the passcode only unlocks the app.
+MC_PASSWORD = "MC_PASSWORD"        # When the SERVER session expires the app
+                                   # says "Sesión caducada" and falls back to
+                                   # its own username and password, which the
+                                   # passcode cannot answer (walked live)
 INMYTEAM_PHONE = "INMYTEAM_PHONE"  # inMyTeam signs in with a cell number
                                    # (walked live: "Sign in with your phone
                                    # number" — the SMS code lands on the

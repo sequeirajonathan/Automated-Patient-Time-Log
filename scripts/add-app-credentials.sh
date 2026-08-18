@@ -47,6 +47,19 @@ if [[ -n "${MC_PIN_VAL}" && ! "$MC_PIN_VAL" =~ ^[0-9]+$ ]]; then
 fi
 
 echo
+echo "The Mobile Caregiver+ PIN only unlocks the app on this phone. When the"
+echo "SERVER session expires the app says \"Sesión caducada\" and asks for its"
+echo "own username and password instead — the PIN cannot answer that screen,"
+echo "so without these the app needs a person to type them in."
+read -rp  "Mobile Caregiver+ username  : " MC_USER || true
+MC_PASS=""
+if [[ -n "${MC_USER}" ]]; then
+    read -rsp "Mobile Caregiver+ password  : " MC_PASS; echo
+    read -rsp "Confirm password            : " MC_PASS2; echo
+    [[ "$MC_PASS" == "$MC_PASS2" ]] || { echo "passwords do not match" >&2; exit 1; }
+fi
+
+echo
 echo "inMyTeam signs in with the caregiver's CELL NUMBER (digits only, as"
 echo "the app expects it typed). The SMS code arrives on the tethered phone"
 echo "itself, so the sign-in can heal without anyone reading a text aloud."
@@ -73,9 +86,11 @@ upsert() {
 upsert "UMA_USERNAME" "${UMA_USER:-}"
 upsert "UMA_PASSWORD" "${UMA_PASS:-}"
 upsert "MC_PIN"       "${MC_PIN_VAL:-}"
+upsert "MC_USERNAME" "${MC_USER:-}"
+upsert "MC_PASSWORD" "${MC_PASS:-}"
 upsert "INMYTEAM_PHONE" "${IMT_PHONE_VAL:-}"
 
-unset UMA_PASS UMA_PASS2 MC_PIN_VAL IMT_PHONE_VAL
+unset UMA_PASS UMA_PASS2 MC_PIN_VAL MC_PASS MC_PASS2 IMT_PHONE_VAL
 
 chown "$SERVICE_USER:$SERVICE_USER" "$SECRETS"
 chmod 0600 "$SECRETS"
@@ -87,12 +102,15 @@ VENV="/opt/aptlog/.venv/bin/python"
 sudo -u "$SERVICE_USER" "$VENV" - <<'PY' 2>/dev/null || echo "  (could not verify)"
 import sys
 sys.path.insert(0, "/opt/aptlog/src")
-from apt_log.secrets import (INMYTEAM_PHONE, MC_PIN, UMA_PASSWORD,
-                             UMA_USERNAME, FileSecretProvider, SecretNotFound)
+from apt_log.secrets import (INMYTEAM_PHONE, MC_PASSWORD, MC_PIN,
+                             MC_USERNAME, UMA_PASSWORD, UMA_USERNAME,
+                             FileSecretProvider, SecretNotFound)
 p = FileSecretProvider()
 for label, key, masked in (("UMA_USERNAME", UMA_USERNAME, False),
                            ("UMA_PASSWORD", UMA_PASSWORD, True),
                            ("MC_PIN", MC_PIN, True),
+                           ("MC_USERNAME", MC_USERNAME, False),
+                           ("MC_PASSWORD", MC_PASSWORD, True),
                            ("INMYTEAM_PHONE", INMYTEAM_PHONE, True)):
     try:
         v = p.get(key)
