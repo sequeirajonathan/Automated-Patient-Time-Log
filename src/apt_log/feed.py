@@ -1199,6 +1199,25 @@ def hierarchy_package(xml: str | None) -> str:
     return max(counts, key=counts.__getitem__) if counts else ""
 
 
+def _label(raw: str) -> str:
+    """What this node SAYS — its text, or the description standing in for it.
+
+    A view that draws its own content has no text for the tree to carry, and
+    Android's answer is content-desc: the sentence a screen reader would say.
+    Mobile Caregiver+ builds its whole visits list that way — every row is a
+    bare View whose only words are "La visita está programada para <patient>
+    … y su estado es <status>" — so a portal reading text alone showed three
+    identical empty strips where the phone showed three named visits.
+
+    A description is text by every rule that matters: it is disclosed exactly
+    where text is (see text_is_disclosable), it is excluded from editable
+    fields exactly as text is, and it never rides in `has_text` as anything
+    but a boolean. Text wins when a node carries both, which is also what
+    keeps a node that repeats itself from being read twice.
+    """
+    return _attr(raw, "text") or _attr(raw, "content-desc")
+
+
 def elements(xml: str, label: bool = False) -> list[dict]:
     """The tappable structure of a screen, carrying no text.
 
@@ -1244,10 +1263,10 @@ def elements(xml: str, label: bool = False) -> list[dict]:
             # way it is thrown. Not part of frame identity: flipping a checkbox
             # must not invalidate her aim at the one next to it.
             "checked": _attr(raw, "checked") == "true",
-            "has_text": bool(_attr(raw, "text")),
+            "has_text": bool(_label(raw)),
         }
         if label and short not in EDITABLE:
-            entry["txt"] = _clean(_attr(raw, "text"))
+            entry["txt"] = _clean(_label(raw))
         found.append(entry)
     return found
 
@@ -1279,7 +1298,7 @@ def statics(xml: str) -> list[dict]:
         cls = (_attr(raw, "class") or raw[1:].split()[0].rstrip("/>")).rsplit(".", 1)[-1]
         if cls in EDITABLE:
             continue
-        text = _clean(_attr(raw, "text"))
+        text = _clean(_label(raw))
         rid = _attr(raw, "resource-id").split("/")[-1]
         if not text and not (cls == "ImageView" and rid):
             continue

@@ -962,3 +962,49 @@ class TestMapOverlay:
         ))
         texts = [(i.get("txt") or "") for r in m["rows"] for i in r["items"]]
         assert "Borrar" in texts
+
+
+class TestGeneratedDescriptions:
+    """Mobile Caregiver+'s visits list is custom-drawn: its only words are
+    the sentence a screen reader would say. Rendered whole, three of those
+    are a wall of prose where the phone shows three scannable rows."""
+
+    SENTENCE = ("La visita está programada para ATANASIO MEDEROS TORRIEN en "
+                "martes, 18 de agosto de 2026 de 9:05 AM a 11:05 AM y su "
+                "estado es No Empezadas, Tarde")
+
+    def test_the_sentence_becomes_a_list_cell(self):
+        assert screenview._shape_description(self.SENTENCE) == [
+            "ATANASIO MEDEROS TORRIEN", "9:05 AM – 11:05 AM",
+            "No Empezadas, Tarde"]
+
+    def test_english_reads_the_same_way(self):
+        english = ("The visit is scheduled for MARINA ZALDIVAR MARTI on "
+                   "Tuesday, August 18 2026 from 3:20 PM to 5:20 PM and its "
+                   "status is Not started")
+        assert screenview._shape_description(english) == [
+            "MARINA ZALDIVAR MARTI", "3:20 PM – 5:20 PM", "Not started"]
+
+    def test_a_sentence_it_cannot_account_for_is_left_alone(self):
+        """A rule that drops half a sentence it did not understand is worse
+        than a long line."""
+        for text in (
+            "La visita está programada para ATANASIO MEDEROS TORRIEN en "
+            "martes, 18 de agosto de 2026",                    # no status
+            "La visita de las 9:05 AM a 11:05 AM y su estado es Sin empezar",
+            "Su sesión ha caducado, por favor vuelva a iniciar sesión.",
+        ):
+            assert screenview._shape_description(text) is None
+
+    def test_a_short_label_is_never_reshaped(self):
+        assert screenview._shape_description("Sin empezar") is None
+
+    def test_the_row_renders_as_title_and_details(self):
+        m = screenview.build(doc(
+            elements=[el("", "View", [0, 146, 720, 185])],
+            statics=[st([0, 146, 720, 185], self.SENTENCE)],
+        ))
+        (cell,) = [i for r in m["rows"] for i in r["items"]
+                   if i["kind"] == "row"]
+        assert cell["lines"][0] == "ATANASIO MEDEROS TORRIEN"
+        assert cell["lines"][1] == "9:05 AM – 11:05 AM"

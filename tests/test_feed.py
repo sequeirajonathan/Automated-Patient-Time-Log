@@ -1724,3 +1724,48 @@ class TestNotResponding:
             adb.return_value.stdout = b"\x89PNG"
             feed.capture()
         assert feed._anr_since == {}
+
+
+class TestContentDescriptionIsALabel:
+    """A view that draws its own content has no text for the tree to carry,
+    and Android's answer is content-desc. Mobile Caregiver+ builds its whole
+    visits list that way — every row a bare View whose only words are the
+    sentence a screen reader would say — so a portal reading text alone
+    showed three identical empty strips where the phone showed three named
+    visits."""
+
+    ROW = ('<node class="android.view.View" resource-id="" clickable="true" '
+           'text="" content-desc="La visita está programada para ATANASIO '
+           'MEDEROS TORRIEN" bounds="[0,146][720,185]"/>')
+
+    def test_a_description_becomes_the_label(self):
+        (el,) = feed.elements(self.ROW, label=True)
+        assert "ATANASIO" in el["txt"]
+        assert el["has_text"] is True
+
+    def test_a_description_is_words_on_the_screen_too(self):
+        quiet = self.ROW.replace('clickable="true"', 'clickable="false"')
+        (st,) = feed.statics(quiet)
+        assert "ATANASIO" in st["txt"]
+
+    def test_text_wins_when_a_node_carries_both(self):
+        """visits_event0_title says 'mar, ago 18' twice; a row that repeats
+        itself must not be read twice."""
+        both = ('<node class="android.widget.TextView" clickable="false" '
+                'text="mar, ago 18" content-desc="mar, ago 18" '
+                'bounds="[6,130][49,140]"/>')
+        (st,) = feed.statics(both)
+        assert st["txt"] == "mar, ago 18"
+
+    def test_a_description_still_obeys_the_disclosure_rule(self):
+        """It is text by every rule that matters: unspoken unless labelled."""
+        (el,) = feed.elements(self.ROW)          # label=False
+        assert "txt" not in el
+        assert el["has_text"] is True
+
+    def test_an_editable_field_never_lends_its_description(self):
+        typed = ('<node class="android.widget.EditText" clickable="true" '
+                 'text="" content-desc="hunter2" bounds="[0,0][100,50]"/>')
+        (el,) = feed.elements(typed, label=True)
+        assert el.get("txt") is None or el["txt"] == ""
+        assert feed.statics(typed) == []

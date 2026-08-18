@@ -22,6 +22,8 @@ where a control is drawn on her page, never what tapping it means.
 
 from __future__ import annotations
 
+import re
+
 # Widget classes with a meaning of their own. Anything else that is clickable
 # is a container row — the shape Android lists are made of.
 BUTTONS = ("Button", "ImageButton")
@@ -119,6 +121,53 @@ ICON_LABELS = {
 # is good news (green); a cross or a warning is not. The medical context
 # makes this worth the colour: a caregiver scanning her day wants the
 # confirmed check-ins to read as confirmed at a glance.
+# A row whose only words are a GENERATED DESCRIPTION — the sentence a screen
+# reader would say, which is all a custom-drawn list gives the tree. Mobile
+# Caregiver+ builds its visits that way: "La visita está programada para
+# ATANASIO MEDEROS TORRIEN en martes, 18 de agosto de 2026 de 9:05 AM a
+# 11:05 AM y su estado es No Empezadas, Tarde". Rendered whole, three of
+# those are a wall of prose where the phone shows three scannable rows.
+#
+# Shaped ONLY when the sentence can be accounted for completely — a name, a
+# time range, and a status. Anything less and it is left exactly as written,
+# because a rule that drops half a sentence it did not understand is worse
+# than a long line. The one part not carried over is the date, which the
+# page states once above the list as its own section header.
+DESC_MIN_CHARS = 60
+# Two or more capitalised words in a row: how these apps write a patient's
+# name, and long enough that "AM"/"PM" beside a clock cannot pass for one.
+_DESC_NAME = re.compile(
+    r"\b([A-ZÁÉÍÓÚÑÜ][A-ZÁÉÍÓÚÑÜ.'\-]{1,}(?:\s+[A-ZÁÉÍÓÚÑÜ][A-ZÁÉÍÓÚÑÜ.'\-]{1,})+)\b")
+_DESC_CLOCK = re.compile(r"\d{1,2}:\d{2}\s*(?:[AaPp]\.?\s?[Mm]\.?)?")
+# Both locales, as everywhere else here: the apps ship Spanish and English
+# and nothing else has ever appeared on this phone.
+_DESC_STATUS = (" y su estado es ", " y el estado es ",
+                " and its status is ", " and the status is ")
+
+
+def _shape_description(text: str) -> list[str] | None:
+    """A generated description as the lines of a list cell, or None."""
+    if len(text) < DESC_MIN_CHARS:
+        return None
+    names = _DESC_NAME.findall(text)
+    if not names:
+        return None
+    clocks = [c.strip() for c in _DESC_CLOCK.findall(text) if c.strip()]
+    lowered = text.lower()
+    status = ""
+    for lead in _DESC_STATUS:
+        cut = lowered.rfind(lead)
+        if cut != -1:
+            status = text[cut + len(lead):].strip(" .")
+            break
+    if len(clocks) < 2 or not status:
+        return None
+    # The longest run of capitals is the name; a shorter one is an initialism
+    # somewhere else in the sentence.
+    name = max(names, key=len).strip()
+    return [name, f"{clocks[0]} – {clocks[1]}", status]
+
+
 MARK_TONE = {
     "\u2713": "ok",       # check -> green
     "\u2715": "bad",      # cross -> red
@@ -407,6 +456,13 @@ def build(doc: dict) -> dict | None:
                             and lines[k].strip().isupper()):
                         lines.pop(k)
                         break
+            # A cell whose whole content is one generated sentence becomes
+            # the list row that sentence describes. Only when the sentence
+            # accounts for itself — see _shape_description.
+            if len(lines) == 1:
+                shaped = _shape_description(lines[0])
+                if shaped:
+                    lines = shaped
             item["lines"] = lines
             item["badge"] = badge
             # A row whose only content is a KNOWN glyph is named by it —
