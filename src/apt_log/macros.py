@@ -1274,6 +1274,17 @@ def _open_app(package: str):
     return run
 
 
+def _area(element) -> float:
+    """How big a control is, for choosing between nested matches. An element
+    that will not report its size sorts last rather than first: unknown is
+    not a reason to press something."""
+    try:
+        rect = element.rect
+        return float(rect["width"]) * float(rect["height"])
+    except Exception:  # noqa: BLE001
+        return float("inf")
+
+
 def _inmyteam_login(driver, report) -> None:
     """inMyTeam — get as far as the code, and stop there.
 
@@ -1318,17 +1329,26 @@ def _inmyteam_login(driver, report) -> None:
         return found[0] if found else None
 
     def by_words(*words):
-        """A control identified by the words inside it. Compose gives these
-        screens no ids and hangs the caption on a child view, so the text of
-        a descendant is the only handle there is."""
+        """The SMALLEST control containing the words. Smallest is the whole
+        point.
+
+        Compose gives these screens no ids and hangs the caption on a child
+        view, so the text of a descendant is the only handle there is — but
+        the screen's own root is clickable too, and it contains every word on
+        it. Asking for "Sign in" and taking the first match pressed the
+        full-screen container, because the heading reads "Sign in with your
+        phone number": the number went in, nothing happened, and the macro
+        looked like it had never typed anything. The button is the tightest
+        node that still contains the words.
+        """
         for word in words:
-            hits = driver.find_elements(
+            hits = [e for e in driver.find_elements(
                 "xpath",
                 f'//*[@clickable="true"][contains(@text,"{word}")'
                 f' or .//*[contains(@text,"{word}")]]')
-            shown = [e for e in hits if e.is_displayed()]
-            if shown:
-                return shown[0]
+                if e.is_displayed()]
+            if hits:
+                return min(hits, key=_area)
         return None
 
     # ---------------------------------------------------------- the splash

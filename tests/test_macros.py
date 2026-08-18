@@ -857,17 +857,30 @@ class TestInMyTeamWalksToTheCode:
                     return [self._tap(state, "number")]
             for word in ("Sign in", "Iniciar"):
                 if word in selector and state["at"] == "number":
-                    return [self._tap(state, "code")]
+                    # Document order, exactly as the phone reports it: the
+                    # full-screen container first, the button after.
+                    return [self._root(state), self._tap(state, "code")]
             return []
 
         driver.find_elements.side_effect = find_elements
         type(driver).page_source = PropertyMock(side_effect=page)
         return driver
 
-    def _tap(self, state, goes_to):
+    def _tap(self, state, goes_to, size=(600, 60)):
         control = MagicMock()
         control.is_displayed.return_value = True
+        control.rect = {"x": 0, "y": 0, "width": size[0], "height": size[1]}
         control.click.side_effect = lambda: state.update(at=goes_to)
+        return control
+
+    def _root(self, state):
+        """The screen's own root: clickable, full-screen, and it contains
+        every word on the page — including "Sign in with your phone number".
+        Pressing it does nothing at all."""
+        control = MagicMock()
+        control.is_displayed.return_value = True
+        control.rect = {"x": 0, "y": 0, "width": 720, "height": 1515}
+        control.click.side_effect = lambda: state.setdefault("dead", 0)
         return control
 
     def _box(self, state):
@@ -965,6 +978,15 @@ class TestInMyTeamWalksToTheCode:
                     macros.MACROS["inmyteam_login"].run(driver, lambda _k: None)
         finally:
             del self.CODE
+
+    def test_the_button_is_pressed_and_not_the_screen_it_sits_on(self):
+        """Live: the number went in, "Sign in" matched the full-screen root
+        because the heading reads "Sign in with your phone number", and
+        nothing happened. The button is the tightest node with the words."""
+        state = {"at": "number"}
+        self._run(state)
+        assert state["at"] == "code"
+        assert "dead" not in state
 
     def test_it_never_signs_itself_in(self):
         """Pressing it sends a text message to a real phone. Automatic would
