@@ -1,5 +1,36 @@
 # Deploying
 
+## Branches
+
+| Branch | What it is |
+|---|---|
+| `main` | The trunk. Everything arrives by pull request. |
+| `claude/*` | One branch per piece of work, one pull request each. **Deleted once merged.** |
+| `release` | A *pointer*, not a line of development: what the Pi runs. |
+
+`release` being ahead of `main` is normal — work is deployed to the Pi
+before its pull request lands, because the Pi is where it gets tested. It
+is never merged *from*; it is moved to whatever revision should be live.
+
+A merged `claude/*` branch is history twice over, and a pile of them is
+what makes it hard to see which branch is the live one. After anything
+merges:
+
+```
+scripts/branch-audit.sh            # what is orphaned, what is still live
+scripts/branch-audit.sh --prune    # delete the orphans
+```
+
+The audit only ever offers to delete a branch **fully contained in main**,
+where deleting loses nothing. Anything unmerged it reports and leaves
+alone; unmerged work is not a script's to throw away.
+
+Worth setting once, so most of this never accumulates: GitHub's
+**Settings → General → "Automatically delete head branches"** removes a
+branch the moment its pull request merges.
+
+## Deploying
+
 Two ways in, one gate. Whichever route a revision arrives by, the same
 `scripts/manager.sh` decides whether it may run: install the target's
 dependencies, run the whole test suite against it, restart the services,
