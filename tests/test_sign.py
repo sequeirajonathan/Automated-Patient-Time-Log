@@ -181,8 +181,15 @@ class TestExecute:
         with patch.object(sign, "_perform"), \
              patch("apt_log.resident.run", side_effect=lambda w: w(driver)):
             sign.execute(self._payload(), tmp_path / "s.json")
-        raw = (tmp_path / "s.json").read_text()
-        assert "0.1" not in raw and "strokes" not in raw
+        written = json.loads((tmp_path / "s.json").read_text())
+        # Every field EXCEPT the timestamp: an ISO timestamp contains "0.1"
+        # whenever the second ends in 0 and the microseconds begin with 1
+        # ("…:30.123456"), so asserting against the raw file failed about one
+        # run in a hundred — on a suite that is the deploy gate, which turns a
+        # coincidence of the clock into a rolled-back good deploy.
+        body = json.dumps({k: v for k, v in written.items() if k != "at"})
+        assert "0.1" not in body, "a stroke coordinate reached the status"
+        assert "strokes" not in body
         assert sign.read_status(tmp_path / "s.json").digest
 
 
