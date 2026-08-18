@@ -806,3 +806,99 @@ class TestVisitDetailActions:
         ))
         texts = [i.get("txt") for r in m["rows"] for i in r["items"]]
         assert "HOME CARE ON CALL, LLC" in texts and "H" not in texts
+
+
+class TestCarePlanListRuns:
+    """The visit detail's care plan, as the first field test rendered it:
+    fourteen short task lines, every one 'caption shaped', all shouting in
+    small-caps header dress. Three or more loose labels sharing a left
+    edge and a rhythm are the app's list — body lines, not headings."""
+
+    TASKS = ["106 - Hair Care-Shampoo", "127 - Toilet Use", "134 - Bathing",
+             "138 - Laundry", "141 - Incontinence Care"]
+
+    def _labels(self, m):
+        return [i for r in m["rows"] for i in r["items"]
+                if i["kind"] == "label"]
+
+    def test_a_run_of_aligned_lines_is_a_list_not_headings(self):
+        m = screenview.build(doc(
+            elements=[],
+            statics=[st([5, 224 + 21 * k, 710, 234 + 21 * k], t)
+                     for k, t in enumerate(self.TASKS)],
+        ))
+        labels = self._labels(m)
+        assert [i["txt"] for i in labels] == self.TASKS
+        assert not any(i.get("header") for i in labels)
+
+    def test_a_lone_short_label_is_still_a_heading(self):
+        m = screenview.build(doc(
+            elements=[],
+            statics=[st([5, 300, 200, 316], "Horario")],
+        ))
+        (label,) = self._labels(m)
+        assert label["header"] is True
+
+    def test_two_spread_labels_are_not_a_run(self):
+        m = screenview.build(doc(
+            elements=[],
+            statics=[st([5, 300, 200, 316], "Horario"),
+                     st([5, 800, 200, 816], "Mensajes")],
+        ))
+        assert all(i["header"] for i in self._labels(m))
+
+
+class TestDeadTabSlot:
+    """The visit detail's tab strip keeps a wide empty third slot, and it
+    rendered as a nameless full-width '···' button in the tab bar. A wide
+    empty button beside labelled ones is dead space; a small empty button
+    is still an icon and stays."""
+
+    def test_the_wide_empty_slot_is_dropped(self):
+        m = screenview.build(doc(
+            elements=[el("", "Button", [0, 590, 240, 622]),
+                      el("", "Button", [240, 590, 480, 622],
+                         "Registrar Entrada/Salida"),
+                      el("", "Button", [480, 590, 720, 622], "Direcciones")],
+            statics=[],
+        ))
+        buttons = [i for r in m["rows"] for i in r["items"]
+                   if i["kind"] == "button"]
+        assert [b["txt"] for b in buttons] == ["Registrar Entrada/Salida",
+                                               "Direcciones"]
+
+    def test_a_small_icon_button_survives_beside_labelled_ones(self):
+        m = screenview.build(doc(
+            elements=[el("btn_x", "Button", [660, 590, 700, 622]),
+                      el("", "Button", [10, 590, 300, 622], "Guardar"),
+                      el("", "Button", [310, 590, 600, 622], "Cancelar")],
+            statics=[],
+        ))
+        buttons = [i for r in m["rows"] for i in r["items"]
+                   if i["kind"] == "button"]
+        assert len(buttons) == 3
+
+
+class TestNavTitleLength:
+    """'Detalle de Visita CARIDAD ROJAS BATISTA' is 39 characters, and the
+    heading cap demoted the whole title bar to a boxed row. A nav title
+    runs longer than a section heading — but a hint sentence still must
+    not rename the page."""
+
+    def test_a_page_plus_patient_title_is_still_a_nav(self):
+        m = screenview.build(doc(
+            elements=[el("btn_left", "Button", [0, 67, 42, 87], "Atrás")],
+            statics=[st([42, 65, 684, 89],
+                        "Detalle de Visita CARIDAD ROJAS BATISTA")],
+        ))
+        assert m["nav"] is not None
+        assert m["nav"]["title"].startswith("Detalle de Visita")
+
+    def test_a_hint_sentence_does_not_become_the_title(self):
+        m = screenview.build(doc(
+            elements=[el("btn_left", "Button", [0, 67, 42, 87], "Atrás")],
+            statics=[st([42, 65, 684, 89],
+                        "Encontrará las visitas anteriores con Visita "
+                        "Buscar")],
+        ))
+        assert m["nav"] is None

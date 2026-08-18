@@ -69,6 +69,15 @@ BULLETS = {"•", "·", "◦", "‣", "∙", "*", "-"}
 # turned the migration pitch into a wall of shouting.
 HEADER_MAX_CHARS = 32
 
+# A nav bar's title runs longer than a section heading: the visit detail
+# titles itself with the page name AND the patient ("Detalle de Visita
+# CARIDAD ROJAS BATISTA", 39 chars), and holding the title to the heading
+# cap demoted the whole title bar to a boxed row (seen live, first field
+# test). Still short of a sentence — the tablet-density schedule's hint
+# line ("Encontrará las visitas anteriores con Visita Buscar", 51 chars)
+# must keep failing, or the page renames itself to the hint.
+NAV_TITLE_MAX_CHARS = 48
+
 
 def _is_icon_text(txt: str) -> bool:
     """Text that is an icon font's private glyph, not a word.
@@ -485,12 +494,36 @@ def build(doc: dict) -> dict | None:
     # A caption over a CARD (its value being a tappable row) is not here:
     # that value folded into a container, so the caption stays a heading.
     loose.sort(key=lambda s: (s["b"][1], s["b"][0]))
+
+    # A RUN of loose labels — three or more single lines sharing a left
+    # edge and a steady rhythm — is the app's list, not a stack of
+    # headings: the visit detail's care plan is fourteen task lines, and
+    # every one of them short enough to be "caption shaped", so the whole
+    # plan rendered as a wall of muted small-caps section titles (seen
+    # live, first field test). List members read as body lines.
+    run_ids: set[int] = set()
+    k = 0
+    while k < len(loose):
+        m = k + 1
+        while m < len(loose):
+            prev, cur = loose[m - 1], loose[m]
+            line_h = max(cur["b"][3] - cur["b"][1], 1)
+            if (abs(cur["b"][0] - loose[k]["b"][0]) <= max(8, 0.02 * w)
+                    and 0 <= cur["b"][1] - prev["b"][3] <= 2.5 * line_h):
+                m += 1
+            else:
+                break
+        if m - k >= 3:
+            run_ids.update(id(loose[t]) for t in range(k, m))
+        k = m
+
     j = 0
     while j < len(loose):
         s = loose[j]
         nxt = loose[j + 1] if j + 1 < len(loose) else None
         height = s["b"][3] - s["b"][1]
-        caption_shaped = len(s["txt"].strip()) <= HEADER_MAX_CHARS
+        caption_shaped = (len(s["txt"].strip()) <= HEADER_MAX_CHARS
+                          and id(s) not in run_ids)
         # A caption sits a hair above its value (a field), not a heading a
         # line above a paragraph. Tight gap, left-aligned, and the value is
         # a datum — a phone number, an ID, an office — never prose.
@@ -552,6 +585,21 @@ def build(doc: dict) -> dict | None:
         else:
             bands.append([item])
 
+    # A WIDE button with no label sitting beside labelled buttons is a
+    # dead tab slot, not a control: the visit detail's tab strip keeps an
+    # empty third slot, and rendering it as a full-width '···' button put
+    # a nameless call to action in the middle of the tab bar (seen live,
+    # first field test). A small empty button is still an icon — kept.
+    for band in bands:
+        texted = [n for n in band
+                  if n["kind"] == "button" and (n["txt"] or "").strip()]
+        if len(texted) >= 2:
+            band[:] = [n for n in band
+                       if not (n["kind"] == "button"
+                               and not (n["txt"] or "").strip()
+                               and not n.get("small"))]
+    bands = [band for band in bands if band]
+
     # A band that is nothing but section headings is the scroll stitch's
     # day dividers ("agosto 18", "19", "20") landing a few pixels apart and
     # magnetizing into one row — where they lose the header treatment and
@@ -602,7 +650,7 @@ def build(doc: dict) -> dict | None:
                 and min(n["b"][1] for n in first) <= h * NAV_TOP_MAX
                 and max(n["b"][3] for n in first) <= h * NAV_BAND_BOTTOM
                 and all(n.get("small") for n in buttons)
-                and all(len((t["txt"] or "").strip()) <= HEADER_MAX_CHARS
+                and all(len((t["txt"] or "").strip()) <= NAV_TITLE_MAX_CHARS
                         for t in titles)):
             title = max(titles, key=lambda n: len(n["txt"]), default=None)
             nav = {
