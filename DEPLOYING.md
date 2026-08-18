@@ -91,3 +91,33 @@ distance and are not alike at all: *the tests failed* (the revision is
 bad), *dependencies would not install* (the revision is untestable), and
 *pytest missing after install* (the environment judging the revision is
 broken, not the revision). Only the first means the code is at fault.
+
+## From a Claude Code session
+
+The same operations are exposed as an MCP server (`scripts/aptlog_mcp.py`,
+registered by `.mcp.json`), so a session working on this repo can deploy and
+inspect the controller without reassembling the tailnet-plus-ssh incantation
+each time:
+
+| Tool | What it does |
+|---|---|
+| `aptlog_deploy` | Push a revision, run the gate, report DEPLOYED or REFUSED |
+| `aptlog_status` | Revision, services, health, adb, focused app, screen age |
+| `aptlog_screen` | The published accessibility document, as the portal reads it |
+| `aptlog_screenshot` | A picture of the phone, straight from the device |
+| `aptlog_logs` | Recent lines from a service, filterable |
+| `aptlog_run_macro` | Run a macro and report how it ended |
+
+`aptlog_deploy` reports REFUSED by reading what the deploy branch points at
+afterwards, not the push's exit status — see the caveat above.
+
+The tools bring the tailnet daemon up themselves if it has died, which in an
+ephemeral container it does, and which is most of what made these operations
+tedious by hand.
+
+Install the dependency where you run the session — never on the Pi, whose
+deploy gate must not grow new ways to fail:
+
+```
+pip install -e ".[tools]"
+```

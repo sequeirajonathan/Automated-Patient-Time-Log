@@ -46,6 +46,13 @@ dev = [
     # COLLECT, and manager.sh gates every deploy on pytest.
     "httpx==0.28.1",
 ]
+# Deliberately NOT in `dev`. The Pi installs dev on every deploy and gates
+# the deploy on the install succeeding, so anything added there is a new way
+# for a deploy to fail — and these tools run on a developer's machine, never
+# on the controller. `pip install -e .[tools]` where you want them.
+tools = [
+    "mcp>=2.0",
+]
 
 [project.scripts]
 apt-log = "apt_log.cli:app"

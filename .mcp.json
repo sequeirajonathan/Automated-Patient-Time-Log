@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "aptlog": {
+      "command": "python3",
+      "args": ["scripts/aptlog_mcp.py"],
+      "env": {}
+    }
+  }
+}
