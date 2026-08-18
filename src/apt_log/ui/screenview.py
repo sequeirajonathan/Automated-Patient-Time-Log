@@ -315,6 +315,10 @@ def _item(node: dict, kind: str) -> dict:
         "txt": node.get("txt", ""),
         "checked": bool(node.get("checked")),
         "focused": bool(node.get("focused")),
+        # Absent means enabled: every element published before this field
+        # existed was one, and a screen read by an older feed must not come
+        # out greyed from end to end.
+        "enabled": node.get("enabled", True) is not False,
         "b": node["b"],
     }
     if "rid" in node:

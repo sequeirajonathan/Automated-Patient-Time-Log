@@ -664,6 +664,11 @@
                  border:.5px solid var(--line); }
   .preview-label { font-size:12px; color:var(--muted); text-align:center;
                    margin:10px 0 0; }
+  /* A control the app itself has greyed out. Shown, because "clock out is
+     here but not yet" is worth knowing, and unpressable, because a press
+     that goes nowhere reads as the portal being broken. */
+  .a-btn.off, .a-cell.off { opacity:.42; }
+  .a-btn.off:active, .a-cell.off:active { transform:none; filter:none; }
   .padrow { display:flex; gap:10px; margin-top:12px; }
   /* Author display beats UA [hidden] — the OTP bar taught this the hard
      way; the app-side row must actually vanish off the signature moment. */

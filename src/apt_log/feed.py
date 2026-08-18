@@ -162,6 +162,16 @@ CARE_APPS = (
     "com.inmyteam.inmyteam",
 )
 
+# Android's own permission dialogs. Not a place the phone can wander to —
+# only a care app asking for something can raise one, and it is raised OVER
+# that app, mid-flow. Sanctioned for exactly that reason: bouncing it would
+# cancel the request that opened it.
+PERMISSION_APPS = (
+    "com.google.android.permissioncontroller",
+    "com.android.permissioncontroller",
+    "com.android.packageinstaller",
+)
+
 # The phone's own home screen. Its reflow is a grid of icon glyphs — noise
 # wearing a care app's clothes. The page shows a plain card for it instead.
 LAUNCHER_APPS = (
@@ -456,6 +466,16 @@ def _watch_containment(focus: str, serial: str | None = None) -> None:
         _out_since[0] = 0.0
         return
     if pkg == "com.android.chrome" and "CustomTabActivity" in (focus or ""):
+        _out_since[0] = 0.0
+        return
+    if pkg in PERMISSION_APPS:
+        # The care app asked for this. HHAeXchange+ requests location at
+        # check-in and Android answers with its own dialog, from its own
+        # package — which this watchdog would have read as wandering and
+        # bounced after five seconds, taking the permission prompt with it
+        # and stopping the very check-in she asked for. Recovered from the
+        # flight recorder afterwards: grantpermissionsactivity, mid-flow,
+        # between the schedule and the GPS screen.
         _out_since[0] = 0.0
         return
     now = time.time()
@@ -1263,6 +1283,14 @@ def elements(xml: str, label: bool = False) -> list[dict]:
             # way it is thrown. Not part of frame identity: flipping a checkbox
             # must not invalidate her aim at the one next to it.
             "checked": _attr(raw, "checked") == "true",
+            # A control the app has greyed out. HHAeXchange+ ships the visit
+            # screen with `visit_details_clock_out_button_disabled` — clock
+            # out exists from the moment of check-in and does nothing until
+            # the visit is over — and published as an ordinary control it
+            # read as a live call to action: press, nothing happens, and the
+            # portal wears the fault. Absent means enabled, which is how
+            # Android writes it.
+            "enabled": _attr(raw, "enabled") != "false",
             "has_text": bool(_label(raw)),
         }
         if label and short not in EDITABLE:

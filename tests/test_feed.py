@@ -1833,3 +1833,59 @@ class TestTheBarSurvivesTruncation:
         found = feed.statics(self._screen(5))
         assert len(found) == 8
         assert found[0]["txt"] == "Planned Downtime 0"
+
+
+class TestPermissionDialogIsNotWandering:
+    """HHAeXchange+ asks for location at check-in and Android answers with
+    its own dialog, from its own package. Read as wandering, the watchdog
+    bounced it after five seconds — taking the permission prompt with it
+    and stopping the very check-in it was raised for. Recovered from the
+    flight recorder: grantpermissionsactivity, mid-flow, between the
+    schedule and the GPS screen."""
+
+    def setup_method(self):
+        feed._last_care_app[0] = "com.hhaexchange.uma"
+        feed._out_since[0] = 0.0
+        feed._last_return[0] = 0.0
+
+    teardown_method = setup_method
+
+    def _run(self, focus, dwell=True):
+        with patch.object(feed, "_adb") as adb:
+            feed._watch_containment(focus)
+            if dwell:
+                feed._out_since[0] = time.time() - feed.CONTAIN_DWELL - 1
+                feed._watch_containment(focus)
+            return [c.args[0] for c in adb.call_args_list]
+
+    def test_the_location_prompt_is_left_standing(self):
+        sent = self._run("com.google.android.permissioncontroller/"
+                         "com.android.permissioncontroller.permission.ui."
+                         "GrantPermissionsActivity")
+        assert sent == [], "the prompt the app raised must not be bounced"
+
+    def test_a_stranger_is_still_bounced(self):
+        sent = self._run("com.android.settings/.Settings")
+        assert any("monkey" in c for c in sent)
+
+
+class TestDisabledControls:
+    """HHAeXchange+ ships the visit screen with a clock-out button that
+    exists from the moment of check-in and does nothing until the visit is
+    over — `visit_details_clock_out_button_disabled`, straight from the
+    recorder. Published as an ordinary control it read as a live call to
+    action: press, nothing happens, and the portal wears the fault."""
+
+    def test_a_greyed_control_is_published_as_greyed(self):
+        xml = ('<node class="android.view.View" clickable="true" '
+               'enabled="false" text="" '
+               'resource-id="a:id/visit_details_clock_out_button_disabled" '
+               'bounds="[11,1532][709,1557]"/>')
+        (el,) = feed.elements(xml)
+        assert el["enabled"] is False
+
+    def test_absent_means_enabled(self):
+        xml = ('<node class="android.widget.Button" clickable="true" '
+               'text="Continuar" bounds="[11,1532][709,1557]"/>')
+        (el,) = feed.elements(xml)
+        assert el["enabled"] is True

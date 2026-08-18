@@ -1041,3 +1041,39 @@ class TestTabBarFurniture:
     def test_a_number_ABOVE_the_bar_is_still_content(self):
         m = self._model([st([10, 400, 60, 420], "370")])
         assert "370" in self._body(m)
+
+
+class TestDisabledRendersDisabled:
+    def test_the_item_carries_the_greyed_state(self):
+        """The real control is a View — it renders as a cell, not a button,
+        which is why both branches of the template had to learn this."""
+        m = screenview.build(doc(
+            elements=[dict(el("visit_details_clock_out_button_disabled",
+                              "View", [11, 1532, 709, 1557],
+                              "Registrar salida"), enabled=False)],
+            statics=[],
+        ))
+        (cell,) = [i for r in m["rows"] for i in r["items"] if i.get("aim")]
+        assert cell["kind"] == "row"
+        assert cell["enabled"] is False
+
+    def test_a_real_button_carries_it_too(self):
+        m = screenview.build(doc(
+            elements=[dict(el("save", "Button", [11, 1532, 709, 1557],
+                              "Salvar"), enabled=False)],
+            statics=[],
+        ))
+        (btn,) = [i for r in m["rows"] for i in r["items"]
+                  if i["kind"] == "button"]
+        assert btn["enabled"] is False
+
+    def test_a_screen_from_an_older_feed_is_not_greyed_end_to_end(self):
+        """Absent means enabled: every element published before the field
+        existed was one."""
+        m = screenview.build(doc(
+            elements=[el("go", "Button", [11, 200, 709, 240], "Continuar")],
+            statics=[],
+        ))
+        (btn,) = [i for r in m["rows"] for i in r["items"]
+                  if i["kind"] == "button"]
+        assert btn["enabled"] is True
