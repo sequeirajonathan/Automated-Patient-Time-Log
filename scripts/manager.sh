@@ -11,6 +11,11 @@ set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/aptlog}"
 DEPLOY_REF="${DEPLOY_REF:-release}"
+# Where the deploy branch is read from. `origin` is GitHub, on the timer.
+# The push-to-deploy hook sets this to the bare repo beside this one, so a
+# `git push pi` is gated and applied by exactly this script rather than by a
+# second, thinner copy of it that would drift.
+DEPLOY_REMOTE="${DEPLOY_REMOTE:-origin}"
 SERVICE_USER="${SERVICE_USER:-apt}"
 STATE_DIR="/var/lib/aptlog"
 LAST_GOOD="$STATE_DIR/last-good-sha"
@@ -43,6 +48,16 @@ alert() {
 
 cd "$APP_DIR"
 
+# ------------------------------------------------------------------- one at a time
+# Two deploys at once would fight over the working tree, and there are now two
+# ways in: the timer and a push. The second one waits rather than interleaving
+# checkouts with another run's tests.
+exec 9>"$STATE_DIR/manager.lock"
+if ! flock -w 600 9; then
+    log "another deploy is running and did not finish within ten minutes"
+    exit 1
+fi
+
 # ------------------------------------------------------------ git safe.directory
 # The repo is owned by the service user; this script runs as root. Modern git
 # refuses that combination outright -- "detected dubious ownership" -- and every
@@ -72,9 +87,9 @@ if [[ -x "$APP_DIR/scripts/adb-identity.sh" ]]; then
 fi
 
 # ------------------------------------------------------------------ is there work
-git fetch --quiet origin "$DEPLOY_REF"
+git fetch --quiet "$DEPLOY_REMOTE" "$DEPLOY_REF"
 current="$(git rev-parse HEAD)"
-target="$(git rev-parse "origin/$DEPLOY_REF")"
+target="$(git rev-parse "$DEPLOY_REMOTE/$DEPLOY_REF")"
 
 if [[ "$current" == "$target" ]]; then
     exit 0
