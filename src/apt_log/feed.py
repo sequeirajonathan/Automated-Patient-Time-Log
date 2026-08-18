@@ -392,15 +392,54 @@ def _looks_landscape(hierarchy: str | None) -> bool:
     return bool(hierarchy and _LANDSCAPE_X.search(hierarchy))
 
 
+def _density_wanted(focus: str, hierarchy: str | None = None) -> int | None:
+    """What this screen should be laid out at, or None to leave it alone.
+
+    Four sources, most specific first, and the order is the whole point:
+
+      1. an override set for THIS page of this app,
+      2. an override set for this app,
+      3. the code's own table below — the values tuned against the real
+         screens, which no slider can overwrite because overrides live in a
+         different place and clearing one uncovers this again,
+      4. a global override, for a screen this system has no table for: the
+         case where somebody borrows the phone for something else entirely.
+
+    The landscape signature bump sits inside (3) rather than above it. A
+    person who has deliberately set a value for the signature page means it
+    for the signature page.
+    """
+    pkg = (focus or "").split("/")[0]
+    if not pkg:
+        return None
+    page = focus.split("/", 1)[1] if "/" in (focus or "") else ""
+    try:
+        from apt_log import prefs
+
+        chosen = prefs.density_for(pkg, page)
+        if chosen is not None:
+            return chosen
+    except Exception:  # noqa: BLE001
+        # A preference file that cannot be read must not stop the phone
+        # being laid out at the value that is known to work.
+        chosen = None
+    if pkg in CARE_APPS:
+        if pkg == "com.hhaexchange.caregiver" and _looks_landscape(hierarchy):
+            return SIGNATURE_DENSITY
+        return APP_DENSITY.get(pkg, DEFAULT_DENSITY)
+    try:
+        from apt_log import prefs
+
+        return prefs.global_density()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _watch_density(focus: str, serial: str | None = None,
                    hierarchy: str | None = None) -> None:
     pkg = (focus or "").split("/")[0]
-    if pkg not in CARE_APPS:
-        return
-    want = APP_DENSITY.get(pkg, DEFAULT_DENSITY)
-    if pkg == "com.hhaexchange.caregiver" and _looks_landscape(hierarchy):
-        want = SIGNATURE_DENSITY
-    if _density_now[0] == want:
+    want = _density_wanted(focus, hierarchy)
+    if want is None or _density_now[0] == want:
         return
     try:
         from apt_log import macros as macros_mod

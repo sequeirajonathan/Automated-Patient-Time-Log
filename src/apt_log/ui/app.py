@@ -41,7 +41,9 @@ from fastapi.templating import Jinja2Templates
 
 from apt_log import __version__
 from apt_log import macros as macros_mod
+from apt_log import prefs
 from apt_log import video as video_mod
+from apt_log.ui import machine as machine_mod
 from apt_log.ui import state as state_mod
 from apt_log.ui.i18n import SUPPORTED, Translator, normalise
 from apt_log.ui.relay import (
@@ -58,6 +60,9 @@ log = logging.getLogger(__name__)
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 LANGUAGE_COOKIE = "aptlog_lang"
+# Which browser this is. Not a login and not a secret — it is what makes
+# "who is on" answerable and what keeps his English off her screen.
+DEVICE_COOKIE = "aptlog_device"
 
 app = FastAPI(title="APT Log", docs_url=None, redoc_url=None)
 
@@ -127,11 +132,66 @@ _video._on_data = _fan_out
 
 
 def _translator(request: Request) -> Translator:
-    """Cookie first, then the browser's own preference (REQ-11)."""
+    """This browser's language: what this device chose, then the cookie it
+    chose it with, then the browser's own preference (REQ-11).
+
+    The stored preference comes first because it is the one that survives a
+    cleared cookie jar, and because two people share this portal: he switches
+    to English on his phone and she keeps reading Spanish on hers, which only
+    works if the choice belongs to a device rather than to the installation.
+    """
+    stored = prefs.language_of(request.cookies.get(DEVICE_COOKIE) or "")
+    if stored in SUPPORTED:
+        return Translator(stored)
     chosen = request.cookies.get(LANGUAGE_COOKIE)
     if chosen not in SUPPORTED:
         chosen = normalise(request.headers.get("accept-language"))
     return Translator(chosen)
+
+
+def _device_id(request: Request) -> str:
+    """Who is looking. An opaque id in a cookie — not a login, because there
+    is nothing here to log into and never will be: the tailnet is the fence,
+    and a password on top of it would only be one more thing she cannot get
+    past standing in somebody's kitchen."""
+    return request.cookies.get(DEVICE_COOKIE) or prefs.new_device_id()
+
+
+def _remember(response: Response, request: Request, device_id: str,
+              where: str) -> Response:
+    """Stamp the device cookie and record the visit, on the way out."""
+    response.set_cookie(DEVICE_COOKIE, device_id, max_age=prefs.DEVICE_TTL,
+                        httponly=True, samesite="lax")
+    try:
+        prefs.seen(device_id, agent=request.headers.get("user-agent", ""),
+                   where=where)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("cannot record the device (%s)", exc)
+    return response
+
+
+def _back_to(request: Request, wanted: str = "",
+             fallback: str = "/app") -> str:
+    """Where a settings form should return to.
+
+    The language switch used to always redirect to `/`, which meant pressing
+    it from the phone view threw her out of the phone view. A control that
+    moves you somewhere else when all you asked for was a different language
+    is a control people learn not to touch.
+
+    Only a path on this portal is honoured, never a whole URL: this page can
+    move the phone, and an open redirect from it is a way to get somebody to
+    press a control on a page they think is somewhere else.
+    """
+    target = wanted or (request.headers.get("referer") or "").split("?")[0]
+    if target[:4] == "http":
+        from urllib.parse import urlparse
+
+        parsed = urlparse(target)
+        target = parsed.path if parsed.netloc == request.url.netloc else ""
+    if not target.startswith("/") or target.startswith("//"):
+        return fallback
+    return target
 
 
 @app.get("/healthz")
@@ -141,13 +201,38 @@ def healthz() -> dict[str, str]:
     return {"status": "ok", "version": __version__}
 
 
-@app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request):
+@app.get("/")
+def landing():
+    """The front door is the phone.
+
+    For a year this was the status dashboard, because the status dashboard was
+    written first. But nobody opens this portal to read a status dashboard —
+    they open it to use the phone, and every session began by scrolling past
+    seven panels of reference material to reach the one link that did the job.
+    The reference material still exists, at /console, one tap away and no
+    longer in the road.
+    """
+    return RedirectResponse(url="/app", status_code=307)
+
+
+@app.get("/console", response_class=HTMLResponse)
+def console(request: Request):
+    """The control centre: everything about the two machines, unabridged.
+
+    This page and /app are deliberately opposite. /app hides whatever would
+    not help somebody standing in a patient's kitchen. This one hides nothing
+    — the whole screen document, every override, every metric — because its
+    reader is the person teaching her to use /app, and you cannot teach
+    somebody through an interface that is editing what you can both see.
+    """
+    device_id = _device_id(request)
     t = _translator(request)
-    notice = request.query_params.get("relay")
-    return templates.TemplateResponse(
+    doc = _read_json(state_mod.STATE_DIR / "screen.json", None) or {}
+    focus = doc.get("app") or ""
+    page = doc.get("activity") or ""
+    response = templates.TemplateResponse(
         request=request,
-        name="dashboard.html",
+        name="console.html",
         # no-store: a cached shell rendering a newer server's fragments is a
         # broken-looking page nobody can explain from their armchair.
         headers={"Cache-Control": "no-store"},
@@ -157,20 +242,23 @@ def dashboard(request: Request):
             "lang": t.language,
             "languages": SUPPORTED,
             "s": state_mod.collect(),
-            "pending": queue.current(),
-            "relay_notice": notice if notice in ("sent", "expired", "refused") else "",
-            "device_notice": (request.query_params.get("device")
-                              if request.query_params.get("device") in ("sent", "failed")
-                              else ""),
             "Health": state_mod.Health,
-            "KIND_SIGNATURE": KIND_SIGNATURE,
-            "KIND_TOKEN": KIND_TOKEN,
-            "KIND_CHOICE": KIND_CHOICE,
-            "KIND_OTP": KIND_OTP,
             "macros": list(macros_mod.MACROS.values()),
             "macro_status": macros_mod.read_status(),
+            "m": machine_mod.read(),
+            "machine_state": machine_mod.worst(),
+            "device_id": device_id,
+            "devices": prefs.devices(),
+            "apps": PHONE_APPS,
+            "focus_app": focus,
+            "focus_page": page,
+            "screen_doc": doc,
+            "rows": _raw_rows(doc),
+            "density": _density_model(focus, page),
+            "notice": (request.query_params.get("saved") or "")[:24],
         },
     )
+    return _remember(response, request, device_id, "/console")
 
 
 @app.get("/app", response_class=HTMLResponse)
@@ -180,14 +268,15 @@ def phone_app(request: Request):
     A launcher of four tiles, then a live wireframe of whatever the phone
     shows: the screen's real structure, rendered as components instead of
     photographed. It rides the same socket, the same tap verification and the
-    same macro allow-list as the dashboard; this route adds a skin, not a
-    capability. The dashboard at / keeps everything else — health, today,
-    reconciliation — and is one link away.
+    same macro allow-list as the control centre; this route adds a skin, not a
+    capability. It is also where / lands: this is what the portal is for, and
+    everything else lives at /console, one tap away.
     """
+    device_id = _device_id(request)
     t = _translator(request)
     screen_doc = _read_json(state_mod.STATE_DIR / "screen.json", None)
     model = _screen_model(screen_doc) if screen_doc else None
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         request=request,
         name="phone.html",
         headers={"Cache-Control": "no-store"},
@@ -195,6 +284,7 @@ def phone_app(request: Request):
             "t": t,
             "boot": BOOT_ID,
             "lang": t.language,
+            "languages": SUPPORTED,
             "apps": PHONE_APPS,
             "m": model,
             "screen_doc": screen_doc or {},
@@ -205,6 +295,7 @@ def phone_app(request: Request):
             "KIND_OTP": KIND_OTP,
         },
     )
+    return _remember(response, request, device_id, "/app")
 
 
 @app.get("/scan", response_class=HTMLResponse)
@@ -297,13 +388,91 @@ async def tap_element(request: Request):
 
 
 @app.post("/language")
-def set_language(request: Request, language: str = Form(...)):
-    response = RedirectResponse(url="/", status_code=303)
+def set_language(request: Request, language: str = Form(...),
+                 next: str = Form("")):
+    """Switch this device's language and stay where you were.
+
+    Stored twice on purpose: in the preferences file, which is what makes it
+    per-device and survives a new browser session, and in the cookie, which is
+    what answers the very first request after a restart before anything has
+    been looked up.
+    """
+    chosen = normalise(language)
+    device_id = _device_id(request)
+    prefs.set_language(device_id, chosen)
+    response = RedirectResponse(url=_back_to(request, next), status_code=303)
     response.set_cookie(
-        LANGUAGE_COOKIE, normalise(language),
+        LANGUAGE_COOKIE, chosen,
         max_age=60 * 60 * 24 * 365, httponly=True, samesite="lax",
     )
-    return response
+    return _remember(response, request, device_id, _back_to(request, next))
+
+
+@app.post("/settings/name")
+def set_device_name(request: Request, name: str = Form(""),
+                    device: str = Form(""), next: str = Form("")):
+    """Name a device. A list of opaque ids answers nobody's question about
+    who is on; 'Sadia — iPhone' answers it at a glance."""
+    target = device or _device_id(request)
+    prefs.rename(target, name)
+    response = RedirectResponse(
+        url=_back_to(request, next, "/console") + "?saved=name", status_code=303)
+    return _remember(response, request, _device_id(request), "/console")
+
+
+@app.post("/settings/density")
+def set_density(request: Request, scope: str = Form("app"),
+                value: str = Form(""), app_pkg: str = Form(""),
+                page: str = Form(""), next: str = Form("")):
+    """Set or clear a density override.
+
+    An empty value is not an error and not a zero: it is "clear this", which
+    uncovers whatever the code's own table says. That asymmetry is the reason
+    overrides live in their own store rather than being written over the
+    defaults — the defaults were tuned against real screens on a phone that
+    has actually been crashed by a bad value, and nothing a slider does may
+    lose them.
+    """
+    if scope == "global":
+        prefs.set_global_density(value)
+    elif scope == "page" and app_pkg and page:
+        prefs.set_density(app_pkg, value, page=page)
+    elif app_pkg:
+        prefs.set_density(app_pkg, value)
+    response = RedirectResponse(
+        url=_back_to(request, next, "/console") + "?saved=density",
+        status_code=303)
+    return _remember(response, request, _device_id(request), "/console")
+
+
+@app.post("/settings/density/clear")
+def clear_density(request: Request, key: str = Form(...), next: str = Form("")):
+    """Remove one override by its stored key, from the list of what is in
+    force. Same call as setting an empty value; separate route because a list
+    of things to undo is a different control from a slider."""
+    app_pkg, _, page = key.partition("::")
+    prefs.set_density(app_pkg, None, page=page)
+    response = RedirectResponse(
+        url=_back_to(request, next, "/console") + "?saved=cleared",
+        status_code=303)
+    return _remember(response, request, _device_id(request), "/console")
+
+
+@app.get("/api/machine")
+def api_machine():
+    """The metrics, for a page that is left open. Cached in the module, so a
+    tab polling this every few seconds costs one reading, not one per tab."""
+    doc = machine_mod.read()
+    return JSONResponse({**doc, "state": machine_mod.worst(doc)},
+                        headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/who")
+def api_who():
+    """Who has this portal open, and where. Names and languages only — there
+    is nothing else stored about a device to leak."""
+    return JSONResponse({"devices": prefs.devices()},
+                        headers={"Cache-Control": "no-store"})
 
 
 def _mirror_payload(s, t: Translator | None = None) -> dict:
@@ -456,6 +625,85 @@ PHONE_APPS = (
      "accent": "#c2452e"},
 )
 
+def _raw_rows(doc: dict) -> list[dict]:
+    """Every node of the current screen, in the order it sits on the glass.
+
+    /app renders a *reflow* of this: bands folded, furniture swept, labels
+    attached to the control they belong to. That reflow is the product, and
+    it is also the thing that makes the front end impossible to teach — when
+    a row does not appear she cannot tell whether the app did not show it or
+    the portal ate it. This is the other half of the answer: the tree as it
+    came off the device, tappable and untappable together, with the resource
+    ids that name each one.
+
+    Nothing is withheld here that is published anywhere else. Typed field
+    contents never reach this document in the first place (see
+    feed.write_screen) — that is a rule about credentials, not about
+    redaction, and it is enforced a layer below anything a page can undo.
+    """
+    rows: list[dict] = []
+    for el in doc.get("elements") or []:
+        bounds = el.get("b") or [0, 0, 0, 0]
+        rows.append({
+            "tap": True,
+            "txt": el.get("txt", ""),
+            "rid": el.get("rid", ""),
+            "cls": el.get("cls", ""),
+            "b": bounds,
+            "enabled": el.get("enabled", True),
+            "checked": el.get("checked", False),
+            "selected": el.get("selected", False),
+            "focused": el.get("focused", False),
+            "has_text": el.get("has_text", False),
+        })
+    for st in doc.get("statics") or []:
+        bounds = st.get("b") or [0, 0, 0, 0]
+        rows.append({
+            "tap": False,
+            "txt": st.get("txt", ""),
+            "rid": st.get("rid", ""),
+            "cls": st.get("cls", ""),
+            "b": bounds,
+            "enabled": True,
+            "checked": False,
+            "selected": False,
+            "focused": False,
+            "has_text": bool(st.get("txt")),
+        })
+    rows.sort(key=lambda r: (r["b"][1], r["b"][0]))
+    return rows
+
+
+def _density_model(app_pkg: str, page: str) -> dict:
+    """What the density panel needs: what is in force, what set it, and what
+    is stored — kept apart, because the whole point is that clearing an
+    override cannot lose the value underneath it."""
+    from apt_log import feed as feed_mod
+
+    page_key = f"{app_pkg}::{page}" if app_pkg and page else ""
+    store = prefs.overrides()
+    built_in = None
+    if app_pkg:
+        built_in = feed_mod.APP_DENSITY.get(app_pkg)
+        if built_in is None and app_pkg in feed_mod.CARE_APPS:
+            built_in = feed_mod.DEFAULT_DENSITY
+    return {
+        "app": app_pkg,
+        "page": page,
+        "page_key": page_key,
+        "floor": prefs.DENSITY_FLOOR,
+        "ceiling": prefs.DENSITY_CEILING,
+        "step": prefs.DENSITY_STEP,
+        # The code's own value for this app — what a cleared override falls
+        # back to, shown so nobody has to guess what clearing will do.
+        "built_in": built_in,
+        "app_override": store.get(app_pkg),
+        "page_override": store.get(page_key) if page_key else None,
+        "global_override": store.get(prefs.GLOBAL),
+        "overrides": sorted(store.items()),
+    }
+
+
 def _screen_model(doc: dict) -> dict | None:
     """Semantic render model for _screen.html — see ui/screenview.py.
 
@@ -505,7 +753,13 @@ async def live(ws: WebSocket):
     global _viewers
     _viewers += 1
     _publish_viewers()
-    chosen = ws.cookies.get(LANGUAGE_COOKIE)
+    # Same order as _translator: this device's stored choice outranks the
+    # cookie, so a socket opened before the cookie caught up still pushes
+    # fragments in the language the page is rendered in. Half a page in each
+    # language is how a portal stops being trusted.
+    chosen = prefs.language_of(ws.cookies.get(DEVICE_COOKIE) or "")
+    if chosen not in SUPPORTED:
+        chosen = ws.cookies.get(LANGUAGE_COOKIE)
     if chosen not in SUPPORTED:
         chosen = normalise(ws.headers.get("accept-language"))
     t = Translator(chosen)
@@ -902,7 +1156,8 @@ async def sign_action(request: Request):
 
 
 @app.post("/relay")
-def submit_relay(nonce: str = Form(...), kind: str = Form(...),
+def submit_relay(request: Request,
+                 nonce: str = Form(...), kind: str = Form(...),
                  value: str = Form(...)):
     """Answer a token or choice request.
 
@@ -922,19 +1177,22 @@ def submit_relay(nonce: str = Form(...), kind: str = Form(...),
     try:
         digest = queue.submit(nonce, kind, value)
     except RelayExpired:
-        return RedirectResponse(url="/?relay=expired", status_code=303)
+        return RedirectResponse(url=_back_to(request) + "?relay=expired",
+                                status_code=303)
     except RelayError as exc:
         # The reason is deliberately not echoed into the URL: for a token it
         # would be describing a credential.
         log.warning("relay refused a %s: %s", kind, exc)
-        return RedirectResponse(url="/?relay=refused", status_code=303)
+        return RedirectResponse(url=_back_to(request) + "?relay=refused",
+                                status_code=303)
 
     log.info("relay accepted a %s (sha256 %s…)", kind, digest[:8])
-    return RedirectResponse(url="/?relay=sent", status_code=303)
+    return RedirectResponse(url=_back_to(request) + "?relay=sent",
+                            status_code=303)
 
 
 @app.post("/device")
-def device_action(action: str = Form(...)):
+def device_action(request: Request, action: str = Form(...)):
     """Send one of a fixed set of harmless actions to the phone.
 
     Added because the screen goes to sleep and the phone-view panel then shows a
@@ -953,13 +1211,15 @@ def device_action(action: str = Form(...)):
         send_ui_action(action)
     except DeviceUnavailable as exc:
         log.warning("device action refused: %s", exc)
-        return RedirectResponse(url="/?device=failed", status_code=303)
+        return RedirectResponse(url=_back_to(request) + "?device=failed",
+                                status_code=303)
     log.info("device action %s sent from the UI", action)
-    return RedirectResponse(url="/?device=sent", status_code=303)
+    return RedirectResponse(url=_back_to(request) + "?device=sent",
+                            status_code=303)
 
 
 @app.post("/macro")
-def start_macro(name: str = Form(...)):
+def start_macro(request: Request, name: str = Form(...)):
     """Ask the feed process to run a named sequence.
 
     A name from a list, never steps. The list lives in apt_log.macros and the
@@ -973,20 +1233,23 @@ def start_macro(name: str = Form(...)):
         macros.request(name)
     except KeyError:
         log.warning("unknown macro requested: %r", name)
-        return RedirectResponse(url="/?macro=unknown", status_code=303)
-    return RedirectResponse(url="/?macro=started", status_code=303)
+        return RedirectResponse(url=_back_to(request) + "?macro=unknown",
+                                status_code=303)
+    return RedirectResponse(url=_back_to(request) + "?macro=started",
+                            status_code=303)
 
 
 @app.post("/acknowledge")
-def acknowledge(attempt_id: str = Form(...)):
+def acknowledge(request: Request, attempt_id: str = Form(...)):
     state_mod.acknowledge(attempt_id)
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url=_back_to(request), status_code=303)
 
 
 @app.post("/control")
-def control(action: str = Form(...)):
+def control(request: Request, action: str = Form(...)):
     if action not in ("pause", "resume"):
         return Response(status_code=400)
     state_mod.set_paused(action == "pause")
     log.warning("scheduler %sd from the UI", action)
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url=_back_to(request, fallback="/console"),
+                            status_code=303)

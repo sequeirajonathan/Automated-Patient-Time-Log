@@ -206,39 +206,91 @@ tunnel is unavailable you lose interactive debugging, not the ability to ship.
 | Who | Path | Sees |
 |---|---|---|
 | Developer | Tailscale SSH | everything |
-| Sister (on shift) | UI over Tailscale on her personal phone | status, schedule, alerts |
+| Sister (on shift) | `/app` over Tailscale on her personal phone | the phone, as components she can use |
+| Whoever is helping her | `/console`, same tailnet | the same phone with nothing folded away, plus both machines' vital signs |
 | Mother | nothing digital | the printed card on the Pi |
+
+Both people reach the same server over the same tailnet; the difference is which page
+they open and what it does with what it knows, not what they are permitted to see. There
+is no login — the tailnet is the fence, and a password on top of it would be one more
+thing to get past while standing in somebody's kitchen. Preferences (language, density,
+a device's name) belong to a browser, so switching to English on one phone changes
+nothing on the other.
 
 ---
 
-## 4. The status UI
+## 4. The UI
 
-### 4.1 What it's for
+### 4.1 Two pages, and why they are two
 
-The phone and Pi sit on the first floor; the work happens on all the others. The UI
-answers, from wherever she is: *is this thing working, and did it do what it should have?*
+The phone and Pi sit on the first floor; the work happens on all the others, and
+increasingly in another state. What began as a status dashboard is now two pages with
+opposite jobs, because one page could not do both honestly.
+
+| Route | Who it is for | What it does with what it knows |
+|---|---|---|
+| `/app` — **the phone** | the caregiver, mid-visit | **edits**: folds bands, sweeps furniture, refuses pictures of credential screens, renders the phone as components |
+| `/console` — **the control centre** | whoever is helping her | **prints**: the whole screen document, every override, every metric |
+
+`/` redirects to `/app`. Nobody opens this portal to read a status page.
+
+The editing that makes `/app` usable is exactly what makes it impossible to teach
+through: when a row does not appear there, you cannot tell whether the app did not show
+it or the portal folded it away. `/console` is the other half of that answer, and it is
+why it hides nothing.
+
+What is *not* negotiable on either page: typed field contents never reach the screen
+document at all (feed.write_screen), and a capture is refused while a password field has
+focus (REQ-3). Those are enforced below anything a page can undo — a rule about
+credentials, not a display preference.
 
 ### 4.2 Panels
 
-1. **Health** — Pi up, phone attached, Appium up, last heartbeat. One green/red line each.
-2. **Today** — each scheduled visit with status (pending / done / skipped / failed),
-   **scheduled time and observed time side by side**, divergences highlighted.
-3. **Gate** — the live presence signals: USB transport, gateway MAC match, wifi BSSID
-   match, last location fix. Shows *why* a check-off was allowed or refused.
-4. **Phone view** — most recent screenshot, so she can see what the phone sees without
-   walking down. Subject to `FLAG_SECURE` (REQ-1) — if the app blocks screen capture this
-   panel shows a placeholder rather than a black rectangle.
-5. **Needs attention** — failures and skips, with an acknowledge action.
-6. **Reconciliation** — end-of-shift view for checking against the handwritten log, with
-   an explicit "amend in app" column (REQ-8).
+**`/app`** — the launcher, the live wireframe of the current screen, the relay (the four
+things only she can answer), the signature pad, and the phone's own navigation.
+
+**`/console`**
+
+1. **Live** — the phone's own screenshot beside a live iframe of `/app`: what the app is
+   doing, and what she is seeing of it, at the same moment.
+2. **The screen, unabridged** — every node the device reported, tappable and not, in the
+   order they sit on the glass, with the resource ids that name them.
+3. **Density** — a clamped slider (never below the value that has actually crashed the
+   phone) writing *overrides* which are kept apart from the tuned defaults, per page, per
+   app, or for everything else. Clearing one uncovers the default; the default is never
+   written over.
+4. **Who is on** — every browser that has opened the portal lately, nameable, with its
+   language and the page it is on.
+5. **The phone** — battery, temperature, the density actually in force, the cable.
+6. **The controller** — memory, disk, load, temperature, uptime, tailnet address.
+7. **Services** — the three units the deploy gate restarts, plus `tailscaled`.
+8. **Location check** — the live presence signals: whether a visit could have been
+   recorded at all.
+9. **Shortcuts** — the macros, with the line saying they never clock a visit in or out.
+
+Panels that were removed rather than rewritten, and why: *Scheduler* and *Last check-in*
+(a unit and a file reporting "is the controller alive" less directly than the three
+signals that already do), *Today* and *Reconciliation* (an end-of-shift check against a
+handwritten log that is not kept — the agency's record is the record), *Needs attention*
+(empty every day), and *What the controller is doing* (the agent's idea of which screen
+it was on, which drifted from what the phone was showing).
 
 ### 4.3 Build
 
-FastAPI + server-rendered HTML, polling every 5–10s. No build step, no framework, no
-node_modules on the Pi. It's six panels of status — anything more is overhead on a device
-whose main job is elsewhere.
+FastAPI + server-rendered HTML. No build step, no framework, no node_modules on the Pi.
+`/app` rides a websocket; `/console` is forms and redirects with three small scripts that
+nothing depends on — every control on it works with JavaScript off.
+
+Preferences live in `/var/lib/aptlog/prefs.json`, per device, written the same atomic way
+as the other state files. There is still no database: the agency's record is the database,
+and a preference is worth keeping and worth nothing if it is lost.
 
 Expose `/healthz` for the manager's health gate (§2.3).
+
+The suite runs on the Pi as part of that gate, against the live `/var/lib/aptlog`. Tests
+must never write there — `tests/conftest.py` redirects the preferences file to a temporary
+path for every test, so a deploy cannot edit somebody's settings as a side effect of
+checking that it is safe to deploy.
 
 ### 4.4 Binding
 

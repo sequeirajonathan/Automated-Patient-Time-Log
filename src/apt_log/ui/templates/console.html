@@ -1,0 +1,624 @@
+{#
+  The control centre.
+
+  This replaced a dashboard that had grown seven panels nobody read: a
+  scheduler for automation that was abandoned, an end-of-shift reconciliation
+  against a handwritten log that is not kept, a "needs attention" list that was
+  empty every day, and a mirror panel that reported what the controller thought
+  it was doing rather than what the phone was showing. What is here instead is
+  what somebody actually sits with this page open to do:
+
+    · watch the phone, and watch what SHE sees of the phone, side by side,
+    · read the screen with nothing folded away, to teach her the front end,
+    · know who else has the portal open,
+    · change how big the phone's text is, safely,
+    · see whether the Pi and the phone are about to run out of something.
+
+  Two rules it is built to:
+
+  NO REDACTION. /app decides what is worth showing somebody standing in a
+  patient's kitchen. This page decides nothing — it prints the tree. You cannot
+  teach an interface through an interface that is quietly editing itself.
+
+  MOBILE FIRST. It is opened from a bookmark on an iPhone at least as often as
+  from a desk. One column, big targets, safe-area insets, and nothing that
+  needs a pointer.
+
+  Every visible string goes through t(). The tests assert the catalogs have
+  identical keys, so an untranslated addition fails there rather than rendering
+  English into a Spanish page at 2am.
+#}
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#4f46e5">
+<title>{{ t('console.title') }}</title>
+<link rel="stylesheet" href="/static/design.css?v={{ boot }}">
+<link rel="apple-touch-icon" href="/static/icons/icon-180.png">
+<style>
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:16px/1.5 -apple-system,BlinkMacSystemFont,system-ui,"Segoe UI",Roboto,sans-serif;
+         -webkit-text-size-adjust:100%; }
+
+  /* ---------------------------------------------------------- the top bar */
+  /* Translucent and sticky, the way an iOS large-title header behaves: the
+     content scrolls under it rather than being pushed by it, which on a
+     phone is the difference between a web page and an app. */
+  .bar { position:sticky; top:0; z-index:30;
+         padding:calc(8px + env(safe-area-inset-top)) 14px 8px;
+         background:var(--chrome); backdrop-filter:saturate(180%) blur(20px);
+         -webkit-backdrop-filter:saturate(180%) blur(20px);
+         border-bottom:.5px solid var(--line);
+         display:flex; align-items:center; gap:10px; }
+  .bar h1 { font-size:17px; font-weight:650; margin:0; letter-spacing:-.01em;
+            flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .back { display:inline-flex; align-items:center; gap:3px; text-decoration:none;
+          color:var(--tint); font-weight:560; font-size:16px; padding:6px 2px;
+          margin:-6px 0; white-space:nowrap; }
+  .back svg { width:17px; height:17px; }
+
+  /* The language switch: a two-up segmented control, the shape iOS uses for
+     exactly this — a small closed set where both options are worth showing.
+     It is a form, so it works with no script at all. */
+  .seg { display:inline-flex; background:var(--track); border-radius:9px;
+         padding:2px; gap:2px; }
+  .seg button { appearance:none; border:0; background:transparent; color:var(--ink);
+                font:inherit; font-size:13px; font-weight:600; padding:5px 11px;
+                border-radius:7px; cursor:pointer; line-height:1.2; }
+  .seg button[aria-pressed="true"] { background:var(--card);
+                                     box-shadow:0 1px 3px rgb(0 0 0 / .12); }
+
+  main { padding:14px 12px calc(28px + env(safe-area-inset-bottom));
+         max-width:780px; margin:0 auto; }
+  @media (min-width:820px) { main { max-width:900px; } }
+
+  /* ------------------------------------------------------------- sections */
+  section { background:var(--card); border:.5px solid var(--line);
+            border-radius:14px; padding:14px; margin:0 0 12px;
+            box-shadow:var(--shadow-card); }
+  h2 { font-size:13px; font-weight:640; letter-spacing:.04em;
+       text-transform:uppercase; color:var(--muted); margin:0 0 10px; }
+  .sub { color:var(--muted); font-size:13.5px; margin:8px 0 0; }
+  .row { display:flex; align-items:center; justify-content:space-between;
+         gap:12px; padding:9px 0; border-bottom:.5px solid var(--line); }
+  .row:last-child { border-bottom:0; }
+  .row:first-of-type { padding-top:0; }
+  .row .k { min-width:0; }
+  .row .k b { font-weight:560; display:block; }
+  .row .k small { color:var(--muted); font-size:12.5px; display:block;
+                  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .v { font-variant-numeric:tabular-nums; font-weight:560; white-space:nowrap; }
+
+  .dot { width:9px; height:9px; border-radius:50%; display:inline-block;
+         margin-right:7px; vertical-align:baseline; background:var(--muted); }
+  .dot.ok { background:var(--ok); } .dot.bad { background:var(--bad); }
+  .dot.unknown { background:var(--unknown); }
+  .chip { font-size:12px; font-weight:600; padding:3px 9px; border-radius:999px;
+          background:var(--track); color:var(--muted); white-space:nowrap; }
+  .chip.ok { background:color-mix(in srgb, var(--ok) 16%, transparent); color:var(--ok); }
+  .chip.bad { background:color-mix(in srgb, var(--bad) 16%, transparent); color:var(--bad); }
+  .chip.unknown { background:color-mix(in srgb, var(--unknown) 18%, transparent);
+                  color:var(--unknown); }
+  .chip.me { background:var(--tint-soft); color:var(--tint); }
+
+  button, .btn { font:inherit; font-size:15px; font-weight:560; padding:10px 14px;
+                 border-radius:10px; border:.5px solid var(--line);
+                 background:var(--bg); color:var(--ink); cursor:pointer;
+                 -webkit-tap-highlight-color:transparent; }
+  button:active { transform:scale(.97); }
+  button.primary { background:var(--tint); color:#fff; border-color:var(--tint); }
+  button.small { font-size:13px; padding:6px 11px; border-radius:8px; }
+  button.danger { color:var(--bad); }
+  .actions { display:flex; flex-wrap:wrap; gap:8px; }
+  .actions form { margin:0; }
+  input[type=text] { font:inherit; padding:10px 12px; border-radius:10px;
+                     border:.5px solid var(--line); background:var(--bg);
+                     color:var(--ink); width:100%; min-width:0; }
+
+  /* --------------------------------------------------------- the two views */
+  /* The phone and her view of the phone, side by side where there is room and
+     stacked where there is not. Seeing them together is the whole feature:
+     "this is what the app is doing, and this is what you are seeing of it". */
+  .views { display:grid; gap:12px; grid-template-columns:1fr; }
+  @media (min-width:680px) { .views { grid-template-columns:1fr 1fr; } }
+  .view-t { font-size:12.5px; font-weight:600; color:var(--muted);
+            margin:0 0 6px; display:flex; align-items:center; gap:6px; }
+  .glass { background:var(--bg); border:.5px solid var(--line);
+           border-radius:12px; overflow:hidden; position:relative; }
+  .glass img { display:block; width:100%; height:auto; }
+  .glass.turned img { transform:rotate(-90deg); transform-origin:center;
+                      /* A landscape capture in a portrait frame: turned, then
+                         scaled to the frame's WIDTH by its own height. */
+                      width:auto; height:100%; }
+  .peek-empty { padding:30px 14px; text-align:center; color:var(--muted);
+                font-size:14px; }
+  /* Her front end, live, in a phone-shaped window. An iframe rather than a
+     re-render: a copy of the page would drift from the page, and the first
+     time it did the lesson would be teaching her something that is not there. */
+  .mirror { aspect-ratio:9/19.5; width:100%; border:0; display:block;
+            background:var(--bg); }
+  .mirror-wrap { border-radius:12px; overflow:hidden; border:.5px solid var(--line);
+                 background:var(--bg); }
+
+  /* ------------------------------------------------------------- the tree */
+  .tree { margin:0; max-height:420px; overflow:auto; -webkit-overflow-scrolling:touch;
+          border:.5px solid var(--line); border-radius:10px; background:var(--bg); }
+  .node { display:flex; gap:8px; align-items:baseline; padding:7px 10px;
+          border-bottom:.5px solid var(--line); font-size:13.5px; }
+  .node:last-child { border-bottom:0; }
+  .node .t { flex:1; min-width:0; overflow-wrap:anywhere; }
+  .node .meta { font:11.5px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;
+                color:var(--muted); white-space:nowrap; }
+  .node .kind { font-size:10.5px; font-weight:700; letter-spacing:.04em;
+                padding:1px 6px; border-radius:5px; background:var(--track);
+                color:var(--muted); text-transform:uppercase; }
+  .node.tap .kind { background:var(--tint-soft); color:var(--tint); }
+  .node.off { opacity:.55; }
+  .node .flag { font-size:11px; color:var(--ok); font-weight:700; }
+  .empty { color:var(--muted); font-size:14px; padding:14px; text-align:center; }
+
+  /* ----------------------------------------------------------- the slider */
+  /* The dangerous control on the page, so it is built to be hard to misuse:
+     it cannot reach a value below the floor, it shows the number the whole
+     time, and the thing it changes is an OVERRIDE — a layer above the tuned
+     defaults, which is why Clear is always offered next to it. */
+  .dense-now { display:flex; align-items:baseline; gap:10px; margin-bottom:4px; }
+  .dense-now .big { font:650 30px/1 ui-rounded,-apple-system,system-ui,sans-serif;
+                    font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
+  .dense-now .who { color:var(--muted); font-size:13px; }
+  input[type=range] { width:100%; margin:12px 0 4px; accent-color:var(--tint);
+                      height:28px; }
+  .scale { display:flex; justify-content:space-between; color:var(--muted);
+           font-size:11.5px; font-variant-numeric:tabular-nums; margin-top:-4px; }
+  .scope { display:grid; grid-template-columns:1fr; gap:8px; margin-top:12px; }
+  @media (min-width:520px) { .scope { grid-template-columns:1fr 1fr 1fr; } }
+  .scope button { width:100%; }
+  .ovr { display:flex; align-items:center; justify-content:space-between;
+         gap:10px; padding:8px 0; border-bottom:.5px solid var(--line); }
+  .ovr:last-child { border-bottom:0; }
+  .ovr code { font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+              overflow-wrap:anywhere; }
+
+  .banner { border-radius:10px; padding:10px 12px; margin:0 0 12px; font-size:14px;
+            background:color-mix(in srgb, var(--unknown) 12%, transparent);
+            border:.5px solid color-mix(in srgb, var(--unknown) 30%, transparent); }
+  .banner.bad { background:color-mix(in srgb, var(--bad) 12%, transparent);
+                border-color:color-mix(in srgb, var(--bad) 30%, transparent); }
+  .banner.ok { background:color-mix(in srgb, var(--ok) 12%, transparent);
+               border-color:color-mix(in srgb, var(--ok) 30%, transparent); }
+  .bars { height:6px; border-radius:3px; background:var(--track); overflow:hidden;
+          margin-top:6px; }
+  .bars i { display:block; height:100%; background:var(--tint); border-radius:3px; }
+  .bars i.warn { background:var(--unknown); }
+  .bars i.hot { background:var(--bad); }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  @media (min-width:560px) { .grid2 { grid-template-columns:repeat(4,1fr); } }
+  .stat { background:var(--bg); border:.5px solid var(--line); border-radius:11px;
+          padding:10px 11px; }
+  .stat b { display:block; font:650 19px/1.2 ui-rounded,-apple-system,system-ui,sans-serif;
+            font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
+  .stat span { color:var(--muted); font-size:11.5px; font-weight:600;
+               text-transform:uppercase; letter-spacing:.03em; }
+</style>
+</head>
+<body data-boot="{{ boot }}">
+
+<div class="bar">
+  {# Back to the phone, in the position and shape iOS puts it. This page is a
+     detail view of /app, and it says so by being leavable the same way. #}
+  <a class="back" href="/app">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"
+         stroke-linecap="round" stroke-linejoin="round"><path d="M15 5 L8 12 L15 19"/></svg>
+    {{ t('console.back_to_app') }}</a>
+  <h1>{{ t('console.title') }}</h1>
+  {# The global language switch. It posts where it stands and comes back to
+     the same page — the old one always redirected to the dashboard, which
+     meant changing language on the phone view threw you out of it. #}
+  <form method="post" action="/language" class="seg">
+    <input type="hidden" name="next" value="/console">
+    {% for code in languages %}
+    <button type="submit" name="language" value="{{ code }}"
+            aria-pressed="{{ 'true' if code == lang else 'false' }}">
+      {{ 'ES' if code == 'es' else 'EN' }}</button>
+    {% endfor %}
+  </form>
+</div>
+
+<main>
+  {% if notice %}
+    <div class="banner ok">{{ t('console.saved') }}</div>
+  {% endif %}
+  {% if s.paused %}
+    <div class="banner bad">{{ t('control.paused_notice') }}</div>
+  {% endif %}
+  {% if s.transport_mode == 'dev' %}
+    <div class="banner">{{ t('gate.dev_transport') }}</div>
+  {% endif %}
+
+  {# ------------------------------------------------------------- 1. views #}
+  <section>
+    <h2>{{ t('console.live.title') }}</h2>
+    <div class="views">
+      <div>
+        <p class="view-t">
+          <span class="dot {{ 'ok' if not s.mirror.stale else 'unknown' }}"></span>
+          {{ t('console.live.phone') }}</p>
+        {# The photograph, turned when the phone is sideways — the signature
+           screens are the one place a care app goes landscape, and an
+           unturned capture of one is unreadable exactly when it matters. #}
+        <div class="glass {{ 'turned' if screen_doc.get('landscape') }}">
+          {% if s.screenshot_at %}
+            <img id="peek" src="/screen.jpg?v={{ boot }}" alt="">
+          {% else %}
+            <p class="peek-empty">{{ t('phone.none') }}</p>
+          {% endif %}
+        </div>
+        <p class="sub" id="peek-taken">
+          {%- if s.screenshot_at %}{{ t('phone.stale', time=t.time(s.screenshot_at)) }}
+          {%- else %}{{ t('phone.none') }}{% endif -%}
+        </p>
+      </div>
+      <div>
+        <p class="view-t"><span class="dot ok"></span>{{ t('console.live.hers') }}</p>
+        <div class="mirror-wrap">
+          {# Same origin, same socket, same server: this is her page, not a
+             drawing of it. `loading=eager` because the point is that it is
+             already showing what she is looking at when you glance over. #}
+          <iframe class="mirror" src="/app" title="{{ t('console.live.hers') }}"
+                  loading="eager"></iframe>
+        </div>
+        <p class="sub">{{ t('console.live.hers_note') }}</p>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:12px">
+      <div class="k">
+        <b>{{ focus_app or t('common.unknown') }}</b>
+        <small>{{ focus_page or '—' }}</small>
+      </div>
+      <span class="chip {{ 'ok' if not s.mirror.stale else 'unknown' }}">
+        {{ t('console.live.now') if not s.mirror.stale else t('papp.syncing') }}</span>
+    </div>
+
+    {# The phone's own three keys plus wake. They work when the screen in
+       front of her has no way out of itself, which is the only reason they
+       are on a page that otherwise only watches. #}
+    <div class="actions" style="margin-top:12px">
+      {% for act in ['back', 'home', 'recents', 'wake'] %}
+      <form method="post" action="/device">
+        <input type="hidden" name="action" value="{{ act }}">
+        <button type="submit" class="small">{{ t('phone.' ~ act) }}</button>
+      </form>
+      {% endfor %}
+      <form method="post" action="/control">
+        <input type="hidden" name="action" value="{{ 'resume' if s.paused else 'pause' }}">
+        <button type="submit" class="small {{ 'primary' if s.paused }}">
+          {{ t('control.resume') if s.paused else t('control.pause') }}</button>
+      </form>
+    </div>
+  </section>
+
+  {# --------------------------------------------------------- 2. the tree #}
+  <section>
+    <h2>{{ t('console.tree.title') }}</h2>
+    <p class="sub" style="margin:0 0 10px">{{ t('console.tree.explain') }}</p>
+    {% if not rows %}
+      <p class="empty">{{ t('console.tree.empty') }}</p>
+    {% else %}
+    <div class="tree">
+      {% for r in rows %}
+      <div class="node {{ 'tap' if r.tap }} {{ 'off' if not r.enabled }}">
+        <span class="kind">{{ t('console.tree.tap') if r.tap else t('console.tree.text') }}</span>
+        <span class="t">
+          {{ r.txt or ('—' if not r.rid else '') }}
+          {% if r.checked %}<span class="flag">✓</span>{% endif %}
+          {% if not r.enabled %}<span class="meta">{{ t('console.tree.disabled') }}</span>{% endif %}
+        </span>
+        <span class="meta">{{ r.rid or r.cls }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    <p class="sub">{{ t('console.tree.count', shown=rows|length) }}
+      {% if screen_doc.get('full') %}· {{ t('console.tree.whole_page') }}{% endif %}
+      {% if screen_doc.get('webview') %}· {{ t('papp.web_partial') }}{% endif %}</p>
+    {% endif %}
+  </section>
+
+  {# ------------------------------------------------------------ 3. density #}
+  <section>
+    <h2>{{ t('console.density.title') }}</h2>
+    <div class="dense-now">
+      <span class="big" id="dense-value">{{ m.phone.density or '—' }}</span>
+      <span class="who" id="dense-who">
+        {% if density.page_override %}{{ t('console.density.from_page') }}
+        {% elif density.app_override %}{{ t('console.density.from_app') }}
+        {% elif density.built_in %}{{ t('console.density.from_built_in') }}
+        {% elif density.global_override %}{{ t('console.density.from_global') }}
+        {% else %}{{ t('console.density.from_phone') }}{% endif %}
+      </span>
+    </div>
+    <p class="sub" style="margin:0">{{ t('console.density.explain',
+        floor=density.floor, ceiling=density.ceiling) }}</p>
+
+    <form method="post" action="/settings/density" id="dense-form">
+      <input type="hidden" name="next" value="/console">
+      <input type="hidden" name="app_pkg" value="{{ density.app }}">
+      <input type="hidden" name="page" value="{{ density.page }}">
+      <input type="range" name="value" id="dense-range"
+             min="{{ density.floor }}" max="{{ density.ceiling }}"
+             step="{{ density.step }}"
+             value="{{ density.page_override or density.app_override
+                       or density.built_in or m.phone.density or density.floor }}">
+      <div class="scale">
+        <span>{{ density.floor }}</span>
+        <span>{{ t('console.density.bigger') }}</span>
+        <span>{{ density.ceiling }}</span>
+      </div>
+      <div class="scope">
+        <button type="submit" name="scope" value="page" class="primary"
+                {% if not density.page_key %}disabled{% endif %}>
+          {{ t('console.density.this_page') }}</button>
+        <button type="submit" name="scope" value="app"
+                {% if not density.app %}disabled{% endif %}>
+          {{ t('console.density.this_app') }}</button>
+        <button type="submit" name="scope" value="global">
+          {{ t('console.density.everything') }}</button>
+      </div>
+    </form>
+    <p class="sub">{{ t('console.density.scope_note') }}</p>
+
+    <h2 style="margin-top:16px">{{ t('console.density.overrides') }}</h2>
+    {% if not density.overrides %}
+      <p class="sub" style="margin:0">{{ t('console.density.none_set',
+          default=density.built_in or '—') }}</p>
+    {% else %}
+      {% for key, value in density.overrides %}
+      <div class="ovr">
+        <code>{{ t('console.density.everything') if key == '*' else key }}</code>
+        <span class="v">{{ value }}</span>
+        <form method="post" action="/settings/density/clear">
+          <input type="hidden" name="key" value="{{ key }}">
+          <input type="hidden" name="next" value="/console">
+          <button type="submit" class="small danger">{{ t('console.density.clear') }}</button>
+        </form>
+      </div>
+      {% endfor %}
+      <p class="sub">{{ t('console.density.clear_note') }}</p>
+    {% endif %}
+  </section>
+
+  {# -------------------------------------------------------- 4. who is on #}
+  <section>
+    <h2>{{ t('console.who.title') }}</h2>
+    {% for d in devices %}
+    <div class="row">
+      <div class="k">
+        <b>{{ d.name or t('console.who.unnamed') }}
+          {% if d.id == device_id %}<span class="chip me">{{ t('console.who.you') }}</span>{% endif %}
+        </b>
+        <small>{{ d.where or '—' }} · {{ 'Español' if d.language == 'es' else 'English' }}</small>
+      </div>
+      <span class="v" data-seen="{{ d.seen }}">{{ t.time(None) }}</span>
+    </div>
+    {% else %}
+    <p class="sub" style="margin:0">{{ t('console.who.empty') }}</p>
+    {% endfor %}
+    <form method="post" action="/settings/name" style="margin-top:12px;
+          display:flex; gap:8px">
+      <input type="hidden" name="next" value="/console">
+      <input type="text" name="name" maxlength="40"
+             placeholder="{{ t('console.who.name_this') }}"
+             value="{{ (devices | selectattr('id', 'equalto', device_id)
+                       | map(attribute='name') | first) or '' }}">
+      <button type="submit" class="primary">{{ t('console.who.save') }}</button>
+    </form>
+    <p class="sub">{{ t('console.who.explain') }}</p>
+  </section>
+
+  {# --------------------------------------------------------- 5. the phone #}
+  <section>
+    <h2>{{ t('console.phone.title') }}</h2>
+    <div class="grid2">
+      <div class="stat">
+        <b id="stat-battery">{{ (m.phone.battery ~ '%') if m.phone.battery is not none
+                                else '—' }}</b>
+        <span>{{ t('console.phone.battery') }}</span>
+      </div>
+      <div class="stat">
+        <b>{{ (m.phone.temp_c ~ '°') if m.phone.temp_c is not none else '—' }}</b>
+        <span>{{ t('console.phone.temp') }}</span>
+      </div>
+      <div class="stat">
+        <b>{{ m.phone.density or '—' }}</b>
+        <span>{{ t('console.phone.density') }}</span>
+      </div>
+      <div class="stat">
+        <b><span class="dot {{ m.phone.attached }}"></span></b>
+        <span>{{ t('console.phone.link') }}</span>
+      </div>
+    </div>
+    <p class="sub">
+      {{ t('console.phone.cable', mode=m.phone.get('transport') or t('common.unknown')) }}
+      {% if m.phone.charging is not none %}
+        · {{ t('console.phone.charging') if m.phone.charging
+              else t('console.phone.on_battery') }}
+      {% endif %}
+    </p>
+  </section>
+
+  {# ------------------------------------------------------------ 6. the Pi #}
+  <section>
+    <h2>{{ t('console.pi.title') }}
+      <span class="chip {{ machine_state }}">{{ m.host or '—' }}</span></h2>
+
+    {% if m.mem %}
+    <div class="row">
+      <div class="k"><b>{{ t('console.pi.memory') }}</b>
+        <small id="mem-text">{{ t('console.pi.of', used=(m.mem.used // 1048576),
+               total=(m.mem.total // 1048576)) }}</small>
+        <div class="bars"><i id="mem-bar" style="width:{{ m.mem.pct }}%"
+             class="{{ 'hot' if m.mem.pct >= 90 else 'warn' if m.mem.pct >= 75 }}"></i></div>
+      </div>
+      <span class="v" id="mem-pct">{{ m.mem.pct }}%</span>
+    </div>
+    {% endif %}
+
+    {% if m.disk %}
+    <div class="row">
+      <div class="k"><b>{{ t('console.pi.disk') }}</b>
+        <small>{{ t('console.pi.free', free=((m.disk.total - m.disk.used) // 1073741824)) }}</small>
+        <div class="bars"><i style="width:{{ m.disk.pct }}%"
+             class="{{ 'hot' if m.disk.pct >= 90 else 'warn' if m.disk.pct >= 75 }}"></i></div>
+      </div>
+      <span class="v">{{ m.disk.pct }}%</span>
+    </div>
+    {% endif %}
+
+    <div class="row">
+      <div class="k"><b>{{ t('console.pi.load') }}</b>
+        <small>{{ t('console.pi.cpus', n=m.cpus) }}</small></div>
+      <span class="v">{{ (m.load or [])|join('  ') or '—' }}</span>
+    </div>
+    <div class="row">
+      <div class="k"><b>{{ t('console.pi.temp') }}</b></div>
+      <span class="v">{{ (m.temp_c ~ '°C') if m.temp_c is not none else '—' }}</span>
+    </div>
+    <div class="row">
+      <div class="k"><b>{{ t('console.pi.uptime') }}</b></div>
+      <span class="v">{{ t('console.pi.days', d=((m.uptime or 0) // 86400)|int,
+                          h=(((m.uptime or 0) % 86400) // 3600)|int) }}</span>
+    </div>
+    <div class="row">
+      <div class="k"><b>{{ t('console.pi.tailnet') }}</b>
+        <small>{{ m.net.address or '—' }}</small></div>
+      <span class="chip {{ m.net.up }}">
+        {{ t('health.ok') if m.net.up == 'ok' else t('health.bad')
+           if m.net.up == 'bad' else t('common.unknown') }}</span>
+    </div>
+  </section>
+
+  {# ----------------------------------------------------------- 7. services #}
+  <section>
+    <h2>{{ t('console.services.title') }}</h2>
+    {% for svc in m.services %}
+    <div class="row">
+      <div class="k"><b><span class="dot {{ svc.state }}"></span>{{ svc.unit }}</b></div>
+      <span class="chip {{ svc.state }}">
+        {{ t('health.ok') if svc.state == 'ok' else t('health.bad')
+           if svc.state == 'bad' else t('common.unknown') }}</span>
+    </div>
+    {% endfor %}
+    <p class="sub">{{ t('common.updated_at', time=t.time(s.generated_at)) }}</p>
+  </section>
+
+  {# ------------------------------------------------------- 8. is it there? #}
+  {# The location check stays. It is the one panel that answers a question
+     about the record rather than about the machines: whether a visit could
+     have been recorded at all. #}
+  <section>
+    <h2>{{ t('gate.title') }}</h2>
+    <p class="sub" style="margin:0 0 8px">{{ t('gate.explain') }}</p>
+    {% for sig in s.gate %}
+    <div class="row">
+      <div class="k"><b>{{ t(sig.key) }}</b></div>
+      <span class="chip {{ sig.status.value }}">
+        {{ t('gate.signal_ok') if sig.status == Health.OK else t('gate.signal_bad') }}
+      </span>
+    </div>
+    {% else %}
+      <p class="sub" style="margin:0">{{ t('gate.fix_none') }}</p>
+    {% endfor %}
+  </section>
+
+  {# ------------------------------------------------------------ 9. running #}
+  <section>
+    <h2>{{ t('macro.title') }}</h2>
+    <div class="actions">
+      {% for macro in macros %}
+      <form method="post" action="/macro">
+        <input type="hidden" name="name" value="{{ macro.name }}">
+        <button type="submit" class="small">{{ t(macro.label_key) }}</button>
+      </form>
+      {% endfor %}
+    </div>
+    <p class="sub">
+      {% if macro_status.state == 'running' %}{{ t(macro_status.step) }}
+      {% elif macro_status.state == 'done' %}{{ t('macro.state.done') }}
+      {% elif macro_status.state == 'failed' %}{{ t('macro.state.failed') }}
+      {% else %}{{ t('macro.state.idle') }}{% endif %}
+    </p>
+    {# The line that says these never clock a visit in or out. It is on the
+       page rather than only in a docstring because it is a promise to the
+       person pressing the buttons, and a promise nobody can read is not one. #}
+    <p class="sub">{{ t('macro.explain') }}</p>
+  </section>
+</main>
+
+<script>
+  // Three small jobs, none of which the page depends on: the slider's number
+  // while you drag it, relative times ("4 min ago") that a server render
+  // cannot keep current, and a refresh of the metrics for a page that is
+  // left open. Everything else here is a form and works with this file
+  // missing entirely.
+  (function () {
+    var range = document.getElementById('dense-range');
+    var out = document.getElementById('dense-value');
+    var who = document.getElementById('dense-who');
+    if (range && out) {
+      range.addEventListener('input', function () {
+        out.textContent = range.value;
+        if (who) who.textContent = {{ t('console.density.pending')|tojson }};
+      });
+    }
+
+    var UNITS = [[86400, 'd'], [3600, 'h'], [60, 'm']];
+    function ago(seconds) {
+      if (seconds < 60) return {{ t('console.who.just_now')|tojson }};
+      for (var i = 0; i < UNITS.length; i++) {
+        if (seconds >= UNITS[i][0]) {
+          return Math.floor(seconds / UNITS[i][0]) + UNITS[i][1];
+        }
+      }
+      return Math.floor(seconds / 60) + 'm';
+    }
+    function stamps() {
+      var now = Date.now() / 1000;
+      document.querySelectorAll('[data-seen]').forEach(function (el) {
+        var seen = parseFloat(el.getAttribute('data-seen'));
+        if (seen) el.textContent = ago(Math.max(0, now - seen));
+      });
+    }
+    stamps();
+    setInterval(stamps, 15000);
+
+    // The peek. A cache-busted reload rather than a socket: this page is a
+    // reference view, and one image a few seconds old is the right cost for
+    // not holding a second stream open beside the one /app is using.
+    var peek = document.getElementById('peek');
+    setInterval(function () {
+      if (peek && !document.hidden) peek.src = '/screen.jpg?t=' + Date.now();
+    }, 4000);
+
+    setInterval(function () {
+      if (document.hidden) return;
+      fetch('/api/machine').then(function (r) { return r.json(); }).then(function (m) {
+        var b = document.getElementById('stat-battery');
+        if (b && m.phone && m.phone.battery !== null && m.phone.battery !== undefined) {
+          b.textContent = m.phone.battery + '%';
+        }
+        if (m.mem) {
+          var bar = document.getElementById('mem-bar');
+          var pct = document.getElementById('mem-pct');
+          if (bar) bar.style.width = m.mem.pct + '%';
+          if (pct) pct.textContent = m.mem.pct + '%';
+        }
+      }).catch(function () { /* a page that cannot reach the server says so
+                               by its times going stale, not by an alert */ });
+    }, 10000);
+  })();
+</script>
+</body>
+</html>

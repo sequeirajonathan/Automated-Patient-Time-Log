@@ -216,12 +216,17 @@ def collect() -> DashboardState:
     else:
         hb_health = Health.OK
 
+    # Two signals used to sit here and no longer do. "Scheduler" reported a
+    # unit whose job — deciding on its own when to record a visit — was
+    # abandoned; it is a service like any other now, and the control centre
+    # lists it as one. "Last check-in" reported the heartbeat file, which
+    # answers "is the controller alive" a second time and less directly than
+    # the three below. The heartbeat is still written and still read by
+    # heartbeat.sh; it is the PANEL that was noise.
     health = [
         Signal("health.controller", Health.OK),   # this page rendered, so it is up
         Signal("health.phone", phone_health),
         Signal("health.appium", _unit_active("aptlog-appium")),
-        Signal("health.agent", _unit_active("aptlog-agent")),
-        Signal("health.heartbeat", hb_health),
     ]
 
     visits = read_audit()

@@ -71,8 +71,8 @@ class TestNoFragmentConcatenation:
     def test_key_sentences_carry_their_own_context(self):
         for lang in SUPPORTED:
             cat = load_catalog(lang)
-            for key in ("today.diverged", "signature.prompt",
-                        "attention.gate_failed", "attention.no_signature"):
+            for key in ("console.density.explain", "signature.prompt",
+                        "console.tree.explain", "console.who.explain"):
                 assert len(cat[key]) > 30, f"{lang}:{key} looks like a fragment"
 
 
@@ -135,7 +135,10 @@ class TestSafetyCriticalStringsExist:
     @pytest.mark.parametrize("key", [
         "signature.prompt", "signature.instruction", "signature.expired",
         "gate.refused", "gate.dev_transport",
-        "attention.gate_failed", "attention.no_signature", "attention.run_failed",
+        # The density floor is safety-critical in the literal sense: below it
+        # the phone has actually gone down, and the sentence that says so has
+        # to say it in the language of whoever is holding the slider.
+        "console.density.explain",
         "control.paused_notice",
     ])
     def test_present_and_translated_in_both(self, key):
