@@ -206,3 +206,23 @@ class TestCanvasClassHints:
         assert doc["reason"] == "no_canvas"
         assert doc["nodes"][0]["cls"] == "TextView"
         assert "CARIDAD" not in json.dumps(doc)
+
+
+class TestNestedSignatureWrappers:
+    """The live refusal, verbatim: two full-page layout wrappers with
+    "signature" in their ids around the one real canvas. A wrapper that
+    wholly contains another candidate is wrapping, not drawing."""
+
+    def test_the_innermost_candidate_is_the_canvas(self):
+        xml = ('<node class="android.widget.FrameLayout" '
+               'resource-id="app:id/layout_tab_content_signature_skip" '
+               'bounds="[0,90][720,1568]"/>'
+               '<node class="android.widget.FrameLayout" '
+               'resource-id="app:id/layout_tab_content_signature" '
+               'bounds="[0,90][720,1568]"/>'
+               '<node class="android.widget.FrameLayout" '
+               'resource-id="app:id/gesturePatientSignature" '
+               'bounds="[0,492][720,1142]"/>')
+        bounds, reason = sign.find_canvas(xml)
+        assert reason == ""
+        assert bounds == [0, 492, 720, 1142]

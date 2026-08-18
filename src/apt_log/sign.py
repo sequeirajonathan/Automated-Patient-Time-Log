@@ -237,6 +237,19 @@ def find_canvas(xml: str) -> tuple[list[int] | None, str]:
                 and (b[2] - b[0]) * (b[3] - b[1]) >= screen_area * CANVAS_MIN_SHARE):
             shaped.append(b)
 
+    # Hint-matched candidates NEST: the live refusal was two full-page
+    # "layout_tab_content_signature*" wrappers around the one real canvas
+    # (gesturePatientSignature). A wrapper that wholly contains another
+    # candidate is wrapping, not drawing — the innermost is the canvas.
+    def _wraps(outer, inner):
+        return (outer is not inner
+                and outer[0] <= inner[0] and outer[1] <= inner[1]
+                and outer[2] >= inner[2] and outer[3] >= inner[3])
+
+    if len(named) > 1:
+        named = [b for b in named
+                 if not any(_wraps(b, other) for other in named)]
+
     pool = named or shaped
     if not pool:
         _dump_refusal(nodes, "no_canvas")
