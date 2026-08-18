@@ -522,14 +522,24 @@ def build(doc: dict) -> dict | None:
     # A row with a RESOURCE ID is a real control whatever its size: the
     # visit-details back button is a 25px-tall strip at tablet density,
     # and the sliver rule swallowed it — no way back. Anonymity is part
-    # of what makes a scrim a scrim.
+    # of what makes a scrim a scrim. But a name does not make a 1px strip
+    # tappable: the agency picker's "viewtop" divider is id'd and one
+    # pixel tall, and it rendered as an empty tappable row. Below a
+    # finger's reach, the id no longer saves it.
+    def _sliver(n: dict) -> bool:
+        height = n["b"][3] - n["b"][1]
+        if height >= h * CURTAIN_MIN_HEIGHT:
+            return True
+        if height <= h * 0.005:
+            return True
+        return (height <= h * SLIVER_MAX_HEIGHT
+                and not (n.get("aim") or {}).get("rid"))
+
     items = [n for n in items
              if not (n["kind"] == "row"
                      and not n.get("lines")
                      and not n.get("txt")
-                     and not (n.get("aim") or {}).get("rid")
-                     and ((n["b"][3] - n["b"][1]) >= h * CURTAIN_MIN_HEIGHT
-                          or (n["b"][3] - n["b"][1]) <= h * SLIVER_MAX_HEIGHT))]
+                     and _sliver(n))]
 
     items.sort(key=lambda n: (n["b"][1], n["b"][0]))
 
