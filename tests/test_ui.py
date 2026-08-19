@@ -1678,3 +1678,59 @@ class TestTheChecklistDress:
         css = re.sub(r"/\*.*?\*/", "", self.PAGE.read_text(encoding="utf-8"),
                      flags=re.S)
         assert re.search(r"\.a-check::before \{[^}]*inset:-10px", css)
+
+
+class TestTheModalExitIsDrawn:
+    FRAGMENT = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/templates/_screen.html")
+    PAGE = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/templates/phone.html")
+
+    def test_the_fragment_draws_it(self):
+        markup = self.FRAGMENT.read_text(encoding="utf-8")
+        assert "m.dismiss" in markup and "a-dismissbtn" in markup
+
+    def test_it_sits_above_the_sheets_own_controls(self):
+        """Where the phone puts it, and where it has to be found BEFORE
+        anything is pressed."""
+        markup = self.FRAGMENT.read_text(encoding="utf-8")
+        assert markup.index("m.dismiss") < markup.index("row.actions")
+
+    def test_it_is_styled(self):
+        import re
+
+        css = re.sub(r"/\*.*?\*/", "", self.PAGE.read_text(encoding="utf-8"),
+                     flags=re.S)
+        assert re.search(r"\.a-dismissbtn \{[^}]*\}", css)
+
+    def test_it_renders_with_a_real_model(self):
+        from apt_log.ui import screenview
+        from apt_log.ui.app import templates
+
+        class T:
+            language = "en"
+            def __call__(self, k):
+                return "Close" if k == "papp.close_sheet" else k
+
+        m = screenview.build({
+            "id": "f1", "size": [720, 1600], "blocked": "", "notice": "",
+            "elements": [
+                {"rid": "touch_outside", "cls": "View", "b": [0, 64, 720, 1561],
+                 "txt": "", "checked": False, "focused": False},
+                {"rid": "", "cls": "View", "b": [13, 946, 45, 978],
+                 "txt": "", "checked": False, "focused": False},
+                {"rid": "", "cls": "View", "b": [172, 1514, 274, 1545],
+                 "txt": "", "checked": False, "focused": False}],
+            "statics": [{"cls": "TextView", "b": [217, 1522, 245, 1537],
+                         "txt": "Done"}]})
+        html = templates.get_template("_screen.html").render(
+            m=screenview.label_keys(m, T()), t=T())
+        assert "a-dismissbtn" in html and ">Close<" in html
+
+    @pytest.mark.parametrize("name", ["en.json", "es.json"])
+    def test_both_languages_say_it(self, name):
+        import json
+
+        base = Path(__file__).resolve().parents[1] / "src/apt_log/ui/locales"
+        assert json.loads((base / name).read_text(encoding="utf-8")
+                          ).get("papp.close_sheet")

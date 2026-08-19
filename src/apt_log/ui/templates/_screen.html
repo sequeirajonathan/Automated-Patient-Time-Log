@@ -34,6 +34,22 @@
   <div class="a-alert" role="alert">{{ m.notice }}</div>
   {% endif %}
 
+  {% if m.dismiss %}
+  {# The way out of a modal. Drawn ABOVE the sheet's own controls because
+     that is where the phone puts it, and because the whole point is that it
+     is found before anything is pressed. The phone's Back does not close a
+     bottom sheet — verified — so without this there is no third option
+     beside Done and Clear. #}
+  <div class="a-dismiss">
+    <button type="button" class="a-dismissbtn" data-aim='{{ m.dismiss.aim | tojson }}'>
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round"
+        ><path d="M4 4 L12 12 M12 4 L4 12"/></svg>
+      <span>{{ m.dismiss.txt }}</span>
+    </button>
+  </div>
+  {% endif %}
+
   <div class="a-list">
   {% for row in m.rows %}
     {% if row.tabs %}

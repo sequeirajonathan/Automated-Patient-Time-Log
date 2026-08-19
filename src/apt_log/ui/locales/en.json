@@ -156,6 +156,7 @@
   "papp.asleep_hint": "Wake it to see and use it from here.",
   "papp.choose": "Choose an app. It opens on the phone in Florida, and this page becomes its screen.",
   "papp.clearing": "Clearing the screen…",
+  "papp.close_sheet": "Close",
   "papp.covered": "Something is covering the phone's screen.",
   "papp.covered_action": "Clear the screen",
   "papp.covered_hint": "Nothing you tap will reach the app until it is cleared.",
