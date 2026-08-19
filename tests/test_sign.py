@@ -41,9 +41,14 @@ class TestValidate:
     def test_the_pads_object_shape_also_passes(self):
         assert sign.validate([{"width": 2, "points": [[0.1, 0.2, 0]]}]) is True
 
+    # -0.1 and 1.04 USED to be here and are now accepted on purpose: a
+    # finger sliding a little past the pad's edge is still signing, and
+    # refusing the whole payload for one such point bounced entire
+    # signatures. See TestAFingerPastTheEdge. What stays refused is a
+    # coordinate no pad could produce.
     @pytest.mark.parametrize("bad", [
         None, [], "strokes", [[]], [[[1.5, 0.5, 0]]], [[[0.5]]],
-        [[["x", 0.5, 0]]], [[[0.5, -0.1, 0]]],
+        [[["x", 0.5, 0]]], [[[0.5, -0.6, 0]]],
     ])
     def test_everything_else_is_refused(self, bad):
         assert sign.validate(bad) is False
@@ -794,3 +799,62 @@ class TestTheRecordCanSayWhichButtonIsWhich:
         words = [n["word"] for n in doc["nodes"]]
         assert "Borrar" in words
         assert "Sadia Amselem" not in _json.dumps(doc)
+
+
+class TestAFingerPastTheEdge:
+    """A signature that strays off the pad.
+
+    "If I try to sign a bit out of bounds it can't send it to the phone."
+    The pointer keeps reporting while it is captured, so a finger sliding
+    past the edge produced points outside 0..1 — and the old rule refused
+    the WHOLE payload for one of them, bouncing an entire signature with a
+    bare "failed" and leaving the strokes sitting on the pad.
+
+    Reproduced while testing: a curve straying 4% off the left edge came
+    back {"error": "empty"}.
+    """
+
+    def test_a_stroke_that_strays_is_accepted(self):
+        assert sign.validate([[[-0.04, 0.5], [0.2, 0.5], [0.4, 0.5]]])
+
+    def test_and_one_that_strays_off_the_far_edge(self):
+        assert sign.validate([[[0.6, 0.5], [1.04, 0.5]]])
+
+    def test_a_payload_that_is_not_a_signature_is_still_refused(self):
+        """The check exists to refuse nonsense, and still does."""
+        assert not sign.validate([[[5.0, 0.5], [0.2, 0.5]]])
+        assert not sign.validate([[[0.5, -3.0]]])
+
+    def test_the_stray_ink_rides_the_edge(self):
+        """Clamped onto the pad BEFORE the canvas mapping, so it lands on the
+        edge of the drawn box rather than on the wrong margin."""
+        bounds = [100, 200, 500, 400]
+        out = sign.build_paths([[[-0.2, 0.5], [0.5, 0.5]]], bounds, aspect=1.0)
+        xs = [x for x, _ in out[0]]
+        inset = (bounds[2] - bounds[0]) * sign.CANVAS_INSET
+        assert min(xs) >= bounds[0] + inset - 1
+
+    def test_every_stroke_still_arrives(self):
+        """Two strokes in, two paths out — the A is drawn with two."""
+        out = sign.build_paths(
+            [[[0.1, 0.1], [0.2, 0.2]], [[0.3, 0.3], [0.4, 0.4]]],
+            [0, 0, 400, 400])
+        assert len(out) == 2
+
+    def test_the_pad_clamps_at_the_source(self):
+        """Clamped in the browser too, so the preview shows exactly what is
+        sent rather than something the server will quietly move."""
+        from pathlib import Path
+
+        src = (Path(__file__).resolve().parents[1]
+               / "src/apt_log/ui/static/phone.js").read_text(encoding="utf-8")
+        body = src[src.index("function padPoint"):]
+        body = body[:body.index("}")]
+        assert "clamp" in body
+
+    def test_a_refusal_says_which_one(self):
+        from pathlib import Path
+
+        src = (Path(__file__).resolve().parents[1]
+               / "src/apt_log/ui/static/phone.js").read_text(encoding="utf-8")
+        assert "out.error === 'empty'" in src

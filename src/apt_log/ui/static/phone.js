@@ -452,9 +452,21 @@
 
   function padCanvas() { return document.getElementById('signpad'); }
 
+  // Held inside the pad. A finger that slides a little past the edge is still
+  // signing — the pointer keeps reporting while it is captured — and those
+  // points came back outside 0..1, which the server refused OUTRIGHT: one
+  // stray point and the whole signature bounced with "failed", strokes still
+  // on the pad. Reported as "if I try to sign a bit out of bounds it can't
+  // send it to the phone", and reproduced here by a curve that strays 4% off
+  // the left edge.
+  //
+  // Clamped rather than dropped, and clamped HERE so that what she sees in
+  // the preview is exactly what is sent: a signature that runs off the edge
+  // rides the edge, which is what every pad on paper or glass does.
   function padPoint(ev, rect) {
-    return [(ev.clientX - rect.left) / rect.width,
-            (ev.clientY - rect.top) / rect.height];
+    const clamp = (n) => (n < 0 ? 0 : n > 1 ? 1 : n);
+    return [clamp((ev.clientX - rect.left) / rect.width),
+            clamp((ev.clientY - rect.top) / rect.height)];
   }
 
   function drawStrokes(ctx, c, place) {
@@ -554,7 +566,16 @@
                              aspect: rect.width / rect.height })
     }).then(async (r) => {
       const out = await r.json().catch(() => ({}));
-      if (!r.ok) { unbusy(); toast(i18n.failed || ''); return; }
+      if (!r.ok) {
+        unbusy();
+        // Say WHICH failure. "failed" over a refused shape read as the phone
+        // being unreachable, and the strokes are still on the pad either way
+        // — so the difference between "nothing was drawn" and "the controller
+        // could not be reached" is the difference between drawing again and
+        // waiting.
+        toast((out.error === 'empty' ? i18n.signEmpty : i18n.failed) || '');
+        return;
+      }
       pad.waitingId = out.id || '';
       // Cleared on the status push; nothing reusable is left behind.
       pad.strokes = []; padRedraw();
