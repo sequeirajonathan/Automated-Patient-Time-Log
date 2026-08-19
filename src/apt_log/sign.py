@@ -280,13 +280,30 @@ def find_canvas(xml: str, dump: bool = True) -> tuple[list[int] | None, str]:
     # screen has no signature box" over a screen plainly showing one, a Save
     # that could never fire, and a caregiver pressing the app's own button by
     # hand at 10pm. De-duplicate first, keeping document order.
-    if len(named) > 1:
-        named = _distinct(named)
-    if len(named) > 1:
-        named = [b for b in named
-                 if not any(_wraps(b, other) for other in named)]
+    #
+    # BOTH POOLS NEED THIS, and for a while only `named` got it. inMyTeam's
+    # signature sheet names nothing — no id, no telling class — so it takes
+    # the SHAPED path, and Compose hands that path the bottom sheet's own
+    # wrapper TWICE at identical bounds plus the real canvas inside it:
+    #
+    #   View [0,923,720,1561]   39.9% of the screen   the sheet
+    #   View [0,923,720,1561]   39.9%                 the sheet again
+    #   View [13,998,707,1469]  28.4%                 the canvas
+    #
+    # Three candidates, so the finder refused "ambiguous" and she could not
+    # sign at all — caught on the live sheet, and intermittent because the
+    # number of wrappers Compose emits varies. De-duplicated and de-nested
+    # the same way, the wrappers collapse to one and then drop for containing
+    # the canvas, leaving exactly the one thing that draws.
+    def _narrow(boxes):
+        if len(boxes) > 1:
+            boxes = _distinct(boxes)
+        if len(boxes) > 1:
+            boxes = [b for b in boxes
+                     if not any(_wraps(b, other) for other in boxes)]
+        return boxes
 
-    pool = named or shaped
+    pool = _narrow(named) or _narrow(shaped)
     if not pool:
         if dump:
             _dump_refusal(nodes, "no_canvas")

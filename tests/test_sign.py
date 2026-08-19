@@ -891,3 +891,56 @@ class TestAFingerPastTheEdge:
         src = (Path(__file__).resolve().parents[1]
                / "src/apt_log/ui/static/phone.js").read_text(encoding="utf-8")
         assert "out.error === 'empty'" in src
+
+
+class TestASheetThatNamesNothing:
+    """inMyTeam's signature sheet, as the phone actually reports it.
+
+    It names nothing — no resource-id, no telling class — so it takes the
+    SHAPED path, and for a while only the NAMED path was de-duplicated and
+    de-nested. Compose hands the shaped path the bottom sheet's own wrapper
+    TWICE at identical bounds plus the real canvas inside it, so the finder
+    refused "ambiguous" and she could not sign at all. Intermittent, because
+    how many wrappers Compose emits varies.
+    """
+
+    @staticmethod
+    def _node(b, cls="android.view.View", clickable="false", rid=""):
+        return (f'<node class="{cls}" resource-id="{rid}" '
+                f'clickable="{clickable}" text="" '
+                f'bounds="[{b[0]},{b[1]}][{b[2]},{b[3]}]" />')
+
+    def _sheet(self, wrappers=2):
+        parts = [self._node([0, 0, 720, 1600], "android.widget.FrameLayout"),
+                 self._node([0, 64, 720, 1561], rid="touch_outside",
+                            clickable="true")]
+        parts += [self._node([0, 923, 720, 1561]) for _ in range(wrappers)]
+        parts.append(self._node([13, 998, 707, 1469]))
+        return "<hierarchy>" + "".join(parts) + "</hierarchy>"
+
+    def test_the_canvas_is_found_through_two_identical_wrappers(self):
+        assert sign.find_canvas(self._sheet(2), dump=False) == (
+            [13, 998, 707, 1469], "")
+
+    def test_and_through_one(self):
+        assert sign.find_canvas(self._sheet(1), dump=False) == (
+            [13, 998, 707, 1469], "")
+
+    def test_and_through_none(self):
+        assert sign.find_canvas(self._sheet(0), dump=False) == (
+            [13, 998, 707, 1469], "")
+
+    def test_the_scrim_is_never_the_canvas(self):
+        """touch_outside spans 93% of the screen and would win on area."""
+        found, _ = sign.find_canvas(self._sheet(), dump=False)
+        assert found != [0, 64, 720, 1561]
+
+    def test_two_canvases_side_by_side_still_refuse(self):
+        """The check-out page shows a patient box AND a staff box. Neither
+        wraps the other, and guessing between them is exactly what this
+        finder exists not to do."""
+        xml = ("<hierarchy>"
+               + self._node([16, 200, 704, 900])
+               + self._node([16, 950, 704, 1500])
+               + "</hierarchy>")
+        assert sign.find_canvas(xml, dump=False) == (None, "ambiguous")
