@@ -819,30 +819,69 @@ def _click_element(driver, el: dict) -> bool:
     return True
 
 
+# How many points may ride in one action chain. A real signature is one or
+# two hundred and goes in a single chain; the cap only bounds the worst case
+# MAX_POINTS allows, so one gesture script cannot run for half a minute.
+BATCH_MAX_POINTS = 600
+
+
+def _batches(paths):
+    """Strokes grouped into action chains, keeping whole strokes together."""
+    batch, points = [], 0
+    for path in paths:
+        if batch and points + len(path) > BATCH_MAX_POINTS:
+            yield batch
+            batch, points = [], 0
+        batch.append(path)
+        points += len(path)
+    if batch:
+        yield batch
+
+
 def _perform(driver, paths) -> None:
-    """Drive the strokes through W3C pointer actions. Thin on purpose — the
-    logic worth testing lives in build_paths and find_canvas."""
+    """Drive the strokes through W3C pointer actions.
+
+    EVERY STROKE IN ONE CHAIN. Each stroke used to be its own `perform()`,
+    with a fresh pointer input of the same id and a sleep in between — so the
+    pen-up of one stroke and the pen-down of the next were two separate
+    gesture scripts whose ordering rested on that sleep and on the app
+    keeping up. A signature came back from the field with its middle stroke
+    missing, twice; the log this now carries proved the replay had been
+    handed all three (strokes=3 points=24+28+11), so the loss was here.
+
+    Inside one chain the pauses and the up/down boundaries are the driver's
+    to honour, and the whole signature is one gesture script. Nothing about
+    the strokes themselves changed — the same points, the same order.
+    """
     from selenium.webdriver.common.actions import interaction
     from selenium.webdriver.common.actions.action_builder import ActionBuilder
     from selenium.webdriver.common.actions.pointer_input import PointerInput
 
-    for i, path in enumerate(paths):
-        if i:
-            time.sleep(STROKE_GAP)
+    for batch in _batches(paths):
         actions = ActionBuilder(driver,
                                 mouse=PointerInput(interaction.POINTER_TOUCH,
                                                    "touch"),
                                 duration=MOVE_MS)
         pen = actions.pointer_action
-        pen.move_to_location(*path[0])
-        pen.pause(PEN_SETTLE)
-        pen.pointer_down()
-        pen.pause(PEN_SETTLE)
-        for x, y in path[1:]:
-            pen.move_to_location(x, y)
-        pen.pause(PEN_SETTLE)
-        pen.pointer_up()
+        for i, path in enumerate(batch):
+            if i:
+                # INSIDE the chain, not a sleep between two of them. See below.
+                pen.pause(STROKE_GAP)
+            pen.move_to_location(*path[0])
+            pen.pause(PEN_SETTLE)
+            pen.pointer_down()
+            pen.pause(PEN_SETTLE)
+            for x, y in path[1:]:
+                pen.move_to_location(x, y)
+            pen.pause(PEN_SETTLE)
+            pen.pointer_up()
         actions.perform()
+        # Release the input source rather than leaving it half-alive for the
+        # next chain to inherit.
+        try:
+            actions.clear_actions()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def execute(payload: dict, status_path: Path | None = None) -> Status:

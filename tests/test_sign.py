@@ -269,26 +269,57 @@ class TestStrokeSeparation:
         (device,) = [d for d in call["actions"] if d["type"] == "pointer"]
         return device["actions"]
 
-    def test_each_stroke_is_its_own_performed_chain(self):
+    def test_the_whole_signature_is_ONE_chain(self):
+        """Each stroke used to be its own perform(), with a fresh pointer
+        input of the same id and a sleep in between — so a stroke's pen-up and
+        the next stroke's pen-down were two separate gesture scripts whose
+        ordering rested on that sleep. A signature came back from the field
+        with its middle stroke missing, twice, and the log proved the replay
+        had been handed all three (strokes=3 points=24+28+11)."""
         calls, _ = self._replay([[(10, 10), (20, 20)], [(50, 50), (60, 60)]])
-        assert len(calls) == 2
+        chains = [c for c in calls if c and "actions" in c]
+        assert len(chains) == 1
 
     def test_the_pen_settles_between_positioning_and_touching(self):
         calls, _ = self._replay([[(10, 10), (20, 20)]])
-        kinds = [a["type"] for a in self._pointer_actions(calls[0])]
+        chain = next(c for c in calls if c and "actions" in c)
+        kinds = [a["type"] for a in self._pointer_actions(chain)]
         assert kinds[:4] == ["pointerMove", "pause", "pointerDown", "pause"]
         assert kinds[-2:] == ["pause", "pointerUp"]
 
     def test_moves_are_fast_not_the_w3c_default(self):
         calls, _ = self._replay([[(10, 10), (20, 20), (30, 30)]])
-        moves = [a for a in self._pointer_actions(calls[0])
+        chain = next(c for c in calls if c and "actions" in c)
+        moves = [a for a in self._pointer_actions(chain)
                  if a["type"] == "pointerMove"]
         assert all(m["duration"] == sign.MOVE_MS for m in moves)
 
-    def test_strokes_are_separated_by_a_gap_in_time(self):
-        _, slept = self._replay([[(10, 10)], [(20, 20)], [(30, 30)]])
-        assert slept.call_count == 2
-        slept.assert_called_with(sign.STROKE_GAP)
+    def test_every_stroke_gets_its_own_down_and_up(self):
+        """The property the connector-line fix bought, kept inside one chain:
+        three strokes are three touches, not one long scrawl."""
+        calls, _ = self._replay([[(10, 10)], [(20, 20)], [(30, 30)]])
+        chain = next(c for c in calls if c and "actions" in c)
+        kinds = [a["type"] for a in self._pointer_actions(chain)]
+        assert kinds.count("pointerDown") == 3
+        assert kinds.count("pointerUp") == 3
+
+    def test_the_gap_between_strokes_rides_inside_the_chain(self):
+        """A pause the driver honours, not a sleep between two calls it
+        cannot see."""
+        calls, slept = self._replay([[(10, 10)], [(20, 20)], [(30, 30)]])
+        chain = next(c for c in calls if c and "actions" in c)
+        pauses = [a for a in self._pointer_actions(chain)
+                  if a["type"] == "pause"]
+        assert any(a.get("duration") == int(sign.STROKE_GAP * 1000)
+                   for a in pauses)
+        assert slept.call_count == 0
+
+    def test_a_monstrous_signature_is_split_but_strokes_are_not(self):
+        """The cap bounds one gesture script's runtime; a stroke is never cut
+        in half by it."""
+        paths = [[(0, 0)] * 400, [(0, 0)] * 400]
+        assert [len(b) for b in sign._batches(paths)] == [1, 1]
+        assert all(len(st) == 400 for b in sign._batches(paths) for st in b)
 
 
 # The legacy caregiver-signature page, as photographed live: a portrait

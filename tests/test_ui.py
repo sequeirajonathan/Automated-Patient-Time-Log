@@ -1854,3 +1854,14 @@ class TestTheSignaturePadIsSelfContained:
                     "txt": "Clear"}]}
         got = _sheet_actions(doc, screenview.build(doc))
         assert [a["txt"] for a in got] == ["Done", "Clear"]
+
+    def test_the_legacy_row_can_actually_hide(self):
+        """`.padrow { display:flex }` beats the UA's `[hidden]`, so the
+        coordinate pair stayed on screen beside the app's real buttons — and
+        pressing it answered "this screen has no signature box" while the
+        app's own Clear worked right next to it."""
+        import re
+
+        css = re.sub(r"/\*.*?\*/", "", self.PAGE.read_text(encoding="utf-8"),
+                     flags=re.S)
+        assert re.search(r"\.padrow\[hidden\] \{[^}]*display:none", css)

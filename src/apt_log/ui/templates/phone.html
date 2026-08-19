@@ -856,6 +856,12 @@
   /* Author display beats UA [hidden] — the OTP bar taught this the hard
      way; the app-side row must actually vanish off the signature moment. */
   .approw[hidden] { display:none; }
+  /* Same trap, one row down: `.padrow { display:flex }` beats the UA's
+     `[hidden] { display:none }`, so the legacy coordinate pair stayed on
+     screen next to the app's real buttons. Pressing it answered "this screen
+     has no signature box" — reported, with the app's own Clear working right
+     beside it. */
+  .padrow[hidden] { display:none; }
   /* Label over buttons. This used to centre its children, which was right
      for one label beside two buttons and wrong the moment the app's own
      buttons came inside the pad: each shrank to its own caption and sat in
