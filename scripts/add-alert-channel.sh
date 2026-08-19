@@ -64,15 +64,31 @@ umask 077
     [[ -n "$PUSH_TOKEN" ]] && echo "ALERT_PUSHOVER_TOKEN=$PUSH_TOKEN"
     [[ -n "$PUSH_USER" ]] && echo "ALERT_PUSHOVER_USER=$PUSH_USER"
 } > "$CONF"
-chmod 600 "$CONF"
-chown root:root "$CONF" 2>/dev/null || true
+# Readable by the service user, because the service user is who sends. The
+# first version wrote it 0600 root:root, which only root could read — so
+# every alert raised BY THE PORTAL (it runs as this user) reported "no alert
+# channel configured" while a hand-run `sudo alert.sh` worked perfectly. The
+# credential files beside it get this right: secrets.env is 0600 apt:apt.
+SERVICE_USER="${APTLOG_USER:-apt}"
+chmod 640 "$CONF"
+chown "root:$SERVICE_USER" "$CONF" 2>/dev/null \
+    || chown "$SERVICE_USER:$SERVICE_USER" "$CONF" 2>/dev/null || true
+if ! sudo -u "$SERVICE_USER" test -r "$CONF" 2>/dev/null; then
+    echo "WARNING: $SERVICE_USER cannot read $CONF — the portal's own alerts" >&2
+    echo "         will report no channel configured." >&2
+fi
 unset PUSH_TOKEN PUSH_USER
 
 echo
-echo "Wrote $CONF (mode 0600)."
+echo "Wrote $CONF (mode 0640, readable by $SERVICE_USER)."
 echo "Sending a test notification — it should appear on your phone."
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-"$HERE/alert.sh" --url "${APTLOG_PORTAL_URL:-https://aptlog-fl/app}" \
+# Sent AS THE SERVICE USER, not as root. Run as root it proves only that
+# root can send, which is what hid the unreadable config: every hand-run
+# test passed while every alert the portal raised said no channel was
+# configured. A test that does not run as the thing being tested is not one.
+sudo -u "$SERVICE_USER" "$HERE/alert.sh" \
+    --url "${APTLOG_PORTAL_URL:-https://aptlog-fl.tailf012c7.ts.net/app}" \
     "Test from the controller. If you can read this and tapping it opens the portal, the code notification will reach you too."
 echo
 echo "Nothing arrived? Check the journal, which never stays quiet about it:"
