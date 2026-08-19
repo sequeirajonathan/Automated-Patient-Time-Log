@@ -660,6 +660,17 @@
   // A half-drawn signature committed to a visit record is not a cosmetic
   // fault, so this is a lock rather than a hint: the controls that reach the
   // phone go dead until the replay says it has finished.
+  //
+  // WITH A CEILING, for the same reason the busy overlay has one. The lock
+  // lifts on the replay's status push, and a push can be missed — a dropped
+  // socket, a controller restarted mid-replay. Without a ceiling that leaves
+  // step two dead for good and no way at all to press the app's own Done,
+  // which is a worse failure than the one this prevents. Far longer than any
+  // real replay: five to six seconds of drawing, plus the settle before the
+  // ink goes in and up to two redraws of a stroke that left none.
+  const PAD_LOCK_CEILING = 30000;
+  let padLockTimer = 0;
+
   function padWaiting(on) {
     const sheet = document.getElementById('signsheet');
     if (sheet) sheet.classList.toggle('waiting', !!on);
@@ -671,6 +682,17 @@
     }
     const send = document.getElementById('sign-send');
     if (send) send.disabled = !!on;
+    if (!on) { clearTimeout(padLockTimer); padLockTimer = 0; return; }
+    // Armed once per wait, never re-armed: the row is re-locked every time
+    // the app-button row is rebuilt, and restarting the clock on each of
+    // those would let a chatty screen hold the lock open indefinitely.
+    if (padLockTimer) return;
+    padLockTimer = setTimeout(() => {
+      padLockTimer = 0;
+      pad.waitingId = '';
+      padWaiting(false);
+      toast(i18n.signLockLapsed || '');
+    }, PAD_LOCK_CEILING);
   }
 
   function padSend() {

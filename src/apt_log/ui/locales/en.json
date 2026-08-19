@@ -236,6 +236,7 @@
   "sign.button": "Sign",
   "sign.erase": "Erase",
   "sign.instruction": "Sign here with your finger. It will be drawn onto the phone's signature box — then check the screen and press the app's own save button.",
+  "sign.lock_lapsed": "The phone never said whether the drawing finished. Check the phone's screen before saving.",
   "sign.no_canvas": "This screen has no signature box. Open the app's signature screen first, then sign here.",
   "sign.onphone": "On the phone:",
   "sign.preview": "How it will land:",

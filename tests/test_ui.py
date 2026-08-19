@@ -2036,8 +2036,55 @@ class TestTheAppsOwnButtonsWaitForTheInk:
         assert "#signsheet button[disabled]" in css
         assert "#signsheet button[disabled]:active" in css
 
-    def test_both_languages_say_it(self):
+    # ------------------------------------------------------- and it lets go
+    def test_the_lock_has_a_ceiling(self):
+        """The busy overlay carries one for the same reason, in this file's
+        own words: a stuck overlay is worse than a missing one. The lock lifts
+        on a status push, and a push can be missed — a dropped socket, a
+        controller restarted mid-replay. Without a ceiling that leaves step
+        two dead for good and no way at all to press the app's own Done."""
+        js = self._js()
+        assert "PAD_LOCK_CEILING" in js
+        body = js[js.index("function padWaiting("):]
+        body = body[:body.index("\n  }")]
+        assert "setTimeout" in body and "PAD_LOCK_CEILING" in body
+
+    def test_the_ceiling_clears_far_past_any_real_replay(self):
+        """Six seconds of drawing, plus the settle before the ink goes in and
+        up to two redraws of a stroke that left none."""
+        js = self._js()
+        line = [l for l in js.splitlines() if "PAD_LOCK_CEILING =" in l][0]
+        assert int(line.split("=")[1].strip().rstrip(";")) >= 20000
+
+    def test_a_lapse_gives_the_id_back_too(self):
+        """A lock released with the id still held would swallow the status
+        push that finally arrives, and the toast with it."""
+        js = self._js()
+        body = js[js.index("padLockTimer = setTimeout("):]
+        body = body[:body.index("PAD_LOCK_CEILING);")]
+        assert "pad.waitingId = ''" in body
+        assert "padWaiting(false)" in body
+
+    def test_the_clock_is_not_restarted_by_a_rebuild(self):
+        """The row is re-locked every time it is rebuilt, and the payload
+        changes while the ink lands — re-arming there would let a chatty
+        screen hold the lock open indefinitely."""
+        js = self._js()
+        body = js[js.index("function padWaiting("):]
+        body = body[:body.index("\n  }")]
+        assert "if (padLockTimer) return;" in body
+
+    def test_the_lapse_says_something(self):
+        js = self._js()
+        assert "i18n.signLockLapsed" in js
+
+    @pytest.mark.parametrize("key", ["sign.wait_phone", "sign.lock_lapsed"])
+    def test_both_languages_say_it(self, key):
         base = Path(__file__).resolve().parents[1] / "src/apt_log/ui/locales"
         for name in ("en.json", "es.json"):
             assert json.loads(
-                (base / name).read_text(encoding="utf-8")).get("sign.wait_phone")
+                (base / name).read_text(encoding="utf-8")).get(key)
+
+    def test_the_lapse_sentence_reaches_the_script(self, client):
+        """A key the template never passes is an empty toast."""
+        assert "signLockLapsed:" in client.get("/app").text
