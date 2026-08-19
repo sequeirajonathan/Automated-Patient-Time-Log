@@ -392,6 +392,11 @@ def _item(node: dict, kind: str) -> dict:
         "enabled": node.get("enabled", True) is not False,
         "b": node["b"],
     }
+    # A name the PORTAL supplies for a control the app left nameless, carried
+    # as a key rather than a string because the model is language-free until
+    # somebody asks for it in a language. Resolved by `label_keys` at render.
+    if node.get("txt_key") and not out["txt"]:
+        out["txt_key"] = node["txt_key"]
     if "rid" in node:
         # The aim carries the bounds AS CAPTURED at the element's scroll
         # step — tap truth — while node["b"] may be the virtual page
@@ -402,6 +407,80 @@ def _item(node: dict, kind: str) -> dict:
         if node.get("step"):
             out["aim"]["step"] = node["step"]
     return out
+
+
+# ---------------------------------------------------------------- naming
+# Controls the app ships with no name of any kind, named by the portal.
+#
+# The reflow can only print what a control tells it, and some tell it nothing:
+# inMyTeam's agency filter is an EditText whose placeholder Android counts as
+# CONTENT (`showing-hint="false"`), so the typed-content rule strips it and the
+# box draws empty; the refresh beside it is a bare `View` that Android itself
+# flags `NAF="true"` — not accessibility friendly, no name at all. Reported
+# from the field as a blank area and a `···`.
+#
+# This is a last resort and deliberately small. A label the app supplies is
+# always better, because it cannot go stale when the app is redesigned. These
+# two are matched on SHAPE AND PLACE rather than on their (absent) ids, which
+# is exactly as brittle as it sounds — so each carries what it was measured
+# against, and a miss costs the blank box that is already there rather than a
+# wrong name on the wrong control.
+INMYTEAM = "com.inmyteam.inmyteam"
+# A code screen also has one unnamed EditText, and calling that one a filter
+# would be worse than leaving it blank. The top band is what separates them:
+# the filter sits under the title bar, the code box in the middle of the page.
+TOP_BAND = 0.12
+
+
+def _name_the_unnamed(elements: list[dict], statics: list[dict], doc: dict,
+                      w: int, h: int) -> None:
+    """Set `txt_key` on controls the app left nameless. In place."""
+    package = doc.get("h_app") or (doc.get("app") or "").split("/")[0]
+    if package != INMYTEAM:
+        return
+    words = " ".join(s.get("txt", "") for s in statics).lower()
+    # Never on the sign-in walk. Its screens carry their own unnamed field,
+    # and §12 already learned what mistaking one inMyTeam screen for another
+    # costs.
+    if any(k in words for k in ("verify your account", "enter your code",
+                                "sign in with your phone")):
+        return
+    for e in elements:
+        if e.get("rid") or e.get("txt") or e.get("has_text"):
+            continue
+        x1, y1, x2, y2 = e["b"]
+        if y2 > h * TOP_BAND:
+            continue
+        cls, width = e.get("cls", ""), x2 - x1
+        # The filter: the wide field across the top band.
+        if cls == "EditText" and width > w * 0.5:
+            e["txt_key"] = "papp.imt.agency_filter"
+        # Refresh: the small square at the right-hand end of that same row.
+        elif cls == "View" and width < w * 0.10 and x1 > w * 0.85:
+            e["txt_key"] = "papp.imt.refresh"
+
+
+def label_keys(model: dict, t) -> dict:
+    """Resolve every `txt_key` through the caller's translator.
+
+    Done here rather than in the template because a dozen render sites read
+    `it.txt`, and a portal-supplied name has to arrive as ordinary text or it
+    would need saying at every one of them. Done here rather than in `build`
+    because the model is language-free until somebody asks for it in a
+    language — which is what lets the same document render Spanish for her
+    and English for whoever is helping her, at the same moment.
+    """
+    def walk(items):
+        for it in items or ():
+            key = it.get("txt_key")
+            if key and not it.get("txt"):
+                it["txt"] = t(key)
+            walk(it.get("parts"))
+    for row in model.get("rows") or ():
+        walk(row.get("items"))
+    if model.get("nav"):
+        walk(model["nav"].get("trailing"))
+    return model
 
 
 def build(doc: dict) -> dict | None:
@@ -447,6 +526,8 @@ def build(doc: dict) -> dict | None:
         elements = [e for j, e in enumerate(elements)
                     if j > c or (j != c and not _contains(cov, e["b"]))]
         statics = [s for s in statics if not _contains(cov, s["b"])]
+
+    _name_the_unnamed(elements, statics, doc, w, h)
 
     # The app's own bottom tab bar comes out first, before anything is
     # folded or banded: its captions and the containers under them are

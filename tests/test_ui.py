@@ -1038,3 +1038,122 @@ class TestScreenChurnDoesNotRepaint:
                         self._doc(h_app="com.android.chrome"),
                         self._doc(elements=[{"rid": "x"}])):
             assert _render_key(a) != _render_key(changed)
+
+
+class TestControlsTheAppNeverNamed:
+    """Reported from the field twice: the agency filter draws as a blank area
+    and the refresh beside it as `···`.
+
+    Neither has a name the reflow is allowed to print. The filter is an
+    EditText whose placeholder Android counts as CONTENT — `showing-hint` is
+    literally false on the live phone — so the typed-content rule that keeps a
+    typed code out of the screen document strips it, correctly. The refresh is
+    a bare View that Android itself flags `NAF="true"`: no id, no text, no
+    description. So the portal supplies both names, translated.
+    """
+
+    W, H = 720, 1600
+
+    def _doc(self, elements, statics=()):
+        return {"id": "f1", "size": [self.W, self.H], "h_app":
+                "com.inmyteam.inmyteam",
+                "elements": list(elements), "statics": list(statics)}
+
+    FILTER = {"rid": "", "cls": "EditText", "b": [13, 106, 668, 143],
+              "has_text": False}
+    REFRESH = {"rid": "", "cls": "View", "b": [678, 109, 710, 141],
+               "has_text": False}
+
+    def _keys(self, doc):
+        from apt_log.ui.screenview import build
+
+        found = {}
+        for row in build(doc)["rows"]:
+            for it in row["items"]:
+                if it.get("txt_key"):
+                    found[tuple(it["aim_b"] if "aim_b" in it else it["b"])] = \
+                        it["txt_key"]
+        return set(found.values())
+
+    def test_the_filter_is_named_on_the_page(self):
+        keys = self._keys(self._doc([self.FILTER, self.REFRESH],
+                                    [{"txt": "Today", "b": [70, 191, 106, 206]}]))
+        assert "papp.imt.agency_filter" in keys
+
+    def test_the_refresh_is_named_too_even_though_the_reflow_drops_it(self):
+        """Named at the source, and asserted there rather than on the page,
+        because the refresh does not currently reach the page at all.
+
+        It is an anonymous textless `View` and something upstream of banding
+        discards it — the same class of rule that stops every wrapper box in
+        an Android tree becoming a row. That is a separate defect from this
+        one and it is not fixed here; naming it is what makes it *eligible*
+        to be kept, since a control the portal can name is not anonymous any
+        more. This test holds the name so the two halves meet when the drop
+        is fixed, and says plainly that they have not met yet.
+        """
+        from apt_log.ui.screenview import _name_the_unnamed
+
+        els = [dict(e, aim_b=e["b"]) for e in (self.FILTER, self.REFRESH)]
+        _name_the_unnamed(els, [], self._doc([]), self.W, self.H)
+        assert [e.get("txt_key") for e in els] == ["papp.imt.agency_filter",
+                                                   "papp.imt.refresh"]
+
+    def test_the_code_box_is_never_called_a_filter(self):
+        """The one that matters. A code screen also has a single unnamed
+        EditText, and §12 already paid for mistaking one inMyTeam screen for
+        another — there the walk would have typed a phone number over a
+        part-entered code. Two independent guards: the screen's own words,
+        and the band the control sits in."""
+        code_box = {"rid": "", "cls": "EditText", "b": [13, 1041, 707, 1083],
+                    "has_text": False}
+        doc = self._doc([code_box], [{"txt": "Verify Your Account",
+                                      "b": [0, 296, 720, 340]}])
+        assert self._keys(doc) == set()
+
+    def test_the_words_alone_are_enough_to_refuse(self):
+        """Even a field in the top band, if the screen is asking for a code."""
+        doc = self._doc([self.FILTER], [{"txt": "Enter your code",
+                                         "b": [48, 1057, 125, 1073]}])
+        assert self._keys(doc) == set()
+
+    def test_the_band_alone_is_enough_to_refuse(self):
+        """And even with no telltale words, a field down the page is not the
+        filter — the filter sits under the title bar."""
+        low = dict(self.FILTER, b=[13, 1041, 668, 1083])
+        assert self._keys(self._doc([low])) == set()
+
+    def test_another_app_is_left_alone(self):
+        doc = self._doc([self.FILTER])
+        doc["h_app"] = "com.hhaexchange.mobile"
+        assert self._keys(doc) == set()
+
+    def test_a_control_that_names_itself_is_not_renamed(self):
+        named = dict(self.FILTER, has_text=True, txt="Buscar")
+        assert self._keys(self._doc([named])) == set()
+
+    def test_both_names_exist_in_both_languages(self):
+        from apt_log.ui.i18n import Translator
+
+        for lang in ("en", "es"):
+            t = Translator(lang)
+            for key in ("papp.imt.agency_filter", "papp.imt.refresh"):
+                assert t(key) and t(key) != key
+
+    def test_the_key_is_resolved_into_the_text_the_page_prints(self):
+        """`label_keys` runs at render time, not build time — the model is
+        language-free until somebody asks for it in a language, which is what
+        lets the same document render Spanish for her and English for whoever
+        is helping her."""
+        from apt_log.ui.i18n import Translator
+        from apt_log.ui.screenview import build, label_keys
+
+        doc = self._doc([self.FILTER],
+                        [{"txt": "Today", "b": [70, 191, 106, 206]}])
+        es = label_keys(build(doc), Translator("es"))
+        printed = [it.get("txt") for row in es["rows"] for it in row["items"]]
+        assert "Filtrar por agencia" in printed
+
+        en = label_keys(build(doc), Translator("en"))
+        printed = [it.get("txt") for row in en["rows"] for it in row["items"]]
+        assert "Filter by agency" in printed

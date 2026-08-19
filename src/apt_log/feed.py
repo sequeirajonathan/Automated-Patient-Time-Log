@@ -1401,10 +1401,32 @@ def elements(xml: str, label: bool = False) -> list[dict]:
             "enabled": _attr(raw, "enabled") != "false",
             "has_text": bool(_label(raw)),
         }
-        if label and short not in EDITABLE:
+        if label and (short not in EDITABLE or _is_showing_hint(raw)):
             entry["txt"] = _clean(_label(raw))
         found.append(entry)
     return found
+
+
+def _is_showing_hint(raw: str) -> bool:
+    """Whether a field's text is its PLACEHOLDER rather than its contents.
+
+    Android tracks this itself and Appium publishes it as `showing-hint`, so
+    the one question that matters here — "is this string something a person
+    typed?" — has a real answer instead of a guess. A field showing its hint
+    holds nothing, so its text is a label the app drew, and labelling the box
+    with it can leak nothing: the moment anything is typed the flag goes false
+    and the text stops being disclosed again.
+
+    This is the honest version of a rule that was previously all-or-nothing.
+    Editable text was excluded outright because it "is what has been typed",
+    which is true right up until the field is empty and Android is drawing
+    "Enter your code" into it — and then a blank box is all the page can show.
+
+    Absent means false. The adb dump does not carry the attribute at all
+    (only Appium's page source does), so a hierarchy read through the adb
+    fallback labels nothing here, which is the safe direction.
+    """
+    return _attr(raw, "showing-hint") == "true"
 
 
 # The wireframe draws labels too, and an unbounded screen would make the pushed
@@ -1432,7 +1454,7 @@ def statics(xml: str) -> list[dict]:
         if _attr(raw, "package") == "com.android.systemui":
             continue                      # see elements(): never care content
         cls = (_attr(raw, "class") or raw[1:].split()[0].rstrip("/>")).rsplit(".", 1)[-1]
-        if cls in EDITABLE:
+        if cls in EDITABLE and not _is_showing_hint(raw):
             continue
         text = _clean(_label(raw))
         rid = _attr(raw, "resource-id").split("/")[-1]
