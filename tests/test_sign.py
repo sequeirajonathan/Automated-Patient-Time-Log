@@ -149,12 +149,21 @@ class TestExecute:
         driver.current_package = "com.hhaexchange.caregiver"
         driver.page_source = CANVAS + CHROME
         performed = []
-        with patch.object(sign, "_perform",
-                          side_effect=lambda _d, paths: performed.extend(paths)), \
+        measured = []
+
+        def stub(_d, paths, bounds=None, serial=None):
+            performed.extend(paths)
+            measured.append(bounds)
+
+        with patch.object(sign, "_perform", side_effect=stub), \
              patch("apt_log.resident.run", side_effect=lambda w: w(driver)):
             status = sign.execute(self._payload(), tmp_path / "s.json")
         assert status.state == "done"
         assert performed, "nothing was drawn"
+        # The canvas the finder produced is also the window each stroke is
+        # measured in; a replay that did not pass it would lose the check
+        # that a stroke actually landed.
+        assert measured and measured[0], "the canvas was not handed over"
         for x, y in [p for path in performed for p in path]:
             assert 100 <= x <= 1500 and 200 <= y <= 650
         driver.find_element.assert_not_called()   # no button was looked for,
@@ -944,3 +953,78 @@ class TestASheetThatNamesNothing:
                + self._node([16, 950, 704, 1500])
                + "</hierarchy>")
         assert sign.find_canvas(xml, dump=False) == (None, "ambiguous")
+
+
+class TestAStrokeThatDidNotLandIsDrawnAgain:
+    """Three attempts at making the seam between strokes reliable did not
+    hold, and every field report had the same shape: the FIRST stroke lands
+    and a later one does not. perform() returns when the driver ACCEPTED the
+    chain, and nothing in that answer says the ink was drawn — only the
+    screen does. So the screen is asked.
+    """
+
+    BOUNDS = [13, 998, 707, 1469]
+
+    def _replay(self, ink_readings):
+        """ink_readings: what the canvas measures, in call order."""
+        driver = MagicMock()
+        drawn = []
+        readings = list(ink_readings)
+        with patch.object(sign, "_draw",
+                          side_effect=lambda d, path: drawn.append(path)), \
+             patch.object(sign, "_canvas_ink",
+                          side_effect=lambda b, s=None: readings.pop(0)), \
+             patch.object(sign.time, "sleep"):
+            sign._perform(driver, [[(1, 1)], [(2, 2)]], bounds=self.BOUNDS)
+        return drawn
+
+    def test_a_stroke_that_landed_is_drawn_once(self):
+        # before=0 after=500 | before=500 after=900
+        drawn = self._replay([0, 500, 500, 900])
+        assert drawn == [[(1, 1)], [(2, 2)]]
+
+    def test_a_stroke_that_left_no_ink_is_drawn_again(self):
+        """The reported failure, exactly: stroke one lands, stroke two does
+        not."""
+        # s1: before=0 after=500. s2: before=500 after=500 (nothing), retry
+        # then after=900.
+        drawn = self._replay([0, 500, 500, 500, 900])
+        assert drawn == [[(1, 1)], [(2, 2)], [(2, 2)]]
+
+    def test_only_the_missing_stroke_is_redrawn(self):
+        """Never the whole signature, and the canvas is never cleared — so a
+        retry cannot double a stroke that landed."""
+        drawn = self._replay([0, 500, 500, 500, 900])
+        assert drawn.count([(1, 1)]) == 1
+
+    def test_it_gives_up_rather_than_hammering(self):
+        drawn = self._replay([0, 0, 0, 0, 0, 0, 0, 0])
+        # Two strokes, each drawn once and retried at most STROKE_RETRIES
+        # times: a canvas that never takes ink costs a bounded number of
+        # attempts, not an endless one.
+        assert len(drawn) == 2 * (1 + sign.STROKE_RETRIES)
+
+    def test_a_screenshot_that_fails_is_not_read_as_no_ink(self):
+        """None is not zero. A failing screencap must never make a working
+        replay redraw everything."""
+        drawn = self._replay([None, None])
+        assert drawn == [[(1, 1)], [(2, 2)]]
+
+    def test_without_bounds_it_behaves_exactly_as_before(self):
+        driver = MagicMock()
+        drawn = []
+        with patch.object(sign, "_draw",
+                          side_effect=lambda d, path: drawn.append(path)), \
+             patch.object(sign, "_canvas_ink") as measured, \
+             patch.object(sign.time, "sleep"):
+            sign._perform(driver, [[(1, 1)], [(2, 2)]])
+        assert drawn == [[(1, 1)], [(2, 2)]]
+        assert measured.call_count == 0
+
+    def test_the_replay_hands_the_canvas_over_to_be_measured(self):
+        """The bounds the finder already produced are the measuring window;
+        a replay that did not pass them would silently lose the check."""
+        import inspect
+
+        body = inspect.getsource(sign.execute)
+        assert "bounds=bounds" in body
