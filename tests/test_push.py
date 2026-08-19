@@ -216,6 +216,32 @@ class TestTheKey:
 
         assert _check_sub(push.VAPID_SUBJECT)
 
+    def test_the_subject_is_not_an_address_apple_refuses(self, store):
+        """Apple answers `.invalid` with 403 BadJwtToken — a message naming
+        nothing, which sent this looking at keys, clocks and claim shapes.
+        Established by posting tokens signed with four different subjects to
+        a deliberately meaningless Apple endpoint: the refused one came back
+        403, the accepted ones 400 BadDeviceToken, which is Apple saying the
+        token was fine and only the endpoint was not."""
+        assert ".invalid" not in push.VAPID_SUBJECT
+        assert ".test" not in push.VAPID_SUBJECT
+        assert ".example" not in push.VAPID_SUBJECT
+
+    def test_the_subject_is_a_bare_origin_with_no_path(self, store):
+        """py_vapid's regex allows an https origin and no path, and rejects
+        anything else as "Missing 'sub'" — which is not what is wrong."""
+        from urllib.parse import urlparse
+
+        if push.VAPID_SUBJECT.startswith("https://"):
+            assert urlparse(push.VAPID_SUBJECT).path in ("", "/")
+
+    def test_the_notification_link_and_the_subject_share_one_origin(self):
+        """Two copies of a hostname is one wrong hostname waiting to happen,
+        and this one ends up on a lock screen."""
+        from apt_log import macros
+
+        assert macros.PORTAL_URL.startswith(push.PORTAL_ORIGIN)
+
     def test_it_lives_where_the_services_can_actually_write(self):
         """/var/lib/aptlog is the service user's; /etc/aptlog is root's."""
         assert "/var/lib/" in str(push.KEY_PATH)

@@ -59,17 +59,27 @@ KEY_PATH = Path(os.environ.get("APTLOG_VAPID_PATH",
 STORE_PATH = Path(os.environ.get("APTLOG_PUSH_PATH",
                                  "/var/lib/aptlog/push.json"))
 
-# Who the push service should complain to. Not a real inbox — it is a contact
-# of last resort in the VAPID spec, and this fleet is one machine.
+# Where this portal answers, which is also the only address it has to give.
+PORTAL_ORIGIN = os.environ.get("APTLOG_PORTAL_ORIGIN",
+                               "https://aptlog-fl.tailf012c7.ts.net")
+
+# Who the push service should contact about this sender. RFC 8292 allows a
+# `mailto:` or an `https:` origin, and the origin is the honest answer here:
+# there is no inbox, and this URL is genuinely where the sender lives.
 #
-# The domain has to have a DOT in it. py_vapid checks the address against its
-# own regex and refuses `sub` without one, saying "Missing 'sub' from claims"
-# — which is true of nothing: the claim was there and was rejected for its
-# shape. `aptlog@invalid` failed exactly that way. `.invalid` is the TLD
-# RFC 2606 reserves for addresses that must never resolve, so this stays
-# honestly unreachable while being well formed.
-VAPID_SUBJECT = os.environ.get("APTLOG_VAPID_SUBJECT",
-                               "mailto:aptlog@aptlog.invalid")
+# APPLE REFUSES A `.invalid` DOMAIN. The first version used
+# `mailto:aptlog@aptlog.invalid` — chosen because RFC 2606 reserves that TLD
+# for addresses that must never resolve, which felt like the honest way to
+# say "no inbox". Apple answers that with 403 BadJwtToken, a message that
+# names nothing and sent this looking at keys, clocks and claim shapes for
+# an hour. Established by signing tokens with four different subjects and
+# posting each to a deliberately meaningless Apple endpoint: the refused one
+# comes back 403, the accepted ones come back 400 BadDeviceToken, which is
+# Apple saying the TOKEN was fine and only the fake endpoint was not.
+#
+# py_vapid has its own opinion on top: its regex allows an https origin but
+# no path, so this must stay a bare origin.
+VAPID_SUBJECT = os.environ.get("APTLOG_VAPID_SUBJECT", PORTAL_ORIGIN)
 
 _lock = threading.Lock()
 

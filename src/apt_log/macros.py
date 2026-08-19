@@ -1450,8 +1450,13 @@ def _inmyteam_login(driver, report) -> None:
 # something friendlier — a tap that goes nowhere, on the one notification whose
 # entire job is to be tapped. Read off `tailscale serve status` on the live
 # machine rather than assumed a second time.
-PORTAL_URL = os.environ.get(
-    "APTLOG_PORTAL_URL", "https://aptlog-fl.tailf012c7.ts.net/app")
+def _portal_url() -> str:
+    from apt_log import push
+
+    return os.environ.get("APTLOG_PORTAL_URL", f"{push.PORTAL_ORIGIN}/app")
+
+
+PORTAL_URL = _portal_url()
 
 # The sentence itself. Deliberately says nothing about which patient, which
 # agency, or what the code is — it goes to a public relay and lands on a lock
