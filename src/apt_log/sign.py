@@ -560,7 +560,7 @@ def _app_buttons(xml: str) -> dict:
     the button one night), it survives a redesign that moves the strip, and
     it cannot land on the drawing.
     """
-    found: dict[str, list[int]] = {}
+    found: dict[str, dict] = {}
     for raw in _NODE.findall(xml or ""):
         if _attr(raw, "clickable") != "true":
             continue
@@ -570,14 +570,18 @@ def _app_buttons(xml: str) -> dict:
         b = [int(g) for g in m.groups()]
         if b[2] <= b[0] or b[3] <= b[1]:
             continue
-        rid = _attr(raw, "resource-id").split("/")[-1].lower()
-        txt = _attr(raw, "text").strip().lower()
+        full = _attr(raw, "resource-id")
+        rid = full.split("/")[-1].lower()
+        txt = _attr(raw, "text").strip()
+        low = txt.lower()
         for kind, ids, words in (("confirm", _SAVE_IDS, _SAVE_WORDS),
                                  ("clear", _CLEAR_IDS, _CLEAR_WORDS)):
             if kind in found:
                 continue                      # first match wins, in tree order
-            if txt in words or (txt and any(i in rid for i in ids)):
-                found[kind] = [(b[0] + b[2]) // 2, (b[1] + b[3]) // 2]
+            if low in words or (low and any(i in rid for i in ids)):
+                found[kind] = {"rid": full, "txt": txt,
+                               "b": b,
+                               "xy": [(b[0] + b[2]) // 2, (b[1] + b[3]) // 2]}
     return found
 
 
@@ -594,7 +598,15 @@ def button_targets(xml: str, package: str = "") -> dict | None:
     """
     if not sideways(xml, package):
         return None
-    targets = _app_buttons(xml)
+    targets: dict[str, dict] = {}
+    for kind, el in _app_buttons(xml).items():
+        # PRESSED AS AN ELEMENT, NOT AS A POINT. This app rotates its
+        # signature page in the drawing pass, and the tree describes the
+        # UNROTATED layout — so a coordinate taken from these bounds is not
+        # reliably where the button is drawn. Letting Android dispatch to the
+        # element sidesteps the question entirely, which on a screen where a
+        # wrong press saves the wrong thing is the only acceptable answer.
+        targets[kind] = {"element": el}
 
     # The pixel fallback, for whatever the app did not name. It needs the
     # canvas to leave a strip down the left for the buttons to live in;
@@ -606,8 +618,10 @@ def button_targets(xml: str, package: str = "") -> dict | None:
             x1, _y1, _x2, y2 = bounds
             if x1 >= _MIN_STRIP:
                 x = max(x1 // 2, 4)
-                targets.setdefault("clear", [x, y2 - _BUTTON_CLEAR_LIFT])
-                targets.setdefault("confirm", [x, y2 - _BUTTON_CONFIRM_LIFT])
+                targets.setdefault("clear",
+                                   {"point": [x, y2 - _BUTTON_CLEAR_LIFT]})
+                targets.setdefault("confirm",
+                                   {"point": [x, y2 - _BUTTON_CONFIRM_LIFT]})
     return targets or None
 
 
@@ -675,7 +689,13 @@ def do_action(payload: dict, status_path: Path | None = None) -> Status:
             # takes a person pressing the button) and always worth keeping.
             _dump_refusal(_nodes_of(source), "no_canvas")
             return
-        _perform(driver, [[tuple(targets[kind])]])
+        target = targets[kind]
+        if "element" in target:
+            if not _click_element(driver, target["element"]):
+                status.state, status.reason = "failed", "not_pressable"
+                return
+        else:
+            _perform(driver, [[tuple(target["point"])]])
         status.state = "done"
 
     try:
@@ -709,6 +729,44 @@ STROKE_GAP = 0.30
 # signature (hundreds of points) into minutes of drawing; a dozen ms keeps a
 # stroke fluid without outrunning injection.
 MOVE_MS = 12
+
+
+# The locator strategy's wire name. Spelled out rather than imported from
+# appium, which is not installed in the cloud container where this suite also
+# runs — and importing it here would skip these tests exactly where the logic
+# is cheapest to check.
+_XPATH = "xpath"
+
+
+def _click_element(driver, el: dict) -> bool:
+    """Press the app's own button, matched on BOTH its id and its caption.
+
+    Both are required at press time for the same reason the caption is
+    required at match time: this activity publishes one `button_save` on the
+    signature page reading "Salvar" and another on the ordinary visit page
+    with no caption at all, and the second one is the ✎ on a real record.
+    Re-checking here closes the gap between reading the tree and acting on it,
+    where the screen may have changed underneath.
+    """
+    rid, txt = el.get("rid") or "", el.get("txt") or ""
+    if not rid or not txt:
+        return False
+    quoted = txt.replace("'", "&apos;")
+    xpath = f"//*[@resource-id='{rid}'][@text='{quoted}']"
+    try:
+        matches = driver.find_elements(_XPATH, xpath)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not look for %s (%s)", rid, exc)
+        return False
+    if len(matches) != 1:
+        # Zero means the screen moved between the read and the press; more
+        # than one means the same id and caption twice, and neither is a
+        # thing to guess at with a signature on the screen.
+        log.info("signature button %s matched %d elements — refusing",
+                 rid, len(matches))
+        return False
+    matches[0].click()
+    return True
 
 
 def _perform(driver, paths) -> None:
