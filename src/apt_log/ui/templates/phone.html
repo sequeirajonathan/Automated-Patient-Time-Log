@@ -577,6 +577,21 @@
                        font-weight:600; color:var(--muted); text-align:right;
                        max-width:38%; }
 
+  /* The way out of a modal, above the modal's own controls — where the
+     phone puts it, and where it has to be found BEFORE anything is pressed.
+     Quiet on purpose: it is an escape, not an action, and the two things
+     below it are the ones she came here to do. */
+  .a-dismiss { display:flex; padding:2px 4px 8px; }
+  .a-dismissbtn { display:flex; align-items:center; gap:7px; border:none;
+                  background:var(--card); color:var(--muted); cursor:pointer;
+                  border-radius:999px; padding:8px 15px 8px 12px;
+                  min-height:40px; font-size:14px; font-weight:600;
+                  box-shadow:var(--shadow-card);
+                  transition:transform .2s var(--spring), opacity .2s ease; }
+  .a-dismissbtn svg { width:15px; height:15px; }
+  .a-dismissbtn:active { transform:scale(.94); opacity:.6;
+                         transition-duration:.05s; }
+
   .a-switch:active .knob { transform:scale(1.08); }
   .a-switch { flex:none; margin-left:auto; width:51px; height:31px;
               border:none; border-radius:999px; background:var(--track);

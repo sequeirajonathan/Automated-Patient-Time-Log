@@ -1623,3 +1623,66 @@ class TestTheKeypadClassIsNotAlwaysOn:
         html = templates.get_template("_screen.html").render(
             m=screenview.label_keys(m, T()), t=T())
         assert "a-keys" in html
+
+
+class TestTheWayOutOfAModal:
+    """A bottom sheet the portal could not close.
+
+    inMyTeam's signature pad has two exits on the phone and the portal drew
+    NEITHER: the scrim went as a curtain (right, for a scrim that means
+    nothing) and the ✕ went as an accessibility annotation (right, for
+    twelve characters in a sixteen-pixel box). Each rule correct alone; the
+    pair stranded her on the staff signature with Done, Clear and nothing
+    else. KEYCODE_BACK does not close this sheet — verified on the phone —
+    so the portal's own Back was inert too.
+    """
+
+    def _sheet(self, extra_small=()):
+        els = [el("touch_outside", "View", [0, 64, 720, 1561]),
+               el("", "View", [13, 946, 45, 978]),
+               el("", "View", [172, 1514, 274, 1545]),
+               el("", "View", [446, 1514, 548, 1545])]
+        els += [el("", "View", list(b)) for b in extra_small]
+        sts = [st([21, 954, 37, 970], "Cancel Visit"),
+               st([13, 985, 97, 998], "Patient Signature"),
+               st([217, 1522, 245, 1537], "Done"),
+               st([489, 1522, 520, 1537], "Clear")]
+        return screenview.build(doc(els, sts))
+
+    def test_the_modal_gets_a_way_out(self):
+        assert self._sheet()["dismiss"] is not None
+
+    def test_it_aims_at_the_control_that_actually_closes(self):
+        """Not the scrim. Tapping the middle of that was tried on the real
+        sheet and did nothing — this one was pressed twice and closed it."""
+        assert self._sheet()["dismiss"]["aim"]["b"] == [13, 946, 45, 978]
+
+    def test_it_is_named_by_the_portal(self):
+        """The app's word for it is a resource id, and its description names
+        something it does not do."""
+        assert self._sheet()["dismiss"]["txt_key"] == "papp.close_sheet"
+
+    def test_the_scrim_is_never_the_target(self):
+        d = self._sheet()["dismiss"]
+        assert d["aim"]["rid"] != "touch_outside"
+        assert d["aim"]["b"] != [0, 64, 720, 1561]
+
+    def test_the_sheets_own_buttons_are_untouched(self):
+        flat = [i for r in self._sheet()["rows"] for i in r["items"]]
+        said = [i.get("txt") or (i.get("lines") or [None])[0] for i in flat]
+        assert "Done" in said and "Clear" in said
+
+    def test_an_ordinary_screen_gets_none(self):
+        """No scrim, no modal, no exit to offer."""
+        m = screenview.build(doc(
+            elements=[el("", "View", [13, 100, 45, 132]),
+                      el("", "View", [172, 1514, 274, 1545])],
+            statics=[st([217, 1522, 245, 1537], "Done")],
+        ))
+        assert m["dismiss"] is None
+
+    def test_two_candidates_mean_no_guess(self):
+        """Exactly one or nothing — the discipline the canvas finder uses. A
+        wrong "Close" is a button she presses to escape that does something
+        else."""
+        assert self._sheet(extra_small=([60, 946, 92, 978],))["dismiss"] is None

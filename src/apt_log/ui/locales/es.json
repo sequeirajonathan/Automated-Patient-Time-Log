@@ -156,6 +156,7 @@
   "papp.asleep_hint": "Actívela para verla y usarla desde aquí.",
   "papp.choose": "Elija una aplicación. Se abre en el teléfono en Florida y esta página se convierte en su pantalla.",
   "papp.clearing": "Despejando la pantalla…",
+  "papp.close_sheet": "Cerrar",
   "papp.covered": "Algo está tapando la pantalla del teléfono.",
   "papp.covered_action": "Despejar la pantalla",
   "papp.covered_hint": "Nada de lo que toque llegará a la aplicación hasta despejarla.",

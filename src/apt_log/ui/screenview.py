@@ -71,6 +71,39 @@ SLIVER_MAX_HEIGHT = 0.02
 # is a curtain — a slide-over's scrim, a drawer edge — not a row.
 CURTAIN_MIN_HEIGHT = 0.55
 
+# ...except when Android has NAMED it as the way out. `touch_outside` is the
+# framework's own id for the region around a dialog or a bottom sheet, and
+# touching it dismisses: it is not scenery, it is the exit.
+#
+# This exists because a modal with no way out actually happened. inMyTeam's
+# signature pad is a bottom sheet whose two exits are that scrim and a small
+# ✕ — and the portal drew NEITHER. The scrim went as a curtain (right, for a
+# scrim that means nothing) and the ✕ went as an accessibility annotation
+# (right, for a caption of twelve characters in a sixteen-pixel box). Each
+# rule was correct on its own and together they stranded her on the staff
+# signature with Done, Clear, and no third option: KEYCODE_BACK does not
+# close this sheet, verified on the phone, so the portal's own Back was inert
+# too. Reported as "I need a way to exit out of the signature portion".
+#
+# The scrim is the signal, NOT the target. Tapping the middle of it was tried
+# on the real sheet and did nothing — inMyTeam's is not cancelable on an
+# outside touch — so aiming there would have shipped a Close button that does
+# nothing, which is worse than no button. What the id tells us is only this:
+# a screen carrying one is a MODAL, and a modal has a way out.
+DISMISS_IDS = ("touch_outside",)
+
+# ...and on a modal, the way out is the small wordless control above the
+# sheet's own buttons. inMyTeam's is a 32px ✕ at the top-left of the sheet,
+# carrying a content-description ("Cancel Visit") that describes something it
+# does not do — pressed twice on the live phone, it closes the sheet and
+# leaves the form, the ticks and the typed note exactly as they were.
+#
+# Held to the same discipline as the signature canvas finder: EXACTLY ONE
+# candidate or nothing at all. Two small wordless controls above the buttons
+# means the shape rule matched something it should not have, and a wrong
+# "Close" is a button she presses to escape that does something else.
+DISMISS_MAX_SIDE = 0.10
+
 # A wordless little square in the left margin, level with a line of text that
 # starts just past it, is that line's ICON — the clock beside a visit's hours,
 # the pin beside its address. inMyTeam draws three of them on Visit Detail and
@@ -459,6 +492,11 @@ def _is_up_affordance(item: dict) -> bool:
     return (item.get("txt") or "").strip().lower() in _UP_WORDS
 
 
+def _is_dismiss(node: dict) -> bool:
+    """Whether this element is the framework's dismiss region. See DISMISS_IDS."""
+    return (node.get("rid") or "").rsplit("/", 1)[-1].lower() in DISMISS_IDS
+
+
 def _name_the_unnamed(elements: list[dict], statics: list[dict], doc: dict,
                       w: int, h: int) -> None:
     """Carry the feed's own naming onto the items it named. In place.
@@ -502,6 +540,9 @@ def label_keys(model: dict, t) -> dict:
         # ones left it saying "Open navigation drawer" in a Spanish page.
         nav = model["nav"]
         walk(([nav["back"]] if nav.get("back") else []) + (nav.get("trailing") or []))
+    # And the modal's exit, which is named by the portal and by nothing else.
+    if model.get("dismiss"):
+        walk([model["dismiss"]])
     return model
 
 
@@ -550,6 +591,32 @@ def build(doc: dict) -> dict | None:
         statics = [s for s in statics if not _contains(cov, s["b"])]
 
     _name_the_unnamed(elements, statics, doc, w, h)
+
+    # The way out of a modal, lifted before anything else looks at it — the
+    # curtain rule below would drop it, and it is the one control on the
+    # screen she cannot do without. Named in her own language, because the
+    # app's word for it is an id.
+    dismiss = None
+    if any(_is_dismiss(e) for e in elements):
+        elements = [e for e in elements if not _is_dismiss(e)]
+        sheet = [e for e in elements
+                 if not _is_up_affordance({"txt": e.get("txt", "")})]
+        # Anything with words of its own is a control she can already read —
+        # Done, Clear. The exit is the one that has none.
+        wordless = [e for e in sheet if not (e.get("txt") or "").strip()]
+        captioned = [e for e in sheet if (e.get("txt") or "").strip()]
+        floor = min((e["b"][1] for e in captioned), default=h)
+        exits = [e for e in wordless
+                 if (e["b"][2] - e["b"][0]) <= w * DISMISS_MAX_SIDE
+                 and (e["b"][3] - e["b"][1]) <= w * DISMISS_MAX_SIDE
+                 and e["b"][3] <= floor
+                 and not any(_contains(e["b"], o["b"])
+                             for o in sheet if o is not e)]
+        if len(exits) == 1:
+            dismiss = _item(exits[0], "button")
+            dismiss["txt_key"] = "papp.close_sheet"
+            dismiss["small"] = True
+            elements = [e for e in elements if e is not exits[0]]
 
     # The app's own bottom tab bar comes out first, before anything is
     # folded or banded: its captions and the containers under them are
@@ -1077,6 +1144,8 @@ def build(doc: dict) -> dict | None:
         rows.append({"items": band, **shape})
     return {"id": doc.get("id", ""), "nav": nav, "rows": rows,
             "apptabs": apptabs,
+            # The way out of a modal, when the screen is one. See DISMISS_IDS.
+            "dismiss": dismiss,
             "notice": doc.get("notice", ""), "blocked": doc.get("blocked", ""),
             "webview": bool(doc.get("webview")),
             "scrollable": bool(doc.get("scrollable")),
