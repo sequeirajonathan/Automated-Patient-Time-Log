@@ -1417,7 +1417,8 @@ class TestNamingSurvivesAWalkedPage:
         call = re.search(r"feed_mod\.elements\(src,[^)]*\)", source)
         assert call, "the walk should still build elements from the source"
         assert "package=package" in call.group(0)
-        assert "size=size" in call.group(0)
+        # `screen_wh`, never `size` — see TestABadSizeNamesNothingRatherThanCrashing.
+        assert "size=screen_wh" in call.group(0)
 
     def test_a_size_that_cannot_be_read_names_nothing(self):
         from apt_log import macros
@@ -1427,3 +1428,51 @@ class TestNamingSurvivesAWalkedPage:
                 raise RuntimeError("no session")
 
         assert macros._screen_size(Broken()) == (0, 0)
+
+
+class TestABadSizeNamesNothingRatherThanCrashing:
+    """A whole page scan died on `"height" * 0.12`.
+
+    The walk's own function rebinds `size` to the driver's
+    {"width": …, "height": …} dict a few lines below where the naming's size
+    was set, and `capture` is a closure that reads it at CALL time. So naming
+    was handed a dict, unpacked its KEYS, and multiplied the string "height"
+    by a float. The rescan failed outright and the page never rebuilt.
+
+    The name collision is fixed. This pins the other half: three callers feed
+    this a size, and none of them should be able to take a scan down.
+    """
+
+    XML = ('<node class="android.widget.EditText" resource-id="" text="" '
+           'clickable="true" bounds="[13,146][707,183]"/>')
+
+    @pytest.mark.parametrize("bad", [
+        {"width": 720, "height": 1600},          # the one that actually broke
+        None, "nope", (), (720,), (720, 1600, 1), ("720", "1600"),
+    ])
+    def test_a_size_that_is_not_a_pair_of_numbers_names_nothing(self, bad):
+        from apt_log import feed
+
+        el = feed.elements(self.XML, label=True,
+                           package="com.inmyteam.inmyteam", size=bad)[0]
+        assert not el.get("name_key")
+        assert el.get("txt") is None      # and discloses nothing either
+
+    @pytest.mark.parametrize("good", [(720, 1600), [720, 1600]])
+    def test_a_real_size_still_names(self, good):
+        from apt_log import feed
+
+        el = feed.elements(self.XML, label=True,
+                           package="com.inmyteam.inmyteam", size=good)[0]
+        assert el["name_key"] == "papp.imt.agency_filter"
+
+    def test_the_walk_does_not_reuse_the_drivers_own_size_name(self):
+        """The collision itself. `capture` closes over the enclosing scope, so
+        a name reused later in the same function is read at call time."""
+        import re
+
+        source = (Path(__file__).resolve().parents[1]
+                  / "src/apt_log/macros.py").read_text(encoding="utf-8")
+        call = re.search(r"feed_mod\.elements\(src,[^)]*\)", source, re.S)
+        assert "size=size" not in call.group(0)
+        assert "size=screen_wh" in call.group(0)

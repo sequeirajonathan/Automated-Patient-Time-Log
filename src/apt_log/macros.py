@@ -996,13 +996,20 @@ def _stitch_walk(driver, assume_top: bool = False) -> bool:
         # missing, and the agency filter drew blank again on the one screen
         # that gets walked most. The naming has to happen wherever elements
         # are built, and this is the second place.
+        # NOT `size`: this function rebinds that name to the driver's own
+        # {"width": …, "height": …} dict further down, and `capture` is a
+        # closure that reads it at CALL time — so naming was handed a dict,
+        # unpacked its keys, and tried to multiply the string "height" by a
+        # float. A distinct name is the fix; the coercion in `controls` is
+        # the belt.
         package = driver.current_package or ""
-        size = _screen_size(driver)
+        screen_wh = _screen_size(driver)
 
         def capture() -> dict:
             src = driver.page_source or ""
             return {"elements": feed_mod.elements(src, label=True,
-                                                  package=package, size=size),
+                                                  package=package,
+                                                  size=screen_wh),
                     "statics": feed_mod.statics(src)}
 
         def settled_capture() -> dict:
