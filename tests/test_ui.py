@@ -1630,3 +1630,51 @@ class TestEveryShippedScriptParses:
         assert done.returncode == 0, (
             f"{script.name} does not parse:\n"
             + done.stderr.decode("utf-8", "replace")[:800])
+
+
+class TestTheChecklistDress:
+    """The measured half of the fix. Before: a task row 111px tall and the
+    page 2144px. After: 44px and 1259px — the whole check-out page in the
+    space three tasks used to take."""
+
+    PAGE = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/templates/phone.html")
+    FRAGMENT = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/templates/_screen.html")
+
+    def test_a_tick_box_is_drawn_as_a_box(self):
+        markup = self.FRAGMENT.read_text(encoding="utf-8")
+        assert "a-check" in markup
+        assert 'role="checkbox"' in markup
+
+    def test_it_says_its_state_to_a_screen_reader(self):
+        assert 'aria-checked' in self.FRAGMENT.read_text(encoding="utf-8")
+
+    def test_the_checklist_row_never_wraps(self):
+        """A checklist that wraps is not a checklist, it is a stack of
+        paragraphs with switches in it."""
+        import re
+
+        css = re.sub(r"/\*.*?\*/", "", self.PAGE.read_text(encoding="utf-8"),
+                     flags=re.S)
+        rule = re.search(r"\.a-row\.a-checklist \{[^}]*\}", css)
+        assert rule and "flex-wrap:nowrap" in rule.group(0)
+
+    def test_the_task_name_carries_no_block_of_its_own(self):
+        """The heading class was painting the app bar's background behind
+        every task name."""
+        import re
+
+        css = re.sub(r"/\*.*?\*/", "", self.PAGE.read_text(encoding="utf-8"),
+                     flags=re.S)
+        rule = re.search(r"\.a-row\.a-checklist > \.a-label \{[^}]*\}", css)
+        assert rule and "background:none" in rule.group(0)
+
+    def test_the_tick_keeps_a_fingers_worth_of_target(self):
+        """24px reads right beside a line of text; 24px is not tappable. The
+        box stays small and the target grows underneath it."""
+        import re
+
+        css = re.sub(r"/\*.*?\*/", "", self.PAGE.read_text(encoding="utf-8"),
+                     flags=re.S)
+        assert re.search(r"\.a-check::before \{[^}]*inset:-10px", css)

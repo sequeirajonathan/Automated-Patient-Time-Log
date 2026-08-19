@@ -29,6 +29,14 @@ import re
 BUTTONS = ("Button", "ImageButton")
 FIELDS = ("EditText", "AutoCompleteTextView", "SearchView")
 TOGGLES = ("CheckBox", "Switch", "CompoundButton", "ToggleButton", "RadioButton")
+
+# ...but a CHECKBOX is not a SWITCH, and drawing one as the other was
+# reported as "it's a check list design not an on off switch". A switch
+# says a setting is on; a plan of care asks whether a task was done, and
+# the answer to that is a tick in a box. They stay one KIND — the grouping
+# rules and the segmented ✓/✗ pairs all key off "toggle" — and differ only
+# in how they are drawn.
+CHECKS = ("CheckBox", "RadioButton")
 IMAGES = ("ImageView",)
 TEXTS = ("TextView",)
 
@@ -416,6 +424,8 @@ def _item(node: dict, kind: str) -> dict:
         # existed was one, and a screen read by an older feed must not come
         # out greyed from end to end.
         "enabled": node.get("enabled", True) is not False,
+        # A tick box rather than an on/off switch. See CHECKS.
+        "check": node.get("cls") in CHECKS,
         "b": node["b"],
     }
     # A name the PORTAL supplies for a control the app left nameless, carried
@@ -1313,6 +1323,14 @@ def _band_shape(band: list[dict], height: int) -> dict:
         if len(band) > 1 and all(i["kind"] == "label" for i in band):
             return {"heads": True}
         return {}
+    # A CHECKLIST line: tick boxes and the words they answer for, and nothing
+    # else. One line per question, which is what a checklist is — the default
+    # cell layout wraps and centres, and thirteen of those turned a page she
+    # scans in seconds into a page she scrolls for a minute.
+    if (all(i["kind"] in ("toggle", "label") for i in band)
+            and any(i["kind"] == "toggle" and i.get("check") for i in band)
+            and any(i["kind"] == "label" for i in band)):
+        return {"checks": True}
     if (len(interactive) == len(band) and len(band) >= 2
             and all(i.get("small") and i["kind"] in ("button", "toggle",
                                                      "image")

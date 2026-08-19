@@ -1515,3 +1515,111 @@ class TestPlanOfCareScrub:
                      for i in range(4)],
         ))
         assert len(m["rows"]) == 4
+
+
+class TestChecklistNotSwitches:
+    """A plan of care is a checklist. Reported as "it's a check list design
+    not an on off switch…. taking up too much vertical space"."""
+
+    def _row(self):
+        m = screenview.build(doc(
+            elements=[el("", "CheckBox", [24, 307, 56, 339]),
+                      el("", "CheckBox", [591, 324, 623, 356])],
+            statics=[st([61, 315, 164, 331], "Ambulation Assist"),
+                     st([628, 332, 704, 348], "Patient refused")],
+        ))
+        return m["rows"][0]
+
+    def test_a_checkbox_is_marked_as_a_tick_box(self):
+        ticks = [i for i in self._row()["items"] if i["kind"] == "toggle"]
+        assert ticks and all(i["check"] for i in ticks)
+
+    def test_a_real_switch_is_not(self):
+        """A Switch says a setting is on and keeps the switch dress."""
+        m = screenview.build(doc(
+            elements=[el("s", "Switch", [600, 300, 660, 332])],
+            statics=[st([40, 305, 300, 325], "Notifications")],
+        ))
+        sw = next(i for r in m["rows"] for i in r["items"]
+                  if i["kind"] == "toggle")
+        assert sw["check"] is False
+
+    def test_the_band_is_a_checklist_line(self):
+        assert self._row().get("checks") is True
+
+    def test_a_band_with_no_tick_box_is_not(self):
+        m = screenview.build(doc(
+            elements=[el("s", "Switch", [600, 300, 660, 332])],
+            statics=[st([40, 305, 300, 325], "Notifications")],
+        ))
+        assert not m["rows"][0].get("checks")
+
+
+class TestTheHeadingClassDoesNotCollideWithTheChrome:
+    """`.hdr` is the portal's own frosted app bar. The reflow marked every
+    short label with the same class, so each one wore the app bar's
+    background and padding — the grey blocks behind every task name."""
+
+    def test_the_reflow_uses_its_own_class(self):
+        from pathlib import Path
+
+        frag = (Path(__file__).resolve().parents[1]
+                / "src/apt_log/ui/templates/_screen.html"
+                ).read_text(encoding="utf-8")
+        assert "a-hdr" in frag
+        assert " hdr{% endif %}" not in frag
+
+    def test_the_chrome_still_owns_the_bare_name(self):
+        """Renaming the reflow's class must not have renamed the app bar."""
+        from pathlib import Path
+
+        page = (Path(__file__).resolve().parents[1]
+                / "src/apt_log/ui/templates/phone.html"
+                ).read_text(encoding="utf-8")
+        assert '<div class="hdr">' in page or 'class="hdr"' in page
+
+
+class TestTheKeypadClassIsNotAlwaysOn:
+    """`row.keys` in Jinja resolves to dict.keys — a bound method, always
+    truthy — so EVERY row on every screen was rendered as a keypad:
+    centred, with an 18px gap. Nothing in the suite could see it, because
+    every test reads the model rather than the markup."""
+
+    def test_the_template_asks_for_the_value_not_the_method(self):
+        from pathlib import Path
+
+        frag = (Path(__file__).resolve().parents[1]
+                / "src/apt_log/ui/templates/_screen.html"
+                ).read_text(encoding="utf-8")
+        assert "row.get('keys')" in frag
+        assert "{% if row.keys %}" not in frag
+
+    def test_an_ordinary_row_does_not_render_as_a_keypad(self):
+        from apt_log.ui.app import templates
+
+        class T:
+            language = "en"
+            def __call__(self, k): return k
+
+        m = screenview.build(doc(
+            elements=[el("r", "View", [16, 300, 704, 348])],
+            statics=[st([30, 310, 300, 330], "An ordinary row")],
+        ))
+        html = templates.get_template("_screen.html").render(
+            m=screenview.label_keys(m, T()), t=T())
+        assert "a-keys" not in html
+
+    def test_a_real_keypad_still_gets_it(self):
+        from apt_log.ui.app import templates
+
+        class T:
+            language = "en"
+            def __call__(self, k): return k
+
+        keys = [el(f"k{n}", "Button", [60 + n * 90, 900, 130 + n * 90, 970],
+                   str(n)) for n in range(3)]
+        m = screenview.build(doc(elements=keys, statics=[]))
+        assert any(r.get("keys") for r in m["rows"])
+        html = templates.get_template("_screen.html").render(
+            m=screenview.label_keys(m, T()), t=T())
+        assert "a-keys" in html

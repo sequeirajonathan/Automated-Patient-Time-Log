@@ -341,15 +341,15 @@
              min-width:min(10ch, 100%); overflow-wrap:break-word; }
   /* A short loose label is a section heading; prose stays prose. The
      uppercase treatment on whole paragraphs was a wall of shouting. */
-  .a-row.n1 > .a-label.hdr:only-child { color:var(--muted); font-size:11.5px;
+  .a-row.n1 > .a-label.a-hdr:only-child { color:var(--muted); font-size:11.5px;
              font-weight:700; text-transform:uppercase;
              letter-spacing:.07em; }
-  .a-row.n1 > .a-label:not(.hdr):only-child { font-size:13.5px;
+  .a-row.n1 > .a-label:not(.a-hdr):only-child { font-size:13.5px;
              line-height:1.45; color:var(--muted); }
   .a-row:has(> .a-label:only-child) { background:none; box-shadow:none;
              border:none; padding:4px 4px 5px; min-height:0; }
   /* A section heading opens a group: air above it, snug below. */
-  .a-row:has(> .a-label.hdr:only-child) { padding:14px 4px 5px; }
+  .a-row:has(> .a-label.a-hdr:only-child) { padding:14px 4px 5px; }
   /* Several words on one line — a name and its date, the app's own columns.
      No card, no cell padding: the first is the subject and reads like one,
      the rest are its detail and sit quietly at the end of the line. */
@@ -546,6 +546,36 @@
   .a-actbtn.primary { background:var(--tint); color:#fff; }
   .a-actbtn:active { transform:scale(.97); filter:brightness(.93);
                      transition-duration:.05s; }
+
+  /* A tick box. The app asks "did you do this", and the answer is a check,
+     not a setting that is on. Drawn at 24px with the touch target grown to
+     44 by a pseudo-element, so the box stays the size of the line it sits on
+     while the finger still gets what a finger needs. */
+  .a-check { flex:none; position:relative; width:24px; height:24px;
+             border-radius:7px; border:1.8px solid var(--line);
+             background:var(--card); color:transparent; cursor:pointer;
+             padding:0; display:flex; align-items:center;
+             justify-content:center;
+             transition:background .15s ease, border-color .15s ease; }
+  .a-check::before { content:""; position:absolute; inset:-10px; }
+  .a-check svg { width:16px; height:16px; }
+  .a-check.on { background:var(--tint); border-color:var(--tint);
+                color:#fff; }
+  .a-check:active { transform:scale(.88); transition-duration:.05s; }
+
+  /* One question per line: the tick, the task, then the alternative answer
+     riding quietly at the end. No wrapping — a checklist that wraps is not a
+     checklist, it is a stack of paragraphs with switches in it. */
+  .a-row.a-checklist { flex-wrap:nowrap; gap:10px; padding:9px 13px;
+                       min-height:44px; align-items:center; }
+  .a-row.a-checklist > .a-label { background:none; padding:0; margin:0;
+                       font-size:15px; line-height:1.3; min-width:0;
+                       text-transform:none; letter-spacing:normal;
+                       color:var(--ink); flex:1;
+                       overflow-wrap:anywhere; }
+  .a-row.a-checklist > .a-label ~ .a-label { flex:none; font-size:11.5px;
+                       font-weight:600; color:var(--muted); text-align:right;
+                       max-width:38%; }
 
   .a-switch:active .knob { transform:scale(1.08); }
   .a-switch { flex:none; margin-left:auto; width:51px; height:31px;
