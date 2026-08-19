@@ -43,6 +43,20 @@ CREDENTIAL_MARKERS = (
 )
 
 AGENCY_FILTER = "papp.imt.agency_filter"
+NOTE = "papp.imt.note"
+
+# The visit note on the check-out page: a tall, full-width, unnamed EditText
+# well below the title bar. Its content is withheld by the rule that withholds
+# ALL typed text — a rule written for passwords and for the code inMyTeam
+# texts — and here that rule blanks the one field she is trying to read back.
+# Reported as "the additional note is missing text that the phone has".
+#
+# Disclosed on the same terms as the agency filter and no looser: this table
+# has to have positively identified the box, by app and shape and place, on a
+# screen that is not asking for a credential. What is in it is what she typed
+# about this visit, on her own portal, and hiding it from her protects nobody.
+NOTE_MIN_HEIGHT = 0.03
+NOTE_MIN_WIDTH = 0.9
 REFRESH = "papp.imt.refresh"
 DRAWER = "papp.drawer"
 
@@ -86,10 +100,20 @@ class Naming:
             return ""
         if not self._w or not self._h or len(bounds) != 4:
             return ""
-        x1, _y1, x2, y2 = bounds
+        x1, y1, x2, y2 = bounds
+        width, height = x2 - x1, y2 - y1
+        # Below the title bar: the note. A code screen's box is a single line
+        # in the middle of the page, so height and full width are what tell
+        # them apart, and the credential check above has already answered the
+        # only case where getting it wrong would matter.
+        if y1 > self._h * TOP_BAND:
+            if (cls == "EditText"
+                    and width >= self._w * NOTE_MIN_WIDTH
+                    and height >= self._h * NOTE_MIN_HEIGHT):
+                return NOTE
+            return ""
         if y2 > self._h * TOP_BAND:
             return ""
-        width = x2 - x1
         if cls == "EditText" and width > self._w * 0.5:
             return AGENCY_FILTER
         if cls == "View" and width < self._w * 0.10 and x1 > self._w * 0.85:
@@ -105,7 +129,7 @@ class Naming:
         word "filter" whatever is in it. Reported exactly that way: the phone
         showed the agency and the portal showed the label.
         """
-        return self.key(cls, rid, bounds) == AGENCY_FILTER
+        return self.key(cls, rid, bounds) in (AGENCY_FILTER, NOTE)
 
 
 # Names that REPLACE the app's own caption rather than fill a blank.

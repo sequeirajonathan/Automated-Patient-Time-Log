@@ -790,6 +790,12 @@ def digest(strokes) -> str:
 # the next stroke's start. The pauses pin the ordering: position, settle,
 # touch, settle, draw. The gap between strokes keeps the canvas from reading
 # two quick gestures as one.
+# How long the app gets to recover from the hierarchy dump before ink goes
+# in. Set against a measured 3-second stalled frame rather than guessed; a
+# second and a half is most of the way there and is invisible next to the
+# round trip she is already waiting through.
+INK_SETTLE = 1.5
+
 PEN_SETTLE = 0.10
 STROKE_GAP = 0.45
 # Per-move duration. The W3C default is 250ms per point, which turns a real
@@ -907,6 +913,24 @@ def execute(payload: dict, status_path: Path | None = None) -> Status:
         if bounds is None:
             status.state, status.reason = "failed", refusal
             return
+        # LET THE APP GET UP OFF THE FLOOR FIRST.
+        #
+        # Reading the hierarchy is not free on a Compose surface, and this
+        # phone's own log says how expensive: during a replay the app's
+        # frame time was
+        #
+        #   BufferQueueProducer: fps=1.27 dur=3149.73 max=3083.11
+        #
+        # — one frame over three seconds, with an accessibility dump either
+        # side of it. Ink injected into a UI thread in that state arrives and
+        # is not all drawn, which is a signature landing a stroke short.
+        #
+        # The report that found this was hers, and it named the variable
+        # exactly: "if I press send too fast the same happens, but if I wait
+        # about 5-10 seconds the whole signature makes it". Waiting let the
+        # dumps subside. The replay does its own dump right here — for the
+        # canvas bounds it cannot draw without — so it now waits too.
+        time.sleep(INK_SETTLE)
         _perform(driver, build_paths(strokes, bounds,
                                      payload.get("aspect", 1.0),
                                      rotate=sideways(xml, package)))
