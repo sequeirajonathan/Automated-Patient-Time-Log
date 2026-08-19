@@ -280,13 +280,30 @@ def find_canvas(xml: str, dump: bool = True) -> tuple[list[int] | None, str]:
     # screen has no signature box" over a screen plainly showing one, a Save
     # that could never fire, and a caregiver pressing the app's own button by
     # hand at 10pm. De-duplicate first, keeping document order.
-    if len(named) > 1:
-        named = _distinct(named)
-    if len(named) > 1:
-        named = [b for b in named
-                 if not any(_wraps(b, other) for other in named)]
+    #
+    # BOTH POOLS NEED THIS, and for a while only `named` got it. inMyTeam's
+    # signature sheet names nothing — no id, no telling class — so it takes
+    # the SHAPED path, and Compose hands that path the bottom sheet's own
+    # wrapper TWICE at identical bounds plus the real canvas inside it:
+    #
+    #   View [0,923,720,1561]   39.9% of the screen   the sheet
+    #   View [0,923,720,1561]   39.9%                 the sheet again
+    #   View [13,998,707,1469]  28.4%                 the canvas
+    #
+    # Three candidates, so the finder refused "ambiguous" and she could not
+    # sign at all — caught on the live sheet, and intermittent because the
+    # number of wrappers Compose emits varies. De-duplicated and de-nested
+    # the same way, the wrappers collapse to one and then drop for containing
+    # the canvas, leaving exactly the one thing that draws.
+    def _narrow(boxes):
+        if len(boxes) > 1:
+            boxes = _distinct(boxes)
+        if len(boxes) > 1:
+            boxes = [b for b in boxes
+                     if not any(_wraps(b, other) for other in boxes)]
+        return boxes
 
-    pool = named or shaped
+    pool = _narrow(named) or _narrow(shaped)
     if not pool:
         if dump:
             _dump_refusal(nodes, "no_canvas")
@@ -773,8 +790,8 @@ def digest(strokes) -> str:
 # the next stroke's start. The pauses pin the ordering: position, settle,
 # touch, settle, draw. The gap between strokes keeps the canvas from reading
 # two quick gestures as one.
-PEN_SETTLE = 0.06
-STROKE_GAP = 0.30
+PEN_SETTLE = 0.10
+STROKE_GAP = 0.45
 # Per-move duration. The W3C default is 250ms per point, which turns a real
 # signature (hundreds of points) into minutes of drawing; a dozen ms keeps a
 # stroke fluid without outrunning injection.
@@ -820,8 +837,27 @@ def _click_element(driver, el: dict) -> bool:
 
 
 def _perform(driver, paths) -> None:
-    """Drive the strokes through W3C pointer actions. Thin on purpose — the
-    logic worth testing lives in build_paths and find_canvas."""
+    """Drive the strokes through W3C pointer actions, ONE CHAIN PER STROKE.
+
+    One chain for the whole signature was tried and the driver refuses it:
+    UiAutomator2 answers a chain holding more than one touch cycle with
+    "Unable to perform W3C actions ... make sure your input actions chain is
+    valid", every time. So a stroke is a chain, and the seam between two
+    chains is the thing to make safe.
+
+    That seam is where a signature lost the arch of an A, twice, in the
+    field. The log carried at the end of `execute` proved the replay had been
+    handed everything (strokes=3 points=24+28+11) while the phone showed two
+    marks, so the strokes were arriving and one was not being drawn.
+
+    `perform()` returns when the driver has ACCEPTED the chain, not when the
+    phone has finished injecting it — the events land asynchronously and an
+    app that is still processing the previous gesture can drop the next
+    pen-down. Two things guard it now: the input source is released between
+    chains rather than left half-alive for the next one to inherit, and the
+    gap is long enough to outlast a slow frame. Neither is free, and a
+    signature that arrives whole is worth the second it costs.
+    """
     from selenium.webdriver.common.actions import interaction
     from selenium.webdriver.common.actions.action_builder import ActionBuilder
     from selenium.webdriver.common.actions.pointer_input import PointerInput
@@ -843,6 +879,13 @@ def _perform(driver, paths) -> None:
         pen.pause(PEN_SETTLE)
         pen.pointer_up()
         actions.perform()
+        # Release the pointer source. Without this the next chain inherits a
+        # half-alive input of the same id, which is the state a dropped
+        # pen-down comes out of.
+        try:
+            actions.clear_actions()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def execute(payload: dict, status_path: Path | None = None) -> Status:
