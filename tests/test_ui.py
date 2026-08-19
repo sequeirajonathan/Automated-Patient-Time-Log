@@ -1808,3 +1808,49 @@ class TestTheSignaturePadIsSelfContained:
         idx = js.index("setPointerCapture")
         after = js[idx:idx + 300]
         assert "pad.strokes.push" in after
+
+    def test_visit_details_actions_never_reach_the_pad(self):
+        """That row is "Check in" and "Note & Check out". A sheet is required,
+        not merely an actions row."""
+        from apt_log.ui import screenview
+        from apt_log.ui.app import _sheet_actions
+
+        doc = {"id": "f", "size": [720, 1600], "blocked": "", "notice": "",
+               "canvas": True,
+               "elements": [
+                   {"rid": "", "cls": "View", "b": [172, 1510, 274, 1549],
+                    "txt": "", "checked": False, "focused": False},
+                   {"rid": "", "cls": "View", "b": [446, 1508, 548, 1550],
+                    "txt": "", "checked": False, "focused": False}],
+               "statics": [
+                   {"cls": "TextView", "b": [199, 1522, 247, 1537],
+                    "txt": "Check in"},
+                   {"cls": "TextView", "b": [467, 1515, 528, 1543],
+                    "txt": "Note & Check out"}]}
+        assert _sheet_actions(doc, screenview.build(doc)) == []
+
+    def test_a_flickering_canvas_flag_does_not_hide_them(self):
+        """Caught live: the flag read False while the sheet was plainly open
+        with Done and Clear on it. The buttons would have come and gone."""
+        from apt_log.ui import screenview
+        from apt_log.ui.app import _sheet_actions
+
+        doc = {"id": "f", "size": [720, 1600], "blocked": "", "notice": "",
+               "canvas": False,
+               "elements": [
+                   {"rid": "touch_outside", "cls": "View",
+                    "b": [0, 64, 720, 1561], "txt": "", "checked": False,
+                    "focused": False},
+                   {"rid": "", "cls": "View", "b": [13, 946, 45, 978],
+                    "txt": "", "checked": False, "focused": False},
+                   {"rid": "", "cls": "View", "b": [172, 1514, 274, 1545],
+                    "txt": "", "checked": False, "focused": False},
+                   {"rid": "", "cls": "View", "b": [446, 1514, 548, 1545],
+                    "txt": "", "checked": False, "focused": False}],
+               "statics": [
+                   {"cls": "TextView", "b": [217, 1522, 245, 1537],
+                    "txt": "Done"},
+                   {"cls": "TextView", "b": [489, 1522, 520, 1537],
+                    "txt": "Clear"}]}
+        got = _sheet_actions(doc, screenview.build(doc))
+        assert [a["txt"] for a in got] == ["Done", "Clear"]

@@ -612,12 +612,22 @@ def _sans_at(doc: dict) -> dict:
 def _sheet_actions(doc: dict, model: dict | None) -> list[dict]:
     """The app's own buttons on a signature sheet, as aims.
 
-    Only on a sheet that actually holds a canvas, and only the row the reflow
-    already recognised as the page's actions — so this cannot start shipping
-    "Check out" to the pad from an ordinary page. The captions are the app's
-    own words, because they name the app's buttons and not the portal's.
+    Gated on the screen being a MODAL — the reflow found a way out of it, so
+    the app has a sheet in front — and on the row the reflow already
+    recognised as that sheet's actions. Both are needed: Visit Detail has an
+    actions row too, and it is "Check in" and "Note & Check out", which must
+    never be shipped into the signature pad.
+
+    Deliberately NOT gated on `canvas`. That flag comes from a mark in the
+    hierarchy and it flickers: caught live reading False while the signature
+    sheet was plainly open with Done and Clear on it, which would have made
+    the pad's buttons come and go under her hand. A sheet is a sheet whether
+    or not the canvas node happened to be in that dump.
+
+    The captions are the app's own words, because they name the app's
+    buttons and not the portal's.
     """
-    if not doc.get("canvas") or not model:
+    if not model or not model.get("dismiss"):
         return []
     for row in model.get("rows") or ():
         if not row.get("actions"):
