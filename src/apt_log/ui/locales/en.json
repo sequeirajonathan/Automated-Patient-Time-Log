@@ -249,6 +249,7 @@
   "sign.state.running": "Drawing your signature on the phone…",
   "sign.step_draw": "Sign here",
   "sign.step_phone": "Then, on the phone",
+  "sign.wait_phone": "Your signature is being drawn on the phone. These buttons come back when it has finished.",
   "sign.wrong_app": "The phone is not showing one of the care apps, so nothing was drawn.",
   "signature.brush": "Pen width",
   "signature.clear": "Clear",
