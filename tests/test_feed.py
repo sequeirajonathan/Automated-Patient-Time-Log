@@ -1423,9 +1423,13 @@ class TestNotificationShade:
     def test_an_open_shade_is_collapsed_once(self):
         feed._last_collapse[0] = 0.0
         calls = []
+        # Real bytes on stdout: the collapse CHECKS whether the shade went,
+        # because the command reports success either way on the live phone.
+        gone = b"  mCurrentFocus=Window{a u0 com.inmyteam.inmyteam/.Main}\n"
+
         with patch.object(feed, "_adb",
                           side_effect=lambda a, *_, **__: calls.append(a)
-                          or MagicMock(returncode=0)):
+                          or MagicMock(returncode=0, stdout=gone)):
             feed._watch_shade('<node resource-id="com.android.systemui:id/'
                               'quick_qs_panel"/>')
             feed._watch_shade('<node resource-id="com.android.systemui:id/'
@@ -2020,3 +2024,101 @@ class TestDisabledControls:
                'text="Continuar" bounds="[11,1532][709,1557]"/>')
         (el,) = feed.elements(xml)
         assert el["enabled"] is True
+
+
+class TestTheShadeIsNotTheAppUnderneath:
+    """Reported from the field: "somehow inMyTeam ended up in the phone
+    settings and I didn't do anything". It was the notification shade —
+    quick-settings tiles and a wall of the owner's private notifications —
+    sitting over the app for twenty minutes.
+
+    Two faults, and the second is mine from the same day.
+
+    `cmd statusbar collapse` returns success and does nothing on this phone.
+    So do KEYCODE_BACK, KEYCODE_HOME and `service call statusbar 2`; all four
+    were tried against the shade while it was actually up. Only the gesture
+    closes it. The collapse now checks and escalates.
+
+    And the popup-owner rule — which reports the app beneath a dropdown —
+    was reporting the app beneath the SHADE. That is not the app's own
+    surface, it is the system's, over the app. Naming the app told every
+    check the phone was fine and, worse, told the containment watchdog there
+    was nothing to recover: the bounce that used to clear a stuck shade
+    stopped happening the moment that rule shipped.
+    """
+
+    SHADE = ("  mCurrentFocus=Window{8030035 u0 NotificationShade}\n"
+             "  mFocusedApp=ActivityRecord{a1 u0 "
+             "com.inmyteam.inmyteam/.view.activities.MainActivity} t9}\n"
+             "  mAwake=true\n")
+
+    def _read(self, out):
+        with patch.object(feed, "_adb") as adb:
+            adb.return_value.stdout = out.encode()
+            return feed.window_state()
+
+    def test_the_shade_is_reported_as_the_shade(self):
+        focus, _, _ = self._read(self.SHADE)
+        assert focus == "NotificationShade"
+
+    def test_so_the_watchdog_can_still_see_it(self):
+        """The whole point: a care app's package here means "nothing to do"."""
+        focus, _, _ = self._read(self.SHADE)
+        assert focus.split("/")[0] not in feed.CARE_APPS
+
+    def test_a_real_popup_still_reports_its_owner(self):
+        """The dropdown fix must survive: an app's own chooser IS the app."""
+        out = ("  mCurrentFocus=Window{3d46066 u0 Pop-Up Window}\n"
+               "  mFocusedApp=ActivityRecord{a1 u0 "
+               "com.inmyteam.inmyteam/.view.activities.MainActivity} t9}\n"
+               "  mAwake=true\n")
+        focus, _, _ = self._read(out)
+        assert focus.split("/")[0] == "com.inmyteam.inmyteam"
+
+    @pytest.mark.parametrize("panel", [
+        "NotificationShade", "StatusBar", "VolumeDialog",
+        "ScreenDecorOverlay", "NavigationBar",
+    ])
+    def test_every_system_panel_is_left_named_as_itself(self, panel):
+        out = (f"  mCurrentFocus=Window{{a u0 {panel}}}\n"
+               "  mFocusedApp=ActivityRecord{a1 u0 com.x/.Home} t9}\n"
+               "  mAwake=true\n")
+        focus, _, _ = self._read(out)
+        assert focus == panel
+
+    def test_the_collapse_escalates_to_the_gesture(self):
+        """The command reports success either way, so it is checked."""
+        calls = []
+
+        def fake_adb(args, serial=None, **kw):
+            calls.append(args)
+            out = type("R", (), {"stdout": self.SHADE.encode(),
+                                 "returncode": 0})()
+            return out
+
+        feed._last_collapse[0] = 0.0
+        with patch.object(feed, "_adb", side_effect=fake_adb), \
+             patch.object(feed, "screen_size", return_value=[720, 1600]), \
+             patch.object(feed.time, "sleep"):
+            feed._watch_shade('<node resource-id="a:id/notification_stack"/>')
+        assert ["shell", "cmd", "statusbar", "collapse"] in calls
+        swipes = [c for c in calls if "swipe" in c]
+        assert swipes, "a shade that ignores the command must be swiped away"
+        assert swipes[0][:3] == ["shell", "input", "swipe"]
+
+    def test_a_shade_that_obeys_is_not_swiped(self):
+        """No gesture on a phone where the clean command works."""
+        gone = ("  mCurrentFocus=Window{a u0 com.inmyteam.inmyteam/.Main}\n"
+                "  mAwake=true\n")
+        calls = []
+
+        def fake_adb(args, serial=None, **kw):
+            calls.append(args)
+            return type("R", (), {"stdout": gone.encode(), "returncode": 0})()
+
+        feed._last_collapse[0] = 0.0
+        with patch.object(feed, "_adb", side_effect=fake_adb), \
+             patch.object(feed, "screen_size", return_value=[720, 1600]), \
+             patch.object(feed.time, "sleep"):
+            feed._watch_shade('<node resource-id="a:id/notification_stack"/>')
+        assert not [c for c in calls if "swipe" in c]
