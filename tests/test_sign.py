@@ -979,22 +979,22 @@ class TestAStrokeThatDidNotLandIsDrawnAgain:
         return drawn
 
     def test_a_stroke_that_landed_is_drawn_once(self):
-        # before=0 after=500 | before=500 after=900
-        drawn = self._replay([0, 500, 500, 900])
+        # start=0, after s1=500, after s2=900 — one reading per stroke, the
+        # answer for one being the baseline for the next.
+        drawn = self._replay([0, 500, 900])
         assert drawn == [[(1, 1)], [(2, 2)]]
 
     def test_a_stroke_that_left_no_ink_is_drawn_again(self):
         """The reported failure, exactly: stroke one lands, stroke two does
         not."""
-        # s1: before=0 after=500. s2: before=500 after=500 (nothing), retry
-        # then after=900.
-        drawn = self._replay([0, 500, 500, 500, 900])
+        # start=0, after s1=500, after s2=500 (nothing gained), retry -> 900.
+        drawn = self._replay([0, 500, 500, 900])
         assert drawn == [[(1, 1)], [(2, 2)], [(2, 2)]]
 
     def test_only_the_missing_stroke_is_redrawn(self):
         """Never the whole signature, and the canvas is never cleared — so a
         retry cannot double a stroke that landed."""
-        drawn = self._replay([0, 500, 500, 500, 900])
+        drawn = self._replay([0, 500, 500, 900])
         assert drawn.count([(1, 1)]) == 1
 
     def test_it_gives_up_rather_than_hammering(self):
