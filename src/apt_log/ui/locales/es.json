@@ -250,5 +250,8 @@
   "macro.step.closing": "Cerrando la aplicación…",
   "macro.step.restarting": "Reiniciando el teléfono…",
   "macro.inmyteam_login": "Iniciar sesión en inMyTeam",
-  "macro.step.awaiting_code": "Esperando a que la aplicación pida el código…"
+  "macro.step.awaiting_code": "Esperando a que la aplicación pida el código…",
+  "papp.notify_on": "Avísame",
+  "papp.notify_off": "Avisos activados",
+  "papp.notify_denied": "Avisos bloqueados en Ajustes"
 }

@@ -851,6 +851,101 @@
     wireForms(document);
   });
 
+  // -------------------------------------------------------------- push
+  // Notifications from this portal, so a tap opens THIS app. Everything is
+  // guarded: iOS grants Web Push only to a site added to the Home Screen, on
+  // 16.4+, over a real certificate — and the permission prompt only rises
+  // from a genuine press. Where any of that is missing the control stays
+  // hidden rather than offering something that cannot work.
+  function pushSupported() {
+    return 'serviceWorker' in navigator && 'PushManager' in window
+           && 'Notification' in window;
+  }
+
+  function base64ToBytes(value) {
+    const padded = (value + '='.repeat((4 - value.length % 4) % 4))
+      .replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(padded);
+    const out = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+
+  async function serverKey() {
+    try {
+      const r = await fetch('/api/push/key');
+      return (await r.json()).key || '';
+    } catch (e) { return ''; }
+  }
+
+  function paintNotify(state) {
+    const button = document.getElementById('notify-toggle');
+    const label = document.getElementById('notify-label');
+    if (!button || !label) return;
+    button.hidden = false;
+    button.classList.toggle('on', state === 'on');
+    label.textContent = state === 'on' ? i18n.notifyOff
+                      : state === 'denied' ? i18n.notifyDenied
+                      : i18n.notifyOn;
+    button.disabled = state === 'denied';
+  }
+
+  async function setUpNotify() {
+    const button = document.getElementById('notify-toggle');
+    if (!button || !pushSupported()) return;
+    if (!(await serverKey())) return;      // push not available on this Pi
+
+    let registration = null;
+    try {
+      registration = await navigator.serviceWorker.getRegistration('/sw.js');
+      const existing = registration
+        ? await registration.pushManager.getSubscription() : null;
+      paintNotify(Notification.permission === 'denied' ? 'denied'
+                  : existing ? 'on' : 'off');
+    } catch (e) {
+      paintNotify('off');
+    }
+
+    button.addEventListener('click', async () => {
+      try {
+        const reg = await navigator.serviceWorker.getRegistration('/sw.js');
+        const current = reg ? await reg.pushManager.getSubscription() : null;
+        if (current) {
+          const endpoint = current.endpoint;
+          await current.unsubscribe();
+          await fetch('/api/push/subscribe', {
+            method: 'DELETE',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ endpoint: endpoint })
+          });
+          paintNotify('off');
+          return;
+        }
+        // Permission is requested INSIDE the click handler: iOS refuses a
+        // prompt that is not a direct consequence of a press.
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') { paintNotify(permission === 'denied'
+                                                    ? 'denied' : 'off'); return; }
+        const worker = reg || await navigator.serviceWorker.register('/sw.js');
+        await navigator.serviceWorker.ready;
+        const key = await serverKey();
+        const sub = await worker.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: base64ToBytes(key)
+        });
+        const res = await fetch('/api/push/subscribe', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ subscription: sub.toJSON() })
+        });
+        paintNotify(res.ok ? 'on' : 'off');
+      } catch (e) {
+        paintNotify('off');
+      }
+    });
+  }
+  setUpNotify();
+
   // How tall the floating chrome actually is, published to CSS so the
   // content's tail and the type bar can clear it instead of guessing.
   //

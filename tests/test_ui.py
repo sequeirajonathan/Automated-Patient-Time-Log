@@ -164,7 +164,13 @@ class TestWritePaths:
                          # record. /settings/density is the one with teeth,
                          # and it clamps rather than trusting — see prefs.
                          "/settings/name", "/settings/density",
-                         "/settings/density/clear"}
+                         "/settings/density/clear",
+                         # A browser asking to be told when the login code
+                         # arrives. It stores what the browser handed over
+                         # and nothing else: the subscription can push to
+                         # that phone and cannot reach the app, the phone,
+                         # or the record.
+                         "/api/push/subscribe"}
 
     def test_no_route_accepts_a_raw_coordinate_or_keycode(self, client):
         """/tap takes an element from a named frame; /device takes an action

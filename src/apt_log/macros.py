@@ -1457,14 +1457,36 @@ PORTAL_URL = os.environ.get(
 # agency, or what the code is — it goes to a public relay and lands on a lock
 # screen, and neither of those is a place for any of that. It says what to do
 # and where, which is all a notification is for.
+PUSH_TITLE = "inMyTeam needs the code"
 CODE_WAITING = ("inMyTeam texted you a sign-in code. Open the portal and "
                 "type it in — the app is waiting on it.")
 
 
 def _say_the_code_is_waiting() -> None:
+    """Tell her the code is waiting, by both roads that exist.
+
+    Web Push first and above all: it comes from the portal, so tapping it
+    opens the portal — the app she installed, already at the field. A relay's
+    notification can only open Safari at a URL, which is the wrong app on the
+    one notice whose entire job is to be tapped.
+
+    The relay stays as the fallback, and it is not redundant. Push reaches
+    only phones that have subscribed, and only where iOS granted it; the
+    relay reaches whoever configured it, from a machine that does not care
+    whether this portal is healthy. Neither is enough on its own.
+    """
+    pushed = 0
+    try:
+        from apt_log import push
+
+        pushed = push.send(PUSH_TITLE, CODE_WAITING, url="/app", tag="otp")
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not push the code notice (%s)", exc)
+
     from apt_log import notify
 
     notify.send(CODE_WAITING, url=PORTAL_URL)
+    log.info("code notice: pushed to %d subscriber(s)", pushed)
 
 
 # The words every version of this screen uses. Matched loosely because the

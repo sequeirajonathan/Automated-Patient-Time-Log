@@ -312,6 +312,65 @@ def phone_app(request: Request):
     return _remember(response, request, device_id, "/app")
 
 
+@app.get("/sw.js")
+def service_worker():
+    """The push worker, served from the ROOT.
+
+    A service worker's scope is its own directory and below, so the copy
+    under /static could only ever control /static — never /app, which is the
+    page a tapped notification is supposed to open. Same file, served from
+    where it can do its job.
+    """
+    path = Path(__file__).parent / "static" / "sw.js"
+    try:
+        body = path.read_text(encoding="utf-8")
+    except OSError:
+        return Response(status_code=404)
+    return Response(body, media_type="application/javascript",
+                    headers={"Cache-Control": "no-store",
+                             "Service-Worker-Allowed": "/"})
+
+
+@app.get("/api/push/key")
+def push_key():
+    """What a browser needs to subscribe. Empty means push is unavailable on
+    this machine, and the page hides its own control rather than offering one
+    that cannot work."""
+    from apt_log import push
+
+    return JSONResponse({"key": push.public_key()},
+                        headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/push/subscribe")
+async def push_subscribe(request: Request):
+    """Remember a phone that wants to be told about the login code.
+
+    The subscription is the browser's own object, stored as given. It is not
+    a credential for anything here — it lets this server push to that phone
+    and nothing else — but it is kept 0600 beside the other state all the
+    same."""
+    from apt_log import push
+
+    payload = await request.json()
+    ok = push.subscribe(payload.get("subscription") or {},
+                        device_id=_device_id(request))
+    if not ok:
+        return JSONResponse({"error": "malformed"}, status_code=400)
+    return JSONResponse({"ok": True, "subscribers": push.count()})
+
+
+@app.delete("/api/push/subscribe")
+async def push_unsubscribe(request: Request):
+    from apt_log import push
+
+    payload = await request.json()
+    endpoint = (payload or {}).get("endpoint") or ""
+    if endpoint:
+        push.unsubscribe(endpoint)
+    return JSONResponse({"ok": True, "subscribers": push.count()})
+
+
 @app.get("/scan", response_class=HTMLResponse)
 def page_reading(request: Request):
     """The last full-page reading, as a rendered fragment for the sheet.

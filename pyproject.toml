@@ -36,6 +36,13 @@ dependencies = [
     # both around 32 KB, which is the difference between a portal she uses and
     # one she gives up on.
     "pillow==12.1.0",
+    # Web Push, for the one thing this system cannot do for itself: the login
+    # code inMyTeam texts. A notification from the portal ITSELF is what opens
+    # the installed app — a third-party relay can only ever open Safari, which
+    # is the wrong app and the wrong window. Installs from wheels on the Pi in
+    # about twelve seconds, checked before it was added, because the deploy
+    # gate must not grow new ways to fail.
+    "pywebpush==2.4.0",
 ]
 
 [project.optional-dependencies]

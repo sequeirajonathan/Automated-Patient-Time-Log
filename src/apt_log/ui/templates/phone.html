@@ -12,10 +12,16 @@
    - a floating pill tab bar, inset from the edges, riding the safe area
    - one spring curve for everything: cubic-bezier(.22,1,.36,1)
 
-   Same machinery as the dashboard underneath — same socket, same tap
-   verification, same macro allow-list. No service worker on purpose: offline
-   caching would keep copies of what the phone's screen said, and this page is
-   a window, not a document. #}
+   Same machinery as the control centre underneath — same socket, same tap
+   verification, same macro allow-list.
+
+   There IS a service worker now, and it caches nothing. The objection stands
+   and is unchanged — offline caching would keep copies of what the phone's
+   screen said, and this page is a window, not a document — so sw.js has no
+   fetch handler at all. It exists for Web Push, because the login code
+   inMyTeam texts is the one thing this system cannot do for itself, and a
+   notification sent by anything other than this portal opens Safari instead
+   of the app she installed. #}
 <html lang="{{ lang }}">
 <head>
 <meta charset="utf-8">
@@ -116,6 +122,14 @@
                      gap:12px; }
   #launcher footer a { color:rgba(255,255,255,.5); font-size:13px;
                        text-decoration:none; }
+  #launcher footer button { appearance:none; border:0; border-radius:9px;
+                            background:rgba(255,255,255,.12);
+                            color:rgba(255,255,255,.8); font:inherit;
+                            font-size:12.5px; font-weight:600;
+                            padding:7px 14px; cursor:pointer;
+                            -webkit-tap-highlight-color:transparent; }
+  #launcher footer button[hidden] { display:none; }
+  #launcher footer button.on { background:rgba(255,255,255,.9); color:#111; }
   /* The language switch, on the one screen of this view that is hers rather
      than the app's. Two people share this portal and want opposite languages
      from it, so it has to be reachable from the phone view too — not only
@@ -763,6 +777,14 @@
         {{ 'ES' if code == 'es' else 'EN' }}</button>
       {% endfor %}
     </form>
+    {# Notifications, asked for from a real press because iOS will not raise
+       the permission prompt any other way. Hidden until the client has
+       checked that this browser can actually subscribe — an installed home
+       screen app on iOS 16.4+, over the real certificate tailscale serve
+       provides — because a control that cannot work is worse than none. #}
+    <button type="button" id="notify-toggle" hidden>
+      <span id="notify-label">{{ t('papp.notify_on') }}</span>
+    </button>
     <a href="/console">{{ t('papp.full_status') }}</a>
   </footer>
 </div>
@@ -938,6 +960,9 @@
     appTitle: {{ t('app.title')|tojson }},
     opening: {{ t('papp.opening')|tojson }},
     waiting: {{ t('papp.waiting_screen')|tojson }},
+    notifyOn: {{ t('papp.notify_on')|tojson }},
+    notifyOff: {{ t('papp.notify_off')|tojson }},
+    notifyDenied: {{ t('papp.notify_denied')|tojson }},
     moved:   {{ t('portal.moved')|tojson }},
     failed:  {{ t('portal.failed')|tojson }},
     typeHint: {{ t('papp.type.hint')|tojson }},
