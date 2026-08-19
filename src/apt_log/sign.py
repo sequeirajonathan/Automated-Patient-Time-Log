@@ -842,56 +842,115 @@ def _click_element(driver, el: dict) -> bool:
     return True
 
 
-def _perform(driver, paths) -> None:
-    """Drive the strokes through W3C pointer actions, ONE CHAIN PER STROKE.
+# How many times a stroke that did not land is drawn again, and how much of
+# the canvas has to change for it to count as landed.
+#
+# Three attempts at making the seam between strokes reliable did not hold —
+# releasing the pointer source, widening the gap, letting the app recover from
+# the hierarchy dump — and the field report after each was the same shape: the
+# FIRST stroke lands and a later one does not. At that point the honest move
+# is to stop trusting the injection and check.
+#
+# So each stroke is looked at. A screenshot of the canvas before and after
+# says whether ink appeared; if it did not, that one stroke is drawn again.
+# Only the missing stroke is redrawn, never the whole signature, so a retry
+# cannot double an existing stroke — and the canvas is never cleared, so a
+# stroke that DID land is never at risk.
+STROKE_RETRIES = 2
+# A stroke is dozens of dark pixels at minimum. Twenty is comfortably below
+# the smallest real mark and comfortably above the noise of a repaint.
+INK_LANDED = 20
 
-    One chain for the whole signature was tried and the driver refuses it:
-    UiAutomator2 answers a chain holding more than one touch cycle with
-    "Unable to perform W3C actions ... make sure your input actions chain is
-    valid", every time. So a stroke is a chain, and the seam between two
-    chains is the thing to make safe.
 
-    That seam is where a signature lost the arch of an A, twice, in the
-    field. The log carried at the end of `execute` proved the replay had been
-    handed everything (strokes=3 points=24+28+11) while the phone showed two
-    marks, so the strokes were arriving and one was not being drawn.
+def _canvas_ink(bounds, serial=None) -> int | None:
+    """Dark pixels inside the canvas, or None if the screen cannot be read.
 
-    `perform()` returns when the driver has ACCEPTED the chain, not when the
-    phone has finished injecting it — the events land asynchronously and an
-    app that is still processing the previous gesture can drop the next
-    pen-down. Two things guard it now: the input source is released between
-    chains rather than left half-alive for the next one to inherit, and the
-    gap is long enough to outlast a slow frame. Neither is free, and a
-    signature that arrives whole is worth the second it costs.
+    None is not zero: a screenshot that fails must never be read as "the
+    stroke did not land", or a working replay would redraw everything.
     """
+    from apt_log import feed as feed_mod
+
+    try:
+        shot = feed_mod._adb(["exec-out", "screencap", "-p"], serial,
+                             timeout=20.0)
+        if shot.returncode != 0 or not shot.stdout:
+            return None
+        from io import BytesIO
+
+        from PIL import Image
+
+        with Image.open(BytesIO(shot.stdout)) as im:
+            grey = im.convert("L").crop(tuple(bounds))
+            return sum(1 for p in grey.getdata() if p < 100)
+    except Exception as exc:  # noqa: BLE001
+        log.info("cannot measure the canvas (%s)", exc)
+        return None
+
+
+def _draw(driver, path) -> None:
+    """One stroke, one action chain."""
     from selenium.webdriver.common.actions import interaction
     from selenium.webdriver.common.actions.action_builder import ActionBuilder
     from selenium.webdriver.common.actions.pointer_input import PointerInput
 
+    actions = ActionBuilder(driver,
+                            mouse=PointerInput(interaction.POINTER_TOUCH,
+                                               "touch"),
+                            duration=MOVE_MS)
+    pen = actions.pointer_action
+    pen.move_to_location(*path[0])
+    pen.pause(PEN_SETTLE)
+    pen.pointer_down()
+    pen.pause(PEN_SETTLE)
+    for x, y in path[1:]:
+        pen.move_to_location(x, y)
+    pen.pause(PEN_SETTLE)
+    pen.pointer_up()
+    actions.perform()
+    # Release the pointer source. Without this the next chain inherits a
+    # half-alive input of the same id, which is the state a dropped pen-down
+    # comes out of.
+    try:
+        actions.clear_actions()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _perform(driver, paths, bounds=None, serial=None) -> None:
+    """Draw every stroke, and CHECK EACH ONE ARRIVED.
+
+    One chain for the whole signature was tried and the driver refuses it:
+    UiAutomator2 answers a chain holding more than one touch cycle with
+    "Unable to perform W3C actions ... make sure your input actions chain is
+    valid", every time. So a stroke is a chain, and the seam between chains
+    is unreliable in a way three separate fixes did not settle.
+
+    `perform()` returns when the driver has ACCEPTED the chain, not when the
+    phone has finished injecting it, and there is nothing in the response
+    that says the ink was drawn. The only thing that does is the screen. So
+    the canvas is measured before and after each stroke, and a stroke that
+    left no mark is drawn again.
+
+    Only the missing stroke is redrawn — never the whole signature, and the
+    canvas is never cleared — so a retry cannot double a stroke that landed
+    or endanger one that did. Without bounds to measure, this degrades to
+    exactly what it did before: draw each stroke once and hope.
+    """
     for i, path in enumerate(paths):
         if i:
             time.sleep(STROKE_GAP)
-        actions = ActionBuilder(driver,
-                                mouse=PointerInput(interaction.POINTER_TOUCH,
-                                                   "touch"),
-                                duration=MOVE_MS)
-        pen = actions.pointer_action
-        pen.move_to_location(*path[0])
-        pen.pause(PEN_SETTLE)
-        pen.pointer_down()
-        pen.pause(PEN_SETTLE)
-        for x, y in path[1:]:
-            pen.move_to_location(x, y)
-        pen.pause(PEN_SETTLE)
-        pen.pointer_up()
-        actions.perform()
-        # Release the pointer source. Without this the next chain inherits a
-        # half-alive input of the same id, which is the state a dropped
-        # pen-down comes out of.
-        try:
-            actions.clear_actions()
-        except Exception:  # noqa: BLE001
-            pass
+        before = _canvas_ink(bounds, serial) if bounds else None
+        _draw(driver, path)
+        if before is None:
+            continue
+        for attempt in range(STROKE_RETRIES):
+            after = _canvas_ink(bounds, serial)
+            if after is None or after - before >= INK_LANDED:
+                break
+            log.info("stroke %d of %d left no ink; drawing it again",
+                     i + 1, len(paths))
+            time.sleep(STROKE_GAP)
+            _draw(driver, path)
 
 
 def execute(payload: dict, status_path: Path | None = None) -> Status:
@@ -933,7 +992,8 @@ def execute(payload: dict, status_path: Path | None = None) -> Status:
         time.sleep(INK_SETTLE)
         _perform(driver, build_paths(strokes, bounds,
                                      payload.get("aspect", 1.0),
-                                     rotate=sideways(xml, package)))
+                                     rotate=sideways(xml, package)),
+                 bounds=bounds)
         status.state = "done"
 
     try:
