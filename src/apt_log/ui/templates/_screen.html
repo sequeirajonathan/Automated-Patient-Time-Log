@@ -58,7 +58,7 @@
       {% endfor %}
     </div>
     {% else %}
-    <div class="a-row n{{ row['items'] | length }}{% if row.keys %} a-keys{% endif %}{% if row.heads %} a-heads{% endif %}">
+    <div class="a-row n{{ row['items'] | length }}{% if row.get('keys') %} a-keys{% endif %}{% if row.heads %} a-heads{% endif %}{% if row.checks %} a-checklist{% endif %}">
     {% for it in row['items'] %}
       {% if it.kind == 'segment' %}
         {# A part the app marked DISABLED is the section already showing —
@@ -82,6 +82,18 @@
         <button type="button" class="a-field{% if it.focused %} focus{% endif %}"
                 data-aim='{{ it.aim | tojson }}'
           >{{ it.txt or '' }}</button>
+      {% elif it.kind == 'toggle' and it.check %}
+        {# A CHECKBOX, drawn as one. An iOS on/off switch says "this setting
+           is on"; a plan of care asks "did you do this", which is a tick in
+           a box — reported exactly that way, and the switches were also
+           three times the height of the line they belonged to. #}
+        <button type="button" class="a-check{% if it.checked %} on{% endif %}"
+                role="checkbox" aria-checked="{{ 'true' if it.checked else 'false' }}"
+                data-aim='{{ it.aim | tojson }}'
+                aria-label="{{ it.aim.cls }}{% if it.aim.rid %} {{ it.aim.rid }}{% endif %}"
+          ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"
+            ><path d="M3.5 8.5 L6.5 11.5 L12.5 4.5"/></svg></button>
       {% elif it.kind == 'toggle' %}
         <button type="button" class="a-switch{% if it.checked %} on{% endif %}"
                 data-aim='{{ it.aim | tojson }}'
@@ -138,7 +150,7 @@
           <span class="a-kv-val">{{ it.value }}</span>
         </span>
       {% else %}
-        <span class="a-label{% if it.header %} hdr{% endif %}">{{ it.txt }}</span>
+        <span class="a-label{% if it.header %} a-hdr{% endif %}">{{ it.txt }}</span>
       {% endif %}
     {% endfor %}
     </div>
