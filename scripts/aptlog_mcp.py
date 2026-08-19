@@ -203,7 +203,20 @@ echo "revision: $(git -C /opt/aptlog rev-parse --short HEAD 2>/dev/null)"
 echo "services: $(systemctl is-active aptlog-ui aptlog-feed aptlog-appium | tr '\n' ' ')"
 echo "health:   $(curl -sf --max-time 5 http://127.0.0.1:8080/healthz >/dev/null && echo ok || echo UNREACHABLE)"
 echo "adb:      $(adb get-state 2>&1 | head -1)"
-echo "focus:    $(adb shell dumpsys window 2>/dev/null | grep -m1 -oE 'mCurrentFocus=Window\{[^}]*' | sed 's/.* //')"
+# The focused window, or — when that window is a popup rather than an activity
+# — the app that OWNS it. A dropdown reads back as the bare word "Window", and
+# this tool reporting that while the portal correctly reported the app cost a
+# round of confusion during the very investigation that fixed it. Same rule as
+# feed._is_a_window_title: a real focus carries a slash and a dot.
+DUMP=$(adb shell dumpsys window 2>/dev/null)
+FOCUS=$(printf '%s' "$DUMP" | grep -m1 -oE 'mCurrentFocus=Window\{[^}]*' | sed 's/.* //')
+case "$FOCUS" in
+  */*|*.*) ;;
+  ?*) OWNER=$(printf '%s' "$DUMP" | grep -m1 -oE 'mFocusedApp=[^}]*' \
+              | grep -oE '[A-Za-z0-9_.]+/[A-Za-z0-9_.]+' | head -1)
+      [ -n "$OWNER" ] && FOCUS="$OWNER (under a popup)" ;;
+esac
+echo "focus:    $FOCUS"
 python3 - <<'PY'
 import datetime, json
 try:
