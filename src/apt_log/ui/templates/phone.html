@@ -350,6 +350,18 @@
              border:none; padding:4px 4px 5px; min-height:0; }
   /* A section heading opens a group: air above it, snug below. */
   .a-row:has(> .a-label.hdr:only-child) { padding:14px 4px 5px; }
+  /* Several words on one line — a name and its date, the app's own columns.
+     No card, no cell padding: the first is the subject and reads like one,
+     the rest are its detail and sit quietly at the end of the line. */
+  .a-row.a-heads { background:none; box-shadow:none; border:none;
+                   padding:14px 4px 4px; min-height:0; align-items:baseline;
+                   gap:10px; }
+  .a-row.a-heads > .a-label { font-size:16px; font-weight:650;
+                              letter-spacing:-.01em; text-transform:none;
+                              color:var(--ink); flex:1; min-width:0; }
+  .a-row.a-heads > .a-label ~ .a-label { font-size:12.5px; font-weight:600;
+                              color:var(--muted); flex:none; text-align:right;
+                              letter-spacing:.01em; }
   .a-label:first-child { flex:1; }
 
   /* A field: caption above value, one tight unit — a datum, not two

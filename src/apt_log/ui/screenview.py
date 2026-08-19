@@ -77,6 +77,18 @@ CURTAIN_MIN_HEIGHT = 0.55
 ICON_MAX_SIDE = 0.10
 ICON_MAX_GAP = 0.10
 
+# How much two bands must share vertically before a horizontal gap between
+# them is read as one row drawn across two baselines rather than two rows.
+# Below BAND_OVERLAP by design — the horizontal test is what separates a list
+# from a split row, so this only has to be enough to mean "the same line".
+# The plan of care's halves share 47%.
+SPLIT_ROW_OVERLAP = 0.3
+
+# How close a caption must sit above a wordless control to be its name. A
+# label's own line height, near enough — further than that and it is a
+# heading over a section rather than a caption on a box.
+CAPTION_MAX_GAP = 0.02
+
 # Orphaned list dots. The reflow keeps a list's items, not its typography.
 BULLETS = {"•", "·", "◦", "‣", "∙", "*", "-"}
 
@@ -774,9 +786,17 @@ def build(doc: dict) -> dict | None:
         # A caption sits a hair above its value (a field), not a heading a
         # line above a paragraph. Tight gap, left-aligned, and the value is
         # a datum — a phone number, an ID, an office — never prose.
+        # A caption and its value share a LEFT EDGE — that is what makes them
+        # one datum rather than two. The old allowance was 6% of the screen,
+        # 43px at this density, and the plan of care's section header
+        # "Personal Care (1 H)" at x=19 swallowed its first task "Ambulation
+        # Assist" at x=61 with a pixel to spare: the task's name vanished into
+        # a field, its tick was left captioned by nothing, and the caregiver
+        # lost the first line of the list she has to complete. 42px is not a
+        # shared edge, it is the next column in.
         if (nxt is not None and caption_shaped
                 and 0 <= nxt["b"][1] - s["b"][3] <= 0.5 * height
-                and abs(nxt["b"][0] - s["b"][0]) <= max(8, 0.06 * w)
+                and abs(nxt["b"][0] - s["b"][0]) <= max(8, 0.02 * w)
                 and len((nxt["txt"] or "").strip()) <= 80):
             field = _item(s, "kv")
             field["caption"] = s["txt"]
@@ -832,6 +852,36 @@ def build(doc: dict) -> dict | None:
         else:
             bands.append([item])
 
+    # A row the app drew across two baselines is still one row. inMyTeam's
+    # plan of care puts a task's own tick and name on one line and its
+    # "Patient refused" tick and caption seventeen pixels lower and two thirds
+    # of the way across — one choice about one task, which banding split into
+    # two cells because the halves overlap by 47% and the bar is 50%. Thirteen
+    # tasks became twenty-six rows, and the caregiver scrolls twice as far to
+    # answer half as many questions.
+    #
+    # Merged only when the two bands cannot be a list: a list's rows share
+    # horizontal space and differ in y, so a candidate that overlaps the band
+    # vertically AND is clear of every item in it horizontally is the same row
+    # continued. That is a weaker bar than BAND_OVERLAP on purpose, and it is
+    # safe precisely because the horizontal test does the separating.
+    merged: list[list[dict]] = []
+    for band in bands:
+        if merged:
+            prev = merged[-1]
+            span = [min(n["b"][0] for n in prev), min(n["b"][1] for n in prev),
+                    max(n["b"][2] for n in prev), max(n["b"][3] for n in prev)]
+            here = [min(n["b"][0] for n in band), min(n["b"][1] for n in band),
+                    max(n["b"][2] for n in band), max(n["b"][3] for n in band)]
+            if (_overlap(span, here) >= SPLIT_ROW_OVERLAP
+                    and _tiled(prev + band)):
+                prev.extend(band)
+                continue
+        merged.append(band)
+    bands = merged
+    for band in bands:
+        band.sort(key=lambda n: n["b"][0])
+
     # An icon in the margin belongs to the line it decorates, not to a row of
     # its own. See ICON_MAX_SIDE. The icon's own aim survives the fold when
     # the app made it tappable (the address pin opens maps), so the sentence
@@ -843,6 +893,36 @@ def build(doc: dict) -> dict | None:
     for band in bands:
         _fold_gutter_icons(band, w)
     bands = [band for band in bands if band]
+
+    # A caption sitting directly ON TOP of a wordless control is that
+    # control's name. Android puts a label inside the box it names often
+    # enough that folding by containment gets most of them; a signature field
+    # is the case it does not. inMyTeam draws "Patient Signature" and then a
+    # tall empty box beneath it, and the box came through nameless — two
+    # blank cells with chevrons, one above the other, where the two things
+    # she has to collect should be.
+    #
+    # Only a control with NOTHING to say adopts a caption, so a list row that
+    # already carries its own words can never be renamed by the heading above
+    # it — the day divider over a visit card stays a day divider.
+    adopted: set[int] = set()
+    for i, band in enumerate(bands):
+        if i == 0 or len(band) != 1 or len(bands[i - 1]) != 1:
+            continue
+        it, cap = band[0], bands[i - 1][0]
+        if (it["kind"] != "row" or it.get("lines") or it.get("txt")
+                or not it.get("aim")):
+            continue
+        if cap["kind"] != "label" or not (cap.get("txt") or "").strip():
+            continue
+        if not (0 <= it["b"][1] - cap["b"][3] <= CAPTION_MAX_GAP * h):
+            continue
+        if abs(it["b"][0] - cap["b"][0]) > w * 0.03:
+            continue
+        it["lines"] = [cap["txt"]]
+        adopted.add(id(cap))
+    if adopted:
+        bands = [b for b in bands if not (len(b) == 1 and id(b[0]) in adopted)]
 
     # A WIDE button with no label sitting beside labelled buttons is a
     # dead tab slot, not a control: the visit detail's tab strip keeps an
@@ -1221,8 +1301,17 @@ def _band_shape(band: list[dict], height: int) -> dict:
     edge — as list cells it crammed four labels and four chevrons into one
     row.
     """
+    # A band of nothing but words is a heading line, not a cell. A lone one
+    # already had that treatment; a PAIR did not, because every rule for it
+    # was written with :only-child — so the moment Visit Detail's patient and
+    # date stopped being split into two rows they landed in a card together,
+    # at body size, with a list cell's padding around them. Reported as
+    # blocky, too much space, and a grey block, and that is exactly what it
+    # was. The band says what it is and the stylesheet does the rest.
     interactive = [i for i in band if i.get("aim")]
     if not interactive:
+        if len(band) > 1 and all(i["kind"] == "label" for i in band):
+            return {"heads": True}
         return {}
     if (len(interactive) == len(band) and len(band) >= 2
             and all(i.get("small") and i["kind"] in ("button", "toggle",
