@@ -849,6 +849,49 @@ class TestTheCodeBarClearsThePhonesControls:
         assert "classList.add('typing')" in source
         assert "classList.remove('typing')" in source
 
+    def test_the_code_box_is_not_inside_the_controls_that_go_inert(self, client):
+        """The fault behind two field reports, and the only one that mattered.
+
+        The bar was a CHILD of <nav class="navbar">, which is
+        `pointer-events:none` so the phone's screen stays touchable around the
+        floating pill — only `.pill` turns them back on. So the input, Send
+        and Cancel took no touches at all, and `body.typing .navbar *` then
+        forced them inert and dimmed them to 30% on top of that: the rule
+        written to protect the code box was landing on the code box.
+
+        Checked in a real browser at iPhone size with elementFromPoint before
+        this was written — on the old markup a tap on the box landed on
+        `stage`, the phone screen behind it. This holds the structure that
+        made it true, because the CSS above cannot reach what is not a child.
+        """
+        import re
+
+        body = client.get("/app").text
+        nav = re.search(r'<nav class="navbar".*?</nav>', body, flags=re.S)
+        assert nav, "the phone's control bar should still be there"
+        assert 'id="typebar"' not in nav.group(0)
+        assert 'id="typebar"' in body          # and it is still on the page
+
+    def test_the_code_box_says_it_takes_touches(self, client):
+        """Stated rather than inherited, so moving it again cannot silently
+        take it away — which is exactly how it was lost the first time."""
+        import re
+
+        body = client.get("/app").text
+        assert re.search(r"\.typebar\s*\{[^}]*pointer-events:\s*auto", body)
+        assert ".typebar * { pointer-events:auto; }" in body
+
+    def test_the_bar_is_not_measured_by_the_thing_it_is_placed_against(
+            self, client):
+        """`measureChrome()` measures `.navbar` to place the bar above it. With
+        the bar inside the nav, opening it grew the element its own position is
+        derived from — a feedback loop through the ResizeObserver."""
+        import re
+
+        body = client.get("/app").text
+        nav = re.search(r'<nav class="navbar".*?</nav>', body, flags=re.S)
+        assert "typebox" not in nav.group(0)
+
     def test_the_field_is_focused_inside_the_tap_that_opened_it(self):
         """Reported from the field: the bar rendered and could not be typed
         into — read, reasonably, as "greyed out".

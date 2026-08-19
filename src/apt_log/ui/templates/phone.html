@@ -408,11 +408,18 @@
      the bar's own Cancel button on top of Home whenever the app tab row
      was showing — press Cancel, leave the app view, lose the screen the
      code was for. Reported from the field exactly that way. */
+  /* Touchable, said out loud. The bar used to sit inside `.navbar`, which
+     turns pointer events OFF for everything but the pill — so the one control
+     on this page that has to accept a keystroke accepted nothing. It is a
+     sibling of the nav now; this line makes the property explicit rather than
+     inherited, so moving it again cannot silently take it away. */
   .typebar { position:fixed; left:12px; right:12px; z-index:40;
+             pointer-events:auto;
              bottom:calc(var(--chrome-h, 88px) + 14px);
              background:var(--card, #fff); border-radius:16px; padding:12px 14px;
              box-shadow:0 12px 32px -12px rgb(0 0 0 / .35);
              display:flex; flex-direction:column; gap:8px; }
+  .typebar * { pointer-events:auto; }
   /* Author display beats the UA's [hidden] rule, so hidden must be said
      here too — without this the bar sat on every page from load, and no
      amount of closing logic could touch it. */
@@ -636,6 +643,12 @@
      and inert, so a stray thumb near the keyboard cannot press Home and
      throw away the screen the code belongs to. Cancel is the way out, and
      it is the only live control down there while the bar is open. */
+  /* THE NAV ONLY. This pair used to reach the code box as well, because the
+     box was a child of the nav — dimmed to 30% and forced inert by the very
+     rule written to protect it. Reported from the field twice: "grayed out",
+     then "I cannot enter the OTP manually". The bar is a sibling now, so the
+     selector cannot reach it however it is written, and `.typebar` states its
+     own pointer-events besides. */
   body.typing .navbar { opacity:.3; pointer-events:none !important; }
   body.typing .navbar * { pointer-events:none !important; }
   .navbar { position:absolute; left:0; right:0; bottom:0; z-index:7;
@@ -878,18 +891,6 @@
        Filled by phone.js from the screen payload; hidden when the screen
        has no tab bar. #}
     <div id="apptabs" class="apptabs" hidden></div>
-    {# The type bar: one short code into the field she aimed at — the OTP
-       moment. Hidden until a text field is tapped; the server holds the
-       same contract (fields only, short plain token, refuse-if-moved). #}
-    <div id="typebar" class="typebar" hidden>
-      <span class="typehint">{{ t('papp.type.hint') }}</span>
-      <div class="typerow">
-        <input id="typebox" type="text" inputmode="text" autocomplete="one-time-code"
-               maxlength="32" pattern="[A-Za-z0-9]*" />
-        <button id="typesend" type="button">{{ t('papp.type.send') }}</button>
-        <button id="typecancel" type="button">{{ t('papp.type.cancel') }}</button>
-      </div>
-    </div>
     {# The phone's own three, in Android's shapes, plus wake — riding a
        floating pill so the chrome reads native instead of edge-to-edge web. #}
     <div class="pill">
@@ -910,6 +911,35 @@
          harder to mispress than four small ones. #}
     </div>
   </nav>
+
+  {# The type bar: one short code into the field she aimed at — the OTP
+     moment. Hidden until a text field is tapped; the server holds the same
+     contract (fields only, short plain token, refuse-if-moved).
+
+     A SIBLING OF THE NAV, NEVER A CHILD OF IT. It lived inside <nav> and that
+     one fact broke it three separate ways, all of them reported from the
+     field as "I cannot enter the code":
+
+       - `.navbar` is `pointer-events:none` so the phone's screen stays
+         touchable around the floating pill, and only `.pill` turns them back
+         on. The input, Send and Cancel therefore took no touches at all.
+       - `body.typing .navbar *` forces `pointer-events:none !important` and
+         dims the nav to 30% while she types — a guarantee written for the
+         phone's controls that landed on the code box too. That is the
+         "greyed out" in the report, and it was literal.
+       - `measureChrome()` measures the nav to place this bar above it, so
+         opening the bar grew the thing its own position is measured from.
+
+     None of those were about the bar. All three were about where it sat. #}
+  <div id="typebar" class="typebar" hidden>
+    <span class="typehint">{{ t('papp.type.hint') }}</span>
+    <div class="typerow">
+      <input id="typebox" type="text" inputmode="text" autocomplete="one-time-code"
+             maxlength="32" pattern="[A-Za-z0-9]*" />
+      <button id="typesend" type="button">{{ t('papp.type.send') }}</button>
+      <button id="typecancel" type="button">{{ t('papp.type.cancel') }}</button>
+    </div>
+  </div>
 </div>
 
 {# The signature pad. She draws here, on her own screen, where there is no
