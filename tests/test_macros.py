@@ -2639,3 +2639,145 @@ class TestClearScreen:
         confirmation on the one button that unsticks the screen is a second
         thing to get past while stuck."""
         assert "clear_screen" not in macros.CONFIRM
+
+
+class TestCheckStarredTasks:
+    """Ticking the plan of care's required tasks.
+
+    "if there is a star next to a task we must check mark it" — thirteen
+    boxes of 32px, driven from another state, before every check-out.
+
+    Bounds below are the live ones off inMyTeam's check-out page at 720x1600.
+    Two CheckBox columns, identical in class, size, id (none) and caption
+    (none): the task's own tick at x=24, and "Patient refused" at x=591.
+    Position is the only thing that tells them apart, which is why it is the
+    rule — and why the wrong one is a test rather than a comment.
+    """
+
+    W, H = 720, 1600
+
+    def _page(self, checked=(), refused_checked=()):
+        rows = []
+        for i in range(13):
+            top = 307 + i * 42
+            rows.append(
+                f'<node class="android.widget.CheckBox" resource-id=""'
+                f' bounds="[24,{top}][56,{top + 32}]" enabled="true"'
+                f' clickable="true"'
+                f' checked="{"true" if i in checked else "false"}" />')
+            rows.append(
+                f'<node class="android.widget.CheckBox" resource-id=""'
+                f' bounds="[591,{top + 17}][623,{top + 49}]" enabled="true"'
+                f' clickable="true"'
+                f' checked="{"true" if i in refused_checked else "false"}" />')
+            rows.append(
+                f'<node class="android.widget.TextView" text="*"'
+                f' bounds="[16,{top + 9}][24,{top + 25}]" />')
+        # The instruction sentence and both signature captions carry a star
+        # too, and none of them is a task.
+        rows.append('<node class="android.widget.TextView" text="*"'
+                    ' bounds="[16,261][24,277]" />')
+        rows.append('<node class="android.widget.TextView" text="*"'
+                    ' bounds="[16,1007][24,1023]" />')
+        rows.append('<node class="android.widget.TextView" text="*"'
+                    ' bounds="[16,1132][24,1148]" />')
+        return "<hierarchy>" + "".join(rows) + "</hierarchy>"
+
+    def _driver(self, xml):
+        driver = MagicMock()
+        driver.page_source = xml
+        driver.get_window_size.return_value = {"width": self.W,
+                                               "height": self.H}
+        return driver
+
+    def test_every_starred_task_is_found(self):
+        found = macros._starred_tasks(self._driver(self._page()))
+        assert len(found) == 13
+
+    def test_the_refused_column_is_never_one_of_them(self):
+        """Ticking it says the opposite of what this macro is for."""
+        found = macros._starred_tasks(self._driver(self._page()))
+        assert all(t["b"][0] < self.W * 0.25 for t in found)
+        assert not [t for t in found if t["b"][0] == 591]
+
+    def test_a_star_with_no_tick_on_its_line_is_not_a_task(self):
+        """The instruction sentence and the two signature captions each carry
+        one. Matching them would be the macro wandering off the task list."""
+        found = macros._starred_tasks(self._driver(self._page()))
+        for stray in (261, 1007, 1132):
+            assert not [t for t in found
+                        if t["b"][1] <= stray + 8 <= t["b"][3]]
+
+    def test_already_ticked_tasks_are_left_alone(self):
+        """A tap TOGGLES. Running this over a half-filled list would undo the
+        caregiver's own work."""
+        found = macros._starred_tasks(
+            self._driver(self._page(checked=(0, 3, 7))))
+        assert len(found) == 10
+
+    def test_a_fully_ticked_page_asks_for_nothing(self):
+        found = macros._starred_tasks(
+            self._driver(self._page(checked=tuple(range(13)))))
+        assert found == []
+
+    def test_a_refused_task_is_still_offered(self):
+        """Refusing is a different statement from doing, and the star still
+        stands. Whether the two may both be on is the app's business."""
+        found = macros._starred_tasks(
+            self._driver(self._page(refused_checked=(2,))))
+        assert len(found) == 13
+
+    def test_nothing_happens_without_a_screen_size(self):
+        driver = self._driver(self._page())
+        driver.get_window_size.return_value = {}
+        assert macros._starred_tasks(driver) == []
+
+    def test_it_taps_each_pending_box_once(self):
+        driver = self._driver(self._page())
+        taps = []
+        with patch.object(macros, "_tap_xy",
+                          side_effect=lambda x, y: taps.append((x, y))), \
+             patch.object(macros.time, "sleep"), \
+             patch.object(macros, "_starred_tasks",
+                          side_effect=[macros._starred_tasks(driver), []]):
+            macros._check_tasks(driver, lambda step: None)
+        assert len(taps) == 13
+        assert all(x < self.W * 0.25 for x, _ in taps)
+
+    def test_a_box_that_did_not_take_is_named(self):
+        """A plan of care submitted a tick short is rejected by the agency,
+        and she finds out hours later."""
+        driver = self._driver(self._page())
+        pending = macros._starred_tasks(driver)
+        with patch.object(macros, "_tap_xy"), \
+             patch.object(macros.time, "sleep"), \
+             patch.object(macros, "_starred_tasks",
+                          side_effect=[pending, pending[:2]]):
+            with pytest.raises(RuntimeError, match="did not tick"):
+                macros._check_tasks(driver, lambda step: None)
+
+    def test_it_is_registered_with_a_name_in_both_languages(self):
+        import json
+        from pathlib import Path
+
+        assert "check_tasks" in macros.MACROS
+        base = Path(__file__).resolve().parents[1] / "src/apt_log/ui/locales"
+        for name in ("en.json", "es.json"):
+            words = json.loads((base / name).read_text(encoding="utf-8"))
+            for key in ("macro.check_tasks", "macro.step.checking",
+                        "macro.step.nothing_to_check"):
+                assert words.get(key), f"{name} is missing {key}"
+
+    def test_it_only_ever_taps_and_reads(self):
+        """The tedious half is what this automates. Every consequential
+        decision on the page stays hers — so the body presses nothing but the
+        boxes it found, and reaches for no other control."""
+        import ast
+        import inspect
+        import textwrap
+
+        tree = ast.parse(textwrap.dedent(inspect.getsource(macros._check_tasks)))
+        called = {n.func.id for n in ast.walk(tree)
+                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+        assert called <= {"_starred_tasks", "_tap_xy", "report", "len",
+                          "RuntimeError"}, f"unexpected calls: {called}"

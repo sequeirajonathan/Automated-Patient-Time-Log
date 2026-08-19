@@ -1695,6 +1695,90 @@ def _last_care_package() -> str:
     return feed_mod.last_care_app()
 
 
+# A required field on inMyTeam's plan of care is marked with a star in the
+# left margin — the app draws it as a bullet, the tree reports the character.
+# The whole rule for this macro comes from it: "if there is a star next to a
+# task we must check mark it".
+REQUIRED_MARKS = ("*", "•", "•")
+
+# A task's own tick sits in the left margin beside its name. The OTHER column
+# — "Patient refused" — carries an identical CheckBox two thirds of the way
+# across, and ticking that one says the opposite of what this macro is for.
+# The split is by position because position is the only thing that
+# distinguishes them: same class, same size, no id, no caption, no
+# description. Measured on the live screen at 720 wide, the task ticks sit at
+# x=24 and the refusals at x=591.
+TASK_TICK_MAX_X = 0.25
+
+
+def _starred_tasks(driver) -> list[dict]:
+    """Every task tick that a star says is required and that is not yet on.
+
+    Pairs by BASELINE: the star and the tick share a line, which is what
+    "next to" means on this screen and what survives a density change. A star
+    with no tick on its line is not a task at all — the instruction sentence
+    at the top carries one, and so do both signature captions — and it
+    quietly matches nothing, which is the behaviour that keeps this macro
+    from wandering off the task list.
+    """
+    from apt_log import feed as feed_mod
+
+    src = driver.page_source or ""
+    size = driver.get_window_size()
+    width = size.get("width") or 0
+    if not width:
+        return []
+    stars = [s for s in feed_mod.statics(src)
+             if (s.get("txt") or "").strip() in REQUIRED_MARKS]
+    ticks = [e for e in feed_mod.elements(src)
+             if e.get("cls") == "CheckBox"
+             and e.get("enabled", True) is not False
+             and e["b"][2] <= width * TASK_TICK_MAX_X]
+    wanted: list[dict] = []
+    for star in stars:
+        middle = (star["b"][1] + star["b"][3]) / 2
+        mate = next((t for t in ticks
+                     if t["b"][1] <= middle <= t["b"][3]), None)
+        if mate is None or mate.get("checked"):
+            continue
+        if mate not in wanted:
+            wanted.append(mate)
+    return wanted
+
+
+def _check_tasks(driver, report) -> None:
+    """Tick every starred task on the plan of care.
+
+    Thirteen tasks, each needing a tap in a 32px box, driven from Miami
+    through a phone in another state — that is the clunkiness this removes.
+
+    Deliberately only ADDS ticks. A tap on a checkbox toggles it, so running
+    this over a half-filled list would undo the caregiver's own work; already
+    ticked boxes are read from the tree and left alone. It never touches the
+    "Patient refused" column, never presses Check out, and never signs
+    anything: what it does is the tedious half, and every consequential
+    decision on this page stays hers.
+    """
+    report("macro.step.reading")
+    pending = _starred_tasks(driver)
+    if not pending:
+        report("macro.step.nothing_to_check")
+        return
+    report("macro.step.checking")
+    for tick in pending:
+        x = (tick["b"][0] + tick["b"][2]) // 2
+        y = (tick["b"][1] + tick["b"][3]) // 2
+        _tap_xy(x, y)
+        time.sleep(0.35)
+    # Read the page back rather than trusting the taps: a box that did not
+    # take is the failure worth naming, because a plan of care submitted a
+    # tick short is rejected by the agency and she finds out hours later.
+    left = _starred_tasks(driver)
+    if left:
+        raise RuntimeError(
+            f"{len(left)} of {len(pending)} tasks did not tick")
+
+
 def _phone_settings(driver, report) -> None:
     """Open Android's own Settings.
 
@@ -1754,6 +1838,7 @@ MACROS: dict[str, Macro] = {
         Macro("restart_app", "macro.restart_app", _restart_app),
         Macro("rescan", "macro.rescan", _rescan),
         Macro("clear_screen", "macro.clear_screen", _clear_screen),
+        Macro("check_tasks", "macro.check_tasks", _check_tasks),
         Macro("phone_settings", "macro.phone_settings", _phone_settings),
         Macro("restart_phone", "macro.restart_phone", _restart_phone),
     )
