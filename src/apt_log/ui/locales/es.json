@@ -236,6 +236,7 @@
   "sign.button": "Firmar",
   "sign.erase": "Borrar todo",
   "sign.instruction": "Firme aquí con el dedo. Se dibujará en el recuadro de firma del teléfono; después revise la pantalla y pulse el botón de guardar de la propia aplicación.",
+  "sign.lock_lapsed": "El teléfono no avisó si el dibujo terminó. Revise la pantalla del teléfono antes de salvar.",
   "sign.no_canvas": "Esta pantalla no tiene recuadro de firma. Abra primero la pantalla de firma de la aplicación y luego firme aquí.",
   "sign.onphone": "En el teléfono:",
   "sign.preview": "Cómo se verá:",
