@@ -57,6 +57,20 @@ REQUEST_MAX_AGE = 90.0
 MAX_STROKES = 40
 MAX_POINTS = 3000
 
+# How far outside the pad a point may stray and still be part of a signature.
+#
+# The pad clamps at the source now, so nothing should arrive outside at all;
+# this is for the browser that has the old script cached, and for the rounding
+# a fractional device pixel can produce. It exists because the old rule —
+# strictly 0..1, refuse the WHOLE payload otherwise — meant one finger sliding
+# a little past the edge bounced an entire signature with a bare "failed" and
+# left her looking at strokes that would not send.
+#
+# A quarter of the pad is generous for a slip and still nowhere near a payload
+# that is not a signature, which is what this check is really for. Anything
+# inside it is clamped onto the canvas by build_paths, which already does that.
+OVERSHOOT = 0.25
+
 # The apps whose canvases may be signed. Replay refuses anywhere else — the
 # launcher, a settings page, another app entirely.
 APP_PACKAGES = (
@@ -131,7 +145,8 @@ def validate(strokes) -> bool:
             x, y = p[0], p[1]
             if not (isinstance(x, (int, float)) and isinstance(y, (int, float))):
                 return False
-            if not (0 <= x <= 1 and 0 <= y <= 1):
+            if not (-OVERSHOOT <= x <= 1 + OVERSHOOT
+                    and -OVERSHOOT <= y <= 1 + OVERSHOOT):
                 return False
     return True
 
@@ -500,7 +515,12 @@ def build_paths(strokes, bounds: list[int],
         points = stroke.get("points") if isinstance(stroke, dict) else stroke
         path = []
         for p in points:
-            u, v = p[0], p[1]
+            # Onto the pad first. A point that strayed past the edge (see
+            # OVERSHOOT) rides the edge; mapping it raw would push the ink
+            # outside the centred draw box and only the canvas clamp below
+            # would catch it, landing the stroke on the wrong margin.
+            u = min(max(float(p[0]), 0.0), 1.0)
+            v = min(max(float(p[1]), 0.0), 1.0)
             if rotate:
                 u, v = 1.0 - v, u
             px = off_x + u * draw_w
