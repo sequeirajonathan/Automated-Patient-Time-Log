@@ -1937,3 +1937,107 @@ class TestThePadSaysWhereEachButtonActs:
         base = Path(__file__).resolve().parents[1] / "src/apt_log/ui/locales"
         for name in ("en.json", "es.json"):
             assert json.loads((base / name).read_text(encoding="utf-8")).get(key)
+
+
+class TestTheAppsOwnButtonsWaitForTheInk:
+    """"It's about timing. If I pressed send to phone too fast then the same
+    happens — the first part gets captured, then only the end of the line —
+    but if I wait about 5-10 seconds the whole signature makes it."
+
+    Her reading was right and mine were not. Measured on the phone, the
+    canvas reads 0 ink at two seconds after Send, 1764 at four, and complete
+    at six: a replay takes five to six seconds. What is supposed to cover
+    that window is the busy overlay, and it does not — `#busy` is
+    `position:absolute; z-index:6`, bounded by the phone stage, while the pad
+    sheet is `position:fixed; z-index:8` OVER it.
+
+    Harmless until the app's own Done was moved INTO the pad, inches under
+    Send. After that, Send-then-Done reads as one gesture, and a Done pressed
+    at two seconds commits whatever ink has landed so far — one initial, or
+    the bridge of an A without its arch. Which is the report, exactly.
+
+    So the controls that reach the phone go dead until the replay says it
+    finished. A half-drawn signature on a visit record is not cosmetic.
+    """
+
+    SCRIPT = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/static/phone.js")
+    PAGE = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/templates/phone.html")
+
+    def _js(self):
+        return strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
+
+    def _css(self):
+        import re
+
+        return re.sub(r"/\*.*?\*/", "", self.PAGE.read_text(encoding="utf-8"),
+                      flags=re.S)
+
+    # ------------------------------------------------------------ the lock
+    def test_there_is_a_lock(self):
+        assert "function padWaiting(" in self._js()
+
+    def test_it_kills_both_phone_side_rows(self):
+        js = self._js()
+        body = js[js.index("function padWaiting("):]
+        body = body[:body.index("\n  }")]
+        assert "sign-appbtns" in body and "sign-legacyrow" in body
+        assert "disabled" in body
+
+    def test_and_send_itself(self):
+        """Two replays racing each other onto one canvas would interleave."""
+        js = self._js()
+        body = js[js.index("function padWaiting("):]
+        assert "sign-send" in body[:body.index("\n  }")]
+
+    def test_a_replay_takes_the_lock(self):
+        js = self._js()
+        send = js[js.index("function padSend("):js.index("function applySign(")]
+        assert "padWaiting(true)" in send
+
+    def test_and_the_replay_finishing_gives_it_back(self):
+        js = self._js()
+        done = js[js.index("function applySign("):]
+        done = done[:done.index("\n  }")]
+        assert "padWaiting(false)" in done
+
+    def test_the_apps_own_actions_take_it_too(self):
+        """Clear on the phone is a replay of the same kind — seconds long,
+        and a Done pressed into the middle of one saves what survived it."""
+        js = self._js()
+        act = js[js.index("const appAction ="):]
+        act = act[:act.index("const appClear")]
+        assert "padWaiting(true)" in act
+
+    def test_a_rebuilt_row_is_locked_again(self):
+        """The app-button row is redrawn from the screen payload, and the
+        payload changes WHILE the ink lands — a rebuild mid-replay would hand
+        back live buttons."""
+        js = self._js()
+        head = js[:js.index("function padSend(")]
+        assert "if (pad.waitingId) padWaiting(true);" in head
+
+    # ------------------------------------------------------- and it says why
+    def test_the_dead_buttons_say_why_they_are_dead(self, client):
+        """A row of buttons that does nothing, with nothing explaining it,
+        reads as the portal being broken."""
+        assert 'class="padwait"' in client.get("/app").text
+
+    def test_the_sentence_only_shows_while_it_waits(self):
+        css = self._css()
+        assert ".padwait { display:none; }" in css
+        assert "#signsheet.waiting .padwait" in css
+
+    def test_disabled_looks_disabled(self):
+        """Every button in the pad carries a press animation; one that still
+        pops under a finger reads as pressed."""
+        css = self._css()
+        assert "#signsheet button[disabled]" in css
+        assert "#signsheet button[disabled]:active" in css
+
+    def test_both_languages_say_it(self):
+        base = Path(__file__).resolve().parents[1] / "src/apt_log/ui/locales"
+        for name in ("en.json", "es.json"):
+            assert json.loads(
+                (base / name).read_text(encoding="utf-8")).get("sign.wait_phone")

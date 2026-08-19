@@ -249,6 +249,7 @@
   "sign.state.running": "Dibujando su firma en el teléfono…",
   "sign.step_draw": "Firme aquí",
   "sign.step_phone": "Luego, en el teléfono",
+  "sign.wait_phone": "Su firma se está dibujando en el teléfono. Estos botones vuelven cuando termine.",
   "sign.wrong_app": "El teléfono no está mostrando una de las aplicaciones de cuidado, así que no se dibujó nada.",
   "signature.brush": "Grosor del trazo",
   "signature.clear": "Borrar",

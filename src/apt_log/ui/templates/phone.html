@@ -869,6 +869,25 @@
             border-top:1px solid var(--line); }
   #sign-appbtns:empty { display:none; }
 
+  /* WHILE THE INK IS STILL LANDING, STEP TWO IS NOT AVAILABLE YET.
+     The replay takes five to six seconds and the app's own Done now sits
+     inches from Send, so a Done pressed on the way past commits a half-drawn
+     signature. The buttons are disabled in script; this is the part that
+     says WHY, because a row of dead buttons with no explanation reads as the
+     portal being broken. */
+  .padwait { display:none; }
+  #signsheet.waiting .padwait { display:flex; align-items:center; gap:9px;
+                                margin:0 0 12px; font-size:13.5px;
+                                color:var(--muted); }
+  .padwait .spin { flex:none; width:14px; height:14px; border-radius:50%;
+                   border:2px solid var(--tint-soft); border-top-color:var(--tint);
+                   animation:spin .7s linear infinite; }
+  /* Disabled has to LOOK disabled — the pad's buttons all carry a press
+     animation, and one that still pops under a finger reads as pressed. */
+  #signsheet button[disabled] { opacity:.4; cursor:default; }
+  #signsheet button[disabled]:active { transform:none; filter:none;
+                                       opacity:.4; }
+
   /* A numbered step. Two of them, because the pad is two places — hers and
      the phone's — and the confusion was that nothing said so. */
   .signstep { display:flex; align-items:center; gap:9px; margin:0 0 10px; }
@@ -1174,6 +1193,9 @@
       <span class="signstep-n">2</span>
       <span class="signstep-t">{{ t('sign.step_phone') }}</span>
     </div>
+    {# Only while the replay runs. The buttons below it are dead for those
+       few seconds and this is the sentence that says so. #}
+    <p class="padwait"><span class="spin"></span>{{ t('sign.wait_phone') }}</p>
     {# The app's OWN buttons for whatever sheet is in front, filled from the
        screen payload — inMyTeam names them and the tree gives them bounds,
        so they press through the ordinary verified tap like any other

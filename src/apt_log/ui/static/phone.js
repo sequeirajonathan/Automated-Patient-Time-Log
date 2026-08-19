@@ -343,6 +343,10 @@
           bindAims(slot);
         }
       }
+      // A rebuild mid-replay hands back live buttons — the row is redrawn
+      // from the screen payload, and the payload changes while the ink is
+      // landing. Re-apply the lock over anything freshly built.
+      if (pad.waitingId) padWaiting(true);
       // Shown when the app has given us real buttons to press, or on the
       // legacy rotated pages where the pair is pressed by coordinate.
       approw.hidden = !sheetActions.length && !meta.canvas;
@@ -638,6 +642,37 @@
     }
   }
 
+  // THE APP'S OWN BUTTONS ARE NOT PRESSABLE WHILE THE INK IS STILL LANDING.
+  //
+  // A replay takes five to six seconds — measured on the phone: the canvas
+  // reads 0 at two seconds, 1764 at four, complete at six. The busy overlay
+  // that is supposed to cover that is `position:absolute; z-index:6` inside
+  // the stage, and this sheet is `position:fixed; z-index:8` OVER it, so
+  // every button in the pad stayed live throughout.
+  //
+  // That did not matter until the app's own Done was moved INTO the pad,
+  // inches from Send. After that, pressing Send and then Done reads as one
+  // gesture — and Done at two seconds commits whatever has landed so far.
+  // Reported as a stroke never making it "after the submit", and as waiting
+  // five to ten seconds making it work, which is exactly the length of the
+  // replay.
+  //
+  // A half-drawn signature committed to a visit record is not a cosmetic
+  // fault, so this is a lock rather than a hint: the controls that reach the
+  // phone go dead until the replay says it has finished.
+  function padWaiting(on) {
+    const sheet = document.getElementById('signsheet');
+    if (sheet) sheet.classList.toggle('waiting', !!on);
+    const rows = [document.getElementById('sign-appbtns'),
+                  document.getElementById('sign-legacyrow')];
+    for (const row of rows) {
+      if (!row) continue;
+      for (const b of row.querySelectorAll('button')) b.disabled = !!on;
+    }
+    const send = document.getElementById('sign-send');
+    if (send) send.disabled = !!on;
+  }
+
   function padSend() {
     if (!pad.strokes.length) { toast(i18n.signEmpty || ''); return; }
     const c = padCanvas();
@@ -662,6 +697,7 @@
         return;
       }
       pad.waitingId = out.id || '';
+      padWaiting(true);
       // Cleared on the status push; nothing reusable is left behind.
       pad.strokes = []; padRedraw();
     }).catch(() => { unbusy(); toast(i18n.failed || ''); });
@@ -671,6 +707,7 @@
     if (!pad.waitingId || s.id !== pad.waitingId) return;
     if (s.state === 'running') { busy(s.text || ''); return; }
     pad.waitingId = '';
+    padWaiting(false);
     unbusy();
     // done or failed, the sentence arrives rendered; show it either way. On
     // done it says to check the screen and press the app's own save.
@@ -986,6 +1023,9 @@
         const out = await r.json().catch(() => ({}));
         if (!r.ok) { unbusy(); toast(i18n.failed || ''); return; }
         pad.waitingId = out.id || '';
+        // Same lock as a replay: the app's Clear takes seconds too, and a
+        // Done pressed into the middle of one commits whatever survived it.
+        padWaiting(true);
       }).catch(() => { unbusy(); toast(i18n.failed || ''); });
     };
     const appClear = document.getElementById('app-clear');
