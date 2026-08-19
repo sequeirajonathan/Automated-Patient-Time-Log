@@ -133,6 +133,23 @@ _FOCUSED_APP = re.compile(
     r"mFocusedApp=\S*ActivityRecord\{[^}]*?\s([A-Za-z0-9_.]+/[A-Za-z0-9_.]+)")
 
 
+# System panels that sit OVER the app rather than belonging to it. These are
+# bare tokens like the popups below, and the owner substitution must not touch
+# them: the notification shade is not inMyTeam's surface, it is the system's,
+# covering inMyTeam — and reporting the app underneath told every check that
+# the phone was fine while a wall of the owner's private notifications sat on
+# the screen. The containment watchdog is what used to recover that, and
+# naming the app is exactly what stopped it doing so.
+_SYSTEM_WINDOWS = ("notificationshade", "statusbar", "volumedialog",
+                   "screendecoroverlay", "navigationbar", "shadecarrier",
+                   "inputmethod", "assistpreviewpanel")
+
+
+def _is_a_system_panel(focus: str) -> bool:
+    lowered = (focus or "").replace(" ", "").replace("-", "").lower()
+    return any(name in lowered for name in _SYSTEM_WINDOWS)
+
+
 def _is_a_window_title(focus: str) -> bool:
     """True when the focus read named a window rather than an activity.
 
@@ -312,7 +329,7 @@ def window_state(serial: str | None = None) -> tuple[str, bool, str]:
     # names it. Only when the window is not an activity at all — never over a
     # real focus, and never over the ANR dialog, whose title does end in the
     # wedged package and which the caller must keep seeing.
-    if _is_a_window_title(focus) and not anr:
+    if _is_a_window_title(focus) and not anr and not _is_a_system_panel(focus):
         owner = _FOCUSED_APP.search(out)
         if owner:
             focus = owner.group(1)
@@ -422,9 +439,41 @@ def _watch_shade(hierarchy: str | None, serial: str | None = None) -> None:
     _last_collapse[0] = now
     log.info("the notification shade is over the screen — collapsing it")
     try:
+        # The clean way first. It is the documented one and it works on most
+        # devices — and on THIS phone it returns success and does nothing at
+        # all, as do KEYCODE_BACK, KEYCODE_HOME and `service call statusbar 2`.
+        # All four were tried against the shade while it was actually up.
         _adb(["shell", "cmd", "statusbar", "collapse"], serial)
-    except (OSError, subprocess.SubprocessError) as exc:
+        time.sleep(0.6)
+        if not _shade_has_focus(serial):
+            return
+        # What does work is the gesture a person would use. Off the screen's
+        # own size rather than a constant, and from low enough to be inside
+        # the shade's empty area — a swipe that starts on a notification
+        # drags the notification.
+        w, h = screen_size(serial) or (0, 0)
+        if not w or not h:
+            return
+        log.info("the shade ignored the collapse — swiping it away")
+        _adb(["shell", "input", "swipe", str(w // 2), str(int(h * 0.85)),
+              str(w // 2), str(int(h * 0.08)), "250"], serial)
+    except Exception as exc:  # noqa: BLE001
+        # Broad on purpose. This runs inside the capture loop on every frame,
+        # and a surprise from adb or the window read must cost a warning and
+        # a shade left up — never the mirror.
         log.warning("could not collapse the shade (%s)", exc)
+
+
+def _shade_has_focus(serial: str | None = None) -> bool:
+    """Whether the shade still owns the screen, asked of the window manager.
+
+    Checked rather than assumed, because the command that is supposed to
+    close it reports nothing either way — it succeeded and the shade stayed
+    up for twenty minutes, retried every twenty seconds, while the owner's
+    notifications sat over the app and the portal reported the app in front.
+    """
+    focus, _, _ = window_state(serial)
+    return _is_a_system_panel(focus) and "shade" in (focus or "").lower()
 
 
 # Density, PER APP. One global density (84) was chosen for HHAeXchange+,
