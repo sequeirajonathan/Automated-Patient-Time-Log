@@ -70,22 +70,65 @@ _lock = threading.Lock()
 def _generate() -> dict[str, str]:
     """A fresh keypair, in the two shapes its two readers need.
 
-    The browser wants the public key as the raw uncompressed EC point,
-    base64url — that is what `applicationServerKey` is. The sender wants the
-    private key as PEM, which is what pywebpush takes. They are the same key
-    written two ways, and writing both down beats deriving one at every use.
+    BOTH HALVES ARE base64url OF THE RAW KEY, and neither is PEM. The public
+    half is the uncompressed EC point, which is what a browser's
+    `applicationServerKey` is. The private half is the 32-byte scalar, which
+    is what pywebpush's `vapid_private_key` takes when it is given a string —
+    hand it PEM text and it tries to read the base64 as DER and fails with
+    "ASN.1 parsing error: invalid length", which says nothing about what it
+    actually wanted.
+
+    That was a real push, refused, with the failure landing in a log nobody
+    was reading. Established by handing pywebpush both forms against a dead
+    endpoint and watching which one got as far as the network.
     """
     from cryptography.hazmat.primitives import serialization
     from py_vapid import Vapid01
-    from py_vapid.utils import b64urlencode
+    from py_vapid.utils import b64urlencode, num_to_bytes
 
     vapid = Vapid01()
     vapid.generate_keys()
-    raw = vapid.public_key.public_bytes(
+    point = vapid.public_key.public_bytes(
         serialization.Encoding.X962,
         serialization.PublicFormat.UncompressedPoint)
-    return {"public": b64urlencode(raw),
-            "private": vapid.private_pem().decode("utf-8")}
+    scalar = vapid.private_key.private_numbers().private_value
+    return {"public": b64urlencode(point),
+            "private": b64urlencode(num_to_bytes(scalar, 32))}
+
+
+def _reencode(stored: dict[str, str]) -> dict[str, str]:
+    """Turn a PEM private half into the base64url one pywebpush wants,
+    keeping the public half exactly as it is."""
+    try:
+        from py_vapid import Vapid01
+        from py_vapid.utils import b64urlencode, num_to_bytes
+
+        vapid = Vapid01.from_pem(stored["private"].encode("utf-8"))
+        scalar = vapid.private_key.private_numbers().private_value
+        return {"public": stored["public"],
+                "private": b64urlencode(num_to_bytes(scalar, 32))}
+    except Exception as exc:  # noqa: BLE001
+        log.warning("cannot re-encode the stored VAPID key (%s)", exc)
+        return {}
+
+
+def _write(pair: dict[str, str]) -> bool:
+    try:
+        KEY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = KEY_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(pair), encoding="utf-8")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, KEY_PATH)
+        return True
+    except OSError as exc:
+        # A key that cannot be saved is not a key: the next call would
+        # generate a different one, the browser would be subscribed against
+        # the old one, and every push would be rejected by the push service
+        # with nothing on this side saying why. Better to report no push at
+        # all, loudly, than a push that silently cannot work.
+        log.error("cannot save VAPID keys to %s (%s) — push disabled",
+                  KEY_PATH, exc)
+        return False
 
 
 def keys() -> dict[str, str]:
@@ -94,7 +137,18 @@ def keys() -> dict[str, str]:
     not available here" rather than failing."""
     with _lock:
         try:
-            return json.loads(KEY_PATH.read_text(encoding="utf-8"))
+            stored = json.loads(KEY_PATH.read_text(encoding="utf-8"))
+            if not str(stored.get("private", "")).startswith("-----"):
+                return stored
+            # A key written by the version that stored PEM. Converted rather
+            # than replaced: the PUBLIC half is unchanged and correct, so
+            # every browser already subscribed against it stays subscribed.
+            # Regenerating here would silently unsubscribe her instead.
+            fixed = _reencode(stored)
+            if fixed:
+                _write(fixed)
+                log.info("re-encoded the VAPID private key; subscriptions kept")
+                return fixed
         except (OSError, json.JSONDecodeError):
             pass
         try:
@@ -102,23 +156,7 @@ def keys() -> dict[str, str]:
         except Exception as exc:  # noqa: BLE001
             log.warning("cannot generate VAPID keys (%s)", exc)
             return {}
-        try:
-            KEY_PATH.parent.mkdir(parents=True, exist_ok=True)
-            tmp = KEY_PATH.with_suffix(".tmp")
-            tmp.write_text(json.dumps(pair), encoding="utf-8")
-            os.chmod(tmp, 0o600)
-            os.replace(tmp, KEY_PATH)
-        except OSError as exc:
-            # A key that cannot be saved is not a key: the next call would
-            # generate a different one, the browser would be subscribed
-            # against the old one, and every push would be rejected by the
-            # push service with nothing on this side saying why. Better to
-            # report no push at all, loudly, than a push that silently
-            # cannot work.
-            log.error("cannot save VAPID keys to %s (%s) — push disabled",
-                      KEY_PATH, exc)
-            return {}
-        return pair
+        return pair if _write(pair) else {}
 
 
 def public_key() -> str:

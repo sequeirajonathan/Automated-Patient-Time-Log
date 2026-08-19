@@ -174,6 +174,38 @@ class TestTheKey:
                             lambda *a, **k: (_ for _ in ()).throw(OSError()))
         assert push.public_key() == ""
 
+    def test_the_private_half_is_what_the_sender_can_actually_read(self):
+        """Not PEM. pywebpush reads a string private key as base64url of the
+        raw 32-byte scalar; hand it PEM and it fails with "ASN.1 parsing
+        error: invalid length", which says nothing about what it wanted. That
+        cost a real push, refused, into a log nobody was reading."""
+        private = push.keys()["private"]
+        assert "-----" not in private
+        assert len(private) == 43          # 32 bytes, base64url, unpadded
+
+    def test_a_key_stored_as_pem_is_converted_not_replaced(self, store):
+        """The PUBLIC half was always right, so every browser subscribed
+        against it stays subscribed. Regenerating would have silently
+        unsubscribed her instead."""
+        from py_vapid import Vapid01
+        from py_vapid.utils import b64urlencode
+        from cryptography.hazmat.primitives import serialization
+
+        v = Vapid01()
+        v.generate_keys()
+        point = v.public_key.public_bytes(
+            serialization.Encoding.X962,
+            serialization.PublicFormat.UncompressedPoint)
+        old_public = b64urlencode(point)
+        push.KEY_PATH.write_text(json.dumps(
+            {"public": old_public,
+             "private": v.private_pem().decode("utf-8")}), encoding="utf-8")
+
+        pair = push.keys()
+        assert pair["public"] == old_public       # the subscription survives
+        assert "-----" not in pair["private"]     # and the sender can read it
+        assert json.loads(push.KEY_PATH.read_text())["private"] == pair["private"]
+
     def test_it_lives_where_the_services_can_actually_write(self):
         """/var/lib/aptlog is the service user's; /etc/aptlog is root's."""
         assert "/var/lib/" in str(push.KEY_PATH)
