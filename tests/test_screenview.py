@@ -1240,3 +1240,164 @@ class TestDisabledRowsAreStatements:
         (btn,) = [i for r in m["rows"] for i in r["items"]
                   if i["kind"] == "button"]
         assert btn["enabled"] is False
+
+
+class TestVisitDetailScrub:
+    """The Visit Detail page, from the tree the phone actually published.
+
+    Reported as "visit details looks really bad", with a screenshot: three
+    grey blocks reading "···" stacked above three homeless sentences, two
+    enormous voids in the middle of the page, the section she was looking at
+    greyed out as though broken, and the two controls that change a record
+    dressed as list rows.
+
+    Bounds, classes and enabled flags below are the real ones, to the pixel,
+    off a live capture at 720x1600. The words are stand-ins — a patient's
+    name and address do not belong in a repository — and the layout does not
+    depend on them.
+    """
+
+    def _doc(self):
+        return doc(
+            elements=[
+                # The app's own up-arrow, chained to the portal's Back.
+                {**el("", "ImageButton", [5, 64, 42, 106], "Navigate up")},
+                # A clickable View over the WHOLE content area — scaffolding.
+                el("", "View", [0, 106, 720, 1561]),
+                el("", "View", [289, 175, 431, 207]),          # More info
+                # The section switch. The app DISABLES the pane you are on.
+                {**el("", "View", [19, 215, 360, 247]), "enabled": False},
+                el("", "View", [360, 215, 701, 247]),          # Plan of care
+                # Three margin icons. Two decorative, the middle one tappable.
+                {**el("", "Button", [16, 296, 48, 328]), "enabled": False},
+                el("", "Button", [16, 341, 48, 373]),
+                {**el("", "Button", [16, 386, 48, 418]), "enabled": False},
+                el("", "View", [172, 1510, 274, 1549]),        # Check in
+                el("", "View", [446, 1508, 548, 1550]),        # Note & out
+            ],
+            statics=[
+                st([52, 76, 119, 94], "Visit Detail"),
+                st([354, 119, 367, 139], "H"),
+                st([273, 155, 447, 175], "HOME CARE ON CALL, LLC"),
+                st([297, 181, 423, 201], "More Patient info +"),
+                st([175, 224, 204, 238], "Visits"),
+                st([502, 224, 559, 238], "Plan of care"),
+                st([19, 261, 454, 277], "Patient Name"),
+                st([467, 261, 701, 277], "2026-8-19"),
+                st([52, 296, 167, 328], "05:00 AM | 06:00 AM PCA (1 H)"),
+                st([52, 349, 318, 365], "1 Example Street, Somewhere"),
+                st([52, 394, 331, 410],
+                   "No check in and check out data has been recorded"),
+                st([199, 1522, 247, 1537], "Check in"),
+                st([467, 1515, 528, 1543], "Note & Check out"),
+            ],
+        )
+
+    def _model(self):
+        return screenview.build(self._doc())
+
+    def _flat(self):
+        return [it for row in self._model()["rows"] for it in row["items"]]
+
+    # ---------------------------------------------------------- the ··· blocks
+    def test_no_nameless_button_survives(self):
+        """Each one rendered as a full-width "···" — the portal inventing a
+        control out of a square the tree says nothing else about."""
+        for it in self._flat():
+            if it["kind"] == "button":
+                assert (it.get("txt") or "").strip(), \
+                    "a captionless button reached the page again"
+
+    def test_the_sentences_are_not_stranded(self):
+        """The icon took its own row, so the line it decorated fell below it.
+        Every one of the three is back on a line of its own."""
+        rows = self._model()["rows"]
+        for text in ("05:00 AM | 06:00 AM PCA (1 H)",
+                     "1 Example Street, Somewhere",
+                     "No check in and check out data has been recorded"):
+            band = next(r for r in rows if any(
+                text in (it.get("txt") or "") or text in (it.get("lines") or [])
+                for it in r["items"]))
+            assert len(band["items"]) == 1, f"{text!r} still shares its band"
+
+    def test_a_tappable_icon_hands_its_aim_to_its_sentence(self):
+        """The middle icon is the only enabled one. Its tap survives the
+        fold — onto the line it belonged to, which is now the target."""
+        it = next(i for i in self._flat()
+                  if "1 Example Street, Somewhere" in (i.get("lines") or []))
+        assert it["kind"] == "row"
+        assert it["aim"]["b"] == [16, 341, 48, 373], \
+            "the tap must still land where the app drew the control"
+
+    def test_a_disabled_icon_takes_nothing_with_it(self):
+        """It is decoration. Nothing in the tree says otherwise, so the page
+        must not offer a press that would do nothing."""
+        for text in ("05:00 AM | 06:00 AM PCA (1 H)",
+                     "No check in and check out data has been recorded"):
+            it = next(i for i in self._flat() if (i.get("txt") or "") == text)
+            assert not it.get("aim"), f"{text!r} became a fake control"
+
+    # ------------------------------------------------------------- the switch
+    def test_the_section_switch_is_a_segmented_control(self):
+        seg = next(i for i in self._flat() if i["kind"] == "segment")
+        assert [p["txt"] for p in seg["parts"]] == ["Visits", "Plan of care"]
+
+    def test_the_pane_she_is_on_reads_as_current(self):
+        """The app disables the tab you are already on. Greyed out, that said
+        "unavailable" about the one section actually showing."""
+        seg = next(i for i in self._flat() if i["kind"] == "segment")
+        assert [p["checked"] for p in seg["parts"]] == [True, False]
+
+    def test_the_other_pane_is_still_reachable(self):
+        seg = next(i for i in self._flat() if i["kind"] == "segment")
+        assert seg["parts"][1]["aim"]["b"] == [360, 215, 701, 247]
+
+    # ------------------------------------------------------------ the columns
+    def test_the_name_and_the_date_share_one_line(self):
+        """Two headings side by side are the app's own columns. Splitting them
+        stacked two section headings with a heading's margin under each —
+        the pair of voids in the middle of the screenshot."""
+        rows = self._model()["rows"]
+        band = next(r for r in rows
+                    if any((it.get("txt") or "") == "Patient Name"
+                           for it in r["items"]))
+        assert [it.get("txt") for it in band["items"]] == ["Patient Name",
+                                                           "2026-8-19"]
+
+    def test_stacked_headings_are_still_split(self):
+        """The rule this replaced exists for the stitch's day dividers, which
+        land a few pixels apart and overlap in x. Those still separate."""
+        m = screenview.build(doc(
+            elements=[],
+            statics=[st([20, 300, 300, 320], "August 19"),
+                     st([22, 316, 300, 336], "August 20")],
+        ))
+        assert [len(r["items"]) for r in m["rows"]] == [1, 1]
+
+    # ------------------------------------------------------------ the actions
+    def test_the_record_changing_controls_are_actions(self):
+        rows = self._model()["rows"]
+        band = next(r for r in rows if any(
+            "Check in" in (it.get("lines") or []) for it in r["items"]))
+        assert band.get("actions"), \
+            "Check in and Note & Check out rendered as list rows again"
+
+    def test_and_they_still_aim_where_they_always_did(self):
+        """Prominence is a drawing change. What pressing them means is not
+        this module's to alter."""
+        rows = self._model()["rows"]
+        band = next(r for r in rows if r.get("actions"))
+        assert [it["aim"]["b"] for it in band["items"]] == [
+            [172, 1510, 274, 1549], [446, 1508, 548, 1550]]
+
+    # ----------------------------------------------------------- scaffolding
+    def test_the_full_page_container_is_not_a_row(self):
+        for it in self._flat():
+            assert it["b"] != [0, 106, 720, 1561], \
+                "the whole content area rendered as one giant control"
+
+    def test_the_app_up_arrow_is_still_suppressed(self):
+        assert self._model()["nav"]["back"] is None
+
+    def test_the_title_is_the_pages_own(self):
+        assert self._model()["nav"]["title"] == "Visit Detail"
