@@ -1592,3 +1592,41 @@ class TestVisitDetailDress:
         the right edge of a list cell. As a whole row it fills it."""
         css = client.get("/app").text
         assert ".a-seg:only-child" in css
+
+
+class TestEveryShippedScriptParses:
+    """The gap this closes: 1153 tests passed over a phone.js that did not
+    parse at all.
+
+    Every existing JS guard reads the source as TEXT — greps it for a
+    identifier, an option, a call. Text is blind to the one failure that
+    takes the whole page down at once: a duplicate `const` is a SyntaxError,
+    so not one line of the file runs, the socket never opens and the splash
+    it lifts on stays up forever. Reported as "I can't open the app".
+
+    A parser is the only thing that catches that, so the gate now runs one.
+    The deploy gate runs on the Pi, which has node; where node is missing
+    this skips rather than lying about having checked.
+    """
+
+    SCRIPTS = sorted((Path(__file__).resolve().parents[1]
+                      / "src/apt_log/ui/static").glob("*.js"))
+
+    def test_there_are_scripts_to_check(self):
+        """A glob that silently matches nothing would make every case below
+        pass without reading a byte."""
+        assert self.SCRIPTS, "no shipped scripts found to parse"
+
+    @pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)
+    def test_it_parses(self, script):
+        import shutil
+        import subprocess
+
+        node = shutil.which("node") or shutil.which("nodejs")
+        if not node:
+            pytest.skip("no JavaScript engine available to parse with")
+        done = subprocess.run([node, "--check", str(script)],
+                              capture_output=True, timeout=60)
+        assert done.returncode == 0, (
+            f"{script.name} does not parse:\n"
+            + done.stderr.decode("utf-8", "replace")[:800])
