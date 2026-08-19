@@ -432,6 +432,20 @@ INMYTEAM = "com.inmyteam.inmyteam"
 TOP_BAND = 0.12
 
 
+# What an app calls its own up-arrow, in both languages and in the words
+# Android's own description uses. Matched on the whole caption, never on a
+# substring: "Volver a la lista" is a link somewhere and not this.
+_UP_WORDS = frozenset((
+    "navigate up", "up", "back", "go back", "navigate back",
+    "atrás", "atras", "volver", "regresar", "arriba", "navegar hacia arriba",
+))
+
+
+def _is_up_affordance(item: dict) -> bool:
+    """Whether this control is the app's own version of Back."""
+    return (item.get("txt") or "").strip().lower() in _UP_WORDS
+
+
 def _name_the_unnamed(elements: list[dict], statics: list[dict], doc: dict,
                       w: int, h: int) -> None:
     """Set `txt_key` on controls the app left nameless. In place."""
@@ -446,7 +460,14 @@ def _name_the_unnamed(elements: list[dict], statics: list[dict], doc: dict,
                                 "sign in with your phone")):
         return
     for e in elements:
-        if e.get("rid") or e.get("txt") or e.get("has_text"):
+        # `has_text` is deliberately NOT a reason to skip. A field whose text
+        # is stripped reports has_text=True and txt=None — it HAS words and
+        # the portal may not show them — and that is exactly the control this
+        # exists to name. The first version skipped on it and so skipped the
+        # agency filter, which is the one thing it was written for: the label
+        # landed on the Refresh row beside it and the box stayed blank, which
+        # is what came back from the field.
+        if e.get("rid") or e.get("txt"):
             continue
         x1, y1, x2, y2 = e["b"]
         if y2 > h * TOP_BAND:
@@ -908,10 +929,23 @@ def build(doc: dict) -> dict | None:
             # app's own name, which is always true.
             honest = [n for n in titles if _is_honest_title(n["txt"])]
             title = max(honest, key=lambda n: len(n["txt"]), default=None)
+            # The app's own up-arrow does not ride along. The pill already has
+            # a Back and this would be a second control meaning the same
+            # thing, three inches away, in different words — "Navigate up"
+            # beside "Back", which is a question the caregiver has to stop and
+            # answer mid-visit. Reported from the field exactly that way.
+            #
+            # Suppressed rather than re-pointed: the pill's Back sends the
+            # phone's own Back, which is what this arrow does, so there is
+            # nothing to chain it to that is not already there. Only a control
+            # that SAYS it goes up is dropped — the top-left button is
+            # otherwise whatever the app put there, and on HHAeXchange+ that
+            # was the help button (and on the signature page, Anular).
+            controls = [b for b in buttons if not _is_up_affordance(b)]
             nav = {
-                "back": buttons[0],
+                "back": controls[0] if controls else None,
                 "title": title["txt"] if title else "",
-                "trailing": buttons[1:],
+                "trailing": controls[1:],
             }
             bands = bands[1:]
 

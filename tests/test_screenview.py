@@ -81,6 +81,13 @@ class TestContainment:
 
 class TestNavBar:
     def test_the_apps_own_nav_is_recognised(self):
+        """The title and the app's real controls come through — but its own
+        BACK does not, and that is deliberate.
+
+        The pill already has a Back that sends the phone's own Back, which is
+        what "Atrás" does. Publishing both put two controls with one meaning
+        three inches apart in different words, and it was reported from the
+        field as exactly that confusion. `btn_add` still rides."""
         m = screenview.build(doc(
             elements=[el("btn_back", "Button", [0, 20, 120, 120], "Atrás"),
                       el("btn_add", "Button", [640, 20, 720, 120], "+")],
@@ -88,8 +95,9 @@ class TestNavBar:
         ))
         assert m["nav"] is not None
         assert m["nav"]["title"] == "Detalle de Visita"
-        assert m["nav"]["back"]["aim"]["rid"] == "btn_back"
-        assert [b["aim"]["rid"] for b in m["nav"]["trailing"]] == ["btn_add"]
+        kept = ([m["nav"]["back"]] if m["nav"]["back"] else []) \
+            + m["nav"]["trailing"]
+        assert [b["aim"]["rid"] for b in kept] == ["btn_add"]
 
     def test_a_screen_without_a_top_bar_has_no_nav(self):
         m = screenview.build(doc(

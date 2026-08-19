@@ -22,7 +22,7 @@
   <div class="a-nav">
     <span class="a-title">{{ m.nav.title }}</span>
     <span class="a-trail">
-      {% for b in [m.nav.back] + m.nav.trailing %}
+      {% for b in ([m.nav.back] if m.nav.back else []) + m.nav.trailing %}
       <button type="button" class="a-navbtn" data-aim='{{ b.aim | tojson }}'
         >{{ b.txt or '···' }}</button>
       {% endfor %}
