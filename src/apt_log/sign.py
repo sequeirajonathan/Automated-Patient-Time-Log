@@ -287,6 +287,30 @@ def find_canvas(xml: str, dump: bool = True) -> tuple[list[int] | None, str]:
 DEBUG_PATH = STATE_DIR / "sign-debug.json"
 
 
+# Captions the refusal record may keep, and nothing else.
+#
+# The record deliberately holds no text at all, because a signature screen
+# shows a patient's name and a caregiver's. But the one question it cannot
+# currently answer is the one that matters — WHICH BUTTON IS WHICH — and that
+# needs captions. So it keeps a caption only when the caption is one of these
+# words: chrome, in either language, that no name can collide with.
+#
+# Written after an evening spent inferring button identity from screenshots
+# and rotation arithmetic, and getting it wrong twice. The next real signature
+# should simply say.
+_CONTROL_WORDS = frozenset((
+    "borrar", "salvar", "anular", "atrás", "atras", "cancelar", "guardar",
+    "limpiar", "aceptar", "de acuerdo", "firmar",
+    "clear", "save", "cancel", "back", "ok", "done", "sign", "submit",
+))
+
+
+def _control_word(raw: str) -> str:
+    """The node's caption if it is known chrome, otherwise nothing."""
+    txt = _attr(raw, "text").strip()
+    return txt if txt.lower() in _CONTROL_WORDS else ""
+
+
 def _nodes_of(xml: str) -> list:
     """(raw, bounds) for every node with a real rectangle — what the refusal
     dump wants, without making its caller rebuild the finder's own loop."""
@@ -317,6 +341,8 @@ def _dump_refusal(nodes, reason: str) -> None:
                "nodes": [{"cls": (_attr(raw, "class") or "").rsplit(".", 1)[-1],
                           "rid": _attr(raw, "resource-id").split("/")[-1],
                           "clickable": _attr(raw, "clickable"),
+                          # Chrome captions only — see _CONTROL_WORDS.
+                          "word": _control_word(raw),
                           "b": b}
                          for raw, b in nodes]}
         tmp = DEBUG_PATH.with_suffix(".tmp")
@@ -689,6 +715,10 @@ def do_action(payload: dict, status_path: Path | None = None) -> Status:
             # takes a person pressing the button) and always worth keeping.
             _dump_refusal(_nodes_of(source), "no_canvas")
             return
+        # Kept on the way IN, whether this succeeds or not: the record is only
+        # useful if it describes the screen the press was aimed at, and after a
+        # successful press that screen is gone.
+        _dump_refusal(_nodes_of(source), f"pressing:{kind}")
         target = targets[kind]
         if "element" in target:
             if not _click_element(driver, target["element"]):

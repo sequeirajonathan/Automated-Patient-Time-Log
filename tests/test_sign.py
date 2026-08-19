@@ -754,3 +754,43 @@ class TestPressingAnElementNotAPoint:
             def find_elements(self, how, what):
                 raise AssertionError("should not have looked")
         assert sign._click_element(Driver(), {"rid": "a:id/b", "txt": ""}) is False
+
+
+class TestTheRecordCanSayWhichButtonIsWhich:
+    """An evening was spent inferring button identity from screenshots and
+    rotation arithmetic, and getting it wrong twice — first "the pad's Borrar
+    is btn_left", then the same thing again with more confidence. The record
+    held bounds and ids and no captions, so it could not settle it.
+
+    It keeps captions now, from a closed vocabulary of chrome words. A
+    patient's name is not in that list and cannot get into the file through
+    it, which is the property that made the record textless to begin with.
+    """
+
+    def test_a_control_caption_is_kept(self):
+        for word in ("Borrar", "Salvar", "Anular", "Clear", "Save"):
+            node = f'<node text="{word}" bounds="[0,0][10,10]"/>'
+            assert sign._control_word(node) == word
+
+    def test_a_name_is_not(self):
+        """The whole reason the record carries no text."""
+        for name in ("Sadia Amselem", "CARIDAD ROJAS BATISTA", "Firma Paciente",
+                     "08/18 at 08:00PM"):
+            node = f'<node text="{name}" bounds="[0,0][10,10]"/>'
+            assert sign._control_word(node) == ""
+
+    def test_the_dump_carries_the_word_and_no_other_text(self, tmp_path,
+                                                          monkeypatch):
+        import json as _json
+
+        path = tmp_path / "sign-debug.json"
+        monkeypatch.setattr(sign, "DEBUG_PATH", path)
+        xml = ('<node class="android.widget.Button" resource-id="a:id/btn_left"'
+               ' text="Borrar" clickable="true" bounds="[10,75][100,109]"/>'
+               '<node class="android.widget.TextView" text="Sadia Amselem"'
+               ' bounds="[0,1151][358,1164]"/>')
+        sign._dump_refusal(sign._nodes_of(xml), "no_canvas")
+        doc = _json.loads(path.read_text(encoding="utf-8"))
+        words = [n["word"] for n in doc["nodes"]]
+        assert "Borrar" in words
+        assert "Sadia Amselem" not in _json.dumps(doc)
