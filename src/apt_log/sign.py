@@ -936,14 +936,19 @@ def _perform(driver, paths, bounds=None, serial=None) -> None:
     or endanger one that did. Without bounds to measure, this degrades to
     exactly what it did before: draw each stroke once and hope.
     """
+    # Measured ONCE per stroke, not twice: the reading after one stroke is
+    # the reading before the next. A screenshot is a synchronous
+    # SurfaceFlinger round trip and this replay already has a good reason to
+    # believe that leaning on the app mid-signature is not free.
+    before = _canvas_ink(bounds, serial) if bounds else None
     for i, path in enumerate(paths):
         if i:
             time.sleep(STROKE_GAP)
-        before = _canvas_ink(bounds, serial) if bounds else None
         _draw(driver, path)
         if before is None:
             continue
-        for attempt in range(STROKE_RETRIES):
+        after = before
+        for _ in range(STROKE_RETRIES):
             after = _canvas_ink(bounds, serial)
             if after is None or after - before >= INK_LANDED:
                 break
@@ -951,6 +956,7 @@ def _perform(driver, paths, bounds=None, serial=None) -> None:
                      i + 1, len(paths))
             time.sleep(STROKE_GAP)
             _draw(driver, path)
+        before = after if after is not None else before
 
 
 def execute(payload: dict, status_path: Path | None = None) -> Status:
@@ -961,6 +967,14 @@ def execute(payload: dict, status_path: Path | None = None) -> Status:
     status = Status(id=payload.get("id", ""), state="running",
                     digest=digest(strokes)[:16])
     write_status(status, status_path)
+    # WHERE each stroke ended up, once mapped onto the canvas. Extents only —
+    # a bounding box cannot reconstruct a signature, so nothing re-stampable
+    # is written (REQ-10.6) — and it answers the question the point counts
+    # cannot: a stroke that lands on top of another, or collapsed onto an
+    # edge by a bad fit, is present in every count and invisible on the
+    # phone. Reported as "only one of the initials made it", which is what
+    # two initials drawn in the same place would look like.
+    placed = [""]
 
     def work(driver) -> None:
         package = driver.current_package
@@ -990,10 +1004,16 @@ def execute(payload: dict, status_path: Path | None = None) -> Status:
         # dumps subside. The replay does its own dump right here — for the
         # canvas bounds it cannot draw without — so it now waits too.
         time.sleep(INK_SETTLE)
-        _perform(driver, build_paths(strokes, bounds,
-                                     payload.get("aspect", 1.0),
-                                     rotate=sideways(xml, package)),
-                 bounds=bounds)
+        paths = build_paths(strokes, bounds, payload.get("aspect", 1.0),
+                            rotate=sideways(xml, package))
+        placed[0] = " canvas=%s boxes=%s" % (
+            bounds,
+            ";".join("%d,%d-%d,%d" % (min(x for x, _ in pth),
+                                      min(y for _, y in pth),
+                                      max(x for x, _ in pth),
+                                      max(y for _, y in pth))
+                     for pth in paths if pth))
+        _perform(driver, paths, bounds=bounds)
         status.state = "done"
 
     try:
@@ -1011,7 +1031,8 @@ def execute(payload: dict, status_path: Path | None = None) -> Status:
     shape = "+".join(
         str(len(st.get("points") if isinstance(st, dict) else st))
         for st in (strokes or []))
-    log.info("signature replay %s (%s) strokes=%d points=%s",
+    log.info("signature replay %s (%s) strokes=%d points=%s aspect=%.2f%s",
              status.state, status.reason or status.digest[:8],
-             len(strokes or []), shape or "-")
+             len(strokes or []), shape or "-",
+             float(payload.get("aspect") or 0), placed[0])
     return status
