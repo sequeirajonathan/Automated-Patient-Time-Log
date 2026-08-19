@@ -123,8 +123,21 @@ def replaces(key: str) -> bool:
     return key in REPLACING
 
 
-def naming(xml: str, package: str, width: int, height: int) -> Naming:
+def _whole(value) -> int:
+    """A dimension, or 0 for anything that is not one.
+
+    Naming is fed a size by three different callers and one of them handed it
+    a driver's {"width": …} dict, which unpacked to the STRINGS "width" and
+    "height" and blew up multiplying one by a float — taking a whole page scan
+    down with it. Nothing here is worth an exception: a size that cannot be
+    read names nothing, which is the direction every refusal in this file
+    already takes.
+    """
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def naming(xml: str, package: str, width, height) -> Naming:
     """Read the screen once, so every node can be asked cheaply."""
     lowered = (xml or "").lower()
     credential = any(m in lowered for m in CREDENTIAL_MARKERS)
-    return Naming(package, width, height, credential)
+    return Naming(package, _whole(width), _whole(height), credential)

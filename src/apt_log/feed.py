@@ -1373,7 +1373,11 @@ def elements(xml: str, label: bool = False, package: str = "",
     """
     from apt_log import controls as controls_mod
 
-    w, h = size or (0, 0)
+    # Defensively: a dict here unpacks to its keys, which is how a whole page
+    # scan died on `"height" * 0.12`. controls coerces, and this refuses to
+    # unpack anything that is not a pair.
+    pair = size if isinstance(size, (tuple, list)) and len(size) == 2 else (0, 0)
+    w, h = pair
     naming = controls_mod.naming(xml or "", package, w, h)
     found = []
     for raw in _NODE.findall(xml or ""):

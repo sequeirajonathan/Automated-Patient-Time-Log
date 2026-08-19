@@ -840,6 +840,16 @@ def _read_page(driver, report) -> None:
         raise RuntimeError("could not save the page reading") from exc
 
 
+def _screen_size(driver) -> tuple[int, int]:
+    """The device's own size, for the control naming. Degrades to (0, 0),
+    which names nothing rather than naming something wrongly."""
+    try:
+        size = driver.get_window_size()
+        return int(size["width"]), int(size["height"])
+    except Exception:  # noqa: BLE001
+        return (0, 0)
+
+
 def _swipe_geometry(driver) -> tuple[int, int, int]:
     size = driver.get_window_size()
     return (size["width"] // 2,
@@ -980,9 +990,26 @@ def _stitch_walk(driver, assume_top: bool = False) -> bool:
             return False
         cx, y_top, y_bot = _swipe_geometry(driver)
 
+        # The package and the screen size, so the scan names controls exactly
+        # as a viewport capture does. Without them a STITCHED page — which is
+        # what a walked screen becomes — came back with every portal name
+        # missing, and the agency filter drew blank again on the one screen
+        # that gets walked most. The naming has to happen wherever elements
+        # are built, and this is the second place.
+        # NOT `size`: this function rebinds that name to the driver's own
+        # {"width": …, "height": …} dict further down, and `capture` is a
+        # closure that reads it at CALL time — so naming was handed a dict,
+        # unpacked its keys, and tried to multiply the string "height" by a
+        # float. A distinct name is the fix; the coercion in `controls` is
+        # the belt.
+        package = driver.current_package or ""
+        screen_wh = _screen_size(driver)
+
         def capture() -> dict:
             src = driver.page_source or ""
-            return {"elements": feed_mod.elements(src, label=True),
+            return {"elements": feed_mod.elements(src, label=True,
+                                                  package=package,
+                                                  size=screen_wh),
                     "statics": feed_mod.statics(src)}
 
         def settled_capture() -> dict:
