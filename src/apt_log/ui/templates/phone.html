@@ -138,10 +138,17 @@
      says. */
   #launcher .seg { display:inline-flex; gap:2px; padding:2px; border-radius:9px;
                    background:rgba(255,255,255,.12); }
+  /* 44px, which is the smallest target a thumb hits reliably and the number
+     Apple's own guidance gives. These were 43x26 measured in a real browser,
+     and "not very responsive" was the report — half of that was the missing
+     `language` field, and the other half was genuinely having to aim. */
   #launcher .seg button { appearance:none; border:0; background:transparent;
                           color:rgba(255,255,255,.65); font:inherit;
-                          font-size:12px; font-weight:600; letter-spacing:.04em;
-                          padding:5px 12px; border-radius:7px; cursor:pointer;
+                          font-size:13px; font-weight:600; letter-spacing:.04em;
+                          min-width:56px; min-height:44px; padding:0 16px;
+                          display:inline-flex; align-items:center;
+                          justify-content:center;
+                          border-radius:7px; cursor:pointer;
                           -webkit-tap-highlight-color:transparent; }
   #launcher .seg button[aria-pressed="true"] { background:rgba(255,255,255,.9);
                                                color:#111; }
@@ -792,7 +799,11 @@
     {% endfor %}
   </div>
   <footer>
-    <form method="post" action="/language" class="seg">
+    {# data-navigate: this one must reload the page, because changing the
+       language changes every word on it. The live-form wiring posts in the
+       background, which left the switch looking dead — the choice was stored
+       and nothing on screen moved. #}
+    <form method="post" action="/language" class="seg" data-navigate="1">
       <input type="hidden" name="next" value="/app">
       {% for code in languages %}
       <button type="submit" name="language" value="{{ code }}"

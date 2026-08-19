@@ -580,15 +580,33 @@
   function wireForms(root) {
     for (const form of root.querySelectorAll('form[method="post"]')) {
       if (form.dataset.live) continue;
+      // SOME FORMS HAVE TO NAVIGATE. This was written for the relay panel,
+      // whose answers come back over the socket and so need no reload — but
+      // it took every POST form on the page, including the language switch,
+      // whose whole job is to reload the page in the other language. Posting
+      // that one in the background changed the stored language and left every
+      // word on screen as it was, which reads as a button that does nothing.
+      if (form.dataset.navigate) continue;
       form.dataset.live = '1';
       // getAttribute, never form.action — a field named "action" shadows the
       // property. The dashboard learned this the hard way; see live.js.
       const target = form.getAttribute('action') || '';
       form.addEventListener('submit', (ev) => {
         ev.preventDefault();
+        const data = new FormData(form);
+        // A SUBMIT BUTTON'S name/value IS NOT IN FormData(form). That is the
+        // spec, and it is why the language switch posted `next=/app` with no
+        // `language` at all and the server answered 422 — the value lived on
+        // the button that was pressed, which only the browser's own submit
+        // carries. The language form navigates now and never reaches here,
+        // but any form built the same way would have died the same way.
+        const hit = ev.submitter;
+        if (hit && hit.name && !data.has(hit.name)) {
+          data.append(hit.name, hit.value);
+        }
         fetch(target, {
           method: 'POST',
-          body: new URLSearchParams(new FormData(form)),
+          body: new URLSearchParams(data),
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           redirect: 'follow'
         }).catch(() => { /* the socket shows the real state either way */ });
