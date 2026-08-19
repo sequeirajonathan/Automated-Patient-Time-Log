@@ -341,6 +341,12 @@
       }
     }
     body.classList.toggle('offapp', onLauncher);
+    // A system panel is over the app. Said plainly, with the one act that
+    // helps, instead of a sketch of a screen nobody is being shown — and
+    // instead of her tapping controls that cannot possibly answer, which is
+    // what "somehow inMyTeam ended up in the phone settings" felt like from
+    // the other end.
+    body.classList.toggle('covered', !!meta.covered);
 
     // The large title names what is actually in front: the screen's own
     // nav-bar title, else the app the *phone* is showing — never the last
@@ -771,6 +777,23 @@
     });
     const offapp = document.getElementById('offapp-apps');
     if (offapp) offapp.addEventListener('click', () => view('launcher'));
+    // The way out from under a system panel. It is a macro rather than a
+    // keypress because a keypress is exactly what does not work here: this
+    // phone swallows the collapse command, Back and Home alike, and only a
+    // swipe from the top actually shuts the shade. The macro swipes, checks,
+    // and brings the care app back — nothing is force-stopped and no visit
+    // is touched, so pressing it at a bad moment costs a second.
+    const clear = document.getElementById('covered-clear');
+    if (clear) clear.addEventListener('click', () => {
+      awaitingMacro = true;
+      busy(i18n.clearing || '', 30000);
+      fetch('/macro', {
+        method: 'POST',
+        body: new URLSearchParams({ name: 'clear_screen' }),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        redirect: 'follow'
+      }).catch(() => { awaitingMacro = false; unbusy(); toast(i18n.failed || ''); });
+    });
     const scanClose = document.getElementById('scan-close');
     if (scanClose) scanClose.addEventListener('click',
       () => body.classList.remove('reading'));

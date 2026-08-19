@@ -872,7 +872,11 @@ class TestTheCodeBarClearsThePhonesControls:
         sitting over the phone's own controls at that. The phone is the only
         thing that knows, so it says."""
         body = client.get("/app").text
-        assert "body.peeking:not(.asleep).scrolls #phone-scroll" in body
+        # And not while a system panel covers the app: nothing scrolls behind
+        # the shade, and the arrows would be aiming at it rather than at her
+        # page.
+        assert ("body.peeking:not(.asleep):not(.covered).scrolls #phone-scroll"
+                in body)
         # The flag has to survive the whole way: the phone's own attribute →
         # the fragment → a class the CSS above can see.
         fragment = (Path(__file__).resolve().parents[1]
@@ -1476,3 +1480,76 @@ class TestABadSizeNamesNothingRatherThanCrashing:
         call = re.search(r"feed_mod\.elements\(src,[^)]*\)", source, re.S)
         assert "size=size" not in call.group(0)
         assert "size=screen_wh" in call.group(0)
+
+
+class TestTheCoveredCard:
+    """One button, shown only while there is something for it to do.
+
+    Asked for after the shade sat over inMyTeam and the portal had nothing to
+    press: "maybe we need a macro on the phone peek we can press if we run
+    into edge cases like this?" Contextual rather than permanent on purpose —
+    a standing "fix the phone" button is a button she learns to reach for, and
+    on every ordinary screen there is nothing for it to fix.
+    """
+
+    SCRIPT = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/static/phone.js")
+
+    def test_the_card_is_in_the_page(self, client):
+        body = client.get("/app").text
+        assert 'id="covered"' in body
+        assert 'id="covered-clear"' in body
+
+    def test_it_is_hidden_until_the_screen_is_covered(self, client):
+        import re
+
+        css = client.get("/app").text
+        css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+        rule = re.search(r"#covered \{[^}]*\}", css)
+        assert rule and "display:none" in rule.group(0)
+        assert "body.covered #covered { display:flex; }" in css
+
+    def test_and_the_sketch_is_hidden_while_it_shows(self, client):
+        """Not dimmed like a slept screen: the panel over the app is the
+        owner's own notifications, and a wireframe of those is not something
+        this page should be drawing."""
+        import re
+
+        css = re.sub(r"/\*.*?\*/", "", client.get("/app").text, flags=re.S)
+        assert "body.covered #screenwrap" in css
+        rule = re.search(r"body\.covered #screenwrap[^{]*\{[^}]*\}", css)
+        assert "display:none" in rule.group(0)
+
+    def test_the_loading_skeleton_does_not_argue_with_it(self, client):
+        """A screen behind the shade is stale by definition — the watcher has
+        been reading the panel. "Syncing" over the card would be two answers
+        to one question."""
+        css = client.get("/app").text
+        assert "body.stale:not(.asleep):not(.offapp):not(.covered)" in css
+
+    def test_the_button_runs_the_macro(self):
+        source = strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
+        assert "covered-clear" in source
+        assert "clear_screen" in source
+
+    def test_the_class_follows_the_published_flag(self):
+        source = strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
+        assert "body.classList.toggle('covered', !!meta.covered)" in source
+
+    def test_the_flag_reaches_the_browser(self):
+        """The socket sends what the document said; a flag nobody forwards is
+        a flag that does nothing."""
+        source = (Path(__file__).resolve().parents[1]
+                  / "src/apt_log/ui/app.py").read_text(encoding="utf-8")
+        assert '"covered": bool(screen_doc.get("covered"))' in source
+
+    @pytest.mark.parametrize("key", ["papp.covered", "papp.covered_hint",
+                                     "papp.covered_action", "papp.clearing",
+                                     "macro.clear_screen"])
+    def test_both_languages_say_it(self, key):
+        import json
+
+        base = Path(__file__).resolve().parents[1] / "src/apt_log/ui/locales"
+        for name in ("en.json", "es.json"):
+            words = json.loads((base / name).read_text(encoding="utf-8"))
+            assert words.get(key), f"{name} is missing {key}"

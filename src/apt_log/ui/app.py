@@ -904,6 +904,10 @@ async def live(ws: WebSocket):
                     # off this screen there is nothing to press.
                     "canvas": bool(screen_doc.get("canvas")
                                    and screen_doc.get("landscape")),
+                    # A system panel is over the app. Nothing she taps will
+                    # reach the app underneath while this is true, so the page
+                    # stops pretending otherwise and offers the way out.
+                    "covered": bool(screen_doc.get("covered")),
                     # The app's own tab bar, lifted out of the list to ride
                     # the control bar beside Back and Home. Empty on screens
                     # without one.

@@ -150,6 +150,30 @@ def _is_a_system_panel(focus: str) -> bool:
     return any(name in lowered for name in _SYSTEM_WINDOWS)
 
 
+# The panels she can be genuinely STUCK behind — a strict subset of the above,
+# because the two lists answer different questions. The list above asks "is
+# this window the app's?", and for the owner substitution the keyboard is not.
+# This one asks "is she looking at something she cannot get out of?", and the
+# keyboard is not that either: it is up because a field was tapped, it belongs
+# to what she is doing, and offering to clear the screen every time she types
+# would be furniture. The shade that sat over inMyTeam until it was cleared by
+# hand is the case this exists for.
+_COVERING_WINDOWS = ("notificationshade", "statusbar", "volumedialog",
+                     "shadecarrier")
+
+
+def screen_is_covered(focus: str) -> bool:
+    """True when a system panel is over the app rather than beside it.
+
+    Nothing the portal sends reaches the app while this holds — the taps go to
+    the panel, and the app underneath is not the thing with the focus. The
+    page is told so it can stop presenting a screen that will not answer and
+    offer the one act that does.
+    """
+    lowered = (focus or "").replace(" ", "").replace("-", "").lower()
+    return any(name in lowered for name in _COVERING_WINDOWS)
+
+
 def _is_a_window_title(focus: str) -> bool:
     """True when the focus read named a window rather than an activity.
 
@@ -438,6 +462,16 @@ def _watch_shade(hierarchy: str | None, serial: str | None = None) -> None:
         return
     _last_collapse[0] = now
     log.info("the notification shade is over the screen — collapsing it")
+    collapse_shade(serial)
+
+
+def collapse_shade(serial: str | None = None) -> bool:
+    """Get the shade off the screen, and say whether it went.
+
+    Shared with the `clear_screen` macro, which is the hand-operated version
+    of this: the automatic one runs on a cooldown and gives up quietly, and
+    the day it could not do the job there was nothing a person could press.
+    """
     try:
         # The clean way first. It is the documented one and it works on most
         # devices — and on THIS phone it returns success and does nothing at
@@ -446,22 +480,25 @@ def _watch_shade(hierarchy: str | None, serial: str | None = None) -> None:
         _adb(["shell", "cmd", "statusbar", "collapse"], serial)
         time.sleep(0.6)
         if not _shade_has_focus(serial):
-            return
+            return True
         # What does work is the gesture a person would use. Off the screen's
         # own size rather than a constant, and from low enough to be inside
         # the shade's empty area — a swipe that starts on a notification
         # drags the notification.
         w, h = screen_size(serial) or (0, 0)
         if not w or not h:
-            return
+            return False
         log.info("the shade ignored the collapse — swiping it away")
         _adb(["shell", "input", "swipe", str(w // 2), str(int(h * 0.85)),
               str(w // 2), str(int(h * 0.08)), "250"], serial)
+        time.sleep(0.6)
+        return not _shade_has_focus(serial)
     except Exception as exc:  # noqa: BLE001
         # Broad on purpose. This runs inside the capture loop on every frame,
         # and a surprise from adb or the window read must cost a warning and
         # a shade left up — never the mirror.
         log.warning("could not collapse the shade (%s)", exc)
+        return False
 
 
 def _shade_has_focus(serial: str | None = None) -> bool:
@@ -605,6 +642,16 @@ CONTAIN_COOLDOWN = 20.0
 _out_since = [0.0]
 _last_return = [0.0]
 _last_care_app = [""]
+
+
+def last_care_app() -> str:
+    """The last care app the watchdog saw in front, or "" if none yet.
+
+    Exposed because the `clear_screen` macro needs somewhere to return to
+    once it has dismissed whatever was covering the screen, and this is
+    already the record of that — kept by the watchdog for exactly the same
+    purpose."""
+    return _last_care_app[0]
 
 
 def _watch_containment(focus: str, serial: str | None = None) -> None:
@@ -1054,6 +1101,16 @@ def write_screen(target: Path, frame: dict, screen: str, reason: str,
         # swipe on a canvas is ink), and the portal can dress the page
         # for signing instead of reading.
         "canvas": _has_canvas(hierarchy),
+        # Something of the SYSTEM'S is over the care app — the notification
+        # shade, the volume dialog, the keyboard. The elements below are then
+        # not the app's page, and nothing on the portal will move the app,
+        # because the app is not what has the focus. The watchdog tries to
+        # clear this on its own; the flag exists so that when it cannot (this
+        # phone ignores every collapse command but a swipe, and the shade sat
+        # over inMyTeam until it was cleared by hand), the page can offer the
+        # one button that does — rather than leaving her tapping a screen
+        # that will not answer.
+        "covered": screen_is_covered(focus),
         # Whether this document is the WHOLE page (a stitched walk) or the
         # viewport. Full documents leave nothing to wonder about.
         "full": bool(stitched),

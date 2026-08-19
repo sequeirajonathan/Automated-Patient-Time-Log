@@ -2122,3 +2122,51 @@ class TestTheShadeIsNotTheAppUnderneath:
              patch.object(feed.time, "sleep"):
             feed._watch_shade('<node resource-id="a:id/notification_stack"/>')
         assert not [c for c in calls if "swipe" in c]
+
+
+class TestCoveredScreen:
+    """A system panel over the app, said out loud so the page can act on it.
+
+    The shade came down over inMyTeam and stayed — the collapse command lies
+    on this phone, and the popup-owner rule had just taught every check that
+    the app underneath was in front. From the portal it looked like a normal
+    screen that had stopped answering, and there was nothing to press. The
+    document now carries the fact, and the page turns it into one button.
+    """
+
+    @pytest.mark.parametrize("panel", [
+        "NotificationShade", "StatusBar", "VolumeDialog", "Shade Carrier",
+    ])
+    def test_a_covering_panel_is_reported(self, panel):
+        assert feed.screen_is_covered(panel)
+
+    @pytest.mark.parametrize("focus", [
+        "com.inmyteam.inmyteam/.view.activities.MainActivity",
+        "com.hhaexchange.mobile/.MainActivity",
+        "",
+    ])
+    def test_an_ordinary_screen_is_not(self, focus):
+        assert not feed.screen_is_covered(focus)
+
+    def test_the_keyboard_is_not_a_thing_to_escape_from(self):
+        """It is up because a field was tapped. Offering to clear the screen
+        every time she types would be furniture — and the type bar, not this,
+        is the way through that moment."""
+        assert not feed.screen_is_covered("InputMethod")
+        # Still not the app's own window, though: the owner substitution must
+        # go on leaving it alone.
+        assert feed._is_a_system_panel("InputMethod")
+
+    def test_the_flag_reaches_the_document(self, tmp_path):
+        target = tmp_path / "screen.json"
+        frame = {"id": "a", "img": "", "at": "now", "size": [720, 1600]}
+        feed.write_screen(target, frame, "unknown", "", "<node/>",
+                          focus="NotificationShade")
+        assert json.loads(target.read_text())["covered"] is True
+
+    def test_and_is_false_on_an_ordinary_screen(self, tmp_path):
+        target = tmp_path / "screen.json"
+        frame = {"id": "a", "img": "", "at": "now", "size": [720, 1600]}
+        feed.write_screen(target, frame, "unknown", "", "<node/>",
+                          focus="com.inmyteam.inmyteam/.Main")
+        assert json.loads(target.read_text())["covered"] is False
