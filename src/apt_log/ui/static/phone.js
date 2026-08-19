@@ -783,8 +783,8 @@
     // swipe from the top actually shuts the shade. The macro swipes, checks,
     // and brings the care app back — nothing is force-stopped and no visit
     // is touched, so pressing it at a bad moment costs a second.
-    const clear = document.getElementById('covered-clear');
-    if (clear) clear.addEventListener('click', () => {
+    const uncover = document.getElementById('covered-clear');
+    if (uncover) uncover.addEventListener('click', () => {
       awaitingMacro = true;
       busy(i18n.clearing || '', 30000);
       fetch('/macro', {
