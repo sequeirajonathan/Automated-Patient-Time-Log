@@ -1865,3 +1865,75 @@ class TestTheSignaturePadIsSelfContained:
         css = re.sub(r"/\*.*?\*/", "", self.PAGE.read_text(encoding="utf-8"),
                      flags=re.S)
         assert re.search(r"\.padrow\[hidden\] \{[^}]*display:none", css)
+
+
+class TestThePadSaysWhereEachButtonActs:
+    """"User error on the clear signature thing, it's just a bit confusing."
+
+    It was: five buttons in three equal grey pills, and TWO of them said
+    "Clear" — one meaning her own drawing, one meaning the canvas on the
+    phone — with nothing on the page saying which acted where.
+    """
+
+    PAGE = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/templates/phone.html")
+
+    def _css(self):
+        import re
+
+        return re.sub(r"/\*.*?\*/", "", self.PAGE.read_text(encoding="utf-8"),
+                      flags=re.S)
+
+    def test_the_sheet_is_two_numbered_steps(self, client):
+        body = client.get("/app").text
+        assert body.count('class="signstep-n"') == 2
+
+    def test_her_erase_and_the_apps_clear_are_different_words(self):
+        """The whole confusion in one line."""
+        import json
+
+        base = Path(__file__).resolve().parents[1] / "src/apt_log/ui/locales"
+        for name in ("en.json", "es.json"):
+            w = json.loads((base / name).read_text(encoding="utf-8"))
+            assert w["sign.erase"] != w["sign.appclear"]
+            assert w["sign.erase"] != w["signature.clear"]
+
+    def test_her_own_tools_are_quiet(self, client):
+        """Undoing a stroke is not a decision worth a filled pill, and giving
+        it one is what made five buttons look like five choices."""
+        body = client.get("/app").text
+        assert 'id="sign-undo" class="padtool"' in body
+        assert 'id="sign-clear" class="padtool"' in body
+        rule = self._css()
+        assert ".padtool {" in rule and "background:none" in rule
+
+    def test_step_one_has_exactly_one_action(self, client):
+        body = client.get("/app").text
+        assert 'id="sign-send" class="signsend"' in body
+
+    def test_every_button_that_reaches_the_phone_carries_the_phone(self):
+        css = self._css()
+        assert ".padrow.onphone button::before" in css
+
+    def test_the_phone_step_is_across_a_rule(self, client):
+        css = self._css()
+        assert "border-top:1px solid var(--line)" in css
+        assert 'class="padrow onphone" id="sign-appbtns"' \
+            in client.get("/app").text
+
+    def test_the_buttons_are_still_the_ones_the_script_wires(self, client):
+        """A redesign that renamed an id would silently unwire the pad."""
+        body = client.get("/app").text
+        for ident in ("sign-undo", "sign-clear", "sign-send", "signpad",
+                      "signpreview", "sign-appbtns", "sign-legacyrow",
+                      "app-clear", "app-save"):
+            assert f'id="{ident}"' in body
+
+    @pytest.mark.parametrize("key", ["sign.step_draw", "sign.step_phone",
+                                     "sign.erase"])
+    def test_both_languages_say_it(self, key):
+        import json
+
+        base = Path(__file__).resolve().parents[1] / "src/apt_log/ui/locales"
+        for name in ("en.json", "es.json"):
+            assert json.loads((base / name).read_text(encoding="utf-8")).get(key)

@@ -862,14 +862,52 @@
      has no signature box" — reported, with the app's own Clear working right
      beside it. */
   .padrow[hidden] { display:none; }
-  /* Label over buttons. This used to centre its children, which was right
-     for one label beside two buttons and wrong the moment the app's own
-     buttons came inside the pad: each shrank to its own caption and sat in
-     the middle of the row. */
+  /* Step two. Its own side of a rule, so "on the phone" is a place on the
+     page and not a caption somebody has to read carefully. */
   .approw { display:flex; flex-direction:column; align-items:stretch;
-            gap:6px; border-top:1px solid var(--hairline, #8884);
-            padding-top:12px; }
+            gap:6px; margin-top:18px; padding-top:16px;
+            border-top:1px solid var(--line); }
   #sign-appbtns:empty { display:none; }
+
+  /* A numbered step. Two of them, because the pad is two places — hers and
+     the phone's — and the confusion was that nothing said so. */
+  .signstep { display:flex; align-items:center; gap:9px; margin:0 0 10px; }
+  .signstep-n { flex:none; width:22px; height:22px; border-radius:50%;
+                background:var(--tint); color:#fff; font-size:12.5px;
+                font-weight:700; display:flex; align-items:center;
+                justify-content:center; }
+  .signstep-t { font-size:14.5px; font-weight:650; color:var(--ink); }
+
+  /* Undo and Erase act on HER canvas, so they sit against it and stay
+     quiet — undoing a stroke is not a decision worth a filled pill. */
+  .padtools { display:flex; justify-content:flex-end; gap:4px; margin-top:6px; }
+  .padtool { border:none; background:none; color:var(--tint); cursor:pointer;
+             font-size:14px; font-weight:600; padding:8px 12px;
+             min-height:40px; border-radius:10px; }
+  .padtool:active { background:var(--tint-soft); }
+
+  .signpreview-wrap { display:flex; align-items:center; gap:10px;
+                      margin-top:10px; }
+  .signpreview-wrap .preview-label { margin:0; text-align:left; flex:1;
+                                     font-size:12px; color:var(--muted); }
+  .signpreview-wrap #signpreview { width:44%; margin:0; flex:none; }
+
+  /* The one action of step one, and it looks like it. */
+  .signsend { width:100%; margin-top:14px; border:none; border-radius:14px;
+              background:var(--tint); color:#fff; font-size:16.5px;
+              font-weight:650; min-height:52px; cursor:pointer;
+              transition:transform .18s var(--spring), filter .18s ease; }
+  .signsend:active { transform:scale(.97); filter:brightness(.92);
+                     transition-duration:.05s; }
+
+  /* Every button that reaches the phone carries the phone. The words are the
+     app's own — they name the app's buttons — and this is what makes them
+     unmistakably not hers. */
+  .padrow.onphone button { position:relative; padding-left:34px; }
+  .padrow.onphone button::before { content:""; position:absolute;
+              left:13px; top:50%; margin-top:-9px; width:11px; height:18px;
+              border:1.6px solid currentColor; border-radius:3px;
+              opacity:.55; }
   #sign-appbtns button { min-height:46px; }
   .approw-label { flex:0 1 auto; font-size:13px; }
   .padrow button { flex:1; padding:12px; border-radius:13px;
@@ -1102,32 +1140,50 @@
    latency at all; the strokes cross once and the controller replays them onto
    the app's canvas. The app's save button is never pressed by the replay. #}
 <div id="signsheet" class="sheet">
-  <p class="muted" style="margin:0 0 10px; font-size:14px">{{ t('sign.instruction') }}</p>
-  <canvas id="signpad" width="10" height="10"></canvas>
-  <p class="preview-label">{{ t('sign.preview') }}</p>
-  <canvas id="signpreview" width="10" height="10"></canvas>
-  <div class="padrow">
-    <button type="button" id="sign-clear">{{ t('signature.clear') }}</button>
-    <button type="button" id="sign-undo">{{ t('signature.undo') }}</button>
-    <button type="button" id="sign-send" class="primary">{{ t('sign.send') }}</button>
+  {# TWO PLACES, TWO STEPS, SAID OUT LOUD.
+
+     This sheet used to be five buttons in three equal grey pills, and TWO OF
+     THEM SAID "Clear" — one meaning her own drawing, one meaning the canvas
+     on the phone — with nothing on the page saying which acted where. She
+     pressed the wrong one and reported the pad as confusing, which it was.
+
+     So the sheet is numbered now. Step one happens here and its controls sit
+     against the canvas, quiet and small. Step two happens on the phone, on
+     the far side of a rule, under a heading that says so, and every button in
+     it carries a phone glyph. The words stay the app's own — they name the
+     app's buttons — and the glyph is what makes them unmistakably not hers. #}
+  <div class="signstep">
+    <span class="signstep-n">1</span>
+    <span class="signstep-t">{{ t('sign.step_draw') }}</span>
   </div>
-  {# The app's own Borrar and Salvar, pressed remotely. The signature pages
-     draw both in a rotated pass the accessibility tree never shows, so the
-     runner presses real pixels placed off the canvas it CAN see — and only
-     on a live signature moment; the row hides everywhere else. Salvar is
-     her tap relayed, never the replay's. #}
+  <canvas id="signpad" width="10" height="10"></canvas>
+  {# Against the canvas, because they act ON the canvas. Plain text buttons:
+     undoing a stroke is not a decision worth a filled pill. #}
+  <div class="padtools">
+    <button type="button" id="sign-undo" class="padtool">{{ t('signature.undo') }}</button>
+    <button type="button" id="sign-clear" class="padtool">{{ t('sign.erase') }}</button>
+  </div>
+  <div class="signpreview-wrap">
+    <span class="preview-label">{{ t('sign.preview') }}</span>
+    <canvas id="signpreview" width="10" height="10"></canvas>
+  </div>
+  <button type="button" id="sign-send" class="signsend">{{ t('sign.send') }}</button>
+
   <div class="approw" id="sign-approw" hidden>
-    <span class="muted approw-label">{{ t('sign.onphone') }}</span>
+    <div class="signstep">
+      <span class="signstep-n">2</span>
+      <span class="signstep-t">{{ t('sign.step_phone') }}</span>
+    </div>
     {# The app's OWN buttons for whatever sheet is in front, filled from the
        screen payload — inMyTeam names them and the tree gives them bounds,
        so they press through the ordinary verified tap like any other
        control. Here rather than in the phone view because finishing one
        signature should not mean switching between the two. #}
-    <div class="padrow" id="sign-appbtns"></div>
+    <div class="padrow onphone" id="sign-appbtns"></div>
     {# The legacy pair, for the rotated pages whose tree shows no buttons at
        all and where the only way is a press at a derived coordinate. Hidden
        the moment the app gives us something real to aim at. #}
-    <div class="padrow" id="sign-legacyrow">
+    <div class="padrow onphone" id="sign-legacyrow">
       <button type="button" id="app-clear">{{ t('sign.appclear') }}</button>
       <button type="button" id="app-save" class="primary">{{ t('sign.appsave') }}</button>
     </div>
