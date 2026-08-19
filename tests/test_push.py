@@ -261,44 +261,42 @@ class TestSending:
             daemon=True).start()
         assert done.wait(5), "subscribe() hung — the lock is not reentrant"
 
-    def test_a_service_saying_wrong_key_is_believed(self, store):
-        """Apple: 403 {"reason":"BadJwtToken"}. That is a permanent fact
-        about the subscription, not a bad moment — keeping it means refusing
-        the same push forever. Found live: the subscription predated the
-        `key` field, so comparing keys could not catch it and only the
-        service's own answer could."""
+    def test_no_403_ever_drops_a_subscriber(self, store):
+        """This code read Apple's BadJwtToken as "wrong key" and threw the
+        subscription away — then the same refusal arrived for a subscription
+        whose recorded key matched the current one exactly, on a machine with
+        a synced clock and a verified keypair. The message does not mean only
+        that, and acting on it as if it did cost a real subscriber and a trip
+        back to the phone.
+
+        What this side can PROVE stale is still dropped, before anything is
+        sent. A refusal it cannot explain is reported and kept."""
         from pywebpush import WebPushException
 
-        push.subscribe(SUBSCRIPTION)
-        stored = push._load()
-        for sub in stored["subs"].values():
-            sub.pop("key", None)          # as written before that field existed
-        push._save(stored)
+        for reason in ("BadJwtToken", "VapidPkHashMismatch", "TooManyRequests"):
+            push.subscribe(SUBSCRIPTION)
 
-        class Refused:
-            status_code = 403
-            text = '{"reason":"BadJwtToken"}'
+            class Refused:
+                status_code = 403
+                text = '{"reason":"%s"}' % reason
 
-        with patch("pywebpush.webpush",
-                   side_effect=WebPushException("no", response=Refused())):
-            assert push.send("t", "b") == 0
-        assert push.count() == 0
+            with patch("pywebpush.webpush",
+                       side_effect=WebPushException("no", response=Refused())):
+                assert push.send("t", "b") == 0
+            assert push.count() == 1, f"{reason} dropped a subscriber"
 
-    def test_an_ordinary_403_keeps_the_subscriber(self, store):
-        """Not every refusal is permanent, and dropping a good subscriber on
-        a bad afternoon is the failure this must not have."""
-        from pywebpush import WebPushException
+    def test_the_token_does_not_sit_on_the_24_hour_edge(self, store):
+        """py_vapid would use exactly 24 hours, which is the outside edge of
+        what the spec allows and what Apple accepts. An edge is a bad place
+        to sit when the only symptom is a message that names nothing."""
+        import time as clock
 
         push.subscribe(SUBSCRIPTION)
-
-        class Refused:
-            status_code = 403
-            text = '{"reason":"TooManyRequests"}'
-
-        with patch("pywebpush.webpush",
-                   side_effect=WebPushException("no", response=Refused())):
-            assert push.send("t", "b") == 0
-        assert push.count() == 1
+        with patch("pywebpush.webpush") as sent:
+            push.send("t", "b")
+        exp = sent.call_args.kwargs["vapid_claims"]["exp"]
+        ahead = exp - clock.time()
+        assert 0 < ahead < 24 * 3600 - 3600
 
     def test_nothing_subscribed_is_not_an_error(self, store):
         assert push.send("t", "b") == 0

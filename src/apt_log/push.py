@@ -235,20 +235,6 @@ def count() -> int:
     return len(_load()["subs"])
 
 
-# What a push service says when the signature is from the wrong key. Apple
-# answers 403 {"reason":"BadJwtToken"}; the others word it their own way, and
-# all of them mean the same permanent thing. Matched loosely on purpose: a
-# phrase nobody here has seen yet should still be recognised, and the cost of
-# a wrong match is one re-subscribe on the next page load.
-_WRONG_KEY_WORDS = ("badjwttoken", "vapidpkhashmismatch", "invalid jwt",
-                    "unauthorized registration", "mismatch")
-
-
-def _wrong_key(detail: str) -> bool:
-    lowered = (detail or "").lower()
-    return any(word in lowered for word in _WRONG_KEY_WORDS)
-
-
 # ------------------------------------------------------------------- sending
 def send(title: str, body: str, url: str = "/app", tag: str = "aptlog") -> int:
     """Push one notification to every subscribed browser. Returns how many
@@ -273,6 +259,13 @@ def send(title: str, body: str, url: str = "/app", tag: str = "aptlog") -> int:
         log.warning("pywebpush is not installed — nothing pushed")
         return 0
 
+    # How long the signed token stays good for. py_vapid would use 24 hours,
+    # which is the outside edge of what the spec allows and what Apple
+    # accepts — and an edge is a bad place to sit when the only symptom is
+    # "BadJwtToken", a message that names nothing. Twelve hours is as valid
+    # and not on any boundary.
+    claims = {"sub": VAPID_SUBJECT, "exp": int(time.time()) + 12 * 3600}
+
     payload = json.dumps({"title": title, "body": body, "url": url, "tag": tag})
     sent = 0
     for sub in subs:
@@ -293,7 +286,7 @@ def send(title: str, body: str, url: str = "/app", tag: str = "aptlog") -> int:
                 },
                 data=payload,
                 vapid_private_key=pair["private"],
-                vapid_claims={"sub": VAPID_SUBJECT},
+                vapid_claims=dict(claims),
                 timeout=15,
             )
             sent += 1
@@ -304,15 +297,23 @@ def send(title: str, body: str, url: str = "/app", tag: str = "aptlog") -> int:
             if status in (404, 410):
                 log.info("push endpoint retired — forgetting it")
                 unsubscribe(sub["endpoint"])
-            elif status == 403 and _wrong_key(detail):
-                # The service is saying this subscription was made against a
-                # different server key, so it can never be signed for. That
-                # is a permanent fact about the subscription, not a bad
-                # moment — keeping it would mean refusing the same push
-                # forever. The browser re-subscribes on its next load.
-                log.info("subscription belongs to an older key — forgetting "
-                         "it (%s)", detail)
-                unsubscribe(sub["endpoint"])
+            elif status == 403:
+                # NOT dropped, however it is worded. This code read Apple's
+                # BadJwtToken as "wrong key" and threw the subscription away
+                # — and then the same refusal arrived for a subscription
+                # whose recorded key matched the current one exactly, on a
+                # machine with a synced clock and a verified keypair. So the
+                # message does not mean only that, and acting on it as if it
+                # did cost a real subscriber and a trip back to the phone to
+                # tap the toggle again.
+                #
+                # A subscription this code can PROVE is stale — one whose
+                # recorded key differs from the key in force — is still
+                # dropped, above, before anything is sent. That is a fact
+                # this side owns. A refusal it cannot explain is reported
+                # and kept.
+                log.warning("push refused (403) and the subscription kept: "
+                            "%s", detail or "no detail")
             else:
                 log.warning("push failed (%s) %s", status or exc, detail)
         except Exception as exc:  # noqa: BLE001
