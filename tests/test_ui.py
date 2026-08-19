@@ -1249,3 +1249,71 @@ class TestAFieldWhoseWordsAreWithheldStillGetsANamed:
         keys = [it.get("txt_key") for row in build(doc)["rows"]
                 for it in row["items"]]
         assert "papp.imt.agency_filter" in keys
+
+
+class TestTheLanguageSwitchOnTheHomePage:
+    """Reported from the field: the EN/ES buttons are "not very responsive or
+    don't work at all". Both halves were real, and the second was total.
+
+    `wireForms` intercepts every POST form on the page and re-posts it with
+    `fetch`. It was written for the relay panel, whose answers come back over
+    the socket and need no reload. It also took the language switch — and a
+    submit button's name/value IS NOT IN `FormData(form)`, by spec. So the
+    browser sent `next=/app` with no `language` at all, the server answered
+    422, and nothing happened. Caught by reading the POST body in a real
+    browser, which is the only place this path exists.
+
+    Even had the field survived, posting it in the background would have
+    stored the choice and left every word on screen unchanged — which is the
+    same button-does-nothing from the other direction. It navigates now.
+    """
+
+    SCRIPT = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/static/phone.js")
+
+    def test_the_switch_is_marked_to_navigate(self, client):
+        import re
+
+        body = client.get("/app").text
+        form = re.search(r'<form[^>]*action="/language"[^>]*>', body)
+        assert form, "the language switch should still be a plain form"
+        assert "data-navigate" in form.group(0)
+
+    def test_the_live_wiring_leaves_navigating_forms_alone(self):
+        source = strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
+        assert "form.dataset.navigate" in source
+
+    def test_an_intercepted_form_keeps_the_pressed_buttons_value(self):
+        """The bug class, not just this instance: any form whose value lives
+        on the submit button would have died the same way."""
+        source = strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
+        assert "ev.submitter" in source
+        assert "data.append(hit.name, hit.value)" in source
+
+    def test_the_buttons_are_big_enough_to_hit(self, client):
+        """Measured at 43x26 in a real browser. 44 is the smallest target a
+        thumb hits reliably, and half of "not very responsive" was simply
+        having to aim."""
+        import re
+
+        body = client.get("/app").text
+        css = re.sub(r"/\*.*?\*/", "", body, flags=re.S)
+        rule = re.search(r"#launcher \.seg button \{[^}]*\}", css)
+        assert rule, "the switch should still be styled"
+        assert "min-height:44px" in rule.group(0)
+        assert "min-width:56px" in rule.group(0)
+
+    def test_the_route_still_answers_a_plain_post(self, client):
+        """What the browser now sends, unmediated."""
+        r = client.post("/language", data={"language": "en", "next": "/app"},
+                        follow_redirects=False)
+        assert r.status_code == 303
+        assert r.headers["location"] == "/app"
+        assert LANGUAGE_COOKIE in r.cookies
+
+    def test_a_post_without_the_language_is_refused_not_ignored(self, client):
+        """The 422 the browser was getting. Worth pinning: a route that
+        silently accepted a missing field would have hidden this for longer."""
+        r = client.post("/language", data={"next": "/app"},
+                        follow_redirects=False)
+        assert r.status_code == 422
