@@ -235,6 +235,20 @@ def count() -> int:
     return len(_load()["subs"])
 
 
+# What a push service says when the signature is from the wrong key. Apple
+# answers 403 {"reason":"BadJwtToken"}; the others word it their own way, and
+# all of them mean the same permanent thing. Matched loosely on purpose: a
+# phrase nobody here has seen yet should still be recognised, and the cost of
+# a wrong match is one re-subscribe on the next page load.
+_WRONG_KEY_WORDS = ("badjwttoken", "vapidpkhashmismatch", "invalid jwt",
+                    "unauthorized registration", "mismatch")
+
+
+def _wrong_key(detail: str) -> bool:
+    lowered = (detail or "").lower()
+    return any(word in lowered for word in _WRONG_KEY_WORDS)
+
+
 # ------------------------------------------------------------------- sending
 def send(title: str, body: str, url: str = "/app", tag: str = "aptlog") -> int:
     """Push one notification to every subscribed browser. Returns how many
@@ -284,12 +298,23 @@ def send(title: str, body: str, url: str = "/app", tag: str = "aptlog") -> int:
             )
             sent += 1
         except WebPushException as exc:  # noqa: PERF203
-            status = getattr(getattr(exc, "response", None), "status_code", 0)
+            response = getattr(exc, "response", None)
+            status = getattr(response, "status_code", 0)
+            detail = (getattr(response, "text", "") or "")[:120]
             if status in (404, 410):
                 log.info("push endpoint retired — forgetting it")
                 unsubscribe(sub["endpoint"])
+            elif status == 403 and _wrong_key(detail):
+                # The service is saying this subscription was made against a
+                # different server key, so it can never be signed for. That
+                # is a permanent fact about the subscription, not a bad
+                # moment — keeping it would mean refusing the same push
+                # forever. The browser re-subscribes on its next load.
+                log.info("subscription belongs to an older key — forgetting "
+                         "it (%s)", detail)
+                unsubscribe(sub["endpoint"])
             else:
-                log.warning("push failed (%s)", status or exc)
+                log.warning("push failed (%s) %s", status or exc, detail)
         except Exception as exc:  # noqa: BLE001
             log.warning("push failed (%s)", exc)
     return sent

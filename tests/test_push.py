@@ -261,6 +261,45 @@ class TestSending:
             daemon=True).start()
         assert done.wait(5), "subscribe() hung — the lock is not reentrant"
 
+    def test_a_service_saying_wrong_key_is_believed(self, store):
+        """Apple: 403 {"reason":"BadJwtToken"}. That is a permanent fact
+        about the subscription, not a bad moment — keeping it means refusing
+        the same push forever. Found live: the subscription predated the
+        `key` field, so comparing keys could not catch it and only the
+        service's own answer could."""
+        from pywebpush import WebPushException
+
+        push.subscribe(SUBSCRIPTION)
+        stored = push._load()
+        for sub in stored["subs"].values():
+            sub.pop("key", None)          # as written before that field existed
+        push._save(stored)
+
+        class Refused:
+            status_code = 403
+            text = '{"reason":"BadJwtToken"}'
+
+        with patch("pywebpush.webpush",
+                   side_effect=WebPushException("no", response=Refused())):
+            assert push.send("t", "b") == 0
+        assert push.count() == 0
+
+    def test_an_ordinary_403_keeps_the_subscriber(self, store):
+        """Not every refusal is permanent, and dropping a good subscriber on
+        a bad afternoon is the failure this must not have."""
+        from pywebpush import WebPushException
+
+        push.subscribe(SUBSCRIPTION)
+
+        class Refused:
+            status_code = 403
+            text = '{"reason":"TooManyRequests"}'
+
+        with patch("pywebpush.webpush",
+                   side_effect=WebPushException("no", response=Refused())):
+            assert push.send("t", "b") == 0
+        assert push.count() == 1
+
     def test_nothing_subscribed_is_not_an_error(self, store):
         assert push.send("t", "b") == 0
 
