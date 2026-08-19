@@ -834,6 +834,15 @@ class TestTheCodeBarClearsThePhonesControls:
         assert "body.typing .navbar" in body
         assert "pointer-events:none" in body
 
+    def test_the_client_re_registers_what_it_holds_on_every_load(self):
+        """The server can lose a subscription the browser still has — a
+        pruned store, a lost file, a mistake in the sender — and nothing in
+        the browser would notice: it holds a valid subscription, asks for
+        nothing, and the phone goes quiet. Exactly that happened here, and
+        the recovery was asking a person to tap a toggle a third time."""
+        source = self.SCRIPT.read_text(encoding="utf-8")
+        assert "existing.toJSON()" in source
+
     def test_the_client_sets_and_clears_that_state(self):
         source = self.SCRIPT.read_text(encoding="utf-8")
         assert "classList.add('typing')" in source

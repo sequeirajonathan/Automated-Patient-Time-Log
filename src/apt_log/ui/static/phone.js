@@ -945,6 +945,22 @@
           }
         } catch (e) { existing = null; }
       }
+      // Re-register whatever this browser holds, every load. The server can
+      // lose a subscription the browser still has — a pruned store, a lost
+      // file, a mistake in the sender — and nothing in the browser would
+      // ever notice: it holds a valid subscription, so it asks for nothing
+      // and the phone goes quiet. Posting it again is idempotent (the store
+      // keys on the endpoint), costs one request, and makes the server heal
+      // itself without her tapping anything.
+      if (existing) {
+        try {
+          await fetch('/api/push/subscribe', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ subscription: existing.toJSON() })
+          });
+        } catch (e) { /* offline; the next load tries again */ }
+      }
       paintNotify(Notification.permission === 'denied' ? 'denied'
                   : existing ? 'on' : 'off');
     } catch (e) {
