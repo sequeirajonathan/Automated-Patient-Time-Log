@@ -1157,3 +1157,95 @@ class TestControlsTheAppNeverNamed:
         en = label_keys(build(doc), Translator("en"))
         printed = [it.get("txt") for row in en["rows"] for it in row["items"]]
         assert "Filter by agency" in printed
+
+
+class TestTheAppsOwnUpArrowDoesNotRideAlong:
+    """Reported from the field: "we have Navigate up and we have Back".
+
+    Two controls, one meaning, three inches apart, in different words — a
+    question to stop and answer mid-visit. The pill's Back sends the phone's
+    own Back, which is what the arrow does, so there is nothing to chain it
+    to that is not already there; it is simply not published.
+
+    Only a control that SAYS it goes up is dropped. The top-left button is
+    otherwise whatever the app put there, and this project has already been
+    bitten by assuming it is Back — on HHAeXchange+ it was the help button,
+    drawn with a chevron, and pressing it opened a documentation site.
+    """
+
+    W, H = 720, 1600
+
+    def _doc(self, buttons):
+        return {"id": "f", "size": [self.W, self.H],
+                "h_app": "com.inmyteam.inmyteam",
+                "elements": [dict(b, rid="", has_text=True) for b in buttons],
+                "statics": [{"txt": "Today Visits", "b": [52, 76, 127, 94]}]}
+
+    def _nav(self, buttons):
+        from apt_log.ui.screenview import build
+
+        return build(self._doc(buttons))["nav"]
+
+    UP = {"cls": "ImageButton", "b": [5, 64, 42, 106], "txt": "Navigate up"}
+
+    def test_navigate_up_is_not_published(self):
+        nav = self._nav([self.UP])
+        assert nav["back"] is None and nav["trailing"] == []
+
+    @pytest.mark.parametrize("caption", ["Navigate up", "Back", "Atrás",
+                                         "Volver", "navigate back"])
+    def test_every_way_an_app_says_back(self, caption):
+        nav = self._nav([dict(self.UP, txt=caption)])
+        assert nav["back"] is None
+
+    @pytest.mark.parametrize("caption", ["Anular", "Add Notes", "Help",
+                                         "Volver a la lista"])
+    def test_controls_that_are_not_back_stay(self, caption):
+        """Anular is the signature screen's cancel and must never be quietly
+        dropped; "Volver a la lista" is a link and matched on the WHOLE
+        caption, not a substring."""
+        nav = self._nav([dict(self.UP, txt=caption)])
+        assert nav["back"] is not None
+        assert nav["back"]["txt"] == caption
+
+    def test_the_rest_of_the_bar_survives_losing_it(self):
+        other = {"cls": "Button", "b": [600, 64, 700, 106], "txt": "Add Notes"}
+        nav = self._nav([self.UP, other])
+        kept = ([nav["back"]] if nav["back"] else []) + nav["trailing"]
+        assert [k["txt"] for k in kept] == ["Add Notes"]
+
+    def test_the_page_still_renders_with_no_nav_buttons_left(self, client):
+        """The template used to build `[m.nav.back] + trailing`, which is a
+        crash the moment back is None."""
+        from apt_log.ui.screenview import build, label_keys
+        from apt_log.ui.i18n import Translator
+        from apt_log.ui.app import templates
+
+        model = label_keys(build(self._doc([self.UP])), Translator("en"))
+        html = templates.get_template("_screen.html").render(
+            m=model, t=Translator("en"))
+        assert "Today Visits" in html
+        assert "Navigate up" not in html
+
+
+class TestAFieldWhoseWordsAreWithheldStillGetsANamed:
+    """The regression that put this back in the field's hands twice.
+
+    A stripped field reports `has_text=True` and `txt=None` — it HAS words
+    and the portal may not show them — and the first version of the naming
+    rule skipped on has_text, so it skipped the one control it was written
+    for. The label landed on the Refresh row beside it and the box stayed
+    blank, which is exactly what came back.
+    """
+
+    def test_the_agency_filter_is_named_though_its_words_are_withheld(self):
+        from apt_log.ui.screenview import build
+
+        doc = {"id": "f", "size": [720, 1600], "h_app": "com.inmyteam.inmyteam",
+               "elements": [{"rid": "", "cls": "EditText",
+                             "b": [13, 146, 707, 183],
+                             "txt": None, "has_text": True}],
+               "statics": [{"txt": "Today Visits", "b": [52, 76, 127, 94]}]}
+        keys = [it.get("txt_key") for row in build(doc)["rows"]
+                for it in row["items"]]
+        assert "papp.imt.agency_filter" in keys
