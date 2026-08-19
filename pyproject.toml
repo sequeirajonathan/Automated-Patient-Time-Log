@@ -36,6 +36,13 @@ dependencies = [
     # both around 32 KB, which is the difference between a portal she uses and
     # one she gives up on.
     "pillow==12.1.0",
+    # Web Push, for the one thing this system cannot do for itself: the login
+    # code inMyTeam texts. A notification from the portal ITSELF is what opens
+    # the installed app — a third-party relay can only ever open Safari, which
+    # is the wrong app and the wrong window. Installs from wheels on the Pi in
+    # about twelve seconds, checked before it was added, because the deploy
+    # gate must not grow new ways to fail.
+    "pywebpush==2.4.0",
 ]
 
 [project.optional-dependencies]
@@ -45,6 +52,13 @@ dev = [
     # starlette.testclient needs it; without it the whole suite fails to
     # COLLECT, and manager.sh gates every deploy on pytest.
     "httpx==0.28.1",
+]
+# Deliberately NOT in `dev`. The Pi installs dev on every deploy and gates
+# the deploy on the install succeeding, so anything added there is a new way
+# for a deploy to fail — and these tools run on a developer's machine, never
+# on the controller. `pip install -e .[tools]` where you want them.
+tools = [
+    "mcp>=2.0",
 ]
 
 [project.scripts]

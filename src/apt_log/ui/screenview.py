@@ -22,6 +22,8 @@ where a control is drawn on her page, never what tapping it means.
 
 from __future__ import annotations
 
+import re
+
 # Widget classes with a meaning of their own. Anything else that is clickable
 # is a container row — the shape Android lists are made of.
 BUTTONS = ("Button", "ImageButton")
@@ -79,6 +81,58 @@ HEADER_MAX_CHARS = 32
 NAV_TITLE_MAX_CHARS = 48
 
 
+# A word in a box far too small to show it is not being shown: it is an
+# ACCESSIBILITY ANNOTATION riding on the icon that occupies that box. The
+# HHAeXchange+ schedule puts "Contraído"/"Expandido" — the chevron's state —
+# in a five-pixel square beside each visit, and rendered as words it printed
+# "Expandido" under every patient's name, which is what a screen reader says
+# and not what the phone shows.
+#
+# Measured PER CHARACTER, and against the screen rather than in pixels: the
+# phone's density changes underneath this, and box and text scale together.
+# An absolute width was the first attempt and was not a signal — it left
+# "Menú" in a 20px box sitting a whisker from the cut.
+#
+# The threshold is set between two populations of REAL measurements, not
+# chosen. At 720 wide: the annotation runs 0.56 px per character, and the
+# tightest genuine text anybody has seen is Mobile Caregiver+'s "Visitas"
+# tab caption at 2.43 — a caption whose box is drawn tighter than its own
+# text, which is how a tab bar is built and which the existing tab-bar tests
+# already carried. 1.44 sits between them with room on both sides.
+#
+# Four characters minimum, so a mark or a badge is never touched: a check is
+# one character in a box just as narrow, and "54" is two.
+ANNOTATION_WIDTH_PER_CHAR = 0.002
+ANNOTATION_MIN_CHARS = 4
+
+
+def _is_annotation(txt: str, b: list[int], screen_w: int) -> bool:
+    txt = txt.strip()
+    if len(txt) < ANNOTATION_MIN_CHARS or not screen_w:
+        return False
+    return (b[2] - b[0]) / len(txt) < screen_w * ANNOTATION_WIDTH_PER_CHAR
+
+
+def _is_spelled_out(txt: str) -> bool:
+    """Text a screen reader was meant to say letter by letter.
+
+    Apps write alt text for the ear, not the eye: "H H AeXchange +" is the
+    logo's description spelling the brand out, and rendered as words it is
+    gibberish wearing a title's clothes.
+
+    FOUR or more tokens, half of them a single character. Four rather than
+    three because three is where real names live — "A B Smith" is two initials
+    and a surname, which this test wrongly flagged when it asked for three,
+    and a caught patient name is a worse outcome than a missed logo. Spelling
+    is long by nature; a name with initials is short.
+    """
+    tokens = txt.split()
+    if len(tokens) < 4:
+        return False
+    singles = sum(1 for t in tokens if len(t.strip(".·-")) <= 1)
+    return singles * 2 >= len(tokens)
+
+
 def _is_icon_text(txt: str) -> bool:
     """Text that is an icon font's private glyph, not a word.
 
@@ -89,6 +143,25 @@ def _is_icon_text(txt: str) -> bool:
     """
     return bool(txt) and all(
         0xE000 <= ord(c) <= 0xF8FF or c.isspace() for c in txt)
+
+
+def _is_honest_title(txt: str) -> bool:
+    """Whether this is a name for the page, or something that landed there.
+
+    The header is the one string on the screen somebody reads without looking
+    for it, so what may sit in it is worth stating: not a spelled-out brand,
+    not a paragraph, not a bare symbol, and not nothing. Anything rejected
+    falls through to the app's own name, which is always true.
+
+    A title must contain a LETTER OR DIGIT. That is what rules out the glyph
+    case, and it rules it out at the right end: an icon that translates to a
+    real mark (the EVV check) is meaningful in a row and still says nothing as
+    the name of a page.
+    """
+    txt = (txt or "").strip()
+    return bool(txt) and any(c.isalnum() for c in txt) and not (
+        _is_spelled_out(txt)
+        or len(txt) > NAV_TITLE_MAX_CHARS)
 
 
 # Icon glyphs that are STATE, not decoration. The visits list marks each
@@ -124,6 +197,52 @@ MARK_TONE = {
     "\u2715": "bad",      # cross -> red
     "\u26a0": "warn",     # warning -> amber
 }
+
+# A row whose only words are a GENERATED DESCRIPTION — the sentence a screen
+# reader would say, which is all a custom-drawn list gives the tree. Mobile
+# Caregiver+ builds its visits that way: "La visita está programada para
+# ATANASIO MEDEROS TORRIEN en martes, 18 de agosto de 2026 de 9:05 AM a
+# 11:05 AM y su estado es No Empezadas, Tarde". Rendered whole, three of
+# those are a wall of prose where the phone shows three scannable rows.
+#
+# Shaped ONLY when the sentence can be accounted for completely — a name, a
+# time range, and a status. Anything less and it is left exactly as written,
+# because a rule that drops half a sentence it did not understand is worse
+# than a long line. The one part not carried over is the date, which the
+# page states once above the list as its own section header.
+DESC_MIN_CHARS = 60
+# Two or more capitalised words in a row: how these apps write a patient's
+# name, and long enough that "AM"/"PM" beside a clock cannot pass for one.
+_DESC_NAME = re.compile(
+    r"\b([A-ZÁÉÍÓÚÑÜ][A-ZÁÉÍÓÚÑÜ.'\-]{1,}(?:\s+[A-ZÁÉÍÓÚÑÜ][A-ZÁÉÍÓÚÑÜ.'\-]{1,})+)\b")
+_DESC_CLOCK = re.compile(r"\d{1,2}:\d{2}\s*(?:[AaPp]\.?\s?[Mm]\.?)?")
+# Both locales, as everywhere else here: the apps ship Spanish and English
+# and nothing else has ever appeared on this phone.
+_DESC_STATUS = (" y su estado es ", " y el estado es ",
+                " and its status is ", " and the status is ")
+
+
+def _shape_description(text: str) -> list[str] | None:
+    """A generated description as the lines of a list cell, or None."""
+    if len(text) < DESC_MIN_CHARS:
+        return None
+    names = _DESC_NAME.findall(text)
+    if not names:
+        return None
+    clocks = [c.strip() for c in _DESC_CLOCK.findall(text) if c.strip()]
+    lowered = text.lower()
+    status = ""
+    for lead in _DESC_STATUS:
+        cut = lowered.rfind(lead)
+        if cut != -1:
+            status = text[cut + len(lead):].strip(" .")
+            break
+    if len(clocks) < 2 or not status:
+        return None
+    # The longest run of capitals is the name; a shorter one is an initialism
+    # somewhere else in the sentence.
+    name = max(names, key=len).strip()
+    return [name, f"{clocks[0]} – {clocks[1]}", status]
 
 # Text the app itself presents as a PRIMARY BUTTON \u2014 the filled calls to
 # action a screen is built around. Matched at the start of a label so
@@ -267,6 +386,10 @@ def _item(node: dict, kind: str) -> dict:
         "txt": node.get("txt", ""),
         "checked": bool(node.get("checked")),
         "focused": bool(node.get("focused")),
+        # Absent means enabled: every element published before this field
+        # existed was one, and a screen read by an older feed must not come
+        # out greyed from end to end.
+        "enabled": node.get("enabled", True) is not False,
         "b": node["b"],
     }
     if "rid" in node:
@@ -295,7 +418,8 @@ def build(doc: dict) -> dict | None:
     elements = [dict(e, b=e.get("vb") or e["b"], aim_b=e["b"])
                 for e in doc.get("elements") or [] if e.get("b")]
     statics = [dict(s, b=s.get("vb") or s["b"], dev_b=s["b"])
-               for s in doc.get("statics") or [] if s.get("b")]
+               for s in doc.get("statics") or [] if s.get("b")
+               and not _is_annotation(s.get("txt", ""), s["b"], w)]
 
     # ------------------------------------------------------------- overlays
     # An app can slide a full-screen surface OVER the page without removing
@@ -407,6 +531,13 @@ def build(doc: dict) -> dict | None:
                             and lines[k].strip().isupper()):
                         lines.pop(k)
                         break
+            # A cell whose whole content is one generated sentence becomes
+            # the list row that sentence describes. Only when the sentence
+            # accounts for itself — see _shape_description.
+            if len(lines) == 1:
+                shaped = _shape_description(lines[0])
+                if shaped:
+                    lines = shaped
             item["lines"] = lines
             item["badge"] = badge
             # A row whose only content is a KNOWN glyph is named by it —
@@ -443,9 +574,17 @@ def build(doc: dict) -> dict | None:
             narrow = (e["b"][2] - e["b"][0]) <= w * 0.6
             left_anchored = e["b"][0] <= w * 0.08
             line_shaped = (e["b"][3] - e["b"][1]) <= h * 0.03
-            item["info"] = (narrow and left_anchored and line_shaped
-                            and not item["cta"] and not badge
-                            and len(lines) <= 1 and bool(lines or marks))
+            # A row the app itself marks disabled is a statement whatever
+            # its shape — HHAeXchange+ marks its EVV record lines that way
+            # ("Registros de entrada de EVV 6:00 a. m."), which is the app
+            # saying outright what the shape rules above infer. Dimming
+            # those to a greyed control would have hidden the very fact
+            # they exist to show; they read as information instead.
+            item["info"] = (
+                (not item["enabled"] and bool(lines or marks))
+                or (narrow and left_anchored and line_shaped
+                    and not item["cta"] and not badge
+                    and len(lines) <= 1 and bool(lines or marks)))
             item["tone"] = (item["marks"][0]["tone"]
                             if item["info"] and item["marks"] else "")
         elif kind == "button":
@@ -679,7 +818,15 @@ def build(doc: dict) -> dict | None:
                 and all(n.get("small") for n in buttons)
                 and all(len((t["txt"] or "").strip()) <= NAV_TITLE_MAX_CHARS
                         for t in titles)):
-            title = max(titles, key=lambda n: len(n["txt"]), default=None)
+            # Longest of the HONEST candidates. A title bar often carries a
+            # logo beside its title, and the logo's description was winning on
+            # length: the schedule renamed itself "Logotipo de H H AeXchange +"
+            # — the brand spelled out for a screen reader, in the one slot
+            # somebody reads without looking for it. What is rejected here
+            # leaves the title empty, and an empty title falls through to the
+            # app's own name, which is always true.
+            honest = [n for n in titles if _is_honest_title(n["txt"])]
+            title = max(honest, key=lambda n: len(n["txt"]), default=None)
             nav = {
                 "back": buttons[0],
                 "title": title["txt"] if title else "",
@@ -792,6 +939,34 @@ def _app_tabs(elements: list[dict], statics: list[dict],
     consumed: set[int] = set()
     tabs: list[dict] = []
 
+    def _sweep(consumed: set[int], chosen: list[dict]) -> set[int]:
+        """The bar's own furniture, beside the captions it is named by.
+
+        Consuming only the captions left the rest of the strip to fall into
+        the page: Mobile Caregiver+ labels each tab cell with a description
+        AS WELL as a caption, and hangs an unread count on one — so the
+        patients list ended its body with a stray "Beneficiarios" and a bare
+        "370".
+
+        Narrow on purpose. Anything standing in the bottom band was tried
+        first and swept the page's own last row with it: at a dense layout
+        the content runs to within a few pixels of the pinned bar, and
+        "Detalles del paciente" is content, not navigation. Only two things
+        are furniture — a word the bar has already said, and a bare count —
+        and neither can be mistaken for a row of the page.
+        """
+        said = {(t.get("txt") or "").strip().lower() for t in chosen}
+        for node in statics:
+            if id(node) in consumed:
+                continue
+            txt = (node.get("txt") or "").strip()
+            if not txt or _dev(node)[3] < reach:
+                continue
+            if txt.lower() in said or txt.isdigit():
+                consumed.add(id(node))
+        return consumed
+
+
     # Compose-shaped bar: every tab has a caption, and the selected one has
     # no clickable container. Detect from captions so that slot survives.
     # THREE or more: a two-item bottom bar is a page's action pair — the
@@ -808,7 +983,7 @@ def _app_tabs(elements: list[dict], statics: list[dict],
                          "aim": _aim(holder) if holder else None,
                          "current": holder is None})
             consumed.add(id(s))
-        return tabs, consumed
+        return tabs, _sweep(consumed, tabs)
 
     # Icon-tab bar (inMyTeam): three or more equal containers hugging the
     # bottom, captions optional. Each container is a tab; a stray caption
@@ -824,7 +999,7 @@ def _app_tabs(elements: list[dict], statics: list[dict],
                 consumed.add(id(cap))
             tabs.append({"txt": txt, "aim": _aim(e), "current": False})
             consumed.add(id(e))
-        return tabs, consumed
+        return tabs, _sweep(consumed, tabs)
 
     return [], set()
 

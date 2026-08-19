@@ -108,6 +108,54 @@ LOGIN_ACTIVITY_MARKERS = (
 )
 
 _FOCUS = re.compile(r"mCurrentFocus=Window\{[^}]*\s+(\S+)\}")
+# The app underneath, when the focused WINDOW is not an activity.
+#
+# A dropdown, a spinner list, a popup menu and a context menu are all their own
+# window, and Android titles that window rather than naming a package:
+#
+#     mCurrentFocus=Window{3d46066 u0 Pop-Up Window}
+#     mFocusedApp=ActivityRecord{a816218 u0 com.inmyteam.inmyteam/.view…}
+#
+# So the focus read came back with the literal string "Window", and every check
+# downstream took the phone to be somewhere that is not a care app. The
+# containment watchdog then did what it is for and brought inMyTeam back —
+# every twenty seconds, for as long as the dropdown was open, each return
+# resyncing the app. Reported from the field as "the app gets stuck on
+# syncing", and visible in the feed's own log as
+# `foreground is Window — returning to com.inmyteam.inmyteam`, over and over.
+#
+# The answer was already in the same dump: mFocusedApp names the activity that
+# OWNS the popup. This is the same distinction §6's permission-dialog fix
+# turns on — a surface the app in front raised is not the phone wandering —
+# and it generalises past inMyTeam's agency filter to every dropdown in all
+# four apps.
+_FOCUSED_APP = re.compile(
+    r"mFocusedApp=\S*ActivityRecord\{[^}]*?\s([A-Za-z0-9_.]+/[A-Za-z0-9_.]+)")
+
+
+def _is_a_window_title(focus: str) -> bool:
+    """True when the focus read named a window rather than an activity.
+
+    A real focus is `package/activity` and always carries both a slash and a
+    dot. "Pop-Up Window" collapses to the bare word `Window`, which has
+    neither. Deliberately NOT a list of known popup titles: the ANR dialog
+    already proved that matching Android's window prose breaks the first time
+    the wording or the locale changes, and an unknown popup should degrade to
+    "the app underneath" rather than to "somewhere else entirely".
+    """
+    token = focus or ""
+    return bool(token) and "/" not in token and "." not in token
+# Android's "<app> isn't responding — Close app / Wait" dialog owns the focus
+# while it is up, and its window title names the wedged package. This is the
+# ONLY reliable signal for it: the dialog is a system window the accessibility
+# tree does not hand over, and an ANR takes UiAutomator2 down with it — the
+# feed logged "Appium did not open a session within 40s" on repeat while the
+# app hung. So detection cannot depend on a tree; it rides the dumpsys read
+# the focus already costs. Seen live: the legacy app wedged on its own
+# inactivity dialog, and the portal went on publishing that dialog's buttons
+# as if they worked.
+_ANR = re.compile(
+    r"mCurrentFocus=Window\{[^}]*Application Not Responding:\s*([\w.]+)")
 # The display's own state, from the same dump. Android keeps mCurrentFocus
 # while the screen is off, so "no focus" catches only some sleeps — observed
 # on the owner's phone as a green Live over a photograph of a black screen.
@@ -123,6 +171,11 @@ LOGIN_ACTIVITY = "login_activity"
 PASSWORD_FIELD = "password_field"
 SECURE_SCREEN = "secure_screen"
 CAPTURE_FAILED = "capture_failed"
+# The app is wedged behind Android's not-responding dialog. Unlike every other
+# refusal here, this one means the buttons DO NOT work — the other messages all
+# end "and they still work", and saying that here would be a lie she would
+# discover by tapping.
+APP_NOT_RESPONDING = "app_not_responding"
 
 # The two refusals that mean "a credential can be typed here" -- as opposed to
 # FLAG_SECURE, which is the app's own choice and can be any screen at all.
@@ -131,6 +184,13 @@ CREDENTIAL_REFUSALS = (LOGIN_ACTIVITY, PASSWORD_FIELD)
 # Fields whose contents are whatever has been typed into them. Never disclosed,
 # on any screen, under any rule below: this is where a password lives.
 EDITABLE = ("EditText", "AutoCompleteTextView", "SearchView")
+
+# Classes whose content-desc is a picture's ALT TEXT rather than a label.
+# Alt text is written for somebody who cannot see the image; read as a
+# statement it produces the app's logo announcing itself where the page title
+# belongs. On a clickable node the same attribute names a control and is kept
+# — see statics(), which is the only place this applies.
+DECORATIVE = ("ImageView", "ImageButton")
 
 # A label longer than this is not a label. Bounds the damage if some screen
 # turns out to put a paragraph where this expects a sentence.
@@ -144,6 +204,25 @@ CARE_APPS = (
     "com.hhaexchange.uma",
     "com.tellus.evv.v2",
     "com.inmyteam.inmyteam",
+)
+
+# Android's own permission dialogs. Not a place the phone can wander to —
+# only a care app asking for something can raise one, and it is raised OVER
+# that app, mid-flow. Sanctioned for exactly that reason: bouncing it would
+# cancel the request that opened it.
+PERMISSION_APPS = (
+    "com.google.android.permissioncontroller",
+    "com.android.permissioncontroller",
+    "com.android.packageinstaller",
+)
+
+# The phone's own Settings. Somewhere the portal can be ASKED to go — wifi,
+# sound, the phone's own display size — which is different from somewhere it
+# wandered. Without this the watchdog bounced it back to a care app five
+# seconds after the button that opened it did its job.
+SETTINGS_APPS = (
+    "com.android.settings",
+    "com.samsung.android.settings",
 )
 
 # The phone's own home screen. Its reflow is a grid of icon glyphs — noise
@@ -205,24 +284,41 @@ def _adb(args: list[str], serial: str | None = None, timeout: float = 15.0):
     return subprocess.run(cmd, capture_output=True, timeout=timeout)
 
 
-def window_state(serial: str | None = None) -> tuple[str, bool]:
-    """(focused window `package/activity`, display awake) — one dumpsys read.
+def window_state(serial: str | None = None) -> tuple[str, bool, str]:
+    """(focused window `package/activity`, display awake, wedged package).
 
-    Both from the same dump because they answer the same question — "what is
-    on the screen right now?" — and the second half is not optional: a
+    All three from one dumpsys read because they answer the same question —
+    "what is on the screen right now?" — and none of them is optional. A
     sleeping phone keeps its focused window, so focus alone reports an app on
-    a screen that is showing nobody anything.
+    a screen that is showing nobody anything. And an app behind the
+    not-responding dialog looks, through the focus alone, exactly like that
+    app running normally: the dialog's window title ends in the package name,
+    so the focus pattern reads it as a bare package and every check downstream
+    waves it through. The third value is what makes the difference visible.
     """
     try:
         out = _adb(["shell", "dumpsys", "window"], serial).stdout.decode(
             "utf-8", "replace")
     except (OSError, subprocess.SubprocessError) as exc:
         log.warning("cannot read the focused window (%s)", exc)
-        return "", True
+        return "", True, ""
     m = _FOCUS.search(out)
     awake = _AWAKE.search(out)
-    return (m.group(1) if m else "",
-            awake.group(1) == "true" if awake else True)
+    anr = _ANR.search(out)
+    focus = m.group(1) if m else ""
+    # A popup owns the focus while it is open and Android titles that window
+    # instead of naming a package, so the read comes back "Window" and the app
+    # underneath disappears from every check downstream. mFocusedApp still
+    # names it. Only when the window is not an activity at all — never over a
+    # real focus, and never over the ANR dialog, whose title does end in the
+    # wedged package and which the caller must keep seeing.
+    if _is_a_window_title(focus) and not anr:
+        owner = _FOCUSED_APP.search(out)
+        if owner:
+            focus = owner.group(1)
+    return (focus,
+            awake.group(1) == "true" if awake else True,
+            anr.group(1) if anr else "")
 
 
 def current_focus(serial: str | None = None) -> str:
@@ -360,15 +456,54 @@ def _looks_landscape(hierarchy: str | None) -> bool:
     return bool(hierarchy and _LANDSCAPE_X.search(hierarchy))
 
 
+def _density_wanted(focus: str, hierarchy: str | None = None) -> int | None:
+    """What this screen should be laid out at, or None to leave it alone.
+
+    Four sources, most specific first, and the order is the whole point:
+
+      1. an override set for THIS page of this app,
+      2. an override set for this app,
+      3. the code's own table below — the values tuned against the real
+         screens, which no slider can overwrite because overrides live in a
+         different place and clearing one uncovers this again,
+      4. a global override, for a screen this system has no table for: the
+         case where somebody borrows the phone for something else entirely.
+
+    The landscape signature bump sits inside (3) rather than above it. A
+    person who has deliberately set a value for the signature page means it
+    for the signature page.
+    """
+    pkg = (focus or "").split("/")[0]
+    if not pkg:
+        return None
+    page = focus.split("/", 1)[1] if "/" in (focus or "") else ""
+    try:
+        from apt_log import prefs
+
+        chosen = prefs.density_for(pkg, page)
+        if chosen is not None:
+            return chosen
+    except Exception:  # noqa: BLE001
+        # A preference file that cannot be read must not stop the phone
+        # being laid out at the value that is known to work.
+        chosen = None
+    if pkg in CARE_APPS:
+        if pkg == "com.hhaexchange.caregiver" and _looks_landscape(hierarchy):
+            return SIGNATURE_DENSITY
+        return APP_DENSITY.get(pkg, DEFAULT_DENSITY)
+    try:
+        from apt_log import prefs
+
+        return prefs.global_density()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _watch_density(focus: str, serial: str | None = None,
                    hierarchy: str | None = None) -> None:
     pkg = (focus or "").split("/")[0]
-    if pkg not in CARE_APPS:
-        return
-    want = APP_DENSITY.get(pkg, DEFAULT_DENSITY)
-    if pkg == "com.hhaexchange.caregiver" and _looks_landscape(hierarchy):
-        want = SIGNATURE_DENSITY
-    if _density_now[0] == want:
+    want = _density_wanted(focus, hierarchy)
+    if want is None or _density_now[0] == want:
         return
     try:
         from apt_log import macros as macros_mod
@@ -436,6 +571,21 @@ def _watch_containment(focus: str, serial: str | None = None) -> None:
     if pkg == "com.android.chrome" and "CustomTabActivity" in (focus or ""):
         _out_since[0] = 0.0
         return
+    if pkg in SETTINGS_APPS:
+        # Opened on purpose, from the control centre. The watchdog exists to
+        # stop the phone WANDERING; it must not undo somewhere it was sent.
+        _out_since[0] = 0.0
+        return
+    if pkg in PERMISSION_APPS:
+        # The care app asked for this. HHAeXchange+ requests location at
+        # check-in and Android answers with its own dialog, from its own
+        # package — which this watchdog would have read as wandering and
+        # bounced after five seconds, taking the permission prompt with it
+        # and stopping the very check-in she asked for. Recovered from the
+        # flight recorder afterwards: grantpermissionsactivity, mid-flow,
+        # between the schedule and the GPS screen.
+        _out_since[0] = 0.0
+        return
     now = time.time()
     if not _out_since[0]:
         _out_since[0] = now
@@ -459,6 +609,75 @@ def _watch_containment(focus: str, serial: str | None = None) -> None:
               "-c", "android.intent.category.LAUNCHER", "1"], serial)
     except (OSError, subprocess.SubprocessError) as exc:
         log.warning("could not return to the care app (%s)", exc)
+
+
+# How long a wedged app is given to come back on its own. Android dismisses
+# its own dialog if the app catches up, and a slow app mid-visit is worth a
+# short wait before its screen is thrown away. Short, because the dialog does
+# not time out: the one seen live sat there for minutes, blocking everything,
+# with nobody in the room to answer it.
+ANR_GRACE = 20.0
+# And how long before the same app may be restarted again. A second wedge
+# right after a restart is a deeper fault than a restart can fix; thrashing
+# the app would only keep the screen unusable while looking busy.
+ANR_COOLDOWN = 120.0
+# Packages never force-stopped, whatever they do. Killing the system UI or the
+# system process is a bigger hammer than any screen is worth, and an ANR there
+# is not something this controller should be swinging at.
+ANR_UNTOUCHABLE = ("com.android.systemui", "android", "system")
+_anr_since: dict[str, float] = {}
+_anr_last_fix: dict[str, float] = {}
+
+
+def _watch_anr(pkg: str, serial: str | None = None) -> None:
+    """Clear Android's not-responding dialog by restarting the wedged app.
+
+    The dialog offers "Wait" and "Close app", and neither is reachable: it is
+    a system window the tree does not publish, and the ANR takes the Appium
+    session down with it, so there is nothing to drive and nothing to tap.
+    What still answers is adb, and the recipe is the one the expired-session
+    dialog already proved — force-stop, then relaunch through the launcher
+    intent, never through the wedged driver. Verified against the live wedge:
+    force-stop cleared the dialog, the relaunch came up on the sign-in screen,
+    and auto-auth carried it from there.
+
+    Restarting is the whole of the cure and it is destructive, so it waits out
+    ANR_GRACE first and never repeats inside ANR_COOLDOWN.
+    """
+    now = time.time()
+    first = _anr_since.get(pkg)
+    if first is None:
+        _anr_since[pkg] = now
+        log.warning("%s is not responding", pkg)
+        return
+    if now - first < ANR_GRACE:
+        return
+    if now - _anr_last_fix.get(pkg, 0.0) < ANR_COOLDOWN:
+        return
+    if pkg in ANR_UNTOUCHABLE:
+        log.error("%s is not responding and will not be restarted from here",
+                  pkg)
+        _anr_last_fix[pkg] = now
+        return
+    _anr_last_fix[pkg] = now
+    _anr_since.pop(pkg, None)
+    log.warning("restarting %s to clear the not-responding dialog", pkg)
+    try:
+        _adb(["shell", "am", "force-stop", pkg], serial, timeout=30.0)
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("could not stop the wedged app (%s)", exc)
+        return
+    # Only the apps this portal exists to drive are put back up. Anything else
+    # wedged is cleared and left closed; the containment watchdog is what
+    # decides where the phone belongs.
+    if pkg not in CARE_APPS:
+        return
+    try:
+        _adb(["shell", "monkey", "-p", pkg,
+              "-c", "android.intent.category.LAUNCHER", "1"], serial,
+             timeout=30.0)
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("could not relaunch %s (%s)", pkg, exc)
 
 
 def _watch_focus(focus: str, awake: bool, serial: str | None = None) -> None:
@@ -490,8 +709,18 @@ def capture(serial: str | None = None,
     password check and the overlay, which halves the adb work and removes a
     race two callers of the old version had against each other.
     """
-    focus, awake = window_state(serial)
+    focus, awake, anr = window_state(serial)
     _watch_focus(focus, awake, serial)
+    if anr:
+        # Nothing else is worth doing while the phone is wedged: the density
+        # and the notification shade are cosmetics on a screen that answers
+        # no taps, and the containment watchdog would see a care app in front
+        # and be satisfied. The refusal is what keeps the page honest —
+        # without it the portal publishes the wedged app's own dialog as live
+        # buttons, which is exactly what it did the first time this happened.
+        _watch_anr(anr, serial)
+        return None, focus, APP_NOT_RESPONDING
+    _anr_since.clear()
     if awake:
         _watch_shade(hierarchy, serial)
         _watch_containment(focus, serial)
@@ -822,6 +1051,14 @@ def write_frame(path: Path, serial: str | None = None,
     speak = text_is_disclosable(reason)
     els = elements(hierarchy, label=speak) if hierarchy else []
 
+    # A wedged app publishes NOTHING to aim at. Its last tree is still there
+    # and still parses — the legacy app was wedged on its own inactivity
+    # dialog, and that dialog's "DE ACUERDO" went on being published as a live
+    # button nobody could press. Boxes that answer no tap are worse than no
+    # boxes: she taps, nothing happens, and the fault looks like the portal's.
+    if reason == APP_NOT_RESPONDING:
+        els = []
+
     # The whole page, when the runner has walked it: while the stitched
     # document's first capture still matches what is in front, the portal
     # renders and aims at everything, not just the viewport. The moment the
@@ -986,7 +1223,7 @@ class _Hierarchy:
             try:
                 fresh = read_hierarchy(self._serial)
                 if fresh is not None:
-                    focus, awake = window_state(self._serial)
+                    focus, awake, _ = window_state(self._serial)
                     with self._lock:
                         self._read_at = time.time()
                         if self._accept(fresh, focus, awake):
@@ -1090,6 +1327,25 @@ def hierarchy_package(xml: str | None) -> str:
     return max(counts, key=counts.__getitem__) if counts else ""
 
 
+def _label(raw: str) -> str:
+    """What this node SAYS — its text, or the description standing in for it.
+
+    A view that draws its own content has no text for the tree to carry, and
+    Android's answer is content-desc: the sentence a screen reader would say.
+    Mobile Caregiver+ builds its whole visits list that way — every row is a
+    bare View whose only words are "La visita está programada para <patient>
+    … y su estado es <status>" — so a portal reading text alone showed three
+    identical empty strips where the phone showed three named visits.
+
+    A description is text by every rule that matters: it is disclosed exactly
+    where text is (see text_is_disclosable), it is excluded from editable
+    fields exactly as text is, and it never rides in `has_text` as anything
+    but a boolean. Text wins when a node carries both, which is also what
+    keeps a node that repeats itself from being read twice.
+    """
+    return _attr(raw, "text") or _attr(raw, "content-desc")
+
+
 def elements(xml: str, label: bool = False) -> list[dict]:
     """The tappable structure of a screen, carrying no text.
 
@@ -1135,10 +1391,18 @@ def elements(xml: str, label: bool = False) -> list[dict]:
             # way it is thrown. Not part of frame identity: flipping a checkbox
             # must not invalidate her aim at the one next to it.
             "checked": _attr(raw, "checked") == "true",
-            "has_text": bool(_attr(raw, "text")),
+            # A control the app has greyed out. HHAeXchange+ ships the visit
+            # screen with `visit_details_clock_out_button_disabled` — clock
+            # out exists from the moment of check-in and does nothing until
+            # the visit is over — and published as an ordinary control it
+            # read as a live call to action: press, nothing happens, and the
+            # portal wears the fault. Absent means enabled, which is how
+            # Android writes it.
+            "enabled": _attr(raw, "enabled") != "false",
+            "has_text": bool(_label(raw)),
         }
         if label and short not in EDITABLE:
-            entry["txt"] = _clean(_attr(raw, "text"))
+            entry["txt"] = _clean(_label(raw))
         found.append(entry)
     return found
 
@@ -1170,9 +1434,22 @@ def statics(xml: str) -> list[dict]:
         cls = (_attr(raw, "class") or raw[1:].split()[0].rstrip("/>")).rsplit(".", 1)[-1]
         if cls in EDITABLE:
             continue
-        text = _clean(_attr(raw, "text"))
+        text = _clean(_label(raw))
         rid = _attr(raw, "resource-id").split("/")[-1]
-        if not text and not (cls == "ImageView" and rid):
+        if cls in DECORATIVE and not _attr(raw, "text"):
+            # A picture's description is ALT TEXT — what a screen reader says
+            # in place of an image somebody can see. It is not a statement the
+            # screen is making, and treating it as one put the HHAeXchange+
+            # logo's own alt text where the page title goes: "Logotipo de H H
+            # AeXchange +", spelled out letter by letter for a reader that is
+            # not us. The image still rides along by resource-id below, which
+            # is how the EVV check marks are recognised.
+            #
+            # Only the description is dropped, and only on a NON-CLICKABLE
+            # image: a description on something tappable names the control
+            # (Back, Search, the tab you are on), and that is a real label.
+            text = ""
+        if not text and not (cls in DECORATIVE and rid):
             continue
         m = _BOUNDS.search(_attr(raw, "bounds"))
         if not m:
@@ -1184,9 +1461,45 @@ def statics(xml: str) -> list[dict]:
         if not text:
             entry["rid"] = rid
         out.append(entry)
-        if len(out) >= MAX_STATICS:
+        if len(out) >= STATICS_CEILING:
             break
-    return out
+    return _keep_the_bar(out)
+
+
+# A hard stop while reading, so a pathological tree cannot be walked forever.
+# Well above MAX_STATICS: what is read past the cap is not published, it is
+# only looked at long enough to find the bar pinned at the bottom.
+STATICS_CEILING = 600
+
+
+# How much of the tail is held back from the cap for the app's own bottom
+# bar. A tab is not one node: Mobile Caregiver+ spends three on each — the
+# cell's own description, the icon, and the caption — and hangs an unread
+# count beside one, so its three-tab bar alone runs to ten. Sized for five
+# tabs at that rate, because guessing short costs the navigation and the
+# content gives up sixteen rows it has over a hundred of.
+BAR_TAIL = 16
+
+
+def _keep_the_bar(found: list[dict]) -> list[dict]:
+    """Trim to MAX_STATICS without dropping the app's own bottom bar.
+
+    Truncation used to cut the tail, and a pinned bar is the LAST thing in
+    the tree — so the 370-message inbox, which spends its whole budget on
+    messages, published no captions at all and the portal lost the app's
+    navigation. She could read the inbox and had no way back to the visits
+    list except the phone's own Back button.
+
+    The tail is kept by POSITION IN THE TREE rather than by where it sits on
+    the screen. A long list is exactly the case this exists for, and a long
+    list is also where a node's bounds stop being a reliable guide: the rows
+    below the fold carry coordinates that run off the bottom of the screen,
+    so "whatever is lowest" points into the list, not at the bar pinned over
+    it.
+    """
+    if len(found) <= MAX_STATICS:
+        return found
+    return found[:MAX_STATICS - BAR_TAIL] + found[-BAR_TAIL:]
 
 
 # ------------------------------------------------------------------- alerts
@@ -1411,20 +1724,8 @@ class NotOnScreen(RuntimeError):
     """The element posted back is not one this frame offered."""
 
 
-def published_elements(path: Path | None = None) -> list[dict]:
-    """The overlay the page is actually showing, from the feed's own frame file.
-
-    Reading the device again here was wrong twice over. It was slow -- the tap
-    runs in the UI process, which would have to open a second Appium session
-    while the feed holds the only one UiAutomator2 allows, and the contention
-    cost 14 seconds a tap. And it answered the wrong question: a fresh read tells
-    you what is on the screen *now*, when what makes a tap safe is that it was on
-    the screen *she was looking at*.
-
-    So this reads the same file the page drew its boxes from. If the feed has
-    stopped, the frame ages out and taps refuse -- which is the correct answer,
-    because an overlay nobody is updating is one she cannot trust either.
-    """
+def published_frame(path: Path | None = None) -> dict:
+    """The whole published frame, freshness-checked. See published_elements."""
     from apt_log.ui.state import STATE_DIR
 
     target = path or (STATE_DIR / FRAME_NAME)
@@ -1440,6 +1741,24 @@ def published_elements(path: Path | None = None) -> list[dict]:
 
     if age > TAP_FRAME_MAX_AGE:
         raise StaleAim(f"the screen on your page is {age:.0f}s old — look again")
+    return frame
+
+
+def published_elements(path: Path | None = None) -> list[dict]:
+    """The overlay the page is actually showing, from the feed's own frame file.
+
+    Reading the device again here was wrong twice over. It was slow -- the tap
+    runs in the UI process, which would have to open a second Appium session
+    while the feed holds the only one UiAutomator2 allows, and the contention
+    cost 14 seconds a tap. And it answered the wrong question: a fresh read tells
+    you what is on the screen *now*, when what makes a tap safe is that it was on
+    the screen *she was looking at*.
+
+    So this reads the same file the page drew its boxes from. If the feed has
+    stopped, the frame ages out and taps refuse -- which is the correct answer,
+    because an overlay nobody is updating is one she cannot trust either.
+    """
+    frame = published_frame(path)
     return frame.get("elements") or []
 
 
@@ -1459,11 +1778,20 @@ def tap(claimed_frame: str, element: dict, serial: str | None = None,
     there -- a tap at arbitrary coordinates being exactly what this is built not
     to be.
 
-    `claimed_frame` is carried for the log rather than enforced. It was enforced
-    once; see read_stable_hierarchy for the measurement that changed it.
+    `claimed_frame` is carried for the log on NAMED aims rather than enforced —
+    it was enforced for everything once, and a ticking clock re-hashing the
+    frame refused almost every legitimate tap (see read_stable_hierarchy).
+    For an ANONYMOUS aim — no resource-id — it is enforced again: bounds and
+    class are not identity there. The legacy home's menu rows are nameless
+    twins, and while the app finished loading, its layout shifted one slot —
+    "Horario para hoy" was tapped and "Visita no programada" opened, an
+    unscheduled-visit screen nobody asked for (seen live, first field test).
+    The words she read live in the frame's structure hash; if the structure
+    moved on, an anonymous tap refuses and she aims at a fresh frame.
     """
 
-    current = published_elements(frame_path)
+    frame = published_frame(frame_path)
+    current = frame.get("elements") or []
     bounds = list(element.get("b") or [])
     match = next(
         (e for e in current
@@ -1472,6 +1800,11 @@ def tap(claimed_frame: str, element: dict, serial: str | None = None,
          and e["cls"] == element.get("cls", "")),
         None,
     )
+    if (match is not None
+            and not (element.get("rid") or "")
+            and claimed_frame and frame.get("id")
+            and claimed_frame != frame.get("id")):
+        raise StaleAim("the screen changed under that button — look again")
     if match is not None and int(match.get("step") or 0) > 0:
         # Below the fold: the runner replays the scroll, re-verifies the
         # element against a fresh dump at its step, and taps the FOUND

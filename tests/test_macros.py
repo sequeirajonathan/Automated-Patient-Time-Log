@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import json
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
 from apt_log import macros
+from apt_log.macros import AUTO_AUTH_COOLDOWN
 
 
 class TestRegistry:
@@ -413,6 +414,69 @@ class TestAutoAuth:
         with patch.object(runner, "execute"):
             assert runner.maybe_auto_auth() is True
             assert runner.maybe_auto_auth() is False
+
+    def test_one_apps_sign_in_does_not_silence_another(self, tmp_path):
+        """Seen on the live phone: Mobile Caregiver+ signed itself in, and
+        inMyTeam then sat on its splash with somebody watching and nothing
+        happened — because the per-macro cooldown fell back to the shared
+        timestamp the other app had just set. Different apps, different
+        credentials, different clocks."""
+        from apt_log.secrets import (APP_PASSWORD, APP_USERNAME,
+                                     INMYTEAM_PHONE, MC_PIN,
+                                     MemorySecretProvider)
+
+        runner = macros.Runner(
+            tmp_path / "req.json", tmp_path / "status.json",
+            screen_path=tmp_path / "screen.json",
+            viewers_path=self._watching(tmp_path),
+            secrets=MemorySecretProvider(**{APP_USERNAME: "u",
+                                            APP_PASSWORD: "p",
+                                            MC_PIN: "2580",
+                                            INMYTEAM_PHONE: "3055550123"}))
+        ran = []
+        with patch.object(runner, "execute", side_effect=lambda n, r: ran.append(n)):
+            self._doc(tmp_path, app="com.tellus.evv.v2")
+            assert runner.maybe_auto_auth() is True
+            # Now the other app's sign-in screen, immediately after.
+            path = tmp_path / "screen.json"
+            import datetime as dt
+
+            path.write_text(json.dumps({
+                "app": "com.inmyteam.inmyteam", "screen": "unknown",
+                "blocked": "", "at": dt.datetime.now().isoformat(),
+                "statics": [{"txt": "Let’s Get Started"}], "elements": []}))
+            assert runner.maybe_auto_auth() is True
+        assert ran == ["mobile_caregiver_pin", "inmyteam_login"]
+
+    def test_a_macro_that_texts_somebody_waits_much_longer(self, tmp_path):
+        """Its own cooldown, because its retry costs a message on a real
+        person's phone rather than a wasted second."""
+        import datetime as dt
+
+        from apt_log.secrets import INMYTEAM_PHONE, MemorySecretProvider
+
+        runner = macros.Runner(
+            tmp_path / "req.json", tmp_path / "status.json",
+            screen_path=tmp_path / "screen.json",
+            viewers_path=self._watching(tmp_path),
+            secrets=MemorySecretProvider(**{INMYTEAM_PHONE: "3055550123"}))
+
+        def splash():
+            (tmp_path / "screen.json").write_text(json.dumps({
+                "app": "com.inmyteam.inmyteam", "screen": "unknown",
+                "blocked": "", "at": dt.datetime.now().isoformat(),
+                "statics": [{"txt": "Let’s Get Started"}], "elements": []}))
+
+        with patch.object(runner, "execute"):
+            splash()
+            assert runner.maybe_auto_auth() is True
+            # Past the ordinary cooldown, nowhere near this one.
+            runner._auto_auth_seen["inmyteam_login"] -= AUTO_AUTH_COOLDOWN + 5
+            splash()
+            assert runner.maybe_auto_auth() is False
+            runner._auto_auth_seen["inmyteam_login"] -= macros.SMS_AUTH_COOLDOWN
+            splash()
+            assert runner.maybe_auto_auth() is True
 
     def test_a_stale_sighting_is_not_a_landing(self, tmp_path):
         """Screens flash through login during startup, and an old document
@@ -820,6 +884,368 @@ class TestMobileCaregiverPin:
             macros.MACROS["mobile_caregiver_pin"].run(driver, lambda _k: None)
         provider_cls.assert_not_called()
         driver.find_elements.assert_not_called()
+
+
+class TestInMyTeamWalksToTheCode:
+    """Reported from the field: "it should have entered a phone number
+    waiting for the OTP but it's not getting me to that step on app launch".
+
+    It never was. inMyTeam had no sign-in macro, so its tile ran the
+    open-only one: the app came to the front, landed on its marketing splash
+    — "THE FUTURE of home care agencies", one "Let's Get Started" button —
+    and waited for a tap nobody was going to give it.
+
+    The walk stops at the code screen on purpose. A macro cannot invent a
+    texted code, and the portal's type bar was built for this moment.
+    """
+
+    SPLASH = '<node text="Let’s Get Started"/>'
+    NUMBER = '<node text="Enter your cell phone number"/><node text="Sign in"/>'
+    # The app's own words, off the live screen.
+    CODE = ('<node text="Verify Your Account"/>'
+            '<node text="A text with a code was sent to"/>'
+            '<node text="Enter your code"/><node text="Verify"/>')
+
+    def _driver(self, state):
+        """A phone that advances a screen each time something is clicked."""
+        driver = MagicMock()
+        driver.current_activity = "com.inmyteam.inmyteam.MainActivity"
+        driver.current_package = "com.inmyteam.inmyteam"
+
+        def page():
+            return {"splash": self.SPLASH, "number": self.NUMBER,
+                    "code": self.CODE}[state["at"]]
+
+        def find_elements(_by, selector):
+            if "EditText" in selector:
+                return [self._box(state)] if state["at"] in ("number",
+                                                             "code") else []
+            for word in ("Get Started", "Comenzar", "Empezar"):
+                if word in selector and state["at"] == "splash":
+                    return [self._tap(state, "number")]
+            for word in ("Sign in", "Iniciar"):
+                if word in selector and state["at"] == "number":
+                    # Document order, exactly as the phone reports it: the
+                    # full-screen container first, the button after.
+                    return [self._root(state), self._tap(state, "code")]
+            return []
+
+        driver.find_elements.side_effect = find_elements
+        type(driver).page_source = PropertyMock(side_effect=page)
+        return driver
+
+    def _tap(self, state, goes_to, size=(600, 60)):
+        control = MagicMock()
+        control.is_displayed.return_value = True
+        control.rect = {"x": 0, "y": 0, "width": size[0], "height": size[1]}
+        control.click.side_effect = lambda: state.update(at=goes_to)
+        return control
+
+    def _root(self, state):
+        """The screen's own root: clickable, full-screen, and it contains
+        every word on the page — including "Sign in with your phone number".
+        Pressing it does nothing at all."""
+        control = MagicMock()
+        control.is_displayed.return_value = True
+        control.rect = {"x": 0, "y": 0, "width": 720, "height": 1515}
+        control.click.side_effect = lambda: state.setdefault("dead", 0)
+        return control
+
+    def _box(self, state):
+        box = MagicMock()
+        box.is_displayed.return_value = True
+        state.setdefault("typed", [])
+        box.send_keys.side_effect = state["typed"].append
+        state.setdefault("boxes", []).append(box)
+        return box
+
+    def _run(self, state):
+        import itertools
+
+        from apt_log.secrets import INMYTEAM_PHONE, MemorySecretProvider
+
+        driver = self._driver(state)
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider",
+                   return_value=MemorySecretProvider(
+                       **{INMYTEAM_PHONE: "3055550123"})), \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            macros.MACROS["inmyteam_login"].run(driver, lambda _k: None)
+        return driver
+
+    def test_it_presses_through_the_splash_and_types_the_number(self):
+        state = {"at": "splash"}
+        self._run(state)
+        assert state["at"] == "code"
+        assert state["typed"] == ["3055550123"]
+
+    def test_the_box_is_cleared_before_the_number_goes_in(self):
+        """The app remembers the last number, and typing into a prefilled
+        box appends to it — the trap the HHAeXchange+ web form sprang once."""
+        state = {"at": "number"}
+        self._run(state)
+        assert state["typed"] == ["3055550123"]
+
+    def test_it_stops_at_the_code_rather_than_reporting_signed_in(self):
+        """Success here means "now she types the code", and the macro has to
+        actually see the app ask for one."""
+        steps = []
+        state = {"at": "splash"}
+        import itertools
+
+        from apt_log.secrets import INMYTEAM_PHONE, MemorySecretProvider
+
+        driver = self._driver(state)
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider",
+                   return_value=MemorySecretProvider(
+                       **{INMYTEAM_PHONE: "3055550123"})), \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            macros.MACROS["inmyteam_login"].run(driver, steps.append)
+        assert steps[-1] == "macro.step.awaiting_code"
+
+    def _elsewhere(self, tappables):
+        """An app showing something this walk does not recognise."""
+        driver = MagicMock()
+        driver.current_activity = "com.inmyteam.inmyteam.MainActivity"
+        driver.current_package = "com.inmyteam.inmyteam"
+
+        def find_elements(_by, selector):
+            if selector == '//*[@clickable="true"]':
+                return [MagicMock() for _ in range(tappables)]
+            return []
+
+        driver.find_elements.side_effect = find_elements
+        type(driver).page_source = PropertyMock(return_value="<node/>")
+        return driver
+
+    def _bare_run(self, driver):
+        import itertools
+
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider") as provider_cls, \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            macros.MACROS["inmyteam_login"].run(driver, lambda _k: None)
+        return provider_cls
+
+    def test_a_signed_in_app_is_left_alone(self):
+        provider_cls = self._bare_run(self._elsewhere(tappables=6))
+        provider_cls.assert_not_called()
+
+    def test_an_unreadable_tree_is_not_mistaken_for_signed_in(self):
+        """Live: the macro read the tree of the app the phone was LEAVING,
+        found no field in it, and reported done over an inMyTeam splash that
+        had not drawn yet. An empty tree is "not yet", not "nothing to do" —
+        the trap the HHAeXchange+ macro wrote down and this one sprang."""
+        import itertools
+
+        driver = self._elsewhere(tappables=0)
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider"), \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            with pytest.raises(RuntimeError, match="not showing anything"):
+                macros.MACROS["inmyteam_login"].run(driver, lambda _k: None)
+
+    def test_it_waits_for_this_app_and_not_just_any_activity(self):
+        """`current_activity` answers the moment the driver knows anything,
+        including the app the phone is leaving."""
+        import itertools
+
+        driver = self._elsewhere(tappables=6)
+        driver.current_package = "com.tellus.evv.v2"
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider"), \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            with pytest.raises(RuntimeError, match="did not come to the front"):
+                macros.MACROS["inmyteam_login"].run(driver, lambda _k: None)
+
+    def test_a_number_the_app_will_not_take_is_a_failure_not_a_success(self):
+        """A rejected number changes the screen too. Reporting success over
+        an error message is how a macro teaches somebody to distrust it."""
+        import itertools
+
+        from apt_log.secrets import INMYTEAM_PHONE, MemorySecretProvider
+
+        state = {"at": "number"}
+        driver = self._driver(state)
+        # The app bounces back to the number screen with an error instead of
+        # asking for a code.
+        self.CODE = '<node text="That number is not registered"/>'
+        try:
+            with patch("apt_log.macros.wake_display"), \
+                 patch("apt_log.secrets.FileSecretProvider",
+                       return_value=MemorySecretProvider(
+                           **{INMYTEAM_PHONE: "3055550123"})), \
+                 patch("apt_log.macros.time.sleep"), \
+                 patch("apt_log.macros.time.monotonic",
+                       side_effect=itertools.count(step=0.5)):
+                with pytest.raises(RuntimeError, match="did not ask for a code"):
+                    macros.MACROS["inmyteam_login"].run(driver, lambda _k: None)
+        finally:
+            del self.CODE
+
+    def test_the_button_is_pressed_and_not_the_screen_it_sits_on(self):
+        """Live: the number went in, "Sign in" matched the full-screen root
+        because the heading reads "Sign in with your phone number", and
+        nothing happened. The button is the tightest node with the words."""
+        state = {"at": "number"}
+        self._run(state)
+        assert state["at"] == "code"
+        assert "dead" not in state
+
+    def test_a_code_screen_already_up_is_arrival_not_a_reason_to_start_over(self):
+        """Both screens are one EditText and a button. Without this check the
+        walk reads the CODE box as the number box, clears whatever she is
+        part-way through typing, puts a phone number in its place, and
+        presses submit. Found by leaving the phone on the code screen and
+        asking what the macro would do next."""
+        state = {"at": "code"}
+        self._run(state)
+        assert state["at"] == "code"
+        assert state.get("typed", []) == []
+        # And the box she may be part-way through typing into is untouched.
+        assert all(not box.clear.called for box in state.get("boxes", []))
+
+    def test_it_signs_itself_in_like_the_other_three(self):
+        """It was held back because pressing it texts a real person. What
+        changed: the walk is a no-op once the app is already asking for a
+        code, so the common repeat costs nothing."""
+        from apt_log.secrets import INMYTEAM_PHONE, MemorySecretProvider
+
+        provider = MemorySecretProvider(**{INMYTEAM_PHONE: "3055550123"})
+        assert (macros.auth_macro_for("com.inmyteam.inmyteam", provider)
+                == "inmyteam_login")
+
+    def test_no_number_stored_means_no_automatic_anything(self):
+        from apt_log.secrets import MemorySecretProvider
+
+        assert macros.auth_macro_for("com.inmyteam.inmyteam",
+                                     MemorySecretProvider()) is None
+
+    def test_a_macro_that_texts_somebody_gets_the_long_cooldown(self):
+        """Ninety seconds is right for a wasted retry and wrong for one that
+        puts another message on a real person's phone."""
+        assert "inmyteam_login" in macros.SENDS_A_MESSAGE
+        assert macros.SMS_AUTH_COOLDOWN >= 10 * 60
+
+    def test_the_tile_is_what_runs_it(self):
+        from apt_log.ui.app import PHONE_APPS
+
+        tile = next(a for a in PHONE_APPS if a["id"] == "inmyteam")
+        assert tile["macro"] == "inmyteam_login"
+        assert tile["open"] == "open_inmyteam"
+
+
+class TestInMyTeamIsRecognisedByItsWords:
+    """This app has ONE activity. Splash, phone number, code and the
+    signed-in app all live under `mainactivity`, so the atlas cannot tell
+    them apart, and there is no password field anywhere in the walk for the
+    capture refusals to fire on. Its own words are the only signal it gives —
+    the same shape of answer the Chrome rule in auth_macro_for needed."""
+
+    def _doc(self, *words, app="com.inmyteam.inmyteam"):
+        return {"app": app, "statics": [{"txt": w} for w in words],
+                "elements": []}
+
+    def test_the_splash_is_asking_to_be_signed_in(self):
+        assert macros.wants_to_sign_in(
+            self._doc("THE FUTURE of home care agencies",
+                      "Let’s Get Started")) is True
+
+    def test_the_number_screen_is_asking_too(self):
+        assert macros.wants_to_sign_in(
+            self._doc("Sign in with your phone number",
+                      "Enter your cell phone number")) is True
+
+    def test_the_code_screen_is_arrival_not_a_request(self):
+        """Treating it as "please sign in" would put the loop back at a
+        screen it had already reached — and each lap sends a text."""
+        assert macros.wants_to_sign_in(
+            self._doc("Verify Your Account",
+                      "A text with a code was sent to",
+                      "Enter your code", "Verify")) is False
+
+    def test_the_signed_in_app_is_not_asking(self):
+        assert macros.wants_to_sign_in(
+            self._doc("Visitas", "Beneficiarios", "Mensajes")) is False
+
+    def test_another_apps_screen_is_never_matched(self):
+        """The words are loose on purpose; the package is what keeps them
+        from reaching across apps."""
+        assert macros.wants_to_sign_in(
+            self._doc("Sign in with your phone number",
+                      app="com.hhaexchange.uma")) is False
+
+    def test_nothing_published_yet_is_not_asking(self):
+        assert macros.wants_to_sign_in(None) is False
+        assert macros.wants_to_sign_in({}) is False
+
+
+class TestTheCodeIsAnnounced:
+    """The one step in this system nobody can wait out: the code exists only
+    on her phone. A portal that sits there silently asking is a portal nobody
+    discovers is asking."""
+
+    def test_reaching_the_code_screen_sends_a_notification(self):
+        sent = []
+        with patch("apt_log.notify.send",
+                   side_effect=lambda m, url="": sent.append((m, url))):
+            macros._say_the_code_is_waiting()
+        assert len(sent) == 1
+        message, url = sent[0]
+        assert "code" in message.lower()
+        # Tappable, and landing on the screen the code is for. This line read
+        # `endswith("/app")` while its own comment said "straight to the
+        # field", and the comment was the part that was wrong: /app is the app
+        # picker. Reported from the field as the notification opening the page
+        # with all the tiles on it.
+        assert url.endswith(macros.CODE_DEEP_LINK)
+        assert "view=screen" in url
+
+    def test_the_link_is_a_name_a_phone_can_actually_open(self):
+        """It was a bare host first, and `tailscale serve` holds a
+        certificate for the node's WHOLE MagicDNS name — so the bare one
+        fails validation instead of resolving to something friendlier. A tap
+        that goes nowhere, on the one notification whose entire job is to be
+        tapped."""
+        from urllib.parse import urlparse
+
+        parsed = urlparse(macros.PORTAL_URL)
+        assert parsed.scheme == "https"
+        assert parsed.hostname and parsed.hostname.count(".") >= 2, (
+            f"{parsed.hostname!r} is not fully qualified")
+        assert parsed.path == "/app"
+
+    def test_it_carries_no_patient_and_no_code(self):
+        """It goes to a public relay and lands on a lock screen. Neither is a
+        place for a name, and there is no code to carry — that is the point
+        of asking."""
+        message = macros.CODE_WAITING
+        assert not any(ch.isdigit() for ch in message)
+        for leak in ("patient", "paciente", "visit", "visita"):
+            assert leak not in message.lower()
+
+    def test_a_notification_that_cannot_be_sent_never_fails_the_sign_in(self):
+        with patch("apt_log.notify.send", side_effect=OSError("no network")):
+            with pytest.raises(OSError):
+                macros._say_the_code_is_waiting()
+        # ...which is why the real helper swallows it. Proven against the
+        # helper itself rather than assumed of the caller:
+        from apt_log import notify
+
+        with patch("apt_log.notify.subprocess.run",
+                   side_effect=OSError("no curl")):
+            assert notify.send("anything") is False
 
 
 class TestUmaWebFormIsTheAsk:
@@ -1918,3 +2344,209 @@ class TestCanvasNeverWalked:
                                screen_path=tmp_path / "screen.json",
                                viewers_path=tmp_path / "viewers.json")
         assert runner.maybe_stitch() is False
+
+
+class TestMobileCaregiverExpiredSession:
+    """The second lock, found by walking it live.
+
+    The passcode only unlocks the app on this phone. When the SERVER session
+    lapses the dashboard opens, says "Sesión caducada", and drops to a
+    username-and-password form no number of keypad taps can answer — which is
+    how an auth macro spins forever without signing anything in.
+    """
+
+    FORM = "com.tellus.evv.activities.LoginActivity"
+    EXPIRED = ("<node text='Sesión caducada'/>"
+               "<node text='Su sesión ha caducado, por favor vuelva a "
+               "iniciar sesión.'/>")
+
+    def _driver(self, activity, source=""):
+        from unittest.mock import PropertyMock
+        state = {"activity": activity}
+        driver = MagicMock()
+        type(driver).current_activity = PropertyMock(
+            side_effect=lambda: state["activity"])
+        type(driver).page_source = PropertyMock(side_effect=lambda: source)
+        return driver, state
+
+    def _run(self, driver, **secrets):
+        import itertools
+
+        from apt_log.secrets import MemorySecretProvider
+
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider",
+                   return_value=MemorySecretProvider(**secrets)), \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            macros.MACROS["mobile_caregiver_pin"].run(driver, lambda _k: None)
+
+    def test_the_password_is_typed_into_the_form(self):
+        from apt_log.secrets import MC_PASSWORD
+
+        driver, state = self._driver(self.FORM)
+        typed, boxes = [], {}
+
+        def find_elements(by, selector):
+            if "login_password_input" in selector:
+                box = MagicMock()
+                box.send_keys.side_effect = lambda v: typed.append(v)
+                boxes["pw"] = box
+                return [box]
+            if "login_username_input" in selector:
+                box = MagicMock()
+                box.text = "SSequeira"          # remembered between sessions
+                box.send_keys.side_effect = lambda v: typed.append(v)
+                return [box]
+            if "login_button" in selector:
+                button = MagicMock()
+                button.click.side_effect = lambda: state.update(
+                    activity="com.tellus.evv.activities.DashboardActivity")
+                return [button]
+            return []
+
+        driver.find_elements.side_effect = find_elements
+        self._run(driver, **{MC_PASSWORD: "hunter2"})
+        assert typed == ["hunter2"], "a remembered username is not retyped"
+
+    def test_a_forgotten_username_is_filled_too(self):
+        from apt_log.secrets import MC_PASSWORD, MC_USERNAME
+
+        driver, state = self._driver(self.FORM)
+        typed = []
+
+        def find_elements(by, selector):
+            if ("login_password_input" in selector
+                    or "login_username_input" in selector):
+                box = MagicMock()
+                box.text = ""
+                box.send_keys.side_effect = lambda v: typed.append(v)
+                return [box]
+            if "login_button" in selector:
+                button = MagicMock()
+                button.click.side_effect = lambda: state.update(
+                    activity="com.tellus.evv.activities.DashboardActivity")
+                return [button]
+            return []
+
+        driver.find_elements.side_effect = find_elements
+        self._run(driver, **{MC_USERNAME: "SSequeira", MC_PASSWORD: "hunter2"})
+        assert typed == ["SSequeira", "hunter2"]
+
+    def test_without_a_password_nothing_is_typed_at_all(self):
+        driver, _state = self._driver(self.FORM)
+        driver.find_elements.side_effect = lambda *_a: []
+        with pytest.raises(RuntimeError, match="none is stored"):
+            self._run(driver)
+
+    def test_only_the_expiry_dialog_is_dismissed(self):
+        """Pressing whatever sits at android:id/button1 would press the
+        positive button of any alert the app happened to be showing."""
+        driver, _state = self._driver(
+            "com.tellus.evv.activities.DashboardActivity",
+            source="<node text='¿Borrar esta visita?'/>")
+        clicked = []
+
+        def find_elements(by, selector):
+            if "button1" in selector:
+                button = MagicMock()
+                button.click.side_effect = lambda: clicked.append(1)
+                return [button]
+            return []
+
+        driver.find_elements.side_effect = find_elements
+        self._run(driver)
+        assert clicked == [], "an unrecognised dialog stays untouched"
+
+    def test_the_expiry_dialog_is_dismissed_to_reach_the_form(self):
+        from apt_log.secrets import MC_PASSWORD
+
+        driver, state = self._driver(
+            "com.tellus.evv.activities.DashboardActivity",
+            source=self.EXPIRED)
+        clicked = []
+
+        def find_elements(by, selector):
+            if "button1" in selector:
+                button = MagicMock()
+
+                def click():
+                    clicked.append(1)
+                    state["activity"] = self.FORM
+                button.click.side_effect = click
+                return [button]
+            if ("login_password_input" in selector
+                    or "login_username_input" in selector):
+                box = MagicMock()
+                box.text = "SSequeira"
+                return [box]
+            if "login_button" in selector:
+                button = MagicMock()
+                button.click.side_effect = lambda: state.update(
+                    activity="com.tellus.evv.activities.DashboardActivity")
+                return [button]
+            return []
+
+        driver.find_elements.side_effect = find_elements
+        self._run(driver, **{MC_PASSWORD: "hunter2"})
+        assert clicked == [1]
+
+
+    def test_the_form_is_found_under_a_foreign_id_namespace(self):
+        """The live failure: UiAutomator2 prefixes a bare id with the app's
+        package, and this app's package is not the namespace its ids live
+        in — application com.tellus.evv.v2, resources com.tellus.evv. Every
+        bare-id lookup came back empty on a form that was plainly there."""
+        from apt_log.secrets import MC_PASSWORD
+
+        driver, state = self._driver(self.FORM)
+        typed = []
+        # Only ids under the FOREIGN namespace exist here. A locator that
+        # assumes the application package finds nothing.
+        tree = {"com.tellus.evv:id/login_username_input": "SSequeira",
+                "com.tellus.evv:id/login_password_input": "",
+                "com.tellus.evv:id/login_button": None}
+
+        def find_elements(by, selector):
+            if by != "xpath":
+                return []
+            found = []
+            for rid, text in tree.items():
+                needle = selector.split('":id/')[-1].split('"')[0] \
+                    if '":id/' in selector else None
+                if needle and rid.endswith(":id/" + needle):
+                    box = MagicMock()
+                    box.text = text
+                    box.send_keys.side_effect = lambda v: typed.append(v)
+                    box.click.side_effect = lambda: state.update(
+                        activity="com.tellus.evv.activities.DashboardActivity")
+                    found.append(box)
+            return found
+
+        driver.find_elements.side_effect = find_elements
+        self._run(driver, **{MC_PASSWORD: "hunter2"})
+        assert typed == ["hunter2"]
+
+    def test_the_sign_in_button_does_not_catch_its_neighbours(self):
+        """login_passwordhelp_button and login_forgotusername_button sit
+        beside it; anchoring on ":id/" keeps the match to a whole segment."""
+        from apt_log import macros as m
+        for rid in ("com.tellus.evv:id/login_passwordhelp_button",
+                    "com.tellus.evv:id/login_forgotusername_button"):
+            assert ':id/login_button' not in rid
+        assert ':id/login_button' in "com.tellus.evv:id/login_button"
+        assert ':id/login_button"' in m._MC_SIGN_IN
+
+    def test_the_macro_is_offered_on_a_password_alone(self):
+        """The app locks two ways; either secret makes it worth offering."""
+        from apt_log.secrets import MC_PASSWORD, MC_PIN, MemorySecretProvider
+
+        only_password = MemorySecretProvider(**{MC_PASSWORD: "hunter2"})
+        only_pin = MemorySecretProvider(**{MC_PIN: "2580"})
+        neither = MemorySecretProvider()
+        for provider, expected in ((only_password, "mobile_caregiver_pin"),
+                                   (only_pin, "mobile_caregiver_pin"),
+                                   (neither, None)):
+            assert macros.auth_macro_for(
+                "com.tellus.evv.v2", provider) == expected

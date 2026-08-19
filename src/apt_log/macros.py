@@ -65,6 +65,14 @@ POLL_EVERY = 1.0
 AUTO_AUTH_APP = "com.hhaexchange.caregiver"
 AUTO_AUTH_MACRO = "hhax_legacy_login"
 AUTO_AUTH_COOLDOWN = 90.0
+# And how long before a macro that TEXTS SOMEBODY may try again. Fifteen
+# minutes rather than ninety seconds, because the cost of a retry here is not
+# a wasted second, it is another message on a real person's phone. The common
+# repeat is free anyway — the walk no-ops once the app is already asking for
+# a code — so this only bounds the case where the app falls back to the
+# number screen with nobody answering.
+SMS_AUTH_COOLDOWN = 15 * 60.0
+SENDS_A_MESSAGE = ("inmyteam_login",)
 # Screens flash through login on their own during app startup; only a login
 # screen the feed has seen *recently and still* is a real landing.
 AUTO_AUTH_FRESH = 6.0
@@ -640,41 +648,125 @@ def _hhax_uma_login(driver, report) -> None:
         raise RuntimeError("the app came back but did not land signed in")
 
 
-def _mobile_caregiver_pin(driver, report) -> None:
-    """Mobile Caregiver+ — type the passcode, only if the keypad is up.
+# The form's controls are found by the TAIL of their resource-id, never by a
+# bare id. UiAutomator2 prefixes a bare id with the app's package, and this
+# app's package is not the namespace its ids live in: the application is
+# com.tellus.evv.v2 while its classes and resources are com.tellus.evv, so
+# every bare-id lookup came back empty ("the sign-in form is not where it was
+# walked") on a form that was plainly there. The same trap the HHAeXchange+
+# web form documented, sprung a second way. Anchoring on ":id/" keeps the
+# match to a whole id segment, so login_button cannot catch its neighbours.
+_MC_USERNAME_BOX = ('//android.widget.EditText'
+                    '[contains(@resource-id, ":id/login_username_input")]')
+_MC_PASSWORD_BOX = ('//android.widget.EditText'
+                    '[contains(@resource-id, ":id/login_password_input")]')
+_MC_SIGN_IN = ('//android.widget.Button'
+               '[contains(@resource-id, ":id/login_button")]')
 
-    Discovery: an existing session sits behind a PIN keypad ("Introduce un
-    código de acceso", digits 0-9). The keypad's buttons carry their digits
-    as text, so the PIN is typed by tapping them; the screen advances by
-    itself when the last digit lands.
+
+def _mobile_caregiver_pin(driver, report) -> None:
+    """Mobile Caregiver+ — answer whichever of its two locks is up.
+
+    The app has TWO, and they are not interchangeable. Discovery found the
+    first: a PIN keypad ("Introduce un código de acceso", four dots, digits
+    0-9), whose buttons carry their digits as text, so the passcode is typed
+    by tapping them and the screen advances by itself on the last one.
+
+    Walking it live found the second. The passcode only unlocks the app on
+    this phone; when the SERVER session lapses the dashboard opens, says
+    "Sesión caducada", and drops to its own username-and-password form —
+    which no number of keypad taps can answer. Landing there with only a PIN
+    stored is how an auth macro spins without ever signing anything in.
+
+    So the screen in front decides. Either lock may be up, and clearing the
+    first can reveal the second, which is why the passcode path falls through
+    to the password path rather than declaring victory.
     """
-    from apt_log.secrets import MC_PIN, FileSecretProvider
+    from apt_log.secrets import (MC_PASSWORD, MC_PIN, MC_USERNAME,
+                                 FileSecretProvider, SecretNotFound)
 
     report("macro.step.launching")
     wake_display()
     driver.activate_app("com.tellus.evv.v2")
     wait_for(lambda: bool(driver.current_activity), timeout=15.0)
 
-    def on_pin_screen():
-        return "pin" in (driver.current_activity or "").lower()
+    def activity() -> str:
+        return (driver.current_activity or "").lower()
 
-    if not wait_for(on_pin_screen, timeout=4.0, poll=0.5):
+    def on_pin_screen() -> bool:
+        return "pin" in activity()
+
+    def on_login_screen() -> bool:
+        return "login" in activity()
+
+    # ------------------------------------------------------------- the PIN
+    if wait_for(on_pin_screen, timeout=4.0, poll=0.5):
+        # Read only once the keypad is actually up, and raised rather
+        # than returned: an unlocked app must not even open the file.
+        pin = FileSecretProvider().get(MC_PIN)
+        report("macro.step.signing_in")
+        for digit in pin:
+            keys = driver.find_elements(
+                "xpath", f'//android.widget.Button[@text="{digit}"]')
+            if not keys:
+                raise RuntimeError("the keypad is not where discovery saw it")
+            keys[0].click()
+        report("macro.step.checking")
+        if not wait_for(lambda: not on_pin_screen(), timeout=15.0):
+            raise RuntimeError(
+                "still on the passcode screen after typing the PIN")
+
+    # ------------------------------------------------- the expired session
+    # "Sesión caducada" has one button and it only acknowledges; the form is
+    # behind it. Dismissing it is not a commitment — it is the only way to
+    # reach the screen that can be answered. But only THAT dialog: pressing
+    # whatever sits at android:id/button1 would press the positive button of
+    # any alert the app happened to be showing, and this system does not
+    # confirm things it cannot read. The wording is checked first, from the
+    # same per-app list the expiry watcher uses.
+    words = (driver.page_source or "").lower()
+    if any(m in words for m in EXPIRY_MARKERS.get("com.tellus.evv.v2", ())):
+        for alert in driver.find_elements(
+                "xpath", '//android.widget.Button[@resource-id='
+                         '"android:id/button1"]'):
+            alert.click()
+            break
+    wait_for(on_login_screen, timeout=6.0, poll=0.5)
+    if not on_login_screen():
         report("macro.step.checking")
         return
 
-    pin = FileSecretProvider().get(MC_PIN)   # raises before any tap if unset
+    try:
+        password = FileSecretProvider().get(MC_PASSWORD)
+    except SecretNotFound:
+        # Nothing typed, nothing half-filled: an unanswerable screen is left
+        # exactly as it was found, for a person to answer.
+        raise RuntimeError(
+            "Mobile Caregiver+ wants its password and none is stored")
 
     report("macro.step.signing_in")
-    for digit in pin:
-        keys = driver.find_elements(
-            "xpath", f'//android.widget.Button[@text="{digit}"]')
-        if not keys:
-            raise RuntimeError("the keypad is not where discovery saw it")
-        keys[0].click()
+    fields = driver.find_elements("xpath", _MC_PASSWORD_BOX)
+    if not fields:
+        raise RuntimeError("the sign-in form is not where it was walked")
+    # The username is remembered between sessions; it is only typed when the
+    # app has forgotten it, and only if one is stored.
+    for box in driver.find_elements("xpath", _MC_USERNAME_BOX):
+        if not (box.text or "").strip():
+            try:
+                box.clear()
+                box.send_keys(FileSecretProvider().get(MC_USERNAME))
+            except SecretNotFound:
+                pass
+        break
+    fields[0].clear()
+    fields[0].send_keys(password)
+    for button in driver.find_elements("xpath", _MC_SIGN_IN):
+        button.click()
+        break
 
     report("macro.step.checking")
-    if not wait_for(lambda: not on_pin_screen(), timeout=15.0):
-        raise RuntimeError("still on the passcode screen after typing the PIN")
+    if not wait_for(lambda: not on_login_screen(), timeout=30.0):
+        raise RuntimeError("still on the sign-in form after signing in")
 
 
 def _read_page(driver, report) -> None:
@@ -1190,6 +1282,379 @@ def _open_app(package: str):
     return run
 
 
+def _area(element) -> float:
+    """How big a control is, for choosing between nested matches. An element
+    that will not report its size sorts last rather than first: unknown is
+    not a reason to press something."""
+    try:
+        rect = element.rect
+        return float(rect["width"]) * float(rect["height"])
+    except Exception:  # noqa: BLE001
+        return float("inf")
+
+
+def _inmyteam_login(driver, report) -> None:
+    """inMyTeam — get as far as the code, and stop there.
+
+    This app had no sign-in macro at all, so its tile ran the open-only one:
+    the app came to the front, landed on its marketing splash, and waited for
+    a tap nobody was going to give it. Reported from the field as "it should
+    have entered a phone number waiting for the OTP but it's not getting me
+    to that step".
+
+    Three screens, and the third is the point:
+
+    1. **The splash.** "THE FUTURE of home care agencies" with one control,
+       "Let's Get Started". No id, no text on the node itself — the caption
+       is a separate view inside it — so it is found by the words it
+       contains.
+    2. **The number.** One EditText ("Enter your cell phone number") and a
+       "Sign in" button. The number comes from INMYTEAM_PHONE.
+    3. **The code.** Pressing Sign in sends a real SMS, and this macro stops
+       here on purpose. The portal's type bar exists for this moment — she
+       aims at the code field and types the code herself, which is the same
+       contract every other short credential goes through. A macro cannot
+       invent a code, and pretending otherwise would mean retrying, which
+       means a second text to a real person and a walk toward a rate limit.
+
+    Auth only, like the others: if the app opens onto anything but this
+    walk, the session is alive and there is nothing to do.
+    """
+    from apt_log.secrets import (INMYTEAM_PHONE, FileSecretProvider,
+                                 SecretNotFound)
+
+    package = "com.inmyteam.inmyteam"
+    report("macro.step.launching")
+    wake_display()
+    driver.activate_app(package)
+    # Wait for THIS app to be in front, not merely for some activity to be
+    # reported. `current_activity` answers the moment the driver knows
+    # anything, including the app the phone is leaving — and the first live
+    # run read Mobile Caregiver+'s tree, found no field in it, and reported
+    # "already signed in" over an inMyTeam splash that had not drawn yet.
+    if not wait_for(lambda: driver.current_package == package, timeout=20.0):
+        raise RuntimeError("the app did not come to the front")
+
+    def field():
+        """The number box, if this screen has one."""
+        found = [e for e in driver.find_elements(
+            "xpath", '//*[@class="android.widget.EditText"]')
+            if e.is_displayed()]
+        return found[0] if found else None
+
+    def by_words(*words):
+        """The SMALLEST control containing the words. Smallest is the whole
+        point.
+
+        Compose gives these screens no ids and hangs the caption on a child
+        view, so the text of a descendant is the only handle there is — but
+        the screen's own root is clickable too, and it contains every word on
+        it. Asking for "Sign in" and taking the first match pressed the
+        full-screen container, because the heading reads "Sign in with your
+        phone number": the number went in, nothing happened, and the macro
+        looked like it had never typed anything. The button is the tightest
+        node that still contains the words.
+        """
+        for word in words:
+            hits = [e for e in driver.find_elements(
+                "xpath",
+                f'//*[@clickable="true"][contains(@text,"{word}")'
+                f' or .//*[contains(@text,"{word}")]]')
+                if e.is_displayed()]
+            if hits:
+                return min(hits, key=_area)
+        return None
+
+    def start_button():
+        return by_words("Get Started", "Comenzar", "Empezar")
+
+    # A freshly launched app exposes almost nothing for a second or two, and
+    # an empty tree must never read as "signed in" — the trap the
+    # HHAeXchange+ macro was bitten by and wrote down, sprung here anyway.
+    # Wait for one of the two screens this walk knows before deciding.
+    wait_for(lambda: field() is not None or start_button() is not None,
+             timeout=20.0)
+
+    # Already at the code, from an earlier run or from somebody's own tap.
+    # This is the check that has to come FIRST, because both screens are one
+    # EditText and a button: without it the walk reads the code box as the
+    # number box, clears the code she may be part-way through typing, puts a
+    # phone number in its place, and presses whatever looks like submit. The
+    # code screen is where this macro is trying to get to — arriving to find
+    # it already there is success, not a reason to start over.
+    if _asks_for_a_code(driver):
+        report("macro.step.awaiting_code")
+        return
+
+    # ---------------------------------------------------------- the splash
+    if field() is None:
+        start = start_button()
+        if start is not None:
+            report("macro.step.starting")
+            start.click()
+            wait_for(lambda: field() is not None, timeout=15.0)
+
+    box = field()
+    if box is None:
+        # No field and no splash. Either the app is past the walk — signed
+        # in, on its own home screen — or its tree is still unreadable, and
+        # those two must not be confused. A screen with real content has
+        # several tappable nodes; an unready one has none.
+        if len(driver.find_elements("xpath", '//*[@clickable="true"]')) < 2:
+            raise RuntimeError("the app is not showing anything yet")
+        report("macro.step.finished")
+        return
+
+    # ---------------------------------------------------------- the number
+    report("macro.step.signing_in")
+    try:
+        number = FileSecretProvider().get(INMYTEAM_PHONE)
+    except SecretNotFound as exc:
+        raise RuntimeError(
+            "no phone number is stored for inMyTeam") from exc
+
+    # Cleared first: the app remembers the last number, and typing into a
+    # prefilled box appends to it — the trap the HHAeXchange+ web form
+    # already sprang once.
+    box.clear()
+    box.send_keys(number)
+
+    submit = by_words("Sign in", "Iniciar")
+    if submit is None:
+        raise RuntimeError("the sign-in button is not on this screen")
+    submit.click()
+
+    # ------------------------------------------------------------ the code
+    # Done means the number was accepted and the app is asking for the code.
+    # Not "the screen changed": a rejected number also changes the screen,
+    # and reporting success over an error message is how a macro teaches
+    # somebody to distrust it.
+    report("macro.step.awaiting_code")
+    if not wait_for(lambda: _asks_for_a_code(driver), timeout=25.0):
+        raise RuntimeError("the app did not ask for a code")
+
+    # The text has been sent, so somebody has to be told. This is the one
+    # step in the whole system that cannot be waited out or refused — the
+    # code exists only on her phone — and a portal that sits there silently
+    # asking is a portal nobody discovers is asking.
+    _say_the_code_is_waiting()
+
+
+# The portal opens on its app picker, and a notification that lands there has
+# failed at the one job it has: the phone is holding a code screen open and the
+# tap has to arrive AT IT. The view is asked for in the URL because the front
+# end otherwise restores it from sessionStorage, and a window a notification
+# opened is a fresh session with none — which is exactly how the first version
+# came out on the picker, reported from the field that way.
+CODE_DEEP_LINK = "/app?view=screen"
+
+# Where the notification sends her. The tailnet name rather than an address:
+# addresses change, and this string ends up on a lock screen where a wrong
+# one is a dead end nobody can debug from.
+#
+# FULLY QUALIFIED, which the first version was not. `tailscale serve` publishes
+# this portal at the node's whole MagicDNS name and holds a certificate for
+# exactly that name, so the bare host fails validation rather than resolving to
+# something friendlier — a tap that goes nowhere, on the one notification whose
+# entire job is to be tapped. Read off `tailscale serve status` on the live
+# machine rather than assumed a second time.
+def _portal_url() -> str:
+    from apt_log import push
+
+    return os.environ.get("APTLOG_PORTAL_URL",
+                          f"{push.PORTAL_ORIGIN}{CODE_DEEP_LINK}")
+
+
+PORTAL_URL = _portal_url()
+
+# The sentence itself. Deliberately says nothing about which patient, which
+# agency, or what the code is — it goes to a public relay and lands on a lock
+# screen, and neither of those is a place for any of that. It says what to do
+# and where, which is all a notification is for.
+PUSH_TITLE = "inMyTeam needs the code"
+CODE_WAITING = ("inMyTeam texted you a sign-in code. Open the portal and "
+                "type it in — the app is waiting on it.")
+
+
+def _say_the_code_is_waiting() -> None:
+    """Tell her the code is waiting, by both roads that exist.
+
+    Web Push first and above all: it comes from the portal, so tapping it
+    opens the portal — the app she installed, at the phone view the code
+    screen is showing on rather than at the app picker (CODE_DEEP_LINK; the
+    first version landed on the picker and was reported that way). A relay's
+    notification can only open Safari at a URL, which is the wrong app on the
+    one notice whose entire job is to be tapped.
+
+    The relay stays as the fallback, and it is not redundant. Push reaches
+    only phones that have subscribed, and only where iOS granted it; the
+    relay reaches whoever configured it, from a machine that does not care
+    whether this portal is healthy. Neither is enough on its own.
+    """
+    pushed = 0
+    try:
+        from apt_log import push
+
+        pushed = push.send(PUSH_TITLE, CODE_WAITING, url=CODE_DEEP_LINK,
+                           tag="otp")
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not push the code notice (%s)", exc)
+
+    from apt_log import notify
+
+    notify.send(CODE_WAITING, url=PORTAL_URL)
+    log.info("code notice: pushed to %d subscriber(s)", pushed)
+
+
+# The words every version of this screen uses. Matched loosely because the
+# app switches language with the phone and this is the one screen nobody has
+# a second chance at: getting it wrong strands the walk one step from done.
+_CODE_WORDS = ("code", "código", "codigo", "verification", "verificación",
+               "otp", "sms")
+
+
+def _asks_for_a_code(driver) -> bool:
+    """Whether the screen in front is asking for the texted code.
+
+    A field plus the words for one. The field alone is not enough — the
+    number screen has a field too, and the two look identical to anything
+    that only counts boxes.
+    """
+    try:
+        boxes = [e for e in driver.find_elements(
+            "xpath", '//*[@class="android.widget.EditText"]')
+            if e.is_displayed()]
+        if not boxes:
+            return False
+        words = (driver.page_source or "").lower()
+    except Exception:  # noqa: BLE001
+        return False
+    return any(w in words for w in _CODE_WORDS)
+
+
+# --------------------------------------------------------------- operations
+# The sign-in macros above are the ones that took the most work and the ones
+# nobody presses any more: they run themselves, when a session expires. What a
+# person actually reaches for is the short list below — the things you do when
+# something is stuck and you are two thousand kilometres from the phone.
+#
+# All of them are deliberately blunt. A stuck app does not need a clever
+# recovery; it needs the same three or four moves someone in the room would
+# make, available to someone who is not.
+
+def _front_package() -> str:
+    from apt_log import feed as feed_mod
+
+    return (feed_mod.current_focus() or "").split("/")[0]
+
+
+def _force_stop(package: str) -> None:
+    """Kill an app the way the ANR recovery does — through adb, never through
+    the driver, because a wedged app takes the driver down with it."""
+    from apt_log import feed as feed_mod
+
+    feed_mod._adb(["shell", "am", "force-stop", package])
+
+
+def _close_app(driver, report) -> None:
+    """Close the app in front, and leave the phone on the launcher.
+
+    For the state that no amount of tapping fixes: a screen the app will not
+    leave, a spinner that never resolves, a form that has forgotten what it
+    was doing. Restricted to the four care apps — force-stopping the system
+    UI is a bigger hammer than any screen is worth, and this button is
+    reachable from a phone in another state.
+    """
+    from apt_log import feed as feed_mod
+
+    report("macro.step.closing")
+    package = _front_package()
+    if package not in feed_mod.CARE_APPS:
+        raise RuntimeError("the phone is not showing one of the care apps")
+    _force_stop(package)
+    _forget_stitched(package)
+
+
+def _restart_app(driver, report) -> None:
+    """Close the app in front and open it again — the recipe the ANR watchdog
+    uses, on demand rather than on a diagnosis.
+
+    Relaunched through the launcher intent rather than the driver: after a
+    force-stop the driver's handle on the app is stale, and asking it to
+    activate the app it has just lost is how a recovery hangs.
+    """
+    from apt_log import feed as feed_mod
+
+    report("macro.step.closing")
+    package = _front_package()
+    if package not in feed_mod.CARE_APPS:
+        raise RuntimeError("the phone is not showing one of the care apps")
+    _force_stop(package)
+    _forget_stitched(package)
+    time.sleep(1.5)
+    report("macro.step.launching")
+    wake_display()
+    feed_mod._adb(["shell", "monkey", "-p", package,
+                   "-c", "android.intent.category.LAUNCHER", "1"])
+    if not wait_for(lambda: _front_package() == package, timeout=25.0):
+        raise RuntimeError("the app did not come back")
+
+
+def _rescan(driver, report) -> None:
+    """Throw away what the portal thinks this page looks like, and read it
+    again.
+
+    The front end serves a stitched whole-page document from a cache, so a
+    page that changed in a way the tap machinery did not notice can be
+    rendered from a copy that is no longer true. This is the button for "what
+    I am looking at is not what the phone is showing" — the one state where
+    the honest fix is to stop trusting the cache.
+    """
+    report("macro.step.clearing")
+    _forget_stitched(_front_package())
+    report("macro.step.reading")
+    _stitch_walk(driver)
+
+
+def _phone_settings(driver, report) -> None:
+    """Open Android's own Settings.
+
+    Nothing this portal does needs it; the person holding the portal
+    sometimes does — wifi, sound, the phone's own display size. The
+    containment watchdog is told to allow it (see feed.SETTINGS_APPS), or it
+    would bounce the phone back to a care app five seconds after it opened.
+    """
+    from apt_log import feed as feed_mod
+
+    report("macro.step.launching")
+    wake_display()
+    feed_mod._adb(["shell", "am", "start", "-a",
+                   "android.settings.SETTINGS"])
+    wait_for(lambda: "settings" in _front_package(), timeout=15.0)
+
+
+def _restart_phone(driver, report) -> None:
+    """Reboot the phone.
+
+    The last resort, and the reason it is on this page: the alternative is a
+    phone call to somebody in the room. It costs about a minute during which
+    nothing works — adb goes away, the resident Appium session dies with it,
+    and both come back on their own.
+
+    Refused while a visit app is mid-flow is NOT attempted: this code cannot
+    tell a half-finished check-in from a settled screen, and a button that
+    sometimes refuses for reasons nobody can see is worse than one that
+    always does what it says. It is spelled out on the page instead.
+    """
+    from apt_log import feed as feed_mod
+
+    report("macro.step.restarting")
+    feed_mod._adb(["reboot"])
+    # Do not wait for it here. The reboot takes the driver with it, and a
+    # macro that sits for a minute holding the session is a macro that looks
+    # wedged while the phone is doing exactly what it was told.
+
+
 MACROS: dict[str, Macro] = {
     m.name: m for m in (
         Macro("hhax_legacy_login", "macro.hhax_legacy_login", _hhax_legacy_login),
@@ -1202,11 +1667,31 @@ MACROS: dict[str, Macro] = {
               _open_app("com.hhaexchange.uma")),
         Macro("open_mobile_caregiver", "macro.open_mobile_caregiver",
               _open_app("com.tellus.evv.v2")),
+        Macro("inmyteam_login", "macro.inmyteam_login", _inmyteam_login),
         Macro("open_inmyteam", "macro.open_inmyteam",
               _open_app("com.inmyteam.inmyteam")),
         Macro("read_page", "macro.read_page", _read_page),
+        Macro("close_app", "macro.close_app", _close_app),
+        Macro("restart_app", "macro.restart_app", _restart_app),
+        Macro("rescan", "macro.rescan", _rescan),
+        Macro("phone_settings", "macro.phone_settings", _phone_settings),
+        Macro("restart_phone", "macro.restart_phone", _restart_phone),
     )
 }
+
+# What the control centre offers, in the order somebody reaches for them:
+# refresh what I am looking at, restart what is stuck, close it, the phone's
+# own settings, and — last, and last resort — the phone itself.
+#
+# The sign-in macros are deliberately not here. They are battle-tested and
+# they run themselves when a session expires; a button that duplicates what
+# already happens automatically is a button whose only use is pressing it at
+# the wrong moment.
+OPERATIONS = ("rescan", "read_page", "restart_app", "close_app",
+              "phone_settings", "restart_phone")
+
+# The one that cannot be undone by pressing it again. The page asks first.
+CONFIRM = ("restart_phone",)
 
 
 # Session-expiry dialogs, per app. A dialog whose wording is recognised as
@@ -1230,6 +1715,14 @@ EXPIRY_MARKERS = {
         "se ha cerrado la sesión", "se ha cerrado la sesion",
         "regresar al inicio de sesión", "regresar al inicio de sesion",
         "logged out due to", "return to login", "back to login",
+    ),
+    # Mobile Caregiver+ shows this one AFTER the passcode has already been
+    # accepted: the keypad unlocks the app on the phone, the dashboard opens,
+    # and only then does it admit the server session is gone. Walked live.
+    "com.tellus.evv.v2": (
+        "sesión caducada", "sesion caducada",
+        "sesión ha caducado", "sesion ha caducado",
+        "session has expired",
     ),
 }
 
@@ -1292,8 +1785,57 @@ def auth_macro_for(app: str, provider=None, doc: dict | None = None) -> str | No
             return "hhax_uma_login" if uma_credentialed() else None
         return None
     if app == "com.tellus.evv.v2":
-        return "mobile_caregiver_pin" if have(secrets_mod.MC_PIN) else None
+        # Either secret makes the macro worth offering: the app locks two
+        # different ways and the screen in front decides which one it is
+        # answering. Offering it with only a PIN stored is still right — the
+        # keypad is the lock seen most often — and it fails loudly rather
+        # than silently on the form.
+        return ("mobile_caregiver_pin"
+                if have(secrets_mod.MC_PIN) or have(secrets_mod.MC_PASSWORD)
+                else None)
+    if app == "com.inmyteam.inmyteam":
+        # It signs itself in like the other three now. It was held back
+        # because pressing it SENDS A TEXT MESSAGE, and automatic meant a
+        # phone idling on that splash texting somebody every ninety seconds.
+        # Two things changed that: the walk is a no-op once the app is
+        # already asking for a code, so the common repeat costs nothing; and
+        # anything that sends a message gets its own long cooldown (see
+        # SMS_AUTH_COOLDOWN) rather than the ordinary one.
+        return "inmyteam_login" if have(secrets_mod.INMYTEAM_PHONE) else None
     return None
+
+
+# The words inMyTeam's own sign-in screens use. This app needs them because
+# it has ONE activity: splash, phone number, code and the signed-in app all
+# live under `mainactivity`, so the atlas cannot tell them apart and the
+# capture refusals never fire — there is no password field anywhere in the
+# walk. Its own words are the only signal it gives.
+_IMT_LOGIN_WORDS = (
+    "get started",            # the marketing splash
+    "sign in with your phone",
+    "enter your cell phone",
+    "iniciar sesión con su",  # the same screens with the phone in Spanish
+    "número de teléfono",
+)
+
+
+def wants_to_sign_in(doc: dict | None) -> bool:
+    """Whether inMyTeam is showing one of its own sign-in screens.
+
+    The code screen is deliberately NOT here. Reaching it is the walk's
+    destination, and treating it as "please sign in" would put the loop back
+    at a screen it had already arrived at.
+    """
+    if not doc or doc.get("app") != "com.inmyteam.inmyteam":
+        return False
+    words = " ".join(
+        (n.get("txt") or "")
+        for n in (doc.get("statics") or []) + (doc.get("elements") or [])
+    ).lower()
+    if any(w in words for w in ("enter your code", "verify your account",
+                                "introduce el código")):
+        return False
+    return any(w in words for w in _IMT_LOGIN_WORDS)
 
 
 # -------------------------------------------------------------------- request
@@ -1394,6 +1936,8 @@ class Runner:
         # freshly recycled container failed three tests a long-lived one had
         # been passing all day.
         self._auto_auth_at: float | None = None
+        # Per macro, so one app's cooldown never gates another's.
+        self._auto_auth_seen: dict[str, float] = {}
         # The frame a stitch walk failed on: not retried until the screen
         # changes, or a stubborn page would be walked forever.
         self._stitch_failed_for: str = ""
@@ -1694,7 +2238,8 @@ class Runner:
 
         if (doc.get("screen") != "login"
                 and doc.get("blocked") not in CREDENTIAL_REFUSALS
-                and not expiry_on_screen(doc)):
+                and not expiry_on_screen(doc)
+                and not wants_to_sign_in(doc)):
             return False
         try:
             age = (datetime.now()
@@ -1703,11 +2248,25 @@ class Runner:
             return False
         if age > AUTO_AUTH_FRESH:
             return False
-        if (self._auto_auth_at is not None
-                and time.monotonic() - self._auto_auth_at < AUTO_AUTH_COOLDOWN):
+        # Two cooldowns, because two costs. The ordinary one keeps a
+        # bad-credential day from becoming a loop. The long one is for a
+        # macro whose every attempt SENDS A TEXT MESSAGE to a person: a
+        # ninety-second retry there is a stream of codes she never asked for
+        # and a walk into the app's rate limit. Kept per macro so a slow one
+        # never gates a fast one.
+        cooldown = (SMS_AUTH_COOLDOWN if macro_name in SENDS_A_MESSAGE
+                    else AUTO_AUTH_COOLDOWN)
+        # Per macro and ONLY per macro. Falling back to the shared timestamp
+        # was the first version and it defeated the whole point: Mobile
+        # Caregiver+ signing itself in put inMyTeam's fifteen minutes on the
+        # clock, so inMyTeam sat on its splash with somebody watching and
+        # nothing happened. Seen exactly that way on the live phone.
+        last = self._auto_auth_seen.get(macro_name)
+        if last is not None and time.monotonic() - last < cooldown:
             return False
 
         self._auto_auth_at = time.monotonic()
+        self._auto_auth_seen[macro_name] = self._auto_auth_at
         log.info("login screen is up — signing in without being asked")
         self.execute(macro_name, f"auto-{uuid.uuid4().hex[:8]}")
         return True

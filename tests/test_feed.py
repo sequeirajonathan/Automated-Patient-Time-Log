@@ -42,13 +42,13 @@ class TestLoginDetection:
 class TestCaptureRefusals:
     def test_refuses_when_the_focus_cannot_be_read(self):
         """Knowing nothing is not permission."""
-        with patch.object(feed, "window_state", return_value=("", True)):
+        with patch.object(feed, "window_state", return_value=("", True, "")):
             png, _, reason = feed.capture()
         assert png is None
         assert reason == feed.NO_FOCUS
 
     def test_refuses_on_a_login_screen(self):
-        with patch.object(feed, "window_state", return_value=(SIGNIN, True)):
+        with patch.object(feed, "window_state", return_value=(SIGNIN, True, "")):
             png, _, reason = feed.capture()
         assert png is None
         assert reason == feed.LOGIN_ACTIVITY
@@ -56,7 +56,7 @@ class TestCaptureRefusals:
     def test_refuses_when_a_password_field_is_anywhere_on_screen(self):
         """Anywhere, not merely focused. This runs on a timer with no idea what
         is about to happen, and the picture ends up on a web page."""
-        with patch.object(feed, "window_state", return_value=(HOME, True)):
+        with patch.object(feed, "window_state", return_value=(HOME, True, "")):
             png, _, reason = feed.capture(
                 hierarchy='<node password="true" bounds="[0,0][1,1]"/>')
         assert png is None
@@ -65,7 +65,7 @@ class TestCaptureRefusals:
     def test_captures_when_the_hierarchy_is_unreadable_but_activity_is_safe(self):
         """The documented weak point: UiAutomator2 holds the dump service during
         an Appium session, which is exactly when watching matters most."""
-        with patch.object(feed, "window_state", return_value=(HOME, True)), \
+        with patch.object(feed, "window_state", return_value=(HOME, True, "")), \
              patch.object(feed, "_adb") as adb:
             adb.return_value.returncode = 0
             adb.return_value.stdout = PNG
@@ -73,7 +73,7 @@ class TestCaptureRefusals:
         assert png == PNG and reason == feed.CAPTURED
 
     def test_a_refused_capture_is_reported_not_silent(self):
-        with patch.object(feed, "window_state", return_value=(HOME, True)), \
+        with patch.object(feed, "window_state", return_value=(HOME, True, "")), \
              patch.object(feed, "_adb") as adb:
             adb.return_value.returncode = 0
             adb.return_value.stdout = b""
@@ -210,7 +210,7 @@ class TestRun:
         h = feed._Hierarchy(None, every=0.01)
         with patch.object(feed, "read_hierarchy",
                           side_effect=[good] + [None] * 50), \
-             patch.object(feed, "window_state", return_value=("com.x/.Home", True)):
+             patch.object(feed, "window_state", return_value=("com.x/.Home", True, "")):
             h.start()
             deadline = time.monotonic() + 5
             while h.xml is None and time.monotonic() < deadline:
@@ -378,7 +378,7 @@ class TestBlindScreens:
 
     def test_the_frame_carries_the_reason_and_the_words(self, tmp_path):
         shot = tmp_path / "screen.png"
-        with patch.object(feed, "window_state", return_value=(SIGNIN, True)), \
+        with patch.object(feed, "window_state", return_value=(SIGNIN, True, "")), \
              patch.object(feed, "screen_size", return_value=[720, 1600]), \
              patch.object(feed.mirror_mod, "publish"):
             feed.write_frame(shot, hierarchy=self.ALERT)
@@ -945,12 +945,12 @@ class TestSleepIsNotLive:
         out = f"  mCurrentFocus=Window{{abc u0 {HOME}}}\n  mAwake=false\n"
         with patch.object(feed, "_adb") as adb:
             adb.return_value.stdout = out.encode()
-            focus, awake = feed.window_state()
+            focus, awake, _ = feed.window_state()
         assert focus == HOME and awake is False
 
     def test_capture_refuses_while_the_display_is_off(self):
         """The focused app of a black screen is not what anyone is seeing."""
-        with patch.object(feed, "window_state", return_value=(HOME, False)):
+        with patch.object(feed, "window_state", return_value=(HOME, False, "")):
             png, focus, reason = feed.capture()
         assert png is None and reason == feed.NO_FOCUS
 
@@ -960,6 +960,85 @@ class TestSleepIsNotLive:
         w = feed._Hierarchy(None, 1.0)
         good = '<node clickable="true" bounds="[0,0][10,10]"/>'
         assert w._accept(good, HOME, awake=False) is False
+
+
+class TestAPopupIsStillTheAppUnderneath:
+    """Reported from the field: tapping inMyTeam's agency filter left the app
+    "stuck on syncing".
+
+    A dropdown is its own window and Android TITLES that window rather than
+    naming a package, so the focus read came back with the literal string
+    "Window". Every check downstream then took the phone to be somewhere that
+    is not a care app, and the containment watchdog did exactly what it is for
+    — it brought inMyTeam back. Every twenty seconds, for as long as the
+    dropdown stayed open, each return resyncing the app. The feed's own log
+    said so plainly once anyone looked:
+
+        foreground is Window — returning to com.inmyteam.inmyteam
+
+    The answer was in the same dumpsys read the whole time: mFocusedApp names
+    the activity that owns the popup. Same distinction the permission-dialog
+    fix turns on — a surface the app in front raised is not the phone
+    wandering off.
+    """
+
+    # Copied from the live phone with the agency filter open.
+    POPUP = (
+        "  mCurrentFocus=Window{3d46066 u0 Pop-Up Window}\n"
+        "  mFocusedApp=ActivityRecord{a816218 u0 "
+        "com.inmyteam.inmyteam/.view.activities.MainActivity} t958}\n"
+        "  mAwake=true\n"
+    )
+
+    def _read(self, out):
+        with patch.object(feed, "_adb") as adb:
+            adb.return_value.stdout = out.encode()
+            return feed.window_state()
+
+    def test_the_popups_owner_is_reported_instead_of_the_window(self):
+        focus, awake, anr = self._read(self.POPUP)
+        assert focus.split("/")[0] == "com.inmyteam.inmyteam"
+        assert awake is True and not anr
+
+    def test_the_watchdog_leaves_a_dropdown_alone(self):
+        """The whole point. With the owner reported, the package is a care app
+        and the containment check returns before it can bounce anything."""
+        focus, _, _ = self._read(self.POPUP)
+        assert focus.split("/")[0] in feed.CARE_APPS
+
+    def test_a_real_focus_is_never_second_guessed(self):
+        out = (f"  mCurrentFocus=Window{{abc u0 {HOME}}}\n"
+               "  mFocusedApp=ActivityRecord{x u0 com.other/.Thing}\n"
+               "  mAwake=true\n")
+        focus, _, _ = self._read(out)
+        assert focus == HOME
+
+    def test_the_not_responding_dialog_still_wins(self):
+        """Its window title ENDS IN the wedged package, so it is a bare token
+        too — but it means the opposite of "the app is fine underneath", and
+        reading it as the owner would wave a wedged app straight through."""
+        out = ("  mCurrentFocus=Window{a u0 Application Not Responding: "
+               "com.hhaexchange.mobile}\n"
+               "  mFocusedApp=ActivityRecord{x u0 "
+               "com.hhaexchange.mobile/.Home}\n  mAwake=true\n")
+        _, _, anr = self._read(out)
+        assert anr == "com.hhaexchange.mobile"
+
+    def test_an_unreadable_owner_leaves_the_window_as_it_was(self):
+        out = ("  mCurrentFocus=Window{3d46066 u0 Pop-Up Window}\n"
+               "  mFocusedApp=null\n  mAwake=true\n")
+        focus, _, _ = self._read(out)
+        assert focus == "Window"
+
+    @pytest.mark.parametrize("token, is_title", [
+        ("Window", True),
+        ("Pop-Up", True),
+        ("com.inmyteam.inmyteam/.view.activities.MainActivity", False),
+        ("com.hhaexchange.mobile", False),      # the ANR shape: has a dot
+        ("", False),
+    ])
+    def test_what_counts_as_a_window_title(self, token, is_title):
+        assert feed._is_a_window_title(token) is is_title
 
 
 class TestSketchOwnership:
@@ -1394,18 +1473,29 @@ class TestContainment:
         return [c for c in calls if c[:2] == ["shell", "monkey"]]
 
     CARE = "com.hhaexchange.uma/com.hhaexchange.carehub.ui.HomeActivity"
+    # A stray app is one nothing here can have asked for. Android's Settings
+    # used to play this part and no longer can: the control centre has a
+    # button that opens it deliberately (see TestSettingsIsSomewhereItWasSent).
+    STRAY = "com.android.vending/.AssetBrowserActivity"
     SETTINGS = "com.android.settings/.Settings"
 
-    def test_a_stray_settings_screen_is_brought_back(self):
-        out = self._run([self.CARE, self.SETTINGS, self.SETTINGS,
-                         self.SETTINGS])
+    def test_a_stray_screen_is_brought_back(self):
+        out = self._run([self.CARE, self.STRAY, self.STRAY, self.STRAY])
         assert len(out) == 1
         assert out[0][2:4] == ["monkey", "-p"] or "-p" in out[0]
         assert "com.hhaexchange.uma" in out[0]
 
     def test_a_momentary_crossing_is_left_alone(self):
         """One sighting inside the dwell is a transition, not a departure."""
-        out = self._run([self.CARE, self.SETTINGS, self.CARE], dt=2.0)
+        out = self._run([self.CARE, self.STRAY, self.CARE], dt=2.0)
+        assert out == []
+
+    def test_settings_is_somewhere_it_was_sent_not_somewhere_it_wandered(self):
+        """The control centre offers a Phone settings button. Without this the
+        watchdog undid it five seconds later, which is a button that appears
+        to work and does not."""
+        out = self._run([self.CARE, self.SETTINGS, self.SETTINGS,
+                         self.SETTINGS])
         assert out == []
 
     def test_chromes_custom_tab_is_part_of_the_flow(self):
@@ -1545,3 +1635,388 @@ class TestSignatureDensity:
                 'text="Sadia Amselem" bounds="[20,95][36,160]" />')
         assert feed._looks_landscape(page) is False
         assert sign.presentation_rotated(page) is True
+
+
+class TestAnonymousAim:
+    """Bounds and class are not identity for a nameless element. The legacy
+    home's menu rows are anonymous twins, and while the app finished
+    loading its layout shifted one slot — "Horario para hoy" was tapped
+    and the unscheduled-visit screen opened instead (seen live, first
+    field test). For an aim with no resource-id, the claimed frame is
+    enforced: if the tappable structure moved, the tap refuses and she
+    aims at the fresh frame. Named aims keep the relaxed rule — and the
+    frame id hashes only tappable structure, so a ticking clock still
+    invalidates nothing."""
+
+    ROW = {"rid": "", "cls": "LinearLayout", "b": [0, 158, 720, 194],
+           "step": 0}
+    NAMED = {"rid": "btn_go", "cls": "Button", "b": [0, 300, 720, 340],
+             "step": 0}
+
+    def _frame(self, tmp_path, els, fid=None):
+        import datetime as dt
+        path = tmp_path / "frame.json"
+        path.write_text(json.dumps({
+            "at": dt.datetime.now().isoformat(),
+            "id": fid if fid is not None else feed.frame_id(els),
+            "elements": els,
+        }), encoding="utf-8")
+        return path
+
+    def test_an_anonymous_aim_from_a_moved_frame_refuses(self, tmp_path):
+        """The screen she aimed from had an extra loading row; by tap time
+        a DIFFERENT anonymous row occupies the same rectangle."""
+        old = [{"rid": "", "cls": "LinearLayout", "b": [0, 122, 720, 158],
+                "step": 0}, dict(self.ROW), dict(self.NAMED)]
+        now = [dict(self.ROW), dict(self.NAMED)]
+        path = self._frame(tmp_path, now)
+        with patch.object(feed, "_adb") as adb:
+            with pytest.raises(feed.StaleAim):
+                feed.tap(feed.frame_id(old), dict(self.ROW), frame_path=path)
+            adb.assert_not_called()
+
+    def test_an_anonymous_aim_from_the_current_frame_taps(self, tmp_path):
+        els = [dict(self.ROW), dict(self.NAMED)]
+        path = self._frame(tmp_path, els)
+        with patch.object(feed, "_adb") as adb:
+            adb.return_value.returncode = 0
+            out = feed.tap(feed.frame_id(els), dict(self.ROW),
+                           frame_path=path)
+        assert out["tapped"]["cls"] == "LinearLayout"
+
+    def test_a_named_aim_keeps_the_relaxed_rule(self, tmp_path):
+        """A resource-id IS identity; whole-frame equality refusing named
+        taps is the measurement that relaxed this in the first place."""
+        els = [dict(self.ROW), dict(self.NAMED)]
+        path = self._frame(tmp_path, els)
+        with patch.object(feed, "_adb") as adb:
+            adb.return_value.returncode = 0
+            out = feed.tap("somewhere-else-entirely", dict(self.NAMED),
+                           frame_path=path)
+        assert out["tapped"]["rid"] == "btn_go"
+
+
+ANR_DUMP = ("  mCurrentFocus=Window{64be9f9 u0 Application Not Responding: "
+            "com.hhaexchange.caregiver}\n  mAwake=true\n")
+LIVE_DUMP = ("  mCurrentFocus=Window{d617003 u0 com.hhaexchange.caregiver/"
+             "com.hhaexchange.caregiver.HomeActivity}\n  mAwake=true\n")
+
+
+class TestNotResponding:
+    """Android's "<app> isn't responding" dialog, seen live on the legacy app.
+
+    It is invisible three ways at once: the dialog is a system window the
+    accessibility tree does not publish, the ANR takes the Appium session
+    down with it, and the dialog's window title ends in the package name —
+    so the focus reads as that app running normally. Meanwhile the wedged
+    app's own last dialog goes on being published as live buttons. The
+    dumpsys read the focus already costs is what tells the truth.
+    """
+
+    def setup_method(self):
+        feed._anr_since.clear()
+        feed._anr_last_fix.clear()
+
+    teardown_method = setup_method
+
+    def _state(self, dump):
+        with patch.object(feed, "_adb") as adb:
+            adb.return_value.stdout = dump.encode()
+            return feed.window_state()
+
+    def test_the_wedged_package_is_read_from_the_dialog(self):
+        focus, awake, anr = self._state(ANR_DUMP)
+        assert anr == "com.hhaexchange.caregiver"
+        assert awake is True
+
+    def test_a_healthy_screen_names_no_wedge(self):
+        focus, _awake, anr = self._state(LIVE_DUMP)
+        assert anr == ""
+        assert focus.endswith("HomeActivity")
+
+    def test_capture_refuses_and_names_the_fault(self):
+        with patch.object(feed, "window_state",
+                          return_value=("com.hhaexchange.caregiver", True,
+                                        "com.hhaexchange.caregiver")), \
+             patch.object(feed, "_watch_anr") as watch, \
+             patch.object(feed, "_adb") as adb:
+            png, _focus, reason = feed.capture()
+        assert reason == feed.APP_NOT_RESPONDING
+        assert png is None
+        watch.assert_called_once()
+        adb.assert_not_called()          # no screencap of a dead screen
+
+    def test_the_grace_period_is_waited_out_before_anything_is_killed(self):
+        with patch.object(feed, "_adb") as adb:
+            feed._watch_anr("com.hhaexchange.caregiver")
+            adb.assert_not_called()      # first sighting only starts the clock
+
+    def test_after_the_grace_the_app_is_restarted(self):
+        pkg = "com.hhaexchange.caregiver"
+        feed._anr_since[pkg] = time.time() - feed.ANR_GRACE - 1
+        with patch.object(feed, "_adb") as adb:
+            feed._watch_anr(pkg)
+        sent = [call.args[0] for call in adb.call_args_list]
+        assert ["shell", "am", "force-stop", pkg] in sent
+        assert any(c[:3] == ["shell", "monkey", "-p"] and c[3] == pkg
+                   for c in sent), "the app must come back up"
+
+    def test_a_second_wedge_is_not_thrashed(self):
+        pkg = "com.hhaexchange.caregiver"
+        feed._anr_since[pkg] = time.time() - feed.ANR_GRACE - 1
+        feed._anr_last_fix[pkg] = time.time()
+        with patch.object(feed, "_adb") as adb:
+            feed._watch_anr(pkg)
+            adb.assert_not_called()
+
+    def test_the_system_ui_is_never_force_stopped(self):
+        pkg = "com.android.systemui"
+        feed._anr_since[pkg] = time.time() - feed.ANR_GRACE - 1
+        with patch.object(feed, "_adb") as adb:
+            feed._watch_anr(pkg)
+            adb.assert_not_called()
+
+    def test_a_stranger_is_cleared_but_not_relaunched(self):
+        """Only the apps this portal drives are put back up; where the phone
+        belongs is the containment watchdog's decision, not this one's."""
+        pkg = "com.android.settings"
+        feed._anr_since[pkg] = time.time() - feed.ANR_GRACE - 1
+        with patch.object(feed, "_adb") as adb:
+            feed._watch_anr(pkg)
+        sent = [call.args[0] for call in adb.call_args_list]
+        assert ["shell", "am", "force-stop", pkg] in sent
+        assert not any("monkey" in c for c in sent)
+
+    def test_a_wedged_screen_publishes_nothing_to_aim_at(self, tmp_path):
+        """The legacy app wedged on its own inactivity dialog, and that
+        dialog's button went on being published as pressable."""
+        xml = ('<node class="android.widget.Button" resource-id="a:id/'
+               'btn_negative" text="DE ACUERDO" bounds="[6,843][713,864]"/>')
+        frame = {"id": "x", "img": "", "at": "now", "size": [720, 1600]}
+        feed.write_screen(tmp_path / "screen.json", frame, "unknown",
+                          feed.APP_NOT_RESPONDING, xml,
+                          focus="com.hhaexchange.caregiver")
+        doc = json.loads((tmp_path / "screen.json").read_text())
+        assert doc["elements"] == []
+        assert doc["blocked"] == feed.APP_NOT_RESPONDING
+
+    def test_recovery_forgets_the_wedge(self):
+        """So a later ANR waits out its own grace instead of inheriting an
+        expired one and being killed on sight."""
+        feed._anr_since["com.hhaexchange.caregiver"] = time.time() - 999
+        with patch.object(feed, "window_state",
+                          return_value=("com.x/.Home", True, "")), \
+             patch.object(feed, "_watch_shade"), \
+             patch.object(feed, "_watch_containment"), \
+             patch.object(feed, "_watch_density"), \
+             patch.object(feed, "_adb") as adb:
+            adb.return_value.returncode = 0
+            adb.return_value.stdout = b"\x89PNG"
+            feed.capture()
+        assert feed._anr_since == {}
+
+
+class TestContentDescriptionIsALabel:
+    """A view that draws its own content has no text for the tree to carry,
+    and Android's answer is content-desc. Mobile Caregiver+ builds its whole
+    visits list that way — every row a bare View whose only words are the
+    sentence a screen reader would say — so a portal reading text alone
+    showed three identical empty strips where the phone showed three named
+    visits."""
+
+    ROW = ('<node class="android.view.View" resource-id="" clickable="true" '
+           'text="" content-desc="La visita está programada para ATANASIO '
+           'MEDEROS TORRIEN" bounds="[0,146][720,185]"/>')
+
+    def test_a_description_becomes_the_label(self):
+        (el,) = feed.elements(self.ROW, label=True)
+        assert "ATANASIO" in el["txt"]
+        assert el["has_text"] is True
+
+    def test_a_description_is_words_on_the_screen_too(self):
+        quiet = self.ROW.replace('clickable="true"', 'clickable="false"')
+        (st,) = feed.statics(quiet)
+        assert "ATANASIO" in st["txt"]
+
+    def test_text_wins_when_a_node_carries_both(self):
+        """visits_event0_title says 'mar, ago 18' twice; a row that repeats
+        itself must not be read twice."""
+        both = ('<node class="android.widget.TextView" clickable="false" '
+                'text="mar, ago 18" content-desc="mar, ago 18" '
+                'bounds="[6,130][49,140]"/>')
+        (st,) = feed.statics(both)
+        assert st["txt"] == "mar, ago 18"
+
+    def test_a_description_still_obeys_the_disclosure_rule(self):
+        """It is text by every rule that matters: unspoken unless labelled."""
+        (el,) = feed.elements(self.ROW)          # label=False
+        assert "txt" not in el
+        assert el["has_text"] is True
+
+    def test_an_editable_field_never_lends_its_description(self):
+        typed = ('<node class="android.widget.EditText" clickable="true" '
+                 'text="" content-desc="hunter2" bounds="[0,0][100,50]"/>')
+        (el,) = feed.elements(typed, label=True)
+        assert el.get("txt") is None or el["txt"] == ""
+        assert feed.statics(typed) == []
+
+
+class TestAPicturesDescriptionIsNotAStatement:
+    """Alt text is written for somebody who cannot see the image.
+
+    Read as words on the screen it produced the app's own logo announcing
+    itself in the page title — "Logotipo de H H AeXchange +", the brand
+    spelled out letter by letter for a screen reader — in the one slot
+    somebody reads without looking for it.
+    """
+
+    LOGO = ('<node class="android.widget.ImageView" resource-id="com.x:id/logo" '
+            'clickable="false" text="" content-desc="Logotipo de H H '
+            'AeXchange +" bounds="[40,60][300,120]"/>')
+
+    def test_a_logos_alt_text_is_not_words_on_the_screen(self):
+        assert [s["txt"] for s in feed.statics(self.LOGO)] == [""]
+
+    def test_the_image_still_rides_along_by_its_name(self):
+        """The EVV check marks are recognised by resource-id, and dropping
+        the description must not drop the image with it."""
+        (st,) = feed.statics(self.LOGO)
+        assert st["rid"] == "logo"
+
+    def test_an_anonymous_decoration_still_stays_out(self):
+        bare = self.LOGO.replace('resource-id="com.x:id/logo"', 'resource-id=""')
+        assert feed.statics(bare) == []
+
+    def test_a_tappable_image_keeps_its_description(self):
+        """On something clickable the same attribute names the control —
+        Back, Search, the tab you are on — and that is a real label."""
+        button = ('<node class="android.widget.ImageButton" clickable="true" '
+                  'text="" content-desc="Atrás" bounds="[0,0][60,60]"/>')
+        (el,) = feed.elements(button, label=True)
+        assert el["txt"] == "Atrás"
+
+    def test_an_image_that_really_does_carry_text_keeps_it(self):
+        """`text=` on an ImageView is not alt text; it is text."""
+        odd = self.LOGO.replace('text=""', 'text="Agosto 18"')
+        (st,) = feed.statics(odd)
+        assert st["txt"] == "Agosto 18"
+
+
+class TestTheBarSurvivesTruncation:
+    """A pinned tab bar is the LAST thing in the tree, and truncation used
+    to cut the tail: the 370-message inbox spent its whole budget on
+    messages and published no captions at all, so the portal lost the app's
+    navigation. She could read the inbox and had no way back to the visits
+    list except the phone's own Back button."""
+
+    def _screen(self, messages: int) -> str:
+        rows = "".join(
+            f'<node class="android.widget.TextView" clickable="false" '
+            f'text="Planned Downtime {i}" '
+            f'bounds="[0,{100 + i * 10}][720,{108 + i * 10}]"/>'
+            for i in range(messages))
+        bar = "".join(
+            f'<node class="android.widget.TextView" clickable="false" '
+            f'text="{cap}" bounds="[{x},1556][{x + 40},1565]"/>'
+            for cap, x in (("Visitas", 259), ("Beneficiarios", 337),
+                           ("Mensajes", 436)))
+        return rows + bar
+
+    def test_the_captions_outlive_a_flood_of_content(self):
+        found = feed.statics(self._screen(300))
+        assert len(found) <= feed.MAX_STATICS
+        assert [s["txt"] for s in found[-3:]] == ["Visitas", "Beneficiarios",
+                                                  "Mensajes"]
+
+    def test_the_content_is_what_gets_cut(self):
+        """The head is kept, so the top of the page still reads normally."""
+        found = feed.statics(self._screen(300))
+        assert found[0]["txt"] == "Planned Downtime 0"
+
+    def test_a_real_bar_survives_whole(self):
+        """A tab is not one node. This app spends three on each — the cell's
+        description, the icon, the caption — and hangs an unread count
+        beside one, so its three-tab bar runs to ten. Reserving less than
+        the bar is worth loses the caption that ends up first in line."""
+        rows = "".join(
+            f'<node class="android.widget.TextView" clickable="false" '
+            f'text="msg {i}" bounds="[0,{100 + i}][720,{108 + i}]"/>'
+            for i in range(300))
+        bar = ""
+        for cap, x in (("Visitas", 226), ("Beneficiarios", 315),
+                       ("Mensajes", 404)):
+            bar += (f'<node class="android.widget.FrameLayout" '
+                    f'clickable="false" text="" content-desc="{cap}" '
+                    f'bounds="[{x},1539][{x + 89},1568]"/>'
+                    f'<node class="android.widget.ImageView" '
+                    f'resource-id="app:id/icon_{cap}" clickable="false" '
+                    f'text="" bounds="[{x + 30},1542][{x + 43},1555]"/>'
+                    f'<node class="android.widget.TextView" '
+                    f'clickable="false" text="{cap}" '
+                    f'bounds="[{x + 20},1556][{x + 60},1565]"/>')
+        bar += ('<node class="android.widget.TextView" clickable="false" '
+                'text="370" bounds="[447,1539][463,1548]"/>')
+        published = [s["txt"] for s in feed.statics(rows + bar)]
+        for cap in ("Visitas", "Beneficiarios", "Mensajes"):
+            assert published.count(cap) >= 1, f"{cap} was truncated away"
+
+    def test_a_short_screen_is_untouched(self):
+        found = feed.statics(self._screen(5))
+        assert len(found) == 8
+        assert found[0]["txt"] == "Planned Downtime 0"
+
+
+class TestPermissionDialogIsNotWandering:
+    """HHAeXchange+ asks for location at check-in and Android answers with
+    its own dialog, from its own package. Read as wandering, the watchdog
+    bounced it after five seconds — taking the permission prompt with it
+    and stopping the very check-in it was raised for. Recovered from the
+    flight recorder: grantpermissionsactivity, mid-flow, between the
+    schedule and the GPS screen."""
+
+    def setup_method(self):
+        feed._last_care_app[0] = "com.hhaexchange.uma"
+        feed._out_since[0] = 0.0
+        feed._last_return[0] = 0.0
+
+    teardown_method = setup_method
+
+    def _run(self, focus, dwell=True):
+        with patch.object(feed, "_adb") as adb:
+            feed._watch_containment(focus)
+            if dwell:
+                feed._out_since[0] = time.time() - feed.CONTAIN_DWELL - 1
+                feed._watch_containment(focus)
+            return [c.args[0] for c in adb.call_args_list]
+
+    def test_the_location_prompt_is_left_standing(self):
+        sent = self._run("com.google.android.permissioncontroller/"
+                         "com.android.permissioncontroller.permission.ui."
+                         "GrantPermissionsActivity")
+        assert sent == [], "the prompt the app raised must not be bounced"
+
+    def test_a_stranger_is_still_bounced(self):
+        sent = self._run("com.android.vending/.AssetBrowserActivity")
+        assert any("monkey" in c for c in sent)
+
+
+class TestDisabledControls:
+    """HHAeXchange+ ships the visit screen with a clock-out button that
+    exists from the moment of check-in and does nothing until the visit is
+    over — `visit_details_clock_out_button_disabled`, straight from the
+    recorder. Published as an ordinary control it read as a live call to
+    action: press, nothing happens, and the portal wears the fault."""
+
+    def test_a_greyed_control_is_published_as_greyed(self):
+        xml = ('<node class="android.view.View" clickable="true" '
+               'enabled="false" text="" '
+               'resource-id="a:id/visit_details_clock_out_button_disabled" '
+               'bounds="[11,1532][709,1557]"/>')
+        (el,) = feed.elements(xml)
+        assert el["enabled"] is False
+
+    def test_absent_means_enabled(self):
+        xml = ('<node class="android.widget.Button" clickable="true" '
+               'text="Continuar" bounds="[11,1532][709,1557]"/>')
+        (el,) = feed.elements(xml)
+        assert el["enabled"] is True

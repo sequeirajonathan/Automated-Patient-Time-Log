@@ -116,7 +116,10 @@
     for (const el of root.querySelectorAll('[data-aim]')) {
       el.addEventListener('click', (ev) => {
         ev.preventDefault();
-        if (!socket || socket.readyState !== 1) return;
+        if (!socket || socket.readyState !== 1) {
+          toast(i18n.explainOffline || '');
+          return;
+        }
         let aim;
         try { aim = JSON.parse(el.dataset.aim); } catch (e) { return; }
         // The type bar exists for ONE moment: a screen asking for a
@@ -158,14 +161,29 @@
     const hint = bar.querySelector('.typehint');
     if (hint) hint.textContent = label || i18n.typeHint || '';
     bar.hidden = false;
+    // The phone's own controls step back while she types: Cancel is the way
+    // out of this bar, and it used to sit right on top of Home.
+    body.classList.add('typing');
     const box = document.getElementById('typebox');
     box.value = '';
-    setTimeout(() => box.focus(), 50);
+    // FOCUS SYNCHRONOUSLY, INSIDE THE TAP THAT OPENED THIS. iOS raises the
+    // keyboard only for a focus() that happens while a user gesture is still
+    // on the stack; from a setTimeout — where this used to be — the field
+    // takes focus and draws its ring and NO KEYBOARD APPEARS. Reported from
+    // the field as the bar rendering "grayed out": it looked active, it was
+    // active, and there was no way to put a character in it. Reading the
+    // layout first so the element is displayed before it is focused.
+    void bar.offsetHeight;
+    box.focus();
+    // Belt and braces for anything that refuses a focus mid-gesture; harmless
+    // where the line above already worked.
+    setTimeout(() => { if (document.activeElement !== box) box.focus(); }, 50);
   }
   function closeTypeBar() {
     typeAim = null;
     const bar = document.getElementById('typebar');
     if (bar) { bar.hidden = true; }
+    body.classList.remove('typing');
   }
   function sendTyped() {
     const box = document.getElementById('typebox');
@@ -240,6 +258,12 @@
         bindWire();
         const wire = root.querySelector('.wire');
         frameId = wire ? (wire.dataset.frame || '') : '';
+        // Whether the peek's scroll arrows have anything to do. The phone is
+        // the only thing that knows, and most screens fit whole at the tuned
+        // density — so on those the arrows would be furniture sitting over
+        // the phone's own controls.
+        body.classList.toggle('scrolls',
+                              !!wire && wire.dataset.scrolls === '1');
         // Entrance only when the screen actually changed — a checkbox flip
         // re-renders the list and must not re-run the animation under her.
         root.classList.remove('enter');
@@ -679,10 +703,24 @@
 
   // -------------------------------------------------------------------- wire
   document.addEventListener('DOMContentLoaded', () => {
-    // Back where she was, if a reload interrupted her mid-screen.
+    // Where to open. `?view=screen` wins, because that is a caller ASKING for
+    // the phone view rather than a browser remembering one — it is how the
+    // code notification deep-links, and a notification that lands on the app
+    // picker has failed at the one job it has. sessionStorage is the fallback
+    // for a reload that interrupted her mid-screen; a window opened from a
+    // notification is a fresh session and has none, which is exactly why the
+    // notice used to arrive at the front page.
+    let asked = '';
     try {
-      if (sessionStorage.getItem('aptlog-view') === 'screen') view('screen');
-    } catch (e) { /* private mode */ }
+      asked = new URLSearchParams(location.search).get('view') || '';
+    } catch (e) { /* no URL API */ }
+    try {
+      if (asked === 'screen' || sessionStorage.getItem('aptlog-view') === 'screen') {
+        view('screen');
+      }
+    } catch (e) {
+      if (asked === 'screen') view('screen');
+    }
 
     const tsend = document.getElementById('typesend');
     const tcancel = document.getElementById('typecancel');
@@ -806,7 +844,15 @@
 
     for (const btn of document.querySelectorAll('[data-act]')) {
       btn.addEventListener('click', () => {
-        if (!socket || socket.readyState !== 1) return;
+        // Back is the way out of a page she did not mean to be on, so a
+        // Back that quietly does nothing is the worst of the offline
+        // failures: she presses, the screen does not move, and the portal
+        // looks broken rather than disconnected. Home needs no socket and
+        // still works — the picker is pure navigation.
+        if (!socket || socket.readyState !== 1) {
+          toast(i18n.explainOffline || '');
+          return;
+        }
         // Back is always the phone's own Back — it closes slide-overs and
         // backs out of pages, and guessing which press is the last one
         // proved impossible (HHAeXchange+ keeps its whole app under one
@@ -835,6 +881,184 @@
     bindWire();
     wireForms(document);
   });
+
+  // -------------------------------------------------------------- push
+  // Notifications from this portal, so a tap opens THIS app. Everything is
+  // guarded: iOS grants Web Push only to a site added to the Home Screen, on
+  // 16.4+, over a real certificate — and the permission prompt only rises
+  // from a genuine press. Where any of that is missing the control stays
+  // hidden rather than offering something that cannot work.
+  function pushSupported() {
+    return 'serviceWorker' in navigator && 'PushManager' in window
+           && 'Notification' in window;
+  }
+
+  function base64ToBytes(value) {
+    const padded = (value + '='.repeat((4 - value.length % 4) % 4))
+      .replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(padded);
+    const out = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+
+  async function serverKey() {
+    try {
+      const r = await fetch('/api/push/key');
+      return (await r.json()).key || '';
+    } catch (e) { return ''; }
+  }
+
+  function paintNotify(state) {
+    const button = document.getElementById('notify-toggle');
+    const label = document.getElementById('notify-label');
+    if (!button || !label) return;
+    button.hidden = false;
+    button.classList.toggle('on', state === 'on');
+    label.textContent = state === 'on' ? i18n.notifyOff
+                      : state === 'denied' ? i18n.notifyDenied
+                      : i18n.notifyOn;
+    button.disabled = state === 'denied';
+  }
+
+  function sameBytes(a, b) {
+    if (!a || !b || a.byteLength !== b.byteLength) return false;
+    const x = new Uint8Array(a), y = new Uint8Array(b);
+    for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
+    return true;
+  }
+
+  async function keyMatches(subscription) {
+    const applied = subscription.options
+                  && subscription.options.applicationServerKey;
+    if (!applied) return true;          // nothing to compare — leave it alone
+    const key = await serverKey();
+    if (!key) return true;
+    return sameBytes(applied, base64ToBytes(key).buffer);
+  }
+
+  async function resubscribe(registration) {
+    const key = await serverKey();
+    if (!key) return null;
+    const sub = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: base64ToBytes(key)
+    });
+    await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ subscription: sub.toJSON() })
+    });
+    return sub;
+  }
+
+  async function setUpNotify() {
+    const button = document.getElementById('notify-toggle');
+    if (!button || !pushSupported()) return;
+    if (!(await serverKey())) return;      // push not available on this Pi
+
+    try {
+      const registration =
+        await navigator.serviceWorker.getRegistration('/sw.js');
+      let existing = registration
+        ? await registration.pushManager.getSubscription() : null;
+      // A subscription made against a DIFFERENT server key can never be
+      // signed for — the push service refuses it (Apple: 403 BadJwtToken)
+      // while the toggle still says notifications are on, which is the worst
+      // of both. Compare and re-subscribe silently; permission is already
+      // granted, so this needs no prompt and no press.
+      if (existing && !(await keyMatches(existing))) {
+        try {
+          await existing.unsubscribe();
+          existing = null;
+          if (Notification.permission === 'granted') {
+            existing = await resubscribe(registration);
+          }
+        } catch (e) { existing = null; }
+      }
+      // Re-register whatever this browser holds, every load. The server can
+      // lose a subscription the browser still has — a pruned store, a lost
+      // file, a mistake in the sender — and nothing in the browser would
+      // ever notice: it holds a valid subscription, so it asks for nothing
+      // and the phone goes quiet. Posting it again is idempotent (the store
+      // keys on the endpoint), costs one request, and makes the server heal
+      // itself without her tapping anything.
+      if (existing) {
+        try {
+          await fetch('/api/push/subscribe', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ subscription: existing.toJSON() })
+          });
+        } catch (e) { /* offline; the next load tries again */ }
+      }
+      paintNotify(Notification.permission === 'denied' ? 'denied'
+                  : existing ? 'on' : 'off');
+    } catch (e) {
+      paintNotify('off');
+    }
+
+    button.addEventListener('click', async () => {
+      try {
+        const reg = await navigator.serviceWorker.getRegistration('/sw.js');
+        const current = reg ? await reg.pushManager.getSubscription() : null;
+        if (current) {
+          const endpoint = current.endpoint;
+          await current.unsubscribe();
+          await fetch('/api/push/subscribe', {
+            method: 'DELETE',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ endpoint: endpoint })
+          });
+          paintNotify('off');
+          return;
+        }
+        // Permission is requested INSIDE the click handler: iOS refuses a
+        // prompt that is not a direct consequence of a press.
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') { paintNotify(permission === 'denied'
+                                                    ? 'denied' : 'off'); return; }
+        const worker = reg || await navigator.serviceWorker.register('/sw.js');
+        await navigator.serviceWorker.ready;
+        const key = await serverKey();
+        const sub = await worker.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: base64ToBytes(key)
+        });
+        const res = await fetch('/api/push/subscribe', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ subscription: sub.toJSON() })
+        });
+        paintNotify(res.ok ? 'on' : 'off');
+      } catch (e) {
+        paintNotify('off');
+      }
+    });
+  }
+  setUpNotify();
+
+  // How tall the floating chrome actually is, published to CSS so the
+  // content's tail and the type bar can clear it instead of guessing.
+  //
+  // It is not one height. The pill alone is one; the pill under the app's
+  // own tab row is taller, and the tab row comes and goes with the screen.
+  // Two constants were written for it — 104px of padding under the content
+  // and a type bar 88px up — and both were the no-tabs measurement, so on
+  // the schedule the last visit hid behind the tabs and the type bar's
+  // Cancel button sat on top of Home.
+  function measureChrome() {
+    const nav = document.querySelector('.navbar');
+    if (!nav) return;
+    const h = Math.round(nav.getBoundingClientRect().height);
+    if (h > 0) document.documentElement.style.setProperty('--chrome-h', h + 'px');
+  }
+  if (window.ResizeObserver) {
+    const nav = document.querySelector('.navbar');
+    if (nav) new ResizeObserver(measureChrome).observe(nav);
+  }
+  window.addEventListener('resize', measureChrome);
+  measureChrome();
 
   // Failsafe for the splash: 2.8s and it lifts no matter what.
   setTimeout(() => body.classList.add('ready'), 2800);

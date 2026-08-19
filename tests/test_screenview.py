@@ -904,6 +904,108 @@ class TestNavTitleLength:
         assert m["nav"] is None
 
 
+class TestTheTitleIsAName:
+    """What may sit in the header, which is the one string somebody reads
+    without looking for it.
+
+    The schedule renamed itself **"Logotipo de H H AeXchange +"** — the logo
+    ImageView's alt text, the brand spelled out letter by letter for a screen
+    reader — because it was the longest thing in the title bar. Two guards
+    now: a picture's description never becomes words at all (see
+    feed.statics), and a title that reads like spelling is rejected here.
+    Rejected leaves the title empty, and the client falls through to the app's
+    own name, which is always true.
+    """
+
+    def test_a_spelled_out_brand_is_not_a_title(self):
+        m = screenview.build(doc(
+            elements=[el("btn_left", "Button", [0, 67, 42, 87], "Atrás")],
+            statics=[st([42, 65, 684, 89], "Logotipo de H H AeXchange +")],
+        ))
+        assert m["nav"] is not None            # it is still a nav bar
+        assert m["nav"]["title"] == ""         # with nothing worth saying
+
+    def test_the_real_title_wins_over_the_logo_beside_it(self):
+        """A title bar usually carries both, and the logo was winning on
+        length — which is exactly how the page got renamed."""
+        m = screenview.build(doc(
+            elements=[el("btn_left", "Button", [0, 67, 42, 87], "Atrás")],
+            statics=[st([42, 65, 300, 89], "Logotipo de H H AeXchange +"),
+                     st([310, 65, 600, 89], "Horario")],
+        ))
+        assert m["nav"]["title"] == "Horario"
+
+    def test_an_icon_glyph_is_not_a_title(self):
+        m = screenview.build(doc(
+            elements=[el("btn_left", "Button", [0, 67, 42, 87], "Atrás")],
+            statics=[st([42, 65, 684, 89], "")],
+        ))
+        assert m["nav"]["title"] == ""
+
+    def test_initials_a_person_actually_wrote_are_left_alone(self):
+        """The guard is for spelling, not for short words. A patient's name
+        on a visit-detail title is the whole point of that title."""
+        assert screenview._is_spelled_out("Detalle de Visita") is False
+        assert screenview._is_spelled_out("CARIDAD ROJAS BATISTA") is False
+        assert screenview._is_spelled_out("A B Smith") is False
+        assert screenview._is_honest_title("A B Smith") is True
+
+
+class TestAccessibilityAnnotationsAreNotWords:
+    """"Expandido" under every patient's name.
+
+    The HHAeXchange+ schedule puts the chevron's state — "Contraído" /
+    "Expandido" — in a five-pixel square beside each visit. It is what a
+    screen reader says about the arrow, not anything the phone shows, and
+    rendered as text it printed a mystery word under each patient.
+
+    The signal is that the box cannot possibly be showing the word. Numbers
+    below are the real ones, read off the live schedule at density 84.
+    """
+
+    W = 720
+
+    def test_a_word_in_a_five_pixel_box_is_not_being_shown(self):
+        assert screenview._is_annotation("Contraído", [700, 160, 705, 169],
+                                         self.W) is True
+
+    def test_every_real_string_on_that_screen_survives(self):
+        for txt, b in [("Visita Buscar", [407, 105, 459, 116]),
+                       ("LUCRESIA L PUPO", [20, 158, 104, 171]),
+                       ("agosto 18, 2026 (Hoy)", [7, 130, 108, 143]),
+                       ("Ayuda", [691, 69, 718, 93]),
+                       ("Programación", [94, 1553, 143, 1562]),
+                       ("Pacientes", [343, 1553, 378, 1562]),
+                       ("Menú", [591, 1553, 611, 1562])]:
+            assert screenview._is_annotation(txt, b, self.W) is False, txt
+
+    def test_the_tightest_real_caption_anybody_has_seen_survives(self):
+        """Mobile Caregiver+ draws its tab captions in boxes tighter than
+        their own text — "Visitas" at 2.43px per character against the
+        annotation's 0.56. The first threshold sat between the wrong pair of
+        numbers and swallowed it; the tab-bar tests caught that."""
+        assert screenview._is_annotation("Visitas", [262, 1556, 279, 1565],
+                                         self.W) is False
+
+    def test_a_mark_in_an_equally_narrow_box_is_untouched(self):
+        """The EVV check's own box is this narrow. A mark is one character;
+        an annotation is a word, which is what the minimum length is for."""
+        assert screenview._is_annotation("", [686, 160, 693, 169],
+                                         self.W) is False
+        assert screenview._is_annotation("54", [700, 160, 705, 169],
+                                         self.W) is False
+
+    def test_the_visit_row_reads_as_the_phone_shows_it(self):
+        m = screenview.build(doc(
+            elements=[el("", "View", [20, 158, 705, 184])],
+            statics=[st([20, 158, 104, 171], "LUCRESIA L PUPO"),
+                     st([20, 171, 100, 184], "6:00 a. m. - 9:00 a. m."),
+                     st([700, 160, 705, 169], "Contraído")],
+        ))
+        cell = m["rows"][0]["items"][0]
+        assert cell["lines"] == ["LUCRESIA L PUPO", "6:00 a. m. - 9:00 a. m."]
+
+
 class TestMapOverlay:
     """The GPS confirm slides a full-screen map OVER the visit page and
     the tree still reports the page beneath — the portal rendered both at
@@ -962,3 +1064,171 @@ class TestMapOverlay:
         ))
         texts = [(i.get("txt") or "") for r in m["rows"] for i in r["items"]]
         assert "Borrar" in texts
+
+
+class TestGeneratedDescriptions:
+    """Mobile Caregiver+'s visits list is custom-drawn: its only words are
+    the sentence a screen reader would say. Rendered whole, three of those
+    are a wall of prose where the phone shows three scannable rows."""
+
+    SENTENCE = ("La visita está programada para ATANASIO MEDEROS TORRIEN en "
+                "martes, 18 de agosto de 2026 de 9:05 AM a 11:05 AM y su "
+                "estado es No Empezadas, Tarde")
+
+    def test_the_sentence_becomes_a_list_cell(self):
+        assert screenview._shape_description(self.SENTENCE) == [
+            "ATANASIO MEDEROS TORRIEN", "9:05 AM – 11:05 AM",
+            "No Empezadas, Tarde"]
+
+    def test_english_reads_the_same_way(self):
+        english = ("The visit is scheduled for MARINA ZALDIVAR MARTI on "
+                   "Tuesday, August 18 2026 from 3:20 PM to 5:20 PM and its "
+                   "status is Not started")
+        assert screenview._shape_description(english) == [
+            "MARINA ZALDIVAR MARTI", "3:20 PM – 5:20 PM", "Not started"]
+
+    def test_a_sentence_it_cannot_account_for_is_left_alone(self):
+        """A rule that drops half a sentence it did not understand is worse
+        than a long line."""
+        for text in (
+            "La visita está programada para ATANASIO MEDEROS TORRIEN en "
+            "martes, 18 de agosto de 2026",                    # no status
+            "La visita de las 9:05 AM a 11:05 AM y su estado es Sin empezar",
+            "Su sesión ha caducado, por favor vuelva a iniciar sesión.",
+        ):
+            assert screenview._shape_description(text) is None
+
+    def test_a_short_label_is_never_reshaped(self):
+        assert screenview._shape_description("Sin empezar") is None
+
+    def test_the_row_renders_as_title_and_details(self):
+        m = screenview.build(doc(
+            elements=[el("", "View", [0, 146, 720, 185])],
+            statics=[st([0, 146, 720, 185], self.SENTENCE)],
+        ))
+        (cell,) = [i for r in m["rows"] for i in r["items"]
+                   if i["kind"] == "row"]
+        assert cell["lines"][0] == "ATANASIO MEDEROS TORRIEN"
+        assert cell["lines"][1] == "9:05 AM – 11:05 AM"
+
+
+class TestTabBarFurniture:
+    """Mobile Caregiver+ labels each tab cell with a description as well as
+    a caption, and hangs an unread count on one — so the patients list
+    ended its body with a stray "Beneficiarios" and a bare "370"."""
+
+    def _model(self, extra):
+        return screenview.build(doc(
+            elements=[el("action_tab_home", "FrameLayout", [226, 1539, 315, 1568]),
+                      el("action_tab_messages", "FrameLayout", [404, 1539, 493, 1568])],
+            statics=[st([262, 1556, 279, 1565], "Visitas"),
+                     st([337, 1555, 381, 1565], "Beneficiarios"),
+                     st([436, 1556, 460, 1565], "Mensajes")] + extra,
+        ))
+
+    def _body(self, m):
+        return [t for r in m["rows"] for i in r["items"]
+                for t in ([i.get("txt")] + (i.get("lines") or [])) if t]
+
+    def test_a_word_the_bar_already_said_is_not_a_row(self):
+        m = self._model([st([315, 1539, 404, 1568], "Beneficiarios")])
+        assert [t["txt"] for t in m["apptabs"]] == ["Visitas", "Beneficiarios",
+                                                    "Mensajes"]
+        assert "Beneficiarios" not in self._body(m)
+
+    def test_an_unread_count_is_not_a_row(self):
+        m = self._model([st([447, 1539, 463, 1548], "370")])
+        assert "370" not in self._body(m)
+
+    def test_a_number_ABOVE_the_bar_is_still_content(self):
+        m = self._model([st([10, 400, 60, 420], "370")])
+        assert "370" in self._body(m)
+
+
+class TestDisabledRendersDisabled:
+    def test_the_item_carries_the_greyed_state(self):
+        """The real control is a View — it renders as a cell, not a button,
+        which is why both branches of the template had to learn this."""
+        m = screenview.build(doc(
+            elements=[dict(el("visit_details_clock_out_button_disabled",
+                              "View", [11, 1532, 709, 1557],
+                              "Registrar salida"), enabled=False)],
+            statics=[],
+        ))
+        (cell,) = [i for r in m["rows"] for i in r["items"] if i.get("aim")]
+        assert cell["kind"] == "row"
+        assert cell["enabled"] is False
+
+    def test_a_real_button_carries_it_too(self):
+        m = screenview.build(doc(
+            elements=[dict(el("save", "Button", [11, 1532, 709, 1557],
+                              "Salvar"), enabled=False)],
+            statics=[],
+        ))
+        (btn,) = [i for r in m["rows"] for i in r["items"]
+                  if i["kind"] == "button"]
+        assert btn["enabled"] is False
+
+    def test_a_screen_from_an_older_feed_is_not_greyed_end_to_end(self):
+        """Absent means enabled: every element published before the field
+        existed was one."""
+        m = screenview.build(doc(
+            elements=[el("go", "Button", [11, 200, 709, 240], "Continuar")],
+            statics=[],
+        ))
+        (btn,) = [i for r in m["rows"] for i in r["items"]
+                  if i["kind"] == "button"]
+        assert btn["enabled"] is True
+
+
+class TestDisabledRowsAreStatements:
+    """HHAeXchange+ marks its EVV record lines disabled — "Registros de
+    entrada de EVV 6:00 a. m." is a fact the app is stating, not a control.
+    Dimming those to a greyed button would have hidden the very thing they
+    exist to show, so a disabled row reads as information instead. A
+    disabled BUTTON is a different case: a real call to action that is not
+    available yet, and it stays a dimmed button."""
+
+    def test_a_disabled_row_becomes_information(self):
+        m = screenview.build(doc(
+            elements=[dict(el("", "View", [20, 217, 201, 242]),
+                           enabled=False)],
+            statics=[st([35, 223, 195, 236],
+                        "Registros de entrada de EVV 6:00 a. m.")],
+        ))
+        (row,) = [i for r in m["rows"] for i in r["items"]
+                  if i["kind"] == "row"]
+        assert row["info"] is True, "a stated fact, not a door"
+
+    def test_a_wide_disabled_row_is_information_too(self):
+        """Wider than the shape rules would call informational: the app
+        saying so outranks the shape."""
+        m = screenview.build(doc(
+            elements=[dict(el("", "View", [11, 1400, 709, 1440]),
+                           enabled=False)],
+            statics=[st([20, 1410, 700, 1430],
+                        "La visita se registró correctamente")],
+        ))
+        (row,) = [i for r in m["rows"] for i in r["items"]
+                  if i["kind"] == "row"]
+        assert row["info"] is True
+
+    def test_an_enabled_row_is_still_a_door(self):
+        m = screenview.build(doc(
+            elements=[el("schedule_screen_edit_visit", "View",
+                         [22, 271, 704, 296])],
+            statics=[st([339, 278, 388, 289], "Ver detalles")],
+        ))
+        (row,) = [i for r in m["rows"] for i in r["items"]
+                  if i["kind"] == "row"]
+        assert row["info"] is False
+
+    def test_a_disabled_button_stays_a_dimmed_button(self):
+        m = screenview.build(doc(
+            elements=[dict(el("save", "Button", [11, 1532, 709, 1557],
+                              "Salvar"), enabled=False)],
+            statics=[],
+        ))
+        (btn,) = [i for r in m["rows"] for i in r["items"]
+                  if i["kind"] == "button"]
+        assert btn["enabled"] is False

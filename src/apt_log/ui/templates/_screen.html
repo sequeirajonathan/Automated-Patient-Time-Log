@@ -8,7 +8,10 @@
    never what tapping it means.
 
    Rendered server-side and pushed over the socket, like every sentence. #}
-<div class="wire" data-frame="{{ m.id }}">
+{# `data-scrolls` rides the fragment because the peek's scroll arrows are only
+   worth showing on a screen that scrolls, and the phone is the only thing
+   that knows. Read once per screen by phone.js into a body class. #}
+<div class="wire" data-frame="{{ m.id }}" data-scrolls="{{ 1 if m.scrollable else 0 }}">
   {% if m.nav %}
   {# The top band's first button is NOT rendered as a back arrow — it is
      whatever the app put top-left, and on HHAeXchange+ that was the help
@@ -54,7 +57,8 @@
       {% elif it.kind == 'button' %}
         {# A button with no words still needs a face: a blank pill reads
            as broken, and the visit detail's icon buttons shipped three. #}
-        <button type="button" class="a-btn{% if it.small %} sm{% elif it.cta %} cta{% endif %}"
+        <button type="button" class="a-btn{% if it.small %} sm{% elif it.cta %} cta{% endif %}{% if not it.enabled %} off{% endif %}"
+                {% if not it.enabled %}disabled aria-disabled="true"{% endif %}
                 data-aim='{{ it.aim | tojson }}'
                 {% if not it.txt %}aria-label="{{ it.aim.cls }}{% if it.aim.rid %} {{ it.aim.rid }}{% endif %}"{% endif %}
           >{{ it.txt or '···' }}</button>
@@ -80,7 +84,11 @@
            one more grey row with a chevron. A data row is a list cell: its
            title on top, details muted below, verified check-ins as green
            status pills, a chevron saying "opens more". #}
-        <button type="button" class="a-cell{% if it.cta %} cta{% endif %}" data-aim='{{ it.aim | tojson }}'>
+        <button type="button" class="a-cell{% if it.cta %} cta{% endif %}{% if not it.enabled %} off{% endif %}"
+                {% if not it.enabled %}disabled aria-disabled="true"{% endif %}
+                data-aim='{{ it.aim | tojson }}'>
+        {# A disabled row that carries words became an info row above; what
+           reaches here disabled is a control with nothing to say. #}
           {% if it.txt %}<span class="a-line">{{ it.txt }}</span>{% endif %}
           {% for line in it.lines %}
           <span class="a-line{% if not loop.first or it.txt %} sub{% endif %}">{{ line }}</span>

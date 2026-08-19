@@ -216,12 +216,17 @@ def collect() -> DashboardState:
     else:
         hb_health = Health.OK
 
+    # Two signals used to sit here and no longer do. "Scheduler" reported a
+    # unit whose job — deciding on its own when to record a visit — was
+    # abandoned; it is a service like any other now, and the control centre
+    # lists it as one. "Last check-in" reported the heartbeat file, which
+    # answers "is the controller alive" a second time and less directly than
+    # the three below. The heartbeat is still written and still read by
+    # heartbeat.sh; it is the PANEL that was noise.
     health = [
         Signal("health.controller", Health.OK),   # this page rendered, so it is up
         Signal("health.phone", phone_health),
         Signal("health.appium", _unit_active("aptlog-appium")),
-        Signal("health.agent", _unit_active("aptlog-agent")),
-        Signal("health.heartbeat", hb_health),
     ]
 
     visits = read_audit()
@@ -231,16 +236,14 @@ def collect() -> DashboardState:
         if v.status in ("failed", "skipped") and v.attempt_id not in acked
     ]
 
-    latest = visits[-1] if visits else None
-    gate: list[Signal] = []
-    if latest is not None:
-        gate = [
-            Signal("gate.usb", Health.OK if latest.gate_passed else Health.BAD),
-        ]
-
+    # The location-check panel is gone, and so is the signal that fed it. It
+    # reported one field of the last audited attempt — whether the presence
+    # gate passed — from a scheduler that no longer runs, so on a live machine
+    # it was either absent or describing a visit from weeks ago. The gate
+    # itself is unchanged and still decides whether a visit may be recorded
+    # (REQ-5); what was removed is a stale readout of it, not the gate.
     return DashboardState(
         health=health,
-        gate=gate,
         visits=visits,
         attention=attention,
         transport_mode=mode or _transport_mode(),

@@ -12,10 +12,16 @@
    - a floating pill tab bar, inset from the edges, riding the safe area
    - one spring curve for everything: cubic-bezier(.22,1,.36,1)
 
-   Same machinery as the dashboard underneath — same socket, same tap
-   verification, same macro allow-list. No service worker on purpose: offline
-   caching would keep copies of what the phone's screen said, and this page is
-   a window, not a document. #}
+   Same machinery as the control centre underneath — same socket, same tap
+   verification, same macro allow-list.
+
+   There IS a service worker now, and it caches nothing. The objection stands
+   and is unchanged — offline caching would keep copies of what the phone's
+   screen said, and this page is a window, not a document — so sw.js has no
+   fetch handler at all. It exists for Web Push, because the login code
+   inMyTeam texts is the one thing this system cannot do for itself, and a
+   notification sent by anything other than this portal opens Safari instead
+   of the app she installed. #}
 <html lang="{{ lang }}">
 <head>
 <meta charset="utf-8">
@@ -111,9 +117,34 @@
                  rgba(0,0,0,.18)); }
   .tile .name { font-size:12px; font-weight:500; letter-spacing:.01em;
                 color:rgba(255,255,255,.95); text-align:center; }
-  #launcher footer { margin-top:auto; text-align:center; }
+  #launcher footer { margin-top:auto; text-align:center;
+                     display:flex; flex-direction:column; align-items:center;
+                     gap:12px; }
   #launcher footer a { color:rgba(255,255,255,.5); font-size:13px;
                        text-decoration:none; }
+  #launcher footer button { appearance:none; border:0; border-radius:9px;
+                            background:rgba(255,255,255,.12);
+                            color:rgba(255,255,255,.8); font:inherit;
+                            font-size:12.5px; font-weight:600;
+                            padding:7px 14px; cursor:pointer;
+                            -webkit-tap-highlight-color:transparent; }
+  #launcher footer button[hidden] { display:none; }
+  #launcher footer button.on { background:rgba(255,255,255,.9); color:#111; }
+  /* The language switch, on the one screen of this view that is hers rather
+     than the app's. Two people share this portal and want opposite languages
+     from it, so it has to be reachable from the phone view too — not only
+     from a control centre she has no reason to open. It is a form: no script
+     is involved in the one control that decides what every other control
+     says. */
+  #launcher .seg { display:inline-flex; gap:2px; padding:2px; border-radius:9px;
+                   background:rgba(255,255,255,.12); }
+  #launcher .seg button { appearance:none; border:0; background:transparent;
+                          color:rgba(255,255,255,.65); font:inherit;
+                          font-size:12px; font-weight:600; letter-spacing:.04em;
+                          padding:5px 12px; border-radius:7px; cursor:pointer;
+                          -webkit-tap-highlight-color:transparent; }
+  #launcher .seg button[aria-pressed="true"] { background:rgba(255,255,255,.9);
+                                               color:#111; }
 
   /* ---------------------------------------------------------- screen view */
   #screenview { background:var(--bg); }
@@ -202,7 +233,12 @@
   #screenwrap { min-height:100%; }
 
   /* ----------------------------------------------- the reflowed app screen */
-  .wire { padding:2px 0 calc(env(safe-area-inset-bottom) + 104px); }
+  /* The tail clears the floating chrome, whose height is MEASURED rather
+     than guessed (see phone.js): the pill alone is one height, the pill
+     under the app's own tab row is another, and the 104px written here
+     first was the first of those. On a screen with tabs — the schedule,
+     every day — the last visit of the list sat behind them. */
+  .wire { padding:2px 0 calc(var(--chrome-h, 104px) + 18px); }
   /* The app's own title bar. Its NAME is already worn by the portal's
      large title (#where reads .a-title from here — see phone.js), so the
      text stays in the DOM but out of sight: showing it twice, once in the
@@ -368,10 +404,22 @@
 
   /* The type bar: floats above the pill when a text field is tapped. One
      input, one send — the OTP moment, not a keyboard. */
-  .typebar { position:fixed; left:12px; right:12px; bottom:88px; z-index:40;
+  /* Above the chrome by measurement, not by a constant. `bottom:88px` put
+     the bar's own Cancel button on top of Home whenever the app tab row
+     was showing — press Cancel, leave the app view, lose the screen the
+     code was for. Reported from the field exactly that way. */
+  /* Touchable, said out loud. The bar used to sit inside `.navbar`, which
+     turns pointer events OFF for everything but the pill — so the one control
+     on this page that has to accept a keystroke accepted nothing. It is a
+     sibling of the nav now; this line makes the property explicit rather than
+     inherited, so moving it again cannot silently take it away. */
+  .typebar { position:fixed; left:12px; right:12px; z-index:40;
+             pointer-events:auto;
+             bottom:calc(var(--chrome-h, 88px) + 14px);
              background:var(--card, #fff); border-radius:16px; padding:12px 14px;
              box-shadow:0 12px 32px -12px rgb(0 0 0 / .35);
              display:flex; flex-direction:column; gap:8px; }
+  .typebar * { pointer-events:auto; }
   /* Author display beats the UA's [hidden] rule, so hidden must be said
      here too — without this the bar sat on every page from load, and no
      amount of closing logic could touch it. */
@@ -559,10 +607,20 @@
      spec: the reflow already lists everything in the phone's viewport, so
      arrows there are noise; the photo IS the phone's screen, and moving
      it is exactly what arrows mean on it. */
+  /* Above the chrome BY MEASUREMENT, for the same reason the type bar is:
+     102px was written from the no-tab-row case, and the app tab row puts the
+     chrome at 134px — so on any screen with tabs the arrows sat on top of
+     Back and Home. Reported from the field with the overlap circled. */
   #phone-scroll { position:absolute; right:10px; z-index:6;
-                  bottom:calc(102px + env(safe-area-inset-bottom));
+                  bottom:calc(var(--chrome-h, 102px) + 14px);
                   display:none; flex-direction:column; gap:8px; }
-  body.peeking:not(.asleep) #phone-scroll { display:flex; }
+  /* And only when there is something to scroll. The density is tuned so most
+     screens fit whole, which makes a permanent pair of arrows furniture that
+     does nothing on the pages she sees most. The phone says which screens
+     scroll (`scrollable` in the published document, from the tree's own
+     attribute), so the control appears exactly when it has work to do —
+     which is the answer to "do we still need these": on a long list, yes. */
+  body.peeking:not(.asleep).scrolls #phone-scroll { display:flex; }
   #phone-scroll button { width:42px; height:42px; border-radius:50%;
                   border:none; cursor:pointer; color:var(--tint);
                   background:var(--chrome); backdrop-filter:blur(12px);
@@ -591,6 +649,18 @@
      floats over a continuous canvas the way his does — no dead strip. The
      view is its containing block, which also means it rides the view's own
      slide transition instead of being left behind. */
+  /* While she is typing a code, the phone's own controls step back: dimmed
+     and inert, so a stray thumb near the keyboard cannot press Home and
+     throw away the screen the code belongs to. Cancel is the way out, and
+     it is the only live control down there while the bar is open. */
+  /* THE NAV ONLY. This pair used to reach the code box as well, because the
+     box was a child of the nav — dimmed to 30% and forced inert by the very
+     rule written to protect it. Reported from the field twice: "grayed out",
+     then "I cannot enter the OTP manually". The bar is a sibling now, so the
+     selector cannot reach it however it is written, and `.typebar` states its
+     own pointer-events besides. */
+  body.typing .navbar { opacity:.3; pointer-events:none !important; }
+  body.typing .navbar * { pointer-events:none !important; }
   .navbar { position:absolute; left:0; right:0; bottom:0; z-index:7;
             pointer-events:none;
             padding:0 12px calc(env(safe-area-inset-bottom) + 10px); }
@@ -664,6 +734,11 @@
                  border:.5px solid var(--line); }
   .preview-label { font-size:12px; color:var(--muted); text-align:center;
                    margin:10px 0 0; }
+  /* A control the app itself has greyed out. Shown, because "clock out is
+     here but not yet" is worth knowing, and unpressable, because a press
+     that goes nowhere reads as the portal being broken. */
+  .a-btn.off, .a-cell.off { opacity:.42; }
+  .a-btn.off:active, .a-cell.off:active { transform:none; filter:none; }
   .padrow { display:flex; gap:10px; margin-top:12px; }
   /* Author display beats UA [hidden] — the OTP bar taught this the hard
      way; the app-side row must actually vanish off the signature moment. */
@@ -716,7 +791,25 @@
     </button>
     {% endfor %}
   </div>
-  <footer><a href="/">{{ t('papp.full_status') }}</a></footer>
+  <footer>
+    <form method="post" action="/language" class="seg">
+      <input type="hidden" name="next" value="/app">
+      {% for code in languages %}
+      <button type="submit" name="language" value="{{ code }}"
+              aria-pressed="{{ 'true' if code == lang else 'false' }}">
+        {{ 'ES' if code == 'es' else 'EN' }}</button>
+      {% endfor %}
+    </form>
+    {# Notifications, asked for from a real press because iOS will not raise
+       the permission prompt any other way. Hidden until the client has
+       checked that this browser can actually subscribe — an installed home
+       screen app on iOS 16.4+, over the real certificate tailscale serve
+       provides — because a control that cannot work is worse than none. #}
+    <button type="button" id="notify-toggle" hidden>
+      <span id="notify-label">{{ t('papp.notify_on') }}</span>
+    </button>
+    <a href="/console">{{ t('papp.full_status') }}</a>
+  </footer>
 </div>
 
 <div class="view" id="screenview">
@@ -808,18 +901,6 @@
        Filled by phone.js from the screen payload; hidden when the screen
        has no tab bar. #}
     <div id="apptabs" class="apptabs" hidden></div>
-    {# The type bar: one short code into the field she aimed at — the OTP
-       moment. Hidden until a text field is tapped; the server holds the
-       same contract (fields only, short plain token, refuse-if-moved). #}
-    <div id="typebar" class="typebar" hidden>
-      <span class="typehint">{{ t('papp.type.hint') }}</span>
-      <div class="typerow">
-        <input id="typebox" type="text" inputmode="text" autocomplete="one-time-code"
-               maxlength="32" pattern="[A-Za-z0-9]*" />
-        <button id="typesend" type="button">{{ t('papp.type.send') }}</button>
-        <button id="typecancel" type="button">{{ t('papp.type.cancel') }}</button>
-      </div>
-    </div>
     {# The phone's own three, in Android's shapes, plus wake — riding a
        floating pill so the chrome reads native instead of edge-to-edge web. #}
     <div class="pill">
@@ -840,6 +921,35 @@
          harder to mispress than four small ones. #}
     </div>
   </nav>
+
+  {# The type bar: one short code into the field she aimed at — the OTP
+     moment. Hidden until a text field is tapped; the server holds the same
+     contract (fields only, short plain token, refuse-if-moved).
+
+     A SIBLING OF THE NAV, NEVER A CHILD OF IT. It lived inside <nav> and that
+     one fact broke it three separate ways, all of them reported from the
+     field as "I cannot enter the code":
+
+       - `.navbar` is `pointer-events:none` so the phone's screen stays
+         touchable around the floating pill, and only `.pill` turns them back
+         on. The input, Send and Cancel therefore took no touches at all.
+       - `body.typing .navbar *` forces `pointer-events:none !important` and
+         dims the nav to 30% while she types — a guarantee written for the
+         phone's controls that landed on the code box too. That is the
+         "greyed out" in the report, and it was literal.
+       - `measureChrome()` measures the nav to place this bar above it, so
+         opening the bar grew the thing its own position is measured from.
+
+     None of those were about the bar. All three were about where it sat. #}
+  <div id="typebar" class="typebar" hidden>
+    <span class="typehint">{{ t('papp.type.hint') }}</span>
+    <div class="typerow">
+      <input id="typebox" type="text" inputmode="text" autocomplete="one-time-code"
+             maxlength="32" pattern="[A-Za-z0-9]*" />
+      <button id="typesend" type="button">{{ t('papp.type.send') }}</button>
+      <button id="typecancel" type="button">{{ t('papp.type.cancel') }}</button>
+    </div>
+  </div>
 </div>
 
 {# The signature pad. She draws here, on her own screen, where there is no
@@ -890,6 +1000,9 @@
     appTitle: {{ t('app.title')|tojson }},
     opening: {{ t('papp.opening')|tojson }},
     waiting: {{ t('papp.waiting_screen')|tojson }},
+    notifyOn: {{ t('papp.notify_on')|tojson }},
+    notifyOff: {{ t('papp.notify_off')|tojson }},
+    notifyDenied: {{ t('papp.notify_denied')|tojson }},
     moved:   {{ t('portal.moved')|tojson }},
     failed:  {{ t('portal.failed')|tojson }},
     typeHint: {{ t('papp.type.hint')|tojson }},
@@ -913,7 +1026,10 @@
       login_activity: {{ t('phone.blocked.login_activity')|tojson }},
       password_field: {{ t('phone.blocked.password_field')|tojson }},
       secure_screen:  {{ t('phone.blocked.secure_screen')|tojson }},
-      capture_failed: {{ t('phone.blocked.capture_failed')|tojson }}
+      capture_failed: {{ t('phone.blocked.capture_failed')|tojson }},
+      {# The one refusal whose sentence does NOT end "and they still work":
+         a wedged app answers no tap, and this screen carries no buttons. #}
+      app_not_responding: {{ t('phone.blocked.app_not_responding')|tojson }}
     },
     blockedOther: {{ t('phone.blocked.other')|tojson }}
   };
