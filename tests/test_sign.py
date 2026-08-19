@@ -471,10 +471,12 @@ class TestAppButtons:
     def test_targets_sit_in_the_strip_at_the_canvas_foot(self):
         t = sign.button_targets(self.PAGE, self.LEGACY)
         assert t is not None
-        for x, y in t.values():
+        for target in t.values():
+            x, y = target["point"]     # this screen names neither button
             assert 0 < x < 28          # the strip left of the canvas
             assert y < 1560            # above the canvas foot
-        assert t["clear"][1] < t["confirm"][1]   # Borrar rides above Salvar
+        # Borrar rides above Salvar
+        assert t["clear"]["point"][1] < t["confirm"]["point"][1]
 
     def test_off_the_moment_there_is_nothing_to_press(self):
         assert sign.button_targets(self.PAGE, "com.hhaexchange.uma") is None
@@ -524,8 +526,10 @@ class TestAppButtons:
         assert status.state == "done" and status.kind == "clear"
         (path,) = performed
         (point,) = path
-        assert tuple(point) == tuple(
-            sign.button_targets(self.PAGE, self.LEGACY)["clear"])
+        # This screen names neither button, so the clear comes from the
+        # canvas-relative fallback and is still pressed as a point.
+        target = sign.button_targets(self.PAGE, self.LEGACY)["clear"]
+        assert tuple(point) == tuple(target["point"])
 
     def test_do_action_refuses_off_the_signature_screen(self, tmp_path):
         driver = MagicMock()
@@ -616,9 +620,10 @@ class TestTheAppsOwnSaveIsAnElementNotAPixel:
                     'resource-id="app:id/button_save" text="" '
                     'clickable="true" bounds="[642,74][678,110]"/>')
 
-    def test_the_captioned_save_is_found_at_its_centre(self):
+    def test_the_captioned_save_is_found_as_an_element(self):
         found = sign._app_buttons(self.HEADER_SIGNING)
-        assert found["confirm"] == [669, 92]
+        assert found["confirm"]["rid"].endswith("button_save")
+        assert found["confirm"]["txt"] == "Salvar"
 
     def test_the_uncaptioned_button_of_the_same_id_is_not_a_save(self):
         """The trap this nearly walked into. Both screens of this activity
@@ -630,7 +635,6 @@ class TestTheAppsOwnSaveIsAnElementNotAPixel:
         """Anular throws the signature away. A rule loose enough to catch it
         would eventually press it."""
         found = sign._app_buttons(self.HEADER_SIGNING)
-        assert found.get("clear") != [55, 92]
         assert "clear" not in found
 
     def test_the_signature_moment_needs_the_pad_not_just_the_container(self):
@@ -644,8 +648,10 @@ class TestTheAppsOwnSaveIsAnElementNotAPixel:
                              package=self.PACKAGE) is False
 
     def test_targets_press_the_element_and_refuse_off_the_moment(self):
-        assert sign.button_targets(self.CANVAS + self.HEADER_SIGNING,
-                                   package=self.PACKAGE) == {"confirm": [669, 92]}
+        targets = sign.button_targets(self.CANVAS + self.HEADER_SIGNING,
+                                      package=self.PACKAGE)
+        assert list(targets) == ["confirm"]
+        assert targets["confirm"]["element"]["txt"] == "Salvar"
         assert sign.button_targets(self.CANVAS + self.HEADER_VISIT,
                                    package=self.PACKAGE) is None
 
@@ -656,3 +662,95 @@ class TestTheAppsOwnSaveIsAnElementNotAPixel:
         targets = sign.button_targets(self.CANVAS + self.HEADER_SIGNING,
                                       package=self.PACKAGE)
         assert "confirm" in targets and "clear" not in targets
+
+
+class TestClearIsTheOtherHeaderButton:
+    """The recorder was asked, as it should have been the first time.
+
+    Both signature frames from the live clock-out hold exactly 33 elements —
+    two header buttons, two dividers, twenty-eight checkboxes and the
+    clock-out — and NOT ONE of them is a Borrar, by id, by caption or as an
+    anonymous clickable. So the clear cannot be found by hunting for a node
+    that is not there.
+
+    What the field screenshot shows is a PAIR at the foot of the pad, and the
+    only left-hand header button in the tree is `btn_left`. On the screen the
+    caregiver was looking at, that button reads "Borrar"; on the one captured
+    an instant earlier it read "Anular". Same element, different caption,
+    opposite meanings — which is precisely why the caption decides and the id
+    never does.
+    """
+
+    PACKAGE = "com.hhaexchange.caregiver"
+    CANVAS = TestTwoNamesForOneRectangle.PAIR
+
+    def _header(self, left_caption):
+        return ('<node class="android.widget.Button" '
+                f'resource-id="app:id/btn_left" text="{left_caption}" '
+                'clickable="true" bounds="[10,75][100,109]"/>'
+                '<node class="android.widget.Button" '
+                'resource-id="app:id/button_save" text="Salvar" '
+                'clickable="true" bounds="[624,75][714,109]"/>')
+
+    def test_borrar_is_taken_as_the_clear(self):
+        found = sign._app_buttons(self._header("Borrar"))
+        assert found["clear"]["txt"] == "Borrar"
+        assert found["clear"]["rid"].endswith("btn_left")
+
+    def test_anular_is_taken_as_neither(self):
+        """It cancels. It throws the signature away. Same element, same id,
+        one word apart from the button we DO press."""
+        found = sign._app_buttons(self._header("Anular"))
+        assert "clear" not in found
+        assert found["confirm"]["txt"] == "Salvar"
+
+    def test_both_actions_are_offered_when_the_app_captions_both(self):
+        targets = sign.button_targets(self.CANVAS + self._header("Borrar"),
+                                      package=self.PACKAGE)
+        assert sorted(targets) == ["clear", "confirm"]
+        assert targets["clear"]["element"]["txt"] == "Borrar"
+        assert targets["confirm"]["element"]["txt"] == "Salvar"
+
+
+class TestPressingAnElementNotAPoint:
+    """The tree describes the UNROTATED layout while this app rotates its
+    signature page in the drawing pass, so a coordinate taken from these
+    bounds is not reliably where the button is drawn. Letting Android
+    dispatch to the element sidesteps the question — and on a screen where a
+    wrong press saves the wrong thing, that is the only acceptable answer."""
+
+    def test_the_press_requires_the_id_and_the_caption_together(self):
+        pressed = []
+
+        class El:
+            def click(self_inner): pressed.append(True)
+
+        class Driver:
+            def __init__(self, n): self.n = n
+            def find_elements(self, how, what):
+                self.what = what
+                return [El() for _ in range(self.n)]
+
+        el = {"rid": "com.x:id/button_save", "txt": "Salvar"}
+        d = Driver(1)
+        assert sign._click_element(d, el) is True
+        assert "button_save" in d.what and "Salvar" in d.what
+        assert pressed == [True]
+
+    def test_it_refuses_when_the_screen_moved_underneath(self):
+        class Driver:
+            def find_elements(self, how, what): return []
+        assert sign._click_element(Driver(), {"rid": "a:id/b",
+                                              "txt": "Salvar"}) is False
+
+    def test_it_refuses_when_two_things_match(self):
+        class Driver:
+            def find_elements(self, how, what): return [object(), object()]
+        assert sign._click_element(Driver(), {"rid": "a:id/b",
+                                              "txt": "Salvar"}) is False
+
+    def test_a_captionless_target_is_never_pressed(self):
+        class Driver:
+            def find_elements(self, how, what):
+                raise AssertionError("should not have looked")
+        assert sign._click_element(Driver(), {"rid": "a:id/b", "txt": ""}) is False
