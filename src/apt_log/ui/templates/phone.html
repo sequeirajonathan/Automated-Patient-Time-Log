@@ -198,12 +198,14 @@
   /* The sketch and the phone disagree: amber dot, and the old sketch is
      NOT shown at all — the owner's rule: better to wait behind a loading
      page than to look at stale data. A skeleton stands in until the fresh
-     screen arrives; the asleep card and the launcher card outrank it,
-     because each of those states says something truer than "loading". */
+     screen arrives; the asleep card, the launcher card and the covered card
+     outrank it, because each of those states says something truer than
+     "loading" — and a screen behind the shade goes stale by definition,
+     since the panel is what the watcher has been reading. */
   body.stale .hdr-sub .dot::before,
   body.stale .hdr-sub .dot::after { background:hsl(38 92% 50%); }
-  body.stale:not(.asleep):not(.offapp) #screenwrap { display:none; }
-  body.stale:not(.asleep):not(.offapp) #syncing { display:block; }
+  body.stale:not(.asleep):not(.offapp):not(.covered) #screenwrap { display:none; }
+  body.stale:not(.asleep):not(.offapp):not(.covered) #syncing { display:block; }
 
   /* The skeleton: the native loading language — placeholder rows breathing
      where content is about to be, never a spinner over old data. */
@@ -610,6 +612,27 @@
   body.offapp #screenwrap { display:none; }
   body.offapp #offapp { display:flex; }
 
+  /* Something of the system's is over the app — the shade pulled down, the
+     volume dialog, the status bar expanded. Same card, same shape, because it
+     is the same kind of moment: the sketch below describes a screen nobody is
+     being shown, and every tap she makes goes to the panel instead of the app.
+     Hidden outright rather than dimmed for one more reason than the launcher's
+     — the shade is the owner's own notifications, and a sketch of it is not
+     something this page should be drawing at all. */
+  #covered { display:none; flex-direction:column; align-items:center;
+             gap:8px; margin:12px 16px; padding:18px 16px;
+             border-radius:16px; background:var(--card);
+             box-shadow:var(--shadow-card); text-align:center;
+             color:var(--muted); }
+  #covered svg { width:30px; height:30px; opacity:.6; }
+  #covered p { margin:0; font-size:15.5px; color:var(--ink); }
+  #covered p.muted { font-size:13px; color:var(--muted); }
+  #covered .a-btn { margin-top:6px; min-width:170px; }
+  /* Outranks the launcher card: while a panel is up, "which app is behind
+     it" is not the question she needs answered. */
+  body.covered #screenwrap, body.covered #offapp { display:none; }
+  body.covered #covered { display:flex; }
+
   /* The phone-scroll pair lives in the photo view only — the owner's
      spec: the reflow already lists everything in the phone's viewport, so
      arrows there are noise; the photo IS the phone's screen, and moving
@@ -627,7 +650,7 @@
      scroll (`scrollable` in the published document, from the tree's own
      attribute), so the control appears exactly when it has work to do —
      which is the answer to "do we still need these": on a long list, yes. */
-  body.peeking:not(.asleep).scrolls #phone-scroll { display:flex; }
+  body.peeking:not(.asleep):not(.covered).scrolls #phone-scroll { display:flex; }
   #phone-scroll button { width:42px; height:42px; border-radius:50%;
                   border:none; cursor:pointer; color:var(--tint);
                   background:var(--chrome); backdrop-filter:blur(12px);
@@ -891,6 +914,22 @@
       <button type="button" class="a-btn" id="offapp-apps"
               style="flex:none">{{ t('papp.apps') }}</button>
     </div>
+    {# A system panel is over the app — the shade, the volume dialog. The
+       phone is not broken and nothing is lost, but nothing she taps here
+       reaches the app while it is up, and this phone ignores every collapse
+       command there is except a swipe. So: one button, wired to the macro
+       that swipes it away and brings the care app back to the front. The
+       whole point of it being contextual is that a permanent "fix the phone"
+       button teaches her to reach for it, and there is nothing here for it
+       to fix on any ordinary screen. #}
+    <div id="covered">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.6"><rect x="3" y="4" width="18" height="9" rx="2"/><path d="M7 17h10"/><path d="M9 20.5h6"/></svg>
+      <p>{{ t('papp.covered') }}</p>
+      <p class="muted">{{ t('papp.covered_hint') }}</p>
+      <button type="button" class="a-btn" id="covered-clear"
+              style="flex:none">{{ t('papp.covered_action') }}</button>
+    </div>
     <div id="peekwrap"><img id="peek" alt=""></div>
     <div id="peek-cap" hidden></div>
     <div id="busy"><div class="spinner"></div><p id="busy-text"></p></div>
@@ -1025,6 +1064,7 @@
     syncing: {{ t('papp.syncing')|tojson }},
     webTitle: {{ t('papp.web')|tojson }},
     scanning: {{ t('papp.scanning')|tojson }},
+    clearing: {{ t('papp.clearing')|tojson }},
     {# The dot, explained on demand: tap the status and the current colour
        says what it means in a sentence. #}
     explainLive:    {{ t('papp.explain.live')|tojson }},

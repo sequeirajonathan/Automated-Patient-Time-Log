@@ -1643,6 +1643,58 @@ def _rescan(driver, report) -> None:
     _stitch_walk(driver)
 
 
+def _clear_screen(driver, report) -> None:
+    """Get whatever is sitting over the app off the screen.
+
+    The escape hatch for the case that produced it: the notification shade
+    came down over inMyTeam and stayed for twenty minutes, because the
+    command that closes it reports success and does nothing on this phone,
+    and because the watchdog had been told the app was in front. The
+    automatic collapse runs on a cooldown and gives up quietly; this is the
+    same thing with a person behind it, on the page where the person is
+    actually looking.
+
+    Deliberately gentle and deliberately not a restart. Nothing is
+    force-stopped, nothing is committed, no visit is touched — it dismisses
+    the panel and brings the care app back to the front, which is what a
+    person standing over the phone would do with a thumb.
+    """
+    from apt_log import feed as feed_mod
+
+    report("macro.step.clearing")
+    feed_mod.collapse_shade()
+
+    # The shade is the case that produced this, but it is not the only panel
+    # that can sit over the app — the volume dialog is the other one she can
+    # raise by brushing a side button. The swipe above does nothing to that
+    # one, and Back does. Sent only if something is STILL covering the screen,
+    # so this never spends a Back on the app itself.
+    if feed_mod.screen_is_covered(feed_mod.current_focus()):
+        feed_mod._adb(["shell", "input", "keyevent", "KEYCODE_BACK"])
+        time.sleep(0.6)
+
+    package = _last_care_package()
+    if not package:
+        return
+    if _front_package() == package:
+        return
+    report("macro.step.launching")
+    feed_mod._adb(["shell", "monkey", "-p", package,
+                   "-c", "android.intent.category.LAUNCHER", "1"])
+    wait_for(lambda: _front_package() == package, timeout=15.0)
+
+
+def _last_care_package() -> str:
+    """The care app to come back to: the one in front if it is one, else the
+    last one the watchdog saw. Never a guess at a package that is not ours."""
+    from apt_log import feed as feed_mod
+
+    front = _front_package()
+    if front in feed_mod.CARE_APPS:
+        return front
+    return feed_mod.last_care_app()
+
+
 def _phone_settings(driver, report) -> None:
     """Open Android's own Settings.
 
@@ -1701,6 +1753,7 @@ MACROS: dict[str, Macro] = {
         Macro("close_app", "macro.close_app", _close_app),
         Macro("restart_app", "macro.restart_app", _restart_app),
         Macro("rescan", "macro.rescan", _rescan),
+        Macro("clear_screen", "macro.clear_screen", _clear_screen),
         Macro("phone_settings", "macro.phone_settings", _phone_settings),
         Macro("restart_phone", "macro.restart_phone", _restart_phone),
     )
@@ -1714,8 +1767,8 @@ MACROS: dict[str, Macro] = {
 # they run themselves when a session expires; a button that duplicates what
 # already happens automatically is a button whose only use is pressing it at
 # the wrong moment.
-OPERATIONS = ("rescan", "read_page", "restart_app", "close_app",
-              "phone_settings", "restart_phone")
+OPERATIONS = ("rescan", "read_page", "clear_screen", "restart_app",
+              "close_app", "phone_settings", "restart_phone")
 
 # The one that cannot be undone by pressing it again. The page asks first.
 CONFIRM = ("restart_phone",)

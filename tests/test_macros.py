@@ -2550,3 +2550,92 @@ class TestMobileCaregiverExpiredSession:
                                    (neither, None)):
             assert macros.auth_macro_for(
                 "com.tellus.evv.v2", provider) == expected
+
+
+class TestClearScreen:
+    """The hand-operated way out from under a system panel.
+
+    Written because the automatic one could not do the job and there was
+    nothing for a person to press: the shade sat over inMyTeam for twenty
+    minutes, the collapse command reported success every time, and the portal
+    went on rendering the app underneath as though it were in front.
+    """
+
+    def _run(self, focus_seq, front_seq, last_care="com.inmyteam.inmyteam"):
+        from apt_log import feed as feed_mod
+
+        calls = []
+        collapsed = []
+        focus = list(focus_seq)
+        front = list(front_seq)
+
+        def fake_adb(args, serial=None, **kw):
+            calls.append(args)
+            return type("R", (), {"stdout": b"", "returncode": 0})()
+
+        with patch.object(feed_mod, "collapse_shade",
+                          side_effect=lambda *a, **k: collapsed.append(1)), \
+             patch.object(feed_mod, "current_focus",
+                          side_effect=lambda *a, **k: focus.pop(0)
+                          if focus else ""), \
+             patch.object(feed_mod, "_adb", side_effect=fake_adb), \
+             patch.object(feed_mod, "last_care_app", return_value=last_care), \
+             patch.object(macros, "_front_package",
+                          side_effect=lambda *a, **k: front.pop(0)
+                          if len(front) > 1 else (front[0] if front else "")), \
+             patch.object(macros, "wait_for", return_value=True), \
+             patch.object(macros.time, "sleep"):
+            macros._clear_screen(MagicMock(), lambda step: None)
+        return calls, collapsed
+
+    def test_the_shade_is_collapsed_first(self):
+        calls, collapsed = self._run(
+            ["com.inmyteam.inmyteam/.Main"], ["com.inmyteam.inmyteam"])
+        assert collapsed, "the swipe that actually works must be tried"
+
+    def test_a_panel_the_swipe_cannot_reach_gets_a_back(self):
+        """The volume dialog is the other one she can raise by accident, and
+        a shade swipe does nothing to it."""
+        calls, _ = self._run(["VolumeDialog"], ["com.inmyteam.inmyteam"])
+        assert ["shell", "input", "keyevent", "KEYCODE_BACK"] in calls
+
+    def test_back_is_never_spent_on_the_app_itself(self):
+        """A Back into a care app is a navigation she did not ask for — and
+        mid-visit it is a step backwards out of a form."""
+        calls, _ = self._run(["com.inmyteam.inmyteam/.Main"],
+                             ["com.inmyteam.inmyteam"])
+        assert not [c for c in calls if "keyevent" in c]
+
+    def test_the_care_app_is_brought_back(self):
+        calls, _ = self._run(["com.inmyteam.inmyteam/.Main"],
+                             ["com.android.settings"])
+        launches = [c for c in calls if "monkey" in c]
+        assert launches and "com.inmyteam.inmyteam" in launches[0]
+
+    def test_an_app_already_in_front_is_not_relaunched(self):
+        """Gentle is the whole promise: relaunching inMyTeam mid-visit to fix
+        a shade would cost more than the shade did."""
+        calls, _ = self._run(["com.inmyteam.inmyteam/.Main"],
+                             ["com.inmyteam.inmyteam"])
+        assert not [c for c in calls if "monkey" in c]
+
+    def test_nothing_is_force_stopped(self):
+        calls, _ = self._run(["VolumeDialog"], ["com.android.settings"])
+        assert not [c for c in calls if "force-stop" in c]
+        assert not [c for c in calls if "am" in c]
+
+    def test_no_care_app_seen_means_no_guess(self):
+        """Never launch a package the watchdog has not actually watched."""
+        calls, _ = self._run(["com.android.settings/.Settings"],
+                             ["com.android.settings"], last_care="")
+        assert not [c for c in calls if "monkey" in c]
+
+    def test_it_is_offered_as_an_operation(self):
+        assert "clear_screen" in macros.OPERATIONS
+        assert "clear_screen" in macros.MACROS
+
+    def test_it_asks_for_no_confirmation(self):
+        """Restarting the phone does; dismissing a panel does not. A
+        confirmation on the one button that unsticks the screen is a second
+        thing to get past while stuck."""
+        assert "clear_screen" not in macros.CONFIRM
