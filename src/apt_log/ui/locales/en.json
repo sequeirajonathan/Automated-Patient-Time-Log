@@ -166,6 +166,7 @@
   "papp.explain.syncing": "Yellow: the phone's screen is changing — showing the loading page until the fresh screen arrives.",
   "papp.full_status": "Full status page",
   "papp.imt.agency_filter": "Filter by agency",
+  "papp.imt.note": "Visit note",
   "papp.imt.refresh": "Refresh the list",
   "papp.last_seen": "Last on screen before it turned off:",
   "papp.live": "Live",

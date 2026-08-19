@@ -2170,3 +2170,59 @@ class TestCoveredScreen:
         feed.write_screen(target, frame, "unknown", "", "<node/>",
                           focus="com.inmyteam.inmyteam/.Main")
         assert json.loads(target.read_text())["covered"] is False
+
+
+class TestTheVisitNoteIsReadable:
+    """"The additional note is missing text that the phone has."
+
+    It was withheld by the rule that withholds ALL typed text — written for
+    passwords and for the code inMyTeam texts — which here blanked the one
+    field she was trying to read back off her own screen.
+    """
+
+    W, H = 720, 1600
+    NOTE = ('<node class="android.widget.EditText" resource-id=""'
+            ' clickable="true" text="Left the key with the neighbour"'
+            ' bounds="[16,882][704,948]" />')
+
+    def _el(self, xml):
+        return feed.elements(xml, label=True,
+                             package="com.inmyteam.inmyteam",
+                             size=(self.W, self.H))[0]
+
+    def test_the_note_shows_what_she_typed(self):
+        el = self._el(f"<hierarchy>{self.NOTE}</hierarchy>")
+        assert el["txt"] == "Left the key with the neighbour"
+
+    def test_and_is_named_by_the_portal(self):
+        el = self._el(f"<hierarchy>{self.NOTE}</hierarchy>")
+        assert el["name_key"] == "papp.imt.note"
+
+    def test_the_same_box_on_a_code_screen_says_nothing(self):
+        """The credential markers answer first, and they answer for every
+        box on the screen. A code is the one kind of typed text that must
+        never travel, and this rule may not become the hole it goes through."""
+        xml = ("<hierarchy>please enter your code"
+               '<node class="android.widget.EditText" resource-id=""'
+               ' clickable="true" text="246252"'
+               ' bounds="[16,882][704,948]" /></hierarchy>')
+        el = self._el(xml)
+        assert not el.get("txt")
+        assert not el.get("name_key")
+
+    def test_a_single_line_field_is_not_a_note(self):
+        """A code screen carries one unnamed EditText too. Height and full
+        width are what tell them apart."""
+        xml = ('<hierarchy><node class="android.widget.EditText"'
+               ' resource-id="" clickable="true" text="246252"'
+               ' bounds="[220,700][500,740]" /></hierarchy>')
+        el = self._el(xml)
+        assert not el.get("txt")
+
+    def test_another_apps_note_shaped_box_is_not_disclosed(self):
+        """This table names controls for ONE app, by sight. Nothing here
+        generalises to a field it has never seen."""
+        el = feed.elements(f"<hierarchy>{self.NOTE}</hierarchy>", label=True,
+                           package="com.hhaexchange.caregiver",
+                           size=(self.W, self.H))[0]
+        assert not el.get("txt")
