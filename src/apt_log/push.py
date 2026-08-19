@@ -202,10 +202,19 @@ def subscribe(subscription: dict[str, Any], device_id: str = "") -> bool:
     p256dh = ((subscription or {}).get("keys") or {}).get("p256dh")
     if not (endpoint and auth and p256dh):
         return False
+    # Read the key BEFORE taking the lock: keys() takes the same lock, and it
+    # is not reentrant, so doing this inside would hang every subscribe.
+    current = keys().get("public", "")
     with _lock:
         doc = _load()
+        # The server key in force when this browser subscribed. A push is
+        # signed with the CURRENT key, and a push service refuses a signature
+        # from any other one — Apple says 403 BadJwtToken, which names the
+        # symptom and not the cause. Recording it turns that into a fact this
+        # code can check before it wastes a send.
         doc["subs"][endpoint] = {"endpoint": endpoint, "auth": auth,
                                  "p256dh": p256dh, "device": device_id,
+                                 "key": current,
                                  "at": time.time()}
         _save(doc)
     return True
@@ -253,6 +262,15 @@ def send(title: str, body: str, url: str = "/app", tag: str = "aptlog") -> int:
     payload = json.dumps({"title": title, "body": body, "url": url, "tag": tag})
     sent = 0
     for sub in subs:
+        # A subscription made against a different server key can never be
+        # signed for. Dropped here rather than sent and refused, so the log
+        # says what is actually wrong and the browser is free to subscribe
+        # again — which it does by itself, see phone.js.
+        stored_key = sub.get("key")
+        if stored_key and stored_key != pair["public"]:
+            log.info("subscription predates the current key — forgetting it")
+            unsubscribe(sub["endpoint"])
+            continue
         try:
             webpush(
                 subscription_info={

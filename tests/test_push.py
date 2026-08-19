@@ -223,6 +223,44 @@ class TestTheKey:
 
 @needs_push
 class TestSending:
+    def test_a_subscription_from_an_older_key_is_dropped_not_sent(self, store):
+        """Apple answers 403 BadJwtToken for a signature from any key but the
+        one the browser subscribed against — naming the symptom, not the
+        cause. The key in force is recorded at subscribe time so this is a
+        fact the sender can check instead of a send it wastes."""
+        push.subscribe(SUBSCRIPTION)
+        stored = push._load()
+        (only,) = stored["subs"].values()
+        only["key"] = "a-key-from-before"
+        push._save(stored)
+
+        with patch("pywebpush.webpush") as sent:
+            assert push.send("t", "b") == 0
+        assert not sent.called
+        assert push.count() == 0
+
+    def test_a_subscription_from_the_current_key_is_sent(self, store):
+        push.subscribe(SUBSCRIPTION)
+        with patch("pywebpush.webpush"):
+            assert push.send("t", "b") == 1
+
+    def test_subscribing_records_the_key_it_was_made_against(self, store):
+        push.subscribe(SUBSCRIPTION)
+        (stored,) = push.subscriptions()
+        assert stored["key"] == push.public_key()
+
+    def test_subscribing_does_not_deadlock_on_its_own_lock(self, store):
+        """subscribe() holds the lock and needs the key; keys() takes the
+        same lock, and it is not reentrant. Reading the key first is the
+        whole fix, and this is the test that would notice it coming back."""
+        import threading
+
+        done = threading.Event()
+        threading.Thread(
+            target=lambda: (push.subscribe(SUBSCRIPTION), done.set()),
+            daemon=True).start()
+        assert done.wait(5), "subscribe() hung — the lock is not reentrant"
+
     def test_nothing_subscribed_is_not_an_error(self, store):
         assert push.send("t", "b") == 0
 

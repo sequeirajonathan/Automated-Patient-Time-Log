@@ -890,16 +890,61 @@
     button.disabled = state === 'denied';
   }
 
+  function sameBytes(a, b) {
+    if (!a || !b || a.byteLength !== b.byteLength) return false;
+    const x = new Uint8Array(a), y = new Uint8Array(b);
+    for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
+    return true;
+  }
+
+  async function keyMatches(subscription) {
+    const applied = subscription.options
+                  && subscription.options.applicationServerKey;
+    if (!applied) return true;          // nothing to compare — leave it alone
+    const key = await serverKey();
+    if (!key) return true;
+    return sameBytes(applied, base64ToBytes(key).buffer);
+  }
+
+  async function resubscribe(registration) {
+    const key = await serverKey();
+    if (!key) return null;
+    const sub = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: base64ToBytes(key)
+    });
+    await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ subscription: sub.toJSON() })
+    });
+    return sub;
+  }
+
   async function setUpNotify() {
     const button = document.getElementById('notify-toggle');
     if (!button || !pushSupported()) return;
     if (!(await serverKey())) return;      // push not available on this Pi
 
-    let registration = null;
     try {
-      registration = await navigator.serviceWorker.getRegistration('/sw.js');
-      const existing = registration
+      const registration =
+        await navigator.serviceWorker.getRegistration('/sw.js');
+      let existing = registration
         ? await registration.pushManager.getSubscription() : null;
+      // A subscription made against a DIFFERENT server key can never be
+      // signed for — the push service refuses it (Apple: 403 BadJwtToken)
+      // while the toggle still says notifications are on, which is the worst
+      // of both. Compare and re-subscribe silently; permission is already
+      // granted, so this needs no prompt and no press.
+      if (existing && !(await keyMatches(existing))) {
+        try {
+          await existing.unsubscribe();
+          existing = null;
+          if (Notification.permission === 'granted') {
+            existing = await resubscribe(registration);
+          }
+        } catch (e) { existing = null; }
+      }
       paintNotify(Notification.permission === 'denied' ? 'denied'
                   : existing ? 'on' : 'off');
     } catch (e) {
