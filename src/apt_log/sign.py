@@ -877,6 +877,14 @@ def execute(payload: dict, status_path: Path | None = None) -> Status:
 
     status.at = datetime.now().isoformat()
     write_status(status, status_path)
-    log.info("signature replay %s (%s)", status.state,
-             status.reason or status.digest[:8])
+    # The stroke shape goes in the log, textless — counts only, no
+    # coordinates. A signature reported as arriving with a stroke missing
+    # could not be reproduced from generated strokes, and this is the datum
+    # that would settle it: what she drew versus what the replay was handed.
+    shape = "+".join(
+        str(len(st.get("points") if isinstance(st, dict) else st))
+        for st in (strokes or []))
+    log.info("signature replay %s (%s) strokes=%d points=%s",
+             status.state, status.reason or status.digest[:8],
+             len(strokes or []), shape or "-")
     return status
