@@ -44,6 +44,7 @@ from apt_log import macros as macros_mod
 from apt_log import prefs
 from apt_log import video as video_mod
 from apt_log.ui import machine as machine_mod
+from apt_log.ui import screenview as screenview_mod
 from apt_log.ui import state as state_mod
 from apt_log.ui.i18n import SUPPORTED, Translator, normalise
 from apt_log.ui.relay import (
@@ -911,7 +912,7 @@ async def live(ws: WebSocket):
                 payload["screen_html"] = (
                     "" if model is None
                     else templates.get_template("_screen.html").render(
-                        m=model, t=t))
+                        m=screenview_mod.label_keys(model, t), t=t))
 
             # "Live" is a claim, and the page must not keep making it over a
             # document nobody is refreshing. The feed restarting, the resident
