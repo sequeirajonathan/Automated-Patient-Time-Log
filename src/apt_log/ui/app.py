@@ -609,6 +609,36 @@ def _sans_at(doc: dict) -> dict:
     return {k: v for k, v in doc.items() if k != "at"}
 
 
+def _sheet_actions(doc: dict, model: dict | None) -> list[dict]:
+    """The app's own buttons on a signature sheet, as aims.
+
+    Gated on the screen being a MODAL — the reflow found a way out of it, so
+    the app has a sheet in front — and on the row the reflow already
+    recognised as that sheet's actions. Both are needed: Visit Detail has an
+    actions row too, and it is "Check in" and "Note & Check out", which must
+    never be shipped into the signature pad.
+
+    Deliberately NOT gated on `canvas`. That flag comes from a mark in the
+    hierarchy and it flickers: caught live reading False while the signature
+    sheet was plainly open with Done and Clear on it, which would have made
+    the pad's buttons come and go under her hand. A sheet is a sheet whether
+    or not the canvas node happened to be in that dump.
+
+    The captions are the app's own words, because they name the app's
+    buttons and not the portal's.
+    """
+    if not model or not model.get("dismiss"):
+        return []
+    for row in model.get("rows") or ():
+        if not row.get("actions"):
+            continue
+        return [{"txt": (it.get("txt")
+                         or (it.get("lines") or [""])[0] or ""),
+                 "aim": it["aim"]}
+                for it in row["items"] if it.get("aim")]
+    return []
+
+
 def _render_key(doc: dict) -> dict:
     """What the rendered wireframe actually depends on — nothing that churns.
 
@@ -908,6 +938,15 @@ async def live(ws: WebSocket):
                     # reach the app underneath while this is true, so the page
                     # stops pretending otherwise and offers the way out.
                     "covered": bool(screen_doc.get("covered")),
+                    # The signature sheet's OWN buttons — inMyTeam's Done and
+                    # Clear — carried so the pad can show them beside her own
+                    # controls. Without this she draws in the portal, switches
+                    # to the phone view to find the app's save, and switches
+                    # back: "would also like the signature controls embedded
+                    # into the pad instead of switching between phone peek and
+                    # front end". They are ordinary aims and press through the
+                    # ordinary verified tap; nothing here is a new capability.
+                    "sheet_actions": _sheet_actions(screen_doc, model),
                     # The app's own tab bar, lifted out of the list to ride
                     # the control bar beside Back and Home. Empty on screens
                     # without one.

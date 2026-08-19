@@ -308,8 +308,47 @@
     body.classList.toggle('sideways', !!meta.landscape);
     // The app-side Borrar/Salvar only exist while a signature canvas is
     // in front — the buttons press real pixels there and nothing else.
+    // The app's OWN buttons for this sheet, drawn INSIDE the pad so she is
+    // not switching between the phone view and the front end to finish one
+    // signature. Ordinary aims, pressed through the ordinary verified tap.
     const approw = document.getElementById('sign-approw');
-    if (approw) approw.hidden = !meta.canvas;
+    const sheetActions = meta.sheet_actions || [];
+    if (approw) {
+      const slot = document.getElementById('sign-appbtns');
+      const key = JSON.stringify(sheetActions);
+      if (slot && slot.dataset.key !== key) {
+        slot.dataset.key = key;
+        slot.innerHTML = '';
+        for (const a of sheetActions) {
+          const b = document.createElement('button');
+          b.type = 'button';
+          // The pad's own button dress: this row sits inside the pad and
+          // must read as part of it, not as a transplant from the phone view.
+          b.dataset.aim = JSON.stringify(a.aim);
+          b.textContent = a.txt || '·';
+          slot.appendChild(b);
+        }
+        if (sheetActions.length) {
+          // Only an AFFIRMATIVE button leads. The last one led at first, the
+          // way the sheet's own action row does — and on the signature sheet
+          // the last one is Clear, so the pad filled in the destructive
+          // button and left Done looking secondary. A word this does not
+          // recognise simply gets no emphasis, which is the safe direction.
+          for (const b of slot.children) {
+            if (/^(done|save|salvar|guardar|confirm|confirmar|ok|aceptar)$/i
+                .test((b.textContent || '').trim())) {
+              b.classList.add('primary');
+            }
+          }
+          bindAims(slot);
+        }
+      }
+      // Shown when the app has given us real buttons to press, or on the
+      // legacy rotated pages where the pair is pressed by coordinate.
+      approw.hidden = !sheetActions.length && !meta.canvas;
+      const legacy = document.getElementById('sign-legacyrow');
+      if (legacy) legacy.hidden = sheetActions.length > 0;
+    }
     const onLauncher = meta.name === 'launcher';
     // While a macro is working — and for a grace period after it ends —
     // the launcher is not a destination, it is scenery: the sign-in path
@@ -527,7 +566,14 @@
     pad.ctx = c.getContext('2d');
     c.addEventListener('pointerdown', (ev) => {
       ev.preventDefault();
-      c.setPointerCapture(ev.pointerId);
+      // Capture is an OPTIMISATION — it keeps the strokes coming while the
+      // finger wanders off the canvas — and it throws if the browser has
+      // already let go of that pointer id, which happens on a quick lift and
+      // re-touch. Unguarded, the throw aborted the handler before the stroke
+      // below was ever created, and the whole stroke vanished: exactly the
+      // "signature with breaks has issues drawing on the pad" shape, where
+      // the first stroke lands and one of the later ones does not.
+      try { c.setPointerCapture(ev.pointerId); } catch (e) { /* draw anyway */ }
       pad.current = [padPoint(ev, c.getBoundingClientRect())];
       pad.strokes.push(pad.current);
     });
@@ -539,6 +585,45 @@
     const up = () => { pad.current = null; };
     c.addEventListener('pointerup', up);
     c.addEventListener('pointercancel', up);
+  }
+
+  // Swipe a sheet down to close it, the way every sheet on this phone
+  // closes. Without it the only way out of the pad was pressing the pencil
+  // again — "can't scroll down on the signature pad to dismiss have to press
+  // the signature icon again".
+  //
+  // Only from the TOP of the sheet's own scroll, so a sheet with content
+  // below the fold still scrolls normally; and never from the canvas, which
+  // owns every touch that lands on it because those touches are ink.
+  function swipeToDismiss(sheet, close) {
+    if (!sheet) return;
+    let y0 = 0, dy = 0, dragging = false;
+    sheet.addEventListener('touchstart', (ev) => {
+      if (ev.touches.length !== 1) return;
+      if (ev.target.closest('canvas, button, input, textarea')) return;
+      if (sheet.scrollTop > 0) return;
+      y0 = ev.touches[0].clientY;
+      dy = 0;
+      dragging = true;
+    }, { passive: true });
+    sheet.addEventListener('touchmove', (ev) => {
+      if (!dragging) return;
+      dy = ev.touches[0].clientY - y0;
+      if (dy <= 0) { sheet.style.transform = ''; return; }
+      sheet.style.transition = 'none';
+      sheet.style.transform = 'translateY(' + dy + 'px)';
+    }, { passive: true });
+    const end = () => {
+      if (!dragging) return;
+      dragging = false;
+      sheet.style.transition = '';
+      sheet.style.transform = '';
+      // A short drag springs back; a decisive one closes. 90px is about a
+      // thumb's travel and is the same threshold iOS uses by feel.
+      if (dy > 90) close();
+    };
+    sheet.addEventListener('touchend', end);
+    sheet.addEventListener('touchcancel', end);
   }
 
   function padFit() {
@@ -870,6 +955,10 @@
       setInterval(tick, 15000);
     }
     padWire();
+    swipeToDismiss(document.getElementById('signsheet'),
+                   () => body.classList.remove('signing'));
+    swipeToDismiss(document.getElementById('scansheet'),
+                   () => body.classList.remove('reading'));
     window.addEventListener('resize', padFit);
     const scheme = window.matchMedia('(prefers-color-scheme: dark)');
     if (scheme.addEventListener) scheme.addEventListener('change', padRedraw);

@@ -856,8 +856,15 @@
   /* Author display beats UA [hidden] — the OTP bar taught this the hard
      way; the app-side row must actually vanish off the signature moment. */
   .approw[hidden] { display:none; }
-  .approw { align-items:center; border-top:1px solid var(--hairline, #8884);
+  /* Label over buttons. This used to centre its children, which was right
+     for one label beside two buttons and wrong the moment the app's own
+     buttons came inside the pad: each shrank to its own caption and sat in
+     the middle of the row. */
+  .approw { display:flex; flex-direction:column; align-items:stretch;
+            gap:6px; border-top:1px solid var(--hairline, #8884);
             padding-top:12px; }
+  #sign-appbtns:empty { display:none; }
+  #sign-appbtns button { min-height:46px; }
   .approw-label { flex:0 1 auto; font-size:13px; }
   .padrow button { flex:1; padding:12px; border-radius:13px;
                    border:none; background:var(--track);
@@ -1103,10 +1110,21 @@
      runner presses real pixels placed off the canvas it CAN see — and only
      on a live signature moment; the row hides everywhere else. Salvar is
      her tap relayed, never the replay's. #}
-  <div class="padrow approw" id="sign-approw" hidden>
+  <div class="approw" id="sign-approw" hidden>
     <span class="muted approw-label">{{ t('sign.onphone') }}</span>
-    <button type="button" id="app-clear">{{ t('sign.appclear') }}</button>
-    <button type="button" id="app-save" class="primary">{{ t('sign.appsave') }}</button>
+    {# The app's OWN buttons for whatever sheet is in front, filled from the
+       screen payload — inMyTeam names them and the tree gives them bounds,
+       so they press through the ordinary verified tap like any other
+       control. Here rather than in the phone view because finishing one
+       signature should not mean switching between the two. #}
+    <div class="padrow" id="sign-appbtns"></div>
+    {# The legacy pair, for the rotated pages whose tree shows no buttons at
+       all and where the only way is a press at a derived coordinate. Hidden
+       the moment the app gives us something real to aim at. #}
+    <div class="padrow" id="sign-legacyrow">
+      <button type="button" id="app-clear">{{ t('sign.appclear') }}</button>
+      <button type="button" id="app-save" class="primary">{{ t('sign.appsave') }}</button>
+    </div>
   </div>
 </div>
 

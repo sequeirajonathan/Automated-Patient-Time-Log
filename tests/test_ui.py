@@ -1734,3 +1734,123 @@ class TestTheModalExitIsDrawn:
         base = Path(__file__).resolve().parents[1] / "src/apt_log/ui/locales"
         assert json.loads((base / name).read_text(encoding="utf-8")
                           ).get("papp.close_sheet")
+
+
+class TestTheSignaturePadIsSelfContained:
+    """Three field reports about the pad, in one place.
+
+    "Can't scroll down on the signature pad to dismiss."
+    "Would also like the signature controls embedded into the pad instead of
+    switching between phone peek and front end."
+    "Signature with breaks or not linking lines have issues drawing."
+    """
+
+    SCRIPT = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/static/phone.js")
+    PAGE = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/templates/phone.html")
+
+    def _js(self):
+        return strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
+
+    # ------------------------------------------------------------- dismissing
+    def test_a_sheet_can_be_swiped_away(self):
+        js = self._js()
+        assert "swipeToDismiss" in js
+        assert "touchstart" in js and "touchmove" in js
+
+    def test_the_pad_is_one_of_them(self):
+        assert "swipeToDismiss(document.getElementById('signsheet')" in self._js()
+
+    def test_a_swipe_on_the_canvas_is_ink_not_a_dismiss(self):
+        """Every touch that lands on the canvas belongs to the signature."""
+        assert "closest('canvas" in self._js()
+
+    def test_a_sheet_scrolled_down_still_scrolls(self):
+        """Only from the top, or a sheet with content below the fold could
+        never be read."""
+        assert "sheet.scrollTop > 0" in self._js()
+
+    # -------------------------------------------------------- the app's own
+    def test_the_pad_has_a_slot_for_the_apps_buttons(self):
+        assert 'id="sign-appbtns"' in self.PAGE.read_text(encoding="utf-8")
+
+    def test_they_are_filled_from_the_screen_payload(self):
+        assert "meta.sheet_actions" in self._js()
+
+    def test_they_press_through_the_ordinary_verified_tap(self):
+        js = self._js()
+        slot = js[js.index("sheet_actions"):]
+        assert "bindAims(slot)" in slot
+
+    def test_only_an_affirmative_button_leads(self):
+        """The last one led at first, and on this sheet the last one is
+        Clear — the pad filled in the destructive button."""
+        js = self._js()
+        assert "slot.lastChild.classList.add('primary')" not in js
+        assert "done|save|salvar" in js
+
+    def test_the_legacy_coordinate_row_steps_aside(self):
+        assert "sign-legacyrow" in self._js()
+
+    # ------------------------------------------------------------- drawing
+    def test_a_refused_pointer_capture_does_not_eat_the_stroke(self):
+        """Capture throws if the browser has already let go of that pointer
+        id — a quick lift and re-touch — and unguarded it aborted the handler
+        before the stroke was created."""
+        js = self._js()
+        assert "try { c.setPointerCapture" in js
+        idx = js.index("setPointerCapture")
+        assert "catch" in js[idx:idx + 120]
+
+    def test_the_stroke_is_still_recorded_after_the_guard(self):
+        js = self._js()
+        idx = js.index("setPointerCapture")
+        after = js[idx:idx + 300]
+        assert "pad.strokes.push" in after
+
+    def test_visit_details_actions_never_reach_the_pad(self):
+        """That row is "Check in" and "Note & Check out". A sheet is required,
+        not merely an actions row."""
+        from apt_log.ui import screenview
+        from apt_log.ui.app import _sheet_actions
+
+        doc = {"id": "f", "size": [720, 1600], "blocked": "", "notice": "",
+               "canvas": True,
+               "elements": [
+                   {"rid": "", "cls": "View", "b": [172, 1510, 274, 1549],
+                    "txt": "", "checked": False, "focused": False},
+                   {"rid": "", "cls": "View", "b": [446, 1508, 548, 1550],
+                    "txt": "", "checked": False, "focused": False}],
+               "statics": [
+                   {"cls": "TextView", "b": [199, 1522, 247, 1537],
+                    "txt": "Check in"},
+                   {"cls": "TextView", "b": [467, 1515, 528, 1543],
+                    "txt": "Note & Check out"}]}
+        assert _sheet_actions(doc, screenview.build(doc)) == []
+
+    def test_a_flickering_canvas_flag_does_not_hide_them(self):
+        """Caught live: the flag read False while the sheet was plainly open
+        with Done and Clear on it. The buttons would have come and gone."""
+        from apt_log.ui import screenview
+        from apt_log.ui.app import _sheet_actions
+
+        doc = {"id": "f", "size": [720, 1600], "blocked": "", "notice": "",
+               "canvas": False,
+               "elements": [
+                   {"rid": "touch_outside", "cls": "View",
+                    "b": [0, 64, 720, 1561], "txt": "", "checked": False,
+                    "focused": False},
+                   {"rid": "", "cls": "View", "b": [13, 946, 45, 978],
+                    "txt": "", "checked": False, "focused": False},
+                   {"rid": "", "cls": "View", "b": [172, 1514, 274, 1545],
+                    "txt": "", "checked": False, "focused": False},
+                   {"rid": "", "cls": "View", "b": [446, 1514, 548, 1545],
+                    "txt": "", "checked": False, "focused": False}],
+               "statics": [
+                   {"cls": "TextView", "b": [217, 1522, 245, 1537],
+                    "txt": "Done"},
+                   {"cls": "TextView", "b": [489, 1522, 520, 1537],
+                    "txt": "Clear"}]}
+        got = _sheet_actions(doc, screenview.build(doc))
+        assert [a["txt"] for a in got] == ["Done", "Clear"]
