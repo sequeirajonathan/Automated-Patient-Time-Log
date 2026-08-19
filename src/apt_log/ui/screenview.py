@@ -63,6 +63,20 @@ SLIVER_MAX_HEIGHT = 0.02
 # is a curtain — a slide-over's scrim, a drawer edge — not a row.
 CURTAIN_MIN_HEIGHT = 0.55
 
+# A wordless little square in the left margin, level with a line of text that
+# starts just past it, is that line's ICON — the clock beside a visit's hours,
+# the pin beside its address. inMyTeam draws three of them on Visit Detail and
+# gives none of them a caption or a description, so each one rendered as its
+# own full-width button reading "···" with the sentence it belongs to stranded
+# on the line below. Reported as "visit details looks really bad", and it was
+# three grey blocks doing nothing above three homeless sentences.
+#
+# Sized relative to the screen: an icon is small in BOTH directions (a wide
+# short box is a divider, a tall thin one is a rule), it ends before its text
+# begins, and the gap between them is a margin rather than a layout column.
+ICON_MAX_SIDE = 0.10
+ICON_MAX_GAP = 0.10
+
 # Orphaned list dots. The reflow keeps a list's items, not its typography.
 BULLETS = {"•", "·", "◦", "‣", "∙", "*", "-"}
 
@@ -818,6 +832,18 @@ def build(doc: dict) -> dict | None:
         else:
             bands.append([item])
 
+    # An icon in the margin belongs to the line it decorates, not to a row of
+    # its own. See ICON_MAX_SIDE. The icon's own aim survives the fold when
+    # the app made it tappable (the address pin opens maps), so the sentence
+    # becomes the target and the tap still lands where the app put it — the
+    # reflow's standing trade: it moves where a control is DRAWN, never what
+    # pressing it means. A disabled icon is decoration and takes nothing with
+    # it; it is simply not drawn, because the tree says no more about it than
+    # that it is a square, and "···" was the portal inventing a control.
+    for band in bands:
+        _fold_gutter_icons(band, w)
+    bands = [band for band in bands if band]
+
     # A WIDE button with no label sitting beside labelled buttons is a
     # dead tab slot, not a control: the visit detail's tab strip keeps an
     # empty third slot, and rendering it as a full-width '···' button put
@@ -843,9 +869,18 @@ def build(doc: dict) -> dict | None:
     def _is_header(it: dict) -> bool:
         return it["kind"] == "label" and it.get("header")
 
+    # Only the STACKED ones, though. Two headings side by side and never
+    # touching are the app's own columns, not strays that drifted together —
+    # Visit Detail puts the patient on the left and the visit's date on the
+    # right, on one line, and splitting them stacked two section headings with
+    # a heading's margin under each: the pair of enormous voids in the middle
+    # of the page. The stitch's day dividers overlap in x and differ in y,
+    # which is exactly the case this split was written for and the one _tiled
+    # goes on catching.
     split: list[list[dict]] = []
     for band in bands:
-        if len(band) > 1 and all(_is_header(it) for it in band):
+        if (len(band) > 1 and all(_is_header(it) for it in band)
+                and not _tiled(band)):
             for it in sorted(band, key=lambda n: (n["b"][1], n["b"][0])):
                 split.append([it])
         else:
@@ -863,6 +898,38 @@ def build(doc: dict) -> dict | None:
         if len(rows_here) >= 2:
             for it in rows_here:
                 it["info"] = False
+
+    # ...and when exactly one of them is DISABLED, that one is the section
+    # she is already looking at. The app says so itself — inMyTeam disables
+    # "Visits" while the Visits pane is showing and enables "Plan of care" —
+    # and rendering the disabled half as a greyed-out cell said "unavailable"
+    # about the very thing on screen. As a segmented control it says "you are
+    # here", which is what the app meant and what the owner asked for.
+    #
+    # Reuses the segment the care plan's ✓/✗ pairs already draw, so this is a
+    # new READING of the tree rather than a new widget.
+    for band in bands:
+        rows_here = [it for it in band if it["kind"] == "row"]
+        if len(rows_here) != len(band) or len(rows_here) < 2:
+            continue
+        if not _tiled(rows_here):
+            continue
+        if not all(it.get("lines") or it.get("txt") for it in rows_here):
+            continue
+        off = [it for it in rows_here if not it["enabled"]]
+        if len(off) != 1:
+            continue
+        ordered = sorted(rows_here, key=lambda n: n["b"][0])
+        for it in ordered:
+            it["checked"] = it is off[0]
+            # A segment part shows one caption. The row's folded line IS that
+            # caption; the part renders `txt`, so move it across.
+            if not it.get("txt") and it.get("lines"):
+                it["txt"] = it["lines"][0]
+        band[:] = [{"kind": "segment",
+                    "b": [ordered[0]["b"][0], ordered[0]["b"][1],
+                          ordered[-1]["b"][2], ordered[-1]["b"][3]],
+                    "parts": ordered}]
 
     # --------------------------------------------------------------- segments
     for band in bands:
@@ -1084,6 +1151,66 @@ def _app_tabs(elements: list[dict], statics: list[dict],
     return [], set()
 
 
+def _fold_gutter_icons(band: list[dict], width: int) -> None:
+    """Fold margin icons into the line they decorate, in place.
+
+    Conservative in the direction that costs least: a miss leaves the "···"
+    block that was there before, while a false positive would silently eat a
+    real control. So the icon must be small in both directions, must END
+    before its text starts, must sit within a margin's distance of it, and
+    must share the line — and the text must be a plain label with no aim of
+    its own, or there would be two controls competing for one row.
+    """
+    icons = [n for n in band
+             if n["kind"] in ("button", "image")
+             and not (n.get("txt") or "").strip()
+             and not n.get("txt_key")
+             and not n.get("lines")
+             and (n["b"][2] - n["b"][0]) <= width * ICON_MAX_SIDE
+             and (n["b"][3] - n["b"][1]) <= width * ICON_MAX_SIDE]
+    if not icons:
+        return
+    folded: list[dict] = []
+    for icon in icons:
+        mate = next(
+            (t for t in band
+             if t is not icon and t["kind"] == "label"
+             and (t.get("txt") or "").strip()
+             and not t.get("aim")
+             and 0 <= t["b"][0] - icon["b"][2] <= width * ICON_MAX_GAP
+             and _overlap(t["b"], icon["b"]) >= 0.5), None)
+        if mate is None:
+            continue
+        folded.append(icon)
+        # A tappable icon hands its aim to the sentence; a disabled one hands
+        # over nothing, which is the whole of what the tree knows about it.
+        if icon.get("aim") and icon["enabled"]:
+            mate["kind"] = "row"
+            mate["lines"] = [mate["txt"]]
+            mate["txt"] = ""
+            mate["aim"] = icon["aim"]
+            mate["marks"] = []
+            mate["badge"] = ""
+            mate["cta"] = False
+            mate["info"] = False
+            mate["small"] = False
+    if folded:
+        band[:] = [n for n in band if n not in folded]
+
+
+def _tiled(band: list[dict]) -> bool:
+    """Whether these items sit side by side rather than stacked.
+
+    Two boxes that share a line and never overlap horizontally are the app's
+    own columns; two that overlap horizontally are strays that drifted onto
+    one line. The difference decides whether a band is a layout or an
+    accident, and both callers below turn on it.
+    """
+    ordered = sorted(band, key=lambda n: n["b"][0])
+    return all(ordered[i]["b"][2] <= ordered[i + 1]["b"][0]
+               for i in range(len(ordered) - 1))
+
+
 def _band_shape(band: list[dict], height: int) -> dict:
     """Row-level shapes learned from the flight recorder's first session.
 
@@ -1111,6 +1238,23 @@ def _band_shape(band: list[dict], height: int) -> dict:
                      and i["aim"]["b"][3] >= height * TAB_REACH)
                     for i in interactive)):
         return {"tabs": True}
+    # TWO captioned controls hugging the bottom edge are the page's actions,
+    # not a tab bar and not two more list cells. On Visit Detail they are
+    # "Check in" and "Note & Check out" — the only things on the page that
+    # change a record — and they rendered as a pair of narrow grey rows with
+    # chevrons, indistinguishable from the navigation above them. Drawn as
+    # what they are: side by side, full width, the second one filled.
+    #
+    # They are no easier to hit by accident than before — the aim is
+    # unchanged and still verified against the published frame. They are
+    # merely no longer disguised as somewhere to browse.
+    if (len(interactive) == 2 and len(band) == 2
+            and all(i["kind"] == "row" and (i.get("txt") or i.get("lines"))
+                    for i in interactive)
+            and _tiled(interactive)
+            and all(i["aim"]["b"][3] >= height * TAB_REACH
+                    for i in interactive)):
+        return {"actions": True}
     return {}
 
 

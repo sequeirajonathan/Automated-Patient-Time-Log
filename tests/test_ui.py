@@ -1553,3 +1553,42 @@ class TestTheCoveredCard:
         for name in ("en.json", "es.json"):
             words = json.loads((base / name).read_text(encoding="utf-8"))
             assert words.get(key), f"{name} is missing {key}"
+
+
+class TestVisitDetailDress:
+    """How the scrubbed Visit Detail is drawn — the half of the fix that
+    lives in the template rather than in the reflow."""
+
+    FRAGMENT = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/templates/_screen.html")
+
+    def test_the_actions_row_has_its_own_shape(self):
+        markup = self.FRAGMENT.read_text(encoding="utf-8")
+        assert "row.actions" in markup
+        assert "a-actbtn" in markup
+
+    def test_the_last_action_leads(self, client):
+        """An app's primary action is filled. Here that is Note & Check out,
+        the one that closes the visit."""
+        markup = self.FRAGMENT.read_text(encoding="utf-8")
+        assert "loop.last" in markup
+        assert ".a-actbtn.primary" in client.get("/app").text
+
+    def test_the_current_segment_is_not_dressed_as_unavailable(self, client):
+        """It is disabled because she is already there. The greyed-out dress
+        said the section on screen was broken."""
+        import re
+
+        css = re.sub(r"/\*.*?\*/", "", client.get("/app").text, flags=re.S)
+        rule = re.search(r"\.a-segbtn:disabled \{[^}]*\}", css)
+        assert rule and "opacity:1" in rule.group(0)
+
+    def test_the_current_segment_says_so_to_a_screen_reader(self):
+        markup = self.FRAGMENT.read_text(encoding="utf-8")
+        assert 'aria-current="page"' in markup
+
+    def test_a_section_switch_spans_its_row(self, client):
+        """The segment was written for the care plan's tick pair, which hugs
+        the right edge of a list cell. As a whole row it fills it."""
+        css = client.get("/app").text
+        assert ".a-seg:only-child" in css

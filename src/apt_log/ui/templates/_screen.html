@@ -44,13 +44,29 @@
         >{{ it.txt or (it.lines[0] if it.lines else '·') }}</button>
       {% endfor %}
     </div>
+    {% elif row.actions %}
+    {# The page's own actions, side by side and full width. On Visit Detail
+       these are Check in and Note & Check out — the only controls here that
+       change a record — and as chevroned list cells they looked exactly like
+       the navigation above them. The last one leads, the way an app's
+       primary action does. #}
+    <div class="a-row a-actions">
+      {% for it in row['items'] %}
+      <button type="button" class="a-actbtn{% if loop.last %} primary{% endif %}"
+              data-aim='{{ it.aim | tojson }}'
+        >{{ it.txt or (it.lines[0] if it.lines else '·') }}</button>
+      {% endfor %}
+    </div>
     {% else %}
     <div class="a-row n{{ row['items'] | length }}{% if row.keys %} a-keys{% endif %}">
     {% for it in row['items'] %}
       {% if it.kind == 'segment' %}
+        {# A part the app marked DISABLED is the section already showing —
+           "you are here", not "unavailable". It carries no aim to press. #}
         <span class="a-seg">
         {% for part in it.parts %}
           <button type="button" class="a-segbtn{% if part.checked %} on{% endif %}"
+                  {% if part.checked %}aria-current="page" disabled{% endif %}
                   data-aim='{{ part.aim | tojson }}'>{{ part.txt or '·' }}</button>
         {% endfor %}
         </span>

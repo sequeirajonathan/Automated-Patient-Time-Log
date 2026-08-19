@@ -508,6 +508,32 @@
               transform:scale(.94); transition-duration:.05s; }
   .a-segbtn.on { background:var(--card); color:var(--tint); font-weight:600;
                  box-shadow:0 1px 4px rgb(0 0 0 / .12); }
+  /* The chosen part is "you are here", so it is disabled — but it must not
+     wear the greyed-out dress that says "unavailable". That confusion is the
+     bug: inMyTeam disables the tab you are on, and the page dimmed the one
+     section actually showing. It reads as raised and tinted, exactly as a
+     chosen segment should. */
+  .a-segbtn:disabled { opacity:1; cursor:default; }
+  .a-segbtn:disabled:active { transform:none; background:var(--card); }
+  /* A segment that IS the row — a section switch rather than a pair of marks
+     riding at the end of a list cell — spans the row instead of hugging the
+     right edge. */
+  .a-row:has(> .a-seg:only-child) { padding:5px; }
+  .a-seg:only-child { margin-left:0; flex:1; }
+  .a-seg:only-child .a-segbtn { flex:1; }
+
+  /* The page's own actions. Side by side, full width, the last one filled —
+     an app's primary action, not one more row to browse. */
+  .a-row.a-actions { gap:10px; padding:10px 12px; background:none;
+                     box-shadow:none; border:none; }
+  .a-actbtn { flex:1; border:none; border-radius:12px; cursor:pointer;
+              min-height:48px; padding:12px 14px; font-size:15.5px;
+              font-weight:600; background:var(--card); color:var(--tint);
+              box-shadow:var(--shadow-card);
+              transition:transform .2s var(--spring), filter .2s ease; }
+  .a-actbtn.primary { background:var(--tint); color:#fff; }
+  .a-actbtn:active { transform:scale(.97); filter:brightness(.93);
+                     transition-duration:.05s; }
 
   .a-switch:active .knob { transform:scale(1.08); }
   .a-switch { flex:none; margin-left:auto; width:51px; height:31px;
