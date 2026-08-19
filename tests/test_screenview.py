@@ -1401,3 +1401,117 @@ class TestVisitDetailScrub:
 
     def test_the_title_is_the_pages_own(self):
         assert self._model()["nav"]["title"] == "Visit Detail"
+
+
+class TestPlanOfCareScrub:
+    """inMyTeam's check-out page, from the live tree at 720x1600.
+
+    Reported as a mess. Four separate faults, all of them the reflow reading
+    a two-column form as though it were a list.
+    """
+
+    def _tasks(self, n=3):
+        els, sts = [], []
+        names = ["Ambulation Assist", "Assist With dressing", "Bath-Chair Bath"]
+        for i in range(n):
+            top = 307 + i * 42
+            els.append(el("", "CheckBox", [24, top, 56, top + 32]))
+            els.append(el("", "CheckBox", [591, top + 17, 623, top + 49]))
+            sts.append(st([16, top + 9, 24, top + 25], "*"))
+            sts.append(st([61, top + 8, 164, top + 24], names[i]))
+            sts.append(st([628, top + 25, 704, top + 41], "Patient refused"))
+        return els, sts
+
+    def _model(self, extra_sts=()):
+        els, sts = self._tasks()
+        sts = [st([19, 288, 153, 308], "Personal Care (1 H)")] + sts
+        return screenview.build(doc(els, sts + list(extra_sts)))
+
+    def test_a_task_is_one_row_not_two(self):
+        """The task's own tick sits on one baseline and its "Patient refused"
+        seventeen pixels lower, so banding split every task in half: thirteen
+        tasks became twenty-six rows to scroll."""
+        rows = [r for r in self._model()["rows"]
+                if any(i["kind"] == "toggle" for i in r["items"])]
+        assert len(rows) == 3
+        for row in rows:
+            kinds = [i["kind"] for i in row["items"]]
+            assert kinds.count("toggle") == 2, "both choices belong together"
+
+    def test_each_tick_keeps_its_own_caption(self):
+        row = next(r for r in self._model()["rows"]
+                   if any(i["kind"] == "toggle" for i in r["items"]))
+        words = [i.get("txt") for i in row["items"] if i["kind"] == "label"]
+        assert words == ["Ambulation Assist", "Patient refused"]
+
+    def test_the_section_header_does_not_eat_the_first_task(self):
+        """"Personal Care (1 H)" at x=19 swallowed "Ambulation Assist" at
+        x=61 as its value — 42px of indent squeaking under a 43px allowance.
+        The task's name vanished and its tick was left captioned by nothing."""
+        flat = [i for r in self._model()["rows"] for i in r["items"]]
+        assert any((i.get("txt") or "") == "Personal Care (1 H)"
+                   and i["kind"] == "label" for i in flat)
+        assert any("Ambulation Assist" in (i.get("txt") or "") for i in flat)
+        assert not [i for i in flat if i["kind"] == "kv"]
+
+    def test_a_real_caption_and_value_still_pair(self):
+        """The rule this tightened exists for the patient detail, where a
+        caption and its value share a left edge to the pixel."""
+        m = screenview.build(doc([], [
+            st([40, 300, 300, 320], "Admission ID"),
+            st([40, 322, 300, 342], "XOR-900196"),
+        ]))
+        flat = [i for r in m["rows"] for i in r["items"]]
+        assert any(i["kind"] == "kv" for i in flat)
+
+    def test_a_signature_box_takes_the_caption_above_it(self):
+        """Two tall empty boxes with chevrons, one above the other, where the
+        two things she has to collect should be."""
+        m = screenview.build(doc(
+            elements=[el("", "View", [16, 1023, 704, 1121]),
+                      el("", "View", [16, 1148, 704, 1246])],
+            statics=[st([27, 1007, 125, 1023], "Patient Signature"),
+                     st([27, 1132, 112, 1148], "Staff Signature")],
+        ))
+        named = [i.get("lines") for r in m["rows"] for i in r["items"]
+                 if i["kind"] == "row"]
+        assert ["Patient Signature"] in named
+        assert ["Staff Signature"] in named
+
+    def test_a_row_that_already_speaks_is_never_renamed(self):
+        """Only a control with NOTHING to say adopts a caption, or a day
+        divider would rename the visit card beneath it."""
+        m = screenview.build(doc(
+            elements=[el("card", "View", [16, 320, 704, 420])],
+            statics=[st([20, 296, 300, 314], "WEDNESDAY, AUGUST 19"),
+                     st([30, 340, 400, 360], "05:00 AM")],
+        ))
+        card = next(i for r in m["rows"] for i in r["items"]
+                    if i["kind"] == "row")
+        assert card["lines"] == ["05:00 AM"]
+
+    def test_two_headings_on_a_line_are_a_heading_line(self):
+        """Every heading rule was written with :only-child, so the moment the
+        patient and the date shared a band they landed in a card together at
+        body size — blocky, too much space, a grey block."""
+        m = screenview.build(doc([], [
+            st([19, 261, 454, 277], "Patient Name"),
+            st([467, 261, 701, 277], "2026-8-19"),
+        ]))
+        assert m["rows"][0].get("heads") is True
+
+    def test_a_lone_heading_is_not_a_heading_line(self):
+        """It already had its own treatment and keeps it."""
+        m = screenview.build(doc([], [st([19, 261, 454, 277], "Just One")]))
+        assert not m["rows"][0].get("heads")
+
+    def test_a_vertical_list_is_never_merged_into_one_row(self):
+        """The merge is safe only because a list's rows share horizontal
+        space. Full-width cells stacked down the page must stay stacked."""
+        m = screenview.build(doc(
+            elements=[el(f"r{i}", "View", [16, 300 + i * 40, 704,
+                                           336 + i * 40]) for i in range(4)],
+            statics=[st([30, 308 + i * 40, 300, 328 + i * 40], f"Row {i}")
+                     for i in range(4)],
+        ))
+        assert len(m["rows"]) == 4

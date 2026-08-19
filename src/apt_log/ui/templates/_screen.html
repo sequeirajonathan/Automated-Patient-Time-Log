@@ -58,7 +58,7 @@
       {% endfor %}
     </div>
     {% else %}
-    <div class="a-row n{{ row['items'] | length }}{% if row.keys %} a-keys{% endif %}">
+    <div class="a-row n{{ row['items'] | length }}{% if row.keys %} a-keys{% endif %}{% if row.heads %} a-heads{% endif %}">
     {% for it in row['items'] %}
       {% if it.kind == 'segment' %}
         {# A part the app marked DISABLED is the section already showing —
