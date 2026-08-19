@@ -1204,7 +1204,13 @@ class TestTheCodeIsAnnounced:
         assert len(sent) == 1
         message, url = sent[0]
         assert "code" in message.lower()
-        assert url.endswith("/app")          # tappable, straight to the field
+        # Tappable, and landing on the screen the code is for. This line read
+        # `endswith("/app")` while its own comment said "straight to the
+        # field", and the comment was the part that was wrong: /app is the app
+        # picker. Reported from the field as the notification opening the page
+        # with all the tiles on it.
+        assert url.endswith(macros.CODE_DEEP_LINK)
+        assert "view=screen" in url
 
     def test_the_link_is_a_name_a_phone_can_actually_open(self):
         """It was a bare host first, and `tailscale serve` holds a

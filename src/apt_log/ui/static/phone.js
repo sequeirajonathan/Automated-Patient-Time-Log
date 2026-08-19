@@ -166,7 +166,18 @@
     body.classList.add('typing');
     const box = document.getElementById('typebox');
     box.value = '';
-    setTimeout(() => box.focus(), 50);
+    // FOCUS SYNCHRONOUSLY, INSIDE THE TAP THAT OPENED THIS. iOS raises the
+    // keyboard only for a focus() that happens while a user gesture is still
+    // on the stack; from a setTimeout — where this used to be — the field
+    // takes focus and draws its ring and NO KEYBOARD APPEARS. Reported from
+    // the field as the bar rendering "grayed out": it looked active, it was
+    // active, and there was no way to put a character in it. Reading the
+    // layout first so the element is displayed before it is focused.
+    void bar.offsetHeight;
+    box.focus();
+    // Belt and braces for anything that refuses a focus mid-gesture; harmless
+    // where the line above already worked.
+    setTimeout(() => { if (document.activeElement !== box) box.focus(); }, 50);
   }
   function closeTypeBar() {
     typeAim = null;
@@ -686,10 +697,24 @@
 
   // -------------------------------------------------------------------- wire
   document.addEventListener('DOMContentLoaded', () => {
-    // Back where she was, if a reload interrupted her mid-screen.
+    // Where to open. `?view=screen` wins, because that is a caller ASKING for
+    // the phone view rather than a browser remembering one — it is how the
+    // code notification deep-links, and a notification that lands on the app
+    // picker has failed at the one job it has. sessionStorage is the fallback
+    // for a reload that interrupted her mid-screen; a window opened from a
+    // notification is a fresh session and has none, which is exactly why the
+    // notice used to arrive at the front page.
+    let asked = '';
     try {
-      if (sessionStorage.getItem('aptlog-view') === 'screen') view('screen');
-    } catch (e) { /* private mode */ }
+      asked = new URLSearchParams(location.search).get('view') || '';
+    } catch (e) { /* no URL API */ }
+    try {
+      if (asked === 'screen' || sessionStorage.getItem('aptlog-view') === 'screen') {
+        view('screen');
+      }
+    } catch (e) {
+      if (asked === 'screen') view('screen');
+    }
 
     const tsend = document.getElementById('typesend');
     const tcancel = document.getElementById('typecancel');

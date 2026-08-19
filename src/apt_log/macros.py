@@ -1440,6 +1440,14 @@ def _inmyteam_login(driver, report) -> None:
     _say_the_code_is_waiting()
 
 
+# The portal opens on its app picker, and a notification that lands there has
+# failed at the one job it has: the phone is holding a code screen open and the
+# tap has to arrive AT IT. The view is asked for in the URL because the front
+# end otherwise restores it from sessionStorage, and a window a notification
+# opened is a fresh session with none — which is exactly how the first version
+# came out on the picker, reported from the field that way.
+CODE_DEEP_LINK = "/app?view=screen"
+
 # Where the notification sends her. The tailnet name rather than an address:
 # addresses change, and this string ends up on a lock screen where a wrong
 # one is a dead end nobody can debug from.
@@ -1453,7 +1461,8 @@ def _inmyteam_login(driver, report) -> None:
 def _portal_url() -> str:
     from apt_log import push
 
-    return os.environ.get("APTLOG_PORTAL_URL", f"{push.PORTAL_ORIGIN}/app")
+    return os.environ.get("APTLOG_PORTAL_URL",
+                          f"{push.PORTAL_ORIGIN}{CODE_DEEP_LINK}")
 
 
 PORTAL_URL = _portal_url()
@@ -1471,7 +1480,9 @@ def _say_the_code_is_waiting() -> None:
     """Tell her the code is waiting, by both roads that exist.
 
     Web Push first and above all: it comes from the portal, so tapping it
-    opens the portal — the app she installed, already at the field. A relay's
+    opens the portal — the app she installed, at the phone view the code
+    screen is showing on rather than at the app picker (CODE_DEEP_LINK; the
+    first version landed on the picker and was reported that way). A relay's
     notification can only open Safari at a URL, which is the wrong app on the
     one notice whose entire job is to be tapped.
 
@@ -1484,7 +1495,8 @@ def _say_the_code_is_waiting() -> None:
     try:
         from apt_log import push
 
-        pushed = push.send(PUSH_TITLE, CODE_WAITING, url="/app", tag="otp")
+        pushed = push.send(PUSH_TITLE, CODE_WAITING, url=CODE_DEEP_LINK,
+                           tag="otp")
     except Exception as exc:  # noqa: BLE001
         log.warning("could not push the code notice (%s)", exc)
 

@@ -11,7 +11,14 @@
  * cannot do for itself. A notification from a third-party relay opens that
  * relay's idea of a browser — Safari, at a URL — and she is left looking at
  * the wrong app. A notification from the portal, through this, opens the
- * portal she installed on her home screen, already at the field.
+ * portal she installed on her home screen.
+ *
+ * The URL it opens carries the view (`/app?view=screen`), and that is not
+ * decoration. The portal boots on its app picker and restores the phone view
+ * only from sessionStorage — which a window opened by a notification does not
+ * have. So the notice that exists to say "come and type this" arrived at the
+ * front page, with the code screen one tap away and nothing saying so. This
+ * file was already claiming it opened "already at the field" at the time.
  *
  * Served from the site root (see the /sw.js route) rather than /static/,
  * because a worker's scope is its own directory: registered under /static/

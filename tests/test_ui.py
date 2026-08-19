@@ -21,6 +21,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
+from conftest import strip_js_comments
 from apt_log.ui.app import LANGUAGE_COOKIE, _mirror_payload, app, queue
 from apt_log.ui.i18n import Translator
 from apt_log.ui import mirror as mirror_mod
@@ -847,6 +848,31 @@ class TestTheCodeBarClearsThePhonesControls:
         source = self.SCRIPT.read_text(encoding="utf-8")
         assert "classList.add('typing')" in source
         assert "classList.remove('typing')" in source
+
+    def test_the_field_is_focused_inside_the_tap_that_opened_it(self):
+        """Reported from the field: the bar rendered and could not be typed
+        into — read, reasonably, as "greyed out".
+
+        iOS raises the keyboard only for a `focus()` that runs while a user
+        gesture is still on the stack. The call sat in a `setTimeout`, so the
+        field took focus and drew its ring and no keyboard ever came up: a bar
+        that looks live, is live, and cannot accept a character. The fix is
+        one synchronous statement, and this is the guard that it stays one —
+        a focus reachable only from a callback would pass a substring check
+        while failing on the phone.
+        """
+        import re
+
+        source = strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
+        body = source.split("function openTypeBar", 1)[1].split("\n  }", 1)[0]
+        statements = [line.strip() for line in body.splitlines()]
+        assert "box.focus();" in statements, (
+            "openTypeBar must focus the box as a plain statement, not only "
+            "from inside a callback")
+
+    def test_the_old_deferred_focus_is_gone(self):
+        source = strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
+        assert "setTimeout(() => box.focus(), 50)" not in source
 
 
 class TestPhoneBoundaries:

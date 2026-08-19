@@ -20,6 +20,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
+from conftest import strip_js_comments
 from apt_log import push
 from apt_log.ui.app import app
 
@@ -37,18 +38,6 @@ except ImportError:
 
 needs_push = pytest.mark.skipif(not HAVE_PUSH, reason="pywebpush not installed")
 
-
-def strip_js_comments(source: str) -> str:
-    """Code without its prose.
-
-    A guard that cannot tell the two apart forbids describing the bug it
-    exists to prevent — this project has now been bitten by that three times
-    (form.action, the type bar's constant, and the word "caches" in the very
-    comment explaining that nothing is cached).
-    """
-    import re
-
-    return re.sub(r"/\*.*?\*/|//[^\n]*", "", source, flags=re.S)
 
 SUBSCRIPTION = {
     "endpoint": "https://web.push.apple.com/abc123",
@@ -390,7 +379,32 @@ class TestTheCodeNoticeGoesBothWays:
         with patch("apt_log.push.send", return_value=1) as pushed, \
              patch("apt_log.notify.send"):
             macros._say_the_code_is_waiting()
-        assert pushed.call_args.kwargs["url"] == "/app"
+        assert pushed.call_args.kwargs["url"].startswith("/app")
+
+    def test_the_push_opens_the_phone_view_not_the_app_picker(self, store):
+        """Reported from the field: the notice arrived and opened the front
+        page with all the tiles on it, not the screen holding the code box.
+
+        This assertion used to read `== "/app"`, which is the picker. The
+        portal restores the phone view from sessionStorage, and a window a
+        notification opened is a fresh session with none — so the one notice
+        whose whole job is "come here and type this" landed a tap away from
+        where it meant.
+        """
+        from apt_log import macros
+
+        with patch("apt_log.push.send", return_value=1) as pushed, \
+             patch("apt_log.notify.send"):
+            macros._say_the_code_is_waiting()
+        assert "view=screen" in pushed.call_args.kwargs["url"]
+
+    def test_the_relay_link_goes_to_the_same_place(self, store):
+        """The relay cannot open the installed app, but it can at least land
+        on the right page of the web one. Two channels pointing at two
+        different places is how somebody learns to distrust both."""
+        from apt_log import macros
+
+        assert macros.PORTAL_URL.endswith(macros.CODE_DEEP_LINK)
 
     def test_a_failing_push_does_not_stop_the_relay(self, store):
         from apt_log import macros
