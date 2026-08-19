@@ -247,6 +247,26 @@ def find_canvas(xml: str, dump: bool = True) -> tuple[list[int] | None, str]:
                 and outer[0] <= inner[0] and outer[1] <= inner[1]
                 and outer[2] >= inner[2] and outer[3] >= inner[3])
 
+    def _distinct(boxes):
+        seen, out = set(), []
+        for b in boxes:
+            key = tuple(b)
+            if key not in seen:
+                seen.add(key)
+                out.append(b)
+        return out
+
+    # TWO NAMES FOR ONE RECTANGLE ARE NOT TWO CANVASES. The live refusal on a
+    # real clock-out was `layout_tab_content_signature_skip` and
+    # `layout_tab_content_signature` at IDENTICAL bounds [0,120,720,1532]: the
+    # de-nesting rule below asks whether one candidate wraps another, and on
+    # equal rectangles each wraps the other, so BOTH were dropped and the
+    # finder reported `no_canvas`. Downstream that is the toast reading "This
+    # screen has no signature box" over a screen plainly showing one, a Save
+    # that could never fire, and a caregiver pressing the app's own button by
+    # hand at 10pm. De-duplicate first, keeping document order.
+    if len(named) > 1:
+        named = _distinct(named)
     if len(named) > 1:
         named = [b for b in named
                  if not any(_wraps(b, other) for other in named)]
@@ -265,6 +285,20 @@ def find_canvas(xml: str, dump: bool = True) -> tuple[list[int] | None, str]:
 
 
 DEBUG_PATH = STATE_DIR / "sign-debug.json"
+
+
+def _nodes_of(xml: str) -> list:
+    """(raw, bounds) for every node with a real rectangle — what the refusal
+    dump wants, without making its caller rebuild the finder's own loop."""
+    out = []
+    for raw in _NODE.findall(xml or ""):
+        m = _BOUNDS.search(_attr(raw, "bounds"))
+        if not m:
+            continue
+        b = [int(g) for g in m.groups()]
+        if b[2] > b[0] and b[3] > b[1]:
+            out.append((raw, b))
+    return out
 
 
 def _dump_refusal(nodes, reason: str) -> None:
@@ -373,6 +407,24 @@ def sideways(xml: str, package: str = "") -> bool:
         return True
     if package not in ROTATED_CANVAS_APPS:
         return False
+    # A DRAWING SURFACE, or the pad's own captioned save. Either is evidence;
+    # the tab WRAPPER alone is not.
+    #
+    # `layout_tab_content_signature` sits on this app's visit page whether or
+    # not the pad is showing. Until now the finder happened to reject that page
+    # anyway — the two identical wrappers annihilated each other — so the
+    # wrapper never got the chance to be mistaken for a moment. Fixing that
+    # annihilation takes the accidental protection away, and without something
+    # in its place the peek would turn sideways over an ordinary visit page and
+    # offer a Save with nothing to save.
+    #
+    # A real canvas (`gestureSignature`, `gesturePatientSignature` — seen on
+    # the first field signature) is a drawing surface and settles it by itself.
+    # Where the app publishes only wrappers, as it did on the screen that
+    # failed tonight, the captioned Salvar is what appears and disappears with
+    # the pad.
+    if not (_has_drawing_surface(xml) or _app_buttons(xml).get("confirm")):
+        return False
     max_x, max_y = _extent(xml)
     if not max_x or max_x >= max_y:
         return False
@@ -455,24 +507,108 @@ _BUTTON_CONFIRM_LIFT = 22
 _MIN_STRIP = 12
 
 
+# What the app calls its own save and clear.
+#
+# THE CAPTION IS THE SIGNAL, AND THE RESOURCE-ID IS NOT. Both screens of this
+# activity publish a `button_save`, and they are not the same button:
+#
+#   signature tab        btn_left='Anular'   button_save='Salvar'   ← the save
+#   plain visit detail   btn_left='Atrás'    button_save=''         ← the ✎ icon
+#
+# Same id, no caption, a different job, sitting on a real visit record. A rule
+# that trusted the id would have pressed the pencil, so the caption is
+# required and the id is only corroboration. A captioned button that this
+# misses costs a refusal, which is now recorded; a wrong press costs a record.
+#
+# ANULAR IS NEITHER of these — it is cancel, it throws the signature away, and
+# a rule loose enough to catch it would eventually press it.
+_SAVE_IDS = ("button_save", "btn_save", "save_button")
+_CLEAR_IDS = ("button_clear", "btn_clear", "clear_button", "button_erase")
+_SAVE_WORDS = ("salvar", "save", "guardar")
+_CLEAR_WORDS = ("borrar", "clear", "limpiar")
+
+
+# Ids that name a LAYOUT holding the pad rather than the pad itself. A
+# wrapper is present whether or not the thing it wraps is showing.
+_WRAPPER_ID_MARKS = ("layout_", "tab_content", "_skip")
+
+
+def _has_drawing_surface(xml: str) -> bool:
+    """Whether a canvas-named node is a surface rather than a container."""
+    for raw in _NODE.findall(xml or ""):
+        rid = _attr(raw, "resource-id").split("/")[-1].lower()
+        if not rid or not any(h in rid for h in CANVAS_ID_HINTS):
+            continue
+        if not any(mark in rid for mark in _WRAPPER_ID_MARKS):
+            return True
+    return False
+
+
+def _app_buttons(xml: str) -> dict:
+    """The app's own save/clear as REAL elements, by their centre.
+
+    Read off the live signature screen, the legacy app publishes these
+    perfectly well:
+
+        Button  btn_left     'Anular'  clickable  [10,75][100,109]
+        Button  button_save  'Salvar'  clickable  [624,75][714,109]
+
+    which means the save this whole path exists to press was never a pixel
+    that had to be guessed at. Pressing the element is better than pressing
+    an offset from the canvas in every way that matters: it survives a
+    density change (the caregiver had to change the density by hand to reach
+    the button one night), it survives a redesign that moves the strip, and
+    it cannot land on the drawing.
+    """
+    found: dict[str, list[int]] = {}
+    for raw in _NODE.findall(xml or ""):
+        if _attr(raw, "clickable") != "true":
+            continue
+        m = _BOUNDS.search(_attr(raw, "bounds"))
+        if not m:
+            continue
+        b = [int(g) for g in m.groups()]
+        if b[2] <= b[0] or b[3] <= b[1]:
+            continue
+        rid = _attr(raw, "resource-id").split("/")[-1].lower()
+        txt = _attr(raw, "text").strip().lower()
+        for kind, ids, words in (("confirm", _SAVE_IDS, _SAVE_WORDS),
+                                 ("clear", _CLEAR_IDS, _CLEAR_WORDS)):
+            if kind in found:
+                continue                      # first match wins, in tree order
+            if txt in words or (txt and any(i in rid for i in ids)):
+                found[kind] = [(b[0] + b[2]) // 2, (b[1] + b[3]) // 2]
+    return found
+
+
 def button_targets(xml: str, package: str = "") -> dict | None:
     """Where the app's own clear and save sit, or None off the moment.
 
-    Only on a sideways signature moment, and only when the canvas leaves
-    the strip the buttons live in — everywhere else there is nothing to
-    press and the answer is a refusal, not a guess.
+    Only on a sideways signature moment. The app's own elements are used
+    where it publishes them; the canvas-relative offsets below are the
+    fallback for a screen that draws its buttons as pixels and nothing else,
+    which is what the first signature page seen here appeared to do.
+
+    Each kind is answered independently, because a screen that names its
+    save and draws its clear should still be able to save.
     """
     if not sideways(xml, package):
         return None
-    bounds, _ = find_canvas(xml, dump=False)
-    if bounds is None:
-        return None
-    x1, _y1, _x2, y2 = bounds
-    if x1 < _MIN_STRIP:
-        return None
-    x = max(x1 // 2, 4)
-    return {"clear": [x, y2 - _BUTTON_CLEAR_LIFT],
-            "confirm": [x, y2 - _BUTTON_CONFIRM_LIFT]}
+    targets = _app_buttons(xml)
+
+    # The pixel fallback, for whatever the app did not name. It needs the
+    # canvas to leave a strip down the left for the buttons to live in;
+    # where the canvas runs the full width there is no strip and nothing
+    # here is better than a guess, so it declines rather than inventing one.
+    if len(targets) < len(ACTIONS):
+        bounds, _ = find_canvas(xml, dump=False)
+        if bounds is not None:
+            x1, _y1, _x2, y2 = bounds
+            if x1 >= _MIN_STRIP:
+                x = max(x1 // 2, 4)
+                targets.setdefault("clear", [x, y2 - _BUTTON_CLEAR_LIFT])
+                targets.setdefault("confirm", [x, y2 - _BUTTON_CONFIRM_LIFT])
+    return targets or None
 
 
 def request_action(kind: str, path: Path | None = None) -> str:
@@ -527,9 +663,17 @@ def do_action(payload: dict, status_path: Path | None = None) -> Status:
         if package not in APP_PACKAGES:
             status.state, status.reason = "failed", "wrong_app"
             return
-        targets = button_targets(driver.page_source or "", package)
-        if not targets:
+        source = driver.page_source or ""
+        targets = button_targets(source, package)
+        if not targets or kind not in targets:
             status.state, status.reason = "failed", "no_canvas"
+            # RECORD IT. This is the one artifact built to hand over the fix,
+            # and it was written with dumping switched off on every path that
+            # refuses — so the night this failed for real it held a
+            # two-node file from the day before, and the repair had to be
+            # reverse-engineered from screenshots. A refusal here is rare (it
+            # takes a person pressing the button) and always worth keeping.
+            _dump_refusal(_nodes_of(source), "no_canvas")
             return
         _perform(driver, [[tuple(targets[kind])]])
         status.state = "done"
