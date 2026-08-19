@@ -43,7 +43,15 @@ log = logging.getLogger(__name__)
 # the browser, private half signs; losing the file only costs everybody a
 # re-subscribe, which is why it is generated on demand rather than being a
 # deployment step somebody has to remember.
-KEY_PATH = Path(os.environ.get("APTLOG_VAPID_PATH", "/etc/aptlog/vapid.json"))
+#
+# In /var/lib rather than /etc, which is where it went first: /etc/aptlog is
+# root-owned and these services run as `apt`, so the save failed silently and
+# every call generated a FRESH keypair. That is worse than not working — the
+# browser subscribes against one key and the server signs with another, so
+# every push is rejected by the push service and nothing anywhere says why.
+# Caught by asking the live machine for the key twice and comparing.
+KEY_PATH = Path(os.environ.get("APTLOG_VAPID_PATH",
+                               "/var/lib/aptlog/vapid.json"))
 
 # Where subscriptions live. Beside the other state, and 0600: an endpoint plus
 # its keys is enough to push to that phone, which is not a secret worth much
@@ -101,7 +109,15 @@ def keys() -> dict[str, str]:
             os.chmod(tmp, 0o600)
             os.replace(tmp, KEY_PATH)
         except OSError as exc:
-            log.warning("cannot save VAPID keys (%s)", exc)
+            # A key that cannot be saved is not a key: the next call would
+            # generate a different one, the browser would be subscribed
+            # against the old one, and every push would be rejected by the
+            # push service with nothing on this side saying why. Better to
+            # report no push at all, loudly, than a push that silently
+            # cannot work.
+            log.error("cannot save VAPID keys to %s (%s) — push disabled",
+                      KEY_PATH, exc)
+            return {}
         return pair
 
 

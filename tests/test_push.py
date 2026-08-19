@@ -160,6 +160,24 @@ class TestTheKey:
         push.public_key()
         assert (push.KEY_PATH.stat().st_mode & 0o077) == 0
 
+    def test_a_key_that_cannot_be_saved_is_no_key_at_all(self, tmp_path,
+                                                         monkeypatch):
+        """Found on the live machine: the file went to /etc, which is
+        root-owned while these services run as `apt`, so the save failed
+        silently and every call minted a FRESH pair. The browser subscribes
+        against one and the server signs with another — every push rejected,
+        nothing on this side saying why. Reporting no push is the honest
+        answer."""
+        monkeypatch.setattr(push, "KEY_PATH",
+                            tmp_path / "nope" / "vapid.json")
+        monkeypatch.setattr(push.Path, "mkdir",
+                            lambda *a, **k: (_ for _ in ()).throw(OSError()))
+        assert push.public_key() == ""
+
+    def test_it_lives_where_the_services_can_actually_write(self):
+        """/var/lib/aptlog is the service user's; /etc/aptlog is root's."""
+        assert "/var/lib/" in str(push.KEY_PATH)
+
 
 @needs_push
 class TestSending:
