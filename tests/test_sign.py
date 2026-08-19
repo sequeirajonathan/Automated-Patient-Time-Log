@@ -542,3 +542,117 @@ class TestAppButtons:
         sign.write_status(sign.Status(id="a3", state="done", kind="confirm"),
                           tmp_path / "s.json")
         assert sign.read_status(tmp_path / "s.json").kind == "confirm"
+
+
+class TestTwoNamesForOneRectangle:
+    """The live refusal on a real clock-out, and the reason a caregiver ended
+    up pressing the app's own button by hand at ten at night.
+
+    The screen carried BOTH `layout_tab_content_signature_skip` and
+    `layout_tab_content_signature` at IDENTICAL bounds, with no inner canvas
+    to fall through to. The de-nesting rule asks whether one candidate wraps
+    another; on equal rectangles each wraps the other, so both were dropped
+    and the finder said `no_canvas` — which the page rendered as "This screen
+    has no signature box" over a screen plainly showing one.
+    """
+
+    PAIR = ('<node class="android.widget.FrameLayout" '
+            'resource-id="app:id/layout_tab_content_signature_skip" '
+            'bounds="[0,120][720,1532]"/>'
+            '<node class="android.widget.FrameLayout" '
+            'resource-id="app:id/layout_tab_content_signature" '
+            'bounds="[0,120][720,1532]"/>')
+
+    def test_identical_candidates_resolve_to_that_one_rectangle(self):
+        bounds, reason = sign.find_canvas(self.PAIR, dump=False)
+        assert reason == ""
+        assert bounds == [0, 120, 720, 1532]
+
+    def test_a_genuinely_ambiguous_pair_still_refuses(self):
+        """De-duplicating must not become "pick one of two real candidates".
+        Two DIFFERENT rectangles, neither inside the other, is still the case
+        where a wrong choice puts ink on the wrong control."""
+        two = ('<node class="android.widget.FrameLayout" '
+               'resource-id="app:id/signature_one" bounds="[0,120][300,600]"/>'
+               '<node class="android.widget.FrameLayout" '
+               'resource-id="app:id/signature_two" bounds="[400,700][700,1200]"/>')
+        bounds, reason = sign.find_canvas(two, dump=False)
+        assert bounds is None and reason == "ambiguous"
+
+    def test_the_innermost_still_wins_when_there_is_an_inner_one(self):
+        """The case the de-nesting rule was written for is untouched."""
+        xml = self.PAIR + ('<node class="android.widget.FrameLayout" '
+                           'resource-id="app:id/gesturePatientSignature" '
+                           'bounds="[0,492][720,1142]"/>')
+        bounds, _ = sign.find_canvas(xml, dump=False)
+        assert bounds == [0, 492, 720, 1142]
+
+
+class TestTheAppsOwnSaveIsAnElementNotAPixel:
+    """Read off the live signature screen: the save this path exists to press
+    was never a pixel that had to be guessed at.
+
+        Button  btn_left     'Anular'  clickable  [10,75][100,109]
+        Button  button_save  'Salvar'  clickable  [624,75][714,109]
+
+    Pressing the element survives a density change — the caregiver had to
+    change the density by hand one night to reach the button — survives a
+    redesign that moves the strip, and cannot land on the drawing.
+    """
+
+    PACKAGE = "com.hhaexchange.caregiver"
+    CANVAS = TestTwoNamesForOneRectangle.PAIR
+    HEADER_SIGNING = ('<node class="android.widget.Button" '
+                      'resource-id="app:id/btn_left" text="Anular" '
+                      'clickable="true" bounds="[10,75][100,109]"/>'
+                      '<node class="android.widget.Button" '
+                      'resource-id="app:id/button_save" text="Salvar" '
+                      'clickable="true" bounds="[624,75][714,109]"/>')
+    # The SAME id on the ordinary visit page, with no caption: it is the ✎.
+    HEADER_VISIT = ('<node class="android.widget.Button" '
+                    'resource-id="app:id/btn_left" text="Atrás" '
+                    'clickable="true" bounds="[0,71][69,113]"/>'
+                    '<node class="android.widget.Button" '
+                    'resource-id="app:id/button_save" text="" '
+                    'clickable="true" bounds="[642,74][678,110]"/>')
+
+    def test_the_captioned_save_is_found_at_its_centre(self):
+        found = sign._app_buttons(self.HEADER_SIGNING)
+        assert found["confirm"] == [669, 92]
+
+    def test_the_uncaptioned_button_of_the_same_id_is_not_a_save(self):
+        """The trap this nearly walked into. Both screens of this activity
+        publish a `button_save`; on the visit page it is an icon with a
+        different job, sitting on a real record."""
+        assert "confirm" not in sign._app_buttons(self.HEADER_VISIT)
+
+    def test_cancel_is_never_mistaken_for_either(self):
+        """Anular throws the signature away. A rule loose enough to catch it
+        would eventually press it."""
+        found = sign._app_buttons(self.HEADER_SIGNING)
+        assert found.get("clear") != [55, 92]
+        assert "clear" not in found
+
+    def test_the_signature_moment_needs_the_pad_not_just_the_container(self):
+        """`layout_tab_content_signature` is on the visit page whether or not
+        the pad is showing. Once the finder stopped annihilating itself, the
+        container alone would have turned the peek sideways over an ordinary
+        visit page and offered a Save with nothing to save."""
+        assert sign.sideways(self.CANVAS + self.HEADER_SIGNING,
+                             package=self.PACKAGE) is True
+        assert sign.sideways(self.CANVAS + self.HEADER_VISIT,
+                             package=self.PACKAGE) is False
+
+    def test_targets_press_the_element_and_refuse_off_the_moment(self):
+        assert sign.button_targets(self.CANVAS + self.HEADER_SIGNING,
+                                   package=self.PACKAGE) == {"confirm": [669, 92]}
+        assert sign.button_targets(self.CANVAS + self.HEADER_VISIT,
+                                   package=self.PACKAGE) is None
+
+    def test_a_kind_the_app_did_not_name_is_simply_absent(self):
+        """This screen names its save and draws its clear, and the canvas runs
+        the full width so there is no left strip to derive one from. Save must
+        still work — answering each kind independently is the whole point."""
+        targets = sign.button_targets(self.CANVAS + self.HEADER_SIGNING,
+                                      package=self.PACKAGE)
+        assert "confirm" in targets and "clear" not in targets
