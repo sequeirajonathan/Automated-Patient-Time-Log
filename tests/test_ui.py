@@ -1380,3 +1380,50 @@ class TestTheAppsChromeSpeaksHerLanguage:
 
         assert controls.replaces(controls.DRAWER) is True
         assert controls.replaces(controls.AGENCY_FILTER) is False
+
+
+class TestNamingSurvivesAWalkedPage:
+    """The fix shipped and the filter was still blank, because elements are
+    built in TWO places and only one of them was taught.
+
+    A screen the portal has walked end to end is published from the stitch
+    cache, not from the viewport capture — and the walk's own capture called
+    `elements()` with no package and no size, so every portal name came back
+    empty. Today Visits is walked, which is why the one screen the report kept
+    coming from was the one screen that could not work.
+    """
+
+    def test_without_the_screens_context_nothing_is_named(self):
+        """The failure mode itself, pinned. Naming needs to know which app and
+        how big the screen is; absent either, it names nothing rather than
+        guessing — which is the safe direction and also the silent one."""
+        from apt_log import feed
+
+        xml = ('<node class="android.widget.EditText" resource-id="" text="" '
+               'clickable="true" bounds="[13,146][707,183]"/>')
+        assert not feed.elements(xml, label=True)[0].get("name_key")
+        named = feed.elements(xml, label=True,
+                              package="com.inmyteam.inmyteam",
+                              size=(720, 1600))[0]
+        assert named["name_key"] == "papp.imt.agency_filter"
+
+    def test_the_walk_hands_the_context_through(self):
+        """Source-level, because the walk needs a live driver — but the thing
+        that broke was exactly this call losing its arguments."""
+        import re
+
+        source = (Path(__file__).resolve().parents[1]
+                  / "src/apt_log/macros.py").read_text(encoding="utf-8")
+        call = re.search(r"feed_mod\.elements\(src,[^)]*\)", source)
+        assert call, "the walk should still build elements from the source"
+        assert "package=package" in call.group(0)
+        assert "size=size" in call.group(0)
+
+    def test_a_size_that_cannot_be_read_names_nothing(self):
+        from apt_log import macros
+
+        class Broken:
+            def get_window_size(self):
+                raise RuntimeError("no session")
+
+        assert macros._screen_size(Broken()) == (0, 0)
