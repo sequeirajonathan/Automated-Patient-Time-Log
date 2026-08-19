@@ -1009,7 +1009,12 @@ def write_screen(target: Path, frame: dict, screen: str, reason: str,
         # viewport. Full documents leave nothing to wonder about.
         "full": bool(stitched),
         "elements": (stitched["elements"] if stitched
-                     else elements(hierarchy, label=True) if hierarchy else []),
+                     else elements(
+                         hierarchy, label=True,
+                         package=(hierarchy_package(hierarchy)
+                                  or (focus or "").split("/")[0]),
+                         size=tuple(frame["size"] or (0, 0)),
+                     ) if hierarchy else []),
         "statics": (stitched["statics"] if stitched
                     else statics(hierarchy) if hierarchy else []),
     }
@@ -1049,7 +1054,10 @@ def write_frame(path: Path, serial: str | None = None,
     screen = screen_for(focus)
 
     speak = text_is_disclosable(reason)
-    els = elements(hierarchy, label=speak) if hierarchy else []
+    els = elements(hierarchy, label=speak,
+                   package=(hierarchy_package(hierarchy)
+                            or (focus or "").split("/")[0]),
+                   size=tuple(screen_size(serial) or (0, 0))) if hierarchy else []
 
     # A wedged app publishes NOTHING to aim at. Its last tree is still there
     # and still parses — the legacy app was wedged on its own inactivity
@@ -1346,7 +1354,8 @@ def _label(raw: str) -> str:
     return _attr(raw, "text") or _attr(raw, "content-desc")
 
 
-def elements(xml: str, label: bool = False) -> list[dict]:
+def elements(xml: str, label: bool = False, package: str = "",
+             size: tuple[int, int] | None = None) -> list[dict]:
     """The tappable structure of a screen, carrying no text.
 
     This is what the page draws boxes from and what a tap posts back, so it is
@@ -1362,6 +1371,10 @@ def elements(xml: str, label: bool = False) -> list[dict]:
     `text_is_disclosable`, which is the only caller allowed to decide that.
     Editable fields are excluded even then: their text is what has been typed.
     """
+    from apt_log import controls as controls_mod
+
+    w, h = size or (0, 0)
+    naming = controls_mod.naming(xml or "", package, w, h)
     found = []
     for raw in _NODE.findall(xml or ""):
         if _attr(raw, "clickable") != "true":
@@ -1401,7 +1414,14 @@ def elements(xml: str, label: bool = False) -> list[dict]:
             "enabled": _attr(raw, "enabled") != "false",
             "has_text": bool(_label(raw)),
         }
-        if label and (short not in EDITABLE or _is_showing_hint(raw)):
+        # The portal's own name for a control the app ships nameless, decided
+        # here rather than in the reflow because this is where the raw text
+        # is and where the disclosure below has to be decided with it.
+        name_key = naming.key(short, entry["rid"], entry["b"], _label(raw))
+        if name_key:
+            entry["name_key"] = name_key
+        if label and (short not in EDITABLE or _is_showing_hint(raw)
+                      or naming.discloses(short, entry["rid"], entry["b"])):
             entry["txt"] = _clean(_label(raw))
         found.append(entry)
     return found

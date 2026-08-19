@@ -170,6 +170,7 @@
   "scan.title": "The whole page",
   "scan.close": "Close",
   "scan.empty": "Nothing readable was found on this page.",
+  "papp.drawer": "Menu",
   "papp.imt.agency_filter": "Filter by agency",
   "papp.imt.refresh": "Refresh the list",
   "papp.type.hint": "Type here, then send it to the phone",

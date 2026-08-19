@@ -395,7 +395,7 @@ def _item(node: dict, kind: str) -> dict:
     # A name the PORTAL supplies for a control the app left nameless, carried
     # as a key rather than a string because the model is language-free until
     # somebody asks for it in a language. Resolved by `label_keys` at render.
-    if node.get("txt_key") and not out["txt"]:
+    if node.get("txt_key"):
         out["txt_key"] = node["txt_key"]
     if "rid" in node:
         # The aim carries the bounds AS CAPTURED at the element's scroll
@@ -407,29 +407,6 @@ def _item(node: dict, kind: str) -> dict:
         if node.get("step"):
             out["aim"]["step"] = node["step"]
     return out
-
-
-# ---------------------------------------------------------------- naming
-# Controls the app ships with no name of any kind, named by the portal.
-#
-# The reflow can only print what a control tells it, and some tell it nothing:
-# inMyTeam's agency filter is an EditText whose placeholder Android counts as
-# CONTENT (`showing-hint="false"`), so the typed-content rule strips it and the
-# box draws empty; the refresh beside it is a bare `View` that Android itself
-# flags `NAF="true"` — not accessibility friendly, no name at all. Reported
-# from the field as a blank area and a `···`.
-#
-# This is a last resort and deliberately small. A label the app supplies is
-# always better, because it cannot go stale when the app is redesigned. These
-# two are matched on SHAPE AND PLACE rather than on their (absent) ids, which
-# is exactly as brittle as it sounds — so each carries what it was measured
-# against, and a miss costs the blank box that is already there rather than a
-# wrong name on the wrong control.
-INMYTEAM = "com.inmyteam.inmyteam"
-# A code screen also has one unnamed EditText, and calling that one a filter
-# would be worse than leaving it blank. The top band is what separates them:
-# the filter sits under the title bar, the code box in the middle of the page.
-TOP_BAND = 0.12
 
 
 # What an app calls its own up-arrow, in both languages and in the words
@@ -448,37 +425,21 @@ def _is_up_affordance(item: dict) -> bool:
 
 def _name_the_unnamed(elements: list[dict], statics: list[dict], doc: dict,
                       w: int, h: int) -> None:
-    """Set `txt_key` on controls the app left nameless. In place."""
-    package = doc.get("h_app") or (doc.get("app") or "").split("/")[0]
-    if package != INMYTEAM:
-        return
-    words = " ".join(s.get("txt", "") for s in statics).lower()
-    # Never on the sign-in walk. Its screens carry their own unnamed field,
-    # and §12 already learned what mistaking one inMyTeam screen for another
-    # costs.
-    if any(k in words for k in ("verify your account", "enter your code",
-                                "sign in with your phone")):
-        return
+    """Carry the feed's own naming onto the items it named. In place.
+
+    The identification itself moved to `apt_log.controls`, where the raw text
+    is: the same table that decides a box is the agency filter also decides
+    that box's contents may be shown, and those two answers must come from one
+    place or they drift. Here it is only copied across — and only where the
+    control has no words of its own, because the SELECTED agency is a better
+    label than the word "filter" and now arrives as ordinary text.
+    """
+    from apt_log import controls as controls_mod
+
     for e in elements:
-        # `has_text` is deliberately NOT a reason to skip. A field whose text
-        # is stripped reports has_text=True and txt=None — it HAS words and
-        # the portal may not show them — and that is exactly the control this
-        # exists to name. The first version skipped on it and so skipped the
-        # agency filter, which is the one thing it was written for: the label
-        # landed on the Refresh row beside it and the box stayed blank, which
-        # is what came back from the field.
-        if e.get("rid") or e.get("txt"):
-            continue
-        x1, y1, x2, y2 = e["b"]
-        if y2 > h * TOP_BAND:
-            continue
-        cls, width = e.get("cls", ""), x2 - x1
-        # The filter: the wide field across the top band.
-        if cls == "EditText" and width > w * 0.5:
-            e["txt_key"] = "papp.imt.agency_filter"
-        # Refresh: the small square at the right-hand end of that same row.
-        elif cls == "View" and width < w * 0.10 and x1 > w * 0.85:
-            e["txt_key"] = "papp.imt.refresh"
+        key = e.get("name_key")
+        if key and (controls_mod.replaces(key) or not e.get("txt")):
+            e["txt_key"] = key
 
 
 def label_keys(model: dict, t) -> dict:
@@ -494,13 +455,17 @@ def label_keys(model: dict, t) -> dict:
     def walk(items):
         for it in items or ():
             key = it.get("txt_key")
-            if key and not it.get("txt"):
+            if key:
                 it["txt"] = t(key)
             walk(it.get("parts"))
     for row in model.get("rows") or ():
         walk(row.get("items"))
     if model.get("nav"):
-        walk(model["nav"].get("trailing"))
+        # `back` as well as `trailing`: the drawer handle is the first button
+        # in the bar and so lands in `back`, and walking only the trailing
+        # ones left it saying "Open navigation drawer" in a Spanish page.
+        nav = model["nav"]
+        walk(([nav["back"]] if nav.get("back") else []) + (nav.get("trailing") or []))
     return model
 
 
