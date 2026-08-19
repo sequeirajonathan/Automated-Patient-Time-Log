@@ -962,6 +962,85 @@ class TestSleepIsNotLive:
         assert w._accept(good, HOME, awake=False) is False
 
 
+class TestAPopupIsStillTheAppUnderneath:
+    """Reported from the field: tapping inMyTeam's agency filter left the app
+    "stuck on syncing".
+
+    A dropdown is its own window and Android TITLES that window rather than
+    naming a package, so the focus read came back with the literal string
+    "Window". Every check downstream then took the phone to be somewhere that
+    is not a care app, and the containment watchdog did exactly what it is for
+    — it brought inMyTeam back. Every twenty seconds, for as long as the
+    dropdown stayed open, each return resyncing the app. The feed's own log
+    said so plainly once anyone looked:
+
+        foreground is Window — returning to com.inmyteam.inmyteam
+
+    The answer was in the same dumpsys read the whole time: mFocusedApp names
+    the activity that owns the popup. Same distinction the permission-dialog
+    fix turns on — a surface the app in front raised is not the phone
+    wandering off.
+    """
+
+    # Copied from the live phone with the agency filter open.
+    POPUP = (
+        "  mCurrentFocus=Window{3d46066 u0 Pop-Up Window}\n"
+        "  mFocusedApp=ActivityRecord{a816218 u0 "
+        "com.inmyteam.inmyteam/.view.activities.MainActivity} t958}\n"
+        "  mAwake=true\n"
+    )
+
+    def _read(self, out):
+        with patch.object(feed, "_adb") as adb:
+            adb.return_value.stdout = out.encode()
+            return feed.window_state()
+
+    def test_the_popups_owner_is_reported_instead_of_the_window(self):
+        focus, awake, anr = self._read(self.POPUP)
+        assert focus.split("/")[0] == "com.inmyteam.inmyteam"
+        assert awake is True and not anr
+
+    def test_the_watchdog_leaves_a_dropdown_alone(self):
+        """The whole point. With the owner reported, the package is a care app
+        and the containment check returns before it can bounce anything."""
+        focus, _, _ = self._read(self.POPUP)
+        assert focus.split("/")[0] in feed.CARE_APPS
+
+    def test_a_real_focus_is_never_second_guessed(self):
+        out = (f"  mCurrentFocus=Window{{abc u0 {HOME}}}\n"
+               "  mFocusedApp=ActivityRecord{x u0 com.other/.Thing}\n"
+               "  mAwake=true\n")
+        focus, _, _ = self._read(out)
+        assert focus == HOME
+
+    def test_the_not_responding_dialog_still_wins(self):
+        """Its window title ENDS IN the wedged package, so it is a bare token
+        too — but it means the opposite of "the app is fine underneath", and
+        reading it as the owner would wave a wedged app straight through."""
+        out = ("  mCurrentFocus=Window{a u0 Application Not Responding: "
+               "com.hhaexchange.mobile}\n"
+               "  mFocusedApp=ActivityRecord{x u0 "
+               "com.hhaexchange.mobile/.Home}\n  mAwake=true\n")
+        _, _, anr = self._read(out)
+        assert anr == "com.hhaexchange.mobile"
+
+    def test_an_unreadable_owner_leaves_the_window_as_it_was(self):
+        out = ("  mCurrentFocus=Window{3d46066 u0 Pop-Up Window}\n"
+               "  mFocusedApp=null\n  mAwake=true\n")
+        focus, _, _ = self._read(out)
+        assert focus == "Window"
+
+    @pytest.mark.parametrize("token, is_title", [
+        ("Window", True),
+        ("Pop-Up", True),
+        ("com.inmyteam.inmyteam/.view.activities.MainActivity", False),
+        ("com.hhaexchange.mobile", False),      # the ANR shape: has a dot
+        ("", False),
+    ])
+    def test_what_counts_as_a_window_title(self, token, is_title):
+        assert feed._is_a_window_title(token) is is_title
+
+
 class TestSketchOwnership:
     """screen.json carries two apps on purpose: `app` is the focus of this
     moment, `h_app` is whose screen the elements were read under. During an

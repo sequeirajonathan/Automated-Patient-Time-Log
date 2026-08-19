@@ -258,6 +258,12 @@
         bindWire();
         const wire = root.querySelector('.wire');
         frameId = wire ? (wire.dataset.frame || '') : '';
+        // Whether the peek's scroll arrows have anything to do. The phone is
+        // the only thing that knows, and most screens fit whole at the tuned
+        // density — so on those the arrows would be furniture sitting over
+        // the phone's own controls.
+        body.classList.toggle('scrolls',
+                              !!wire && wire.dataset.scrolls === '1');
         // Entrance only when the screen actually changed — a checkbox flip
         // re-renders the list and must not re-run the animation under her.
         root.classList.remove('enter');

@@ -8,7 +8,10 @@
    never what tapping it means.
 
    Rendered server-side and pushed over the socket, like every sentence. #}
-<div class="wire" data-frame="{{ m.id }}">
+{# `data-scrolls` rides the fragment because the peek's scroll arrows are only
+   worth showing on a screen that scrolls, and the phone is the only thing
+   that knows. Read once per screen by phone.js into a body class. #}
+<div class="wire" data-frame="{{ m.id }}" data-scrolls="{{ 1 if m.scrollable else 0 }}">
   {% if m.nav %}
   {# The top band's first button is NOT rendered as a back arrow — it is
      whatever the app put top-left, and on HHAeXchange+ that was the help

@@ -607,10 +607,20 @@
      spec: the reflow already lists everything in the phone's viewport, so
      arrows there are noise; the photo IS the phone's screen, and moving
      it is exactly what arrows mean on it. */
+  /* Above the chrome BY MEASUREMENT, for the same reason the type bar is:
+     102px was written from the no-tab-row case, and the app tab row puts the
+     chrome at 134px — so on any screen with tabs the arrows sat on top of
+     Back and Home. Reported from the field with the overlap circled. */
   #phone-scroll { position:absolute; right:10px; z-index:6;
-                  bottom:calc(102px + env(safe-area-inset-bottom));
+                  bottom:calc(var(--chrome-h, 102px) + 14px);
                   display:none; flex-direction:column; gap:8px; }
-  body.peeking:not(.asleep) #phone-scroll { display:flex; }
+  /* And only when there is something to scroll. The density is tuned so most
+     screens fit whole, which makes a permanent pair of arrows furniture that
+     does nothing on the pages she sees most. The phone says which screens
+     scroll (`scrollable` in the published document, from the tree's own
+     attribute), so the control appears exactly when it has work to do —
+     which is the answer to "do we still need these": on a long list, yes. */
+  body.peeking:not(.asleep).scrolls #phone-scroll { display:flex; }
   #phone-scroll button { width:42px; height:42px; border-radius:50%;
                   border:none; cursor:pointer; color:var(--tint);
                   background:var(--chrome); backdrop-filter:blur(12px);

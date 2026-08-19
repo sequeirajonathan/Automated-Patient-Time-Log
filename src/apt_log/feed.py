@@ -108,6 +108,43 @@ LOGIN_ACTIVITY_MARKERS = (
 )
 
 _FOCUS = re.compile(r"mCurrentFocus=Window\{[^}]*\s+(\S+)\}")
+# The app underneath, when the focused WINDOW is not an activity.
+#
+# A dropdown, a spinner list, a popup menu and a context menu are all their own
+# window, and Android titles that window rather than naming a package:
+#
+#     mCurrentFocus=Window{3d46066 u0 Pop-Up Window}
+#     mFocusedApp=ActivityRecord{a816218 u0 com.inmyteam.inmyteam/.view…}
+#
+# So the focus read came back with the literal string "Window", and every check
+# downstream took the phone to be somewhere that is not a care app. The
+# containment watchdog then did what it is for and brought inMyTeam back —
+# every twenty seconds, for as long as the dropdown was open, each return
+# resyncing the app. Reported from the field as "the app gets stuck on
+# syncing", and visible in the feed's own log as
+# `foreground is Window — returning to com.inmyteam.inmyteam`, over and over.
+#
+# The answer was already in the same dump: mFocusedApp names the activity that
+# OWNS the popup. This is the same distinction §6's permission-dialog fix
+# turns on — a surface the app in front raised is not the phone wandering —
+# and it generalises past inMyTeam's agency filter to every dropdown in all
+# four apps.
+_FOCUSED_APP = re.compile(
+    r"mFocusedApp=\S*ActivityRecord\{[^}]*?\s([A-Za-z0-9_.]+/[A-Za-z0-9_.]+)")
+
+
+def _is_a_window_title(focus: str) -> bool:
+    """True when the focus read named a window rather than an activity.
+
+    A real focus is `package/activity` and always carries both a slash and a
+    dot. "Pop-Up Window" collapses to the bare word `Window`, which has
+    neither. Deliberately NOT a list of known popup titles: the ANR dialog
+    already proved that matching Android's window prose breaks the first time
+    the wording or the locale changes, and an unknown popup should degrade to
+    "the app underneath" rather than to "somewhere else entirely".
+    """
+    token = focus or ""
+    return bool(token) and "/" not in token and "." not in token
 # Android's "<app> isn't responding — Close app / Wait" dialog owns the focus
 # while it is up, and its window title names the wedged package. This is the
 # ONLY reliable signal for it: the dialog is a system window the accessibility
@@ -268,7 +305,18 @@ def window_state(serial: str | None = None) -> tuple[str, bool, str]:
     m = _FOCUS.search(out)
     awake = _AWAKE.search(out)
     anr = _ANR.search(out)
-    return (m.group(1) if m else "",
+    focus = m.group(1) if m else ""
+    # A popup owns the focus while it is open and Android titles that window
+    # instead of naming a package, so the read comes back "Window" and the app
+    # underneath disappears from every check downstream. mFocusedApp still
+    # names it. Only when the window is not an activity at all — never over a
+    # real focus, and never over the ANR dialog, whose title does end in the
+    # wedged package and which the caller must keep seeing.
+    if _is_a_window_title(focus) and not anr:
+        owner = _FOCUSED_APP.search(out)
+        if owner:
+            focus = owner.group(1)
+    return (focus,
             awake.group(1) == "true" if awake else True,
             anr.group(1) if anr else "")
 

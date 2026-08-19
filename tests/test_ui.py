@@ -849,6 +849,50 @@ class TestTheCodeBarClearsThePhonesControls:
         assert "classList.add('typing')" in source
         assert "classList.remove('typing')" in source
 
+    def test_the_peek_arrows_clear_the_chrome_by_measurement(self, client):
+        """Reported from the field with the overlap circled: on a screen with
+        an app tab row the scroll arrows sat on top of Back and Home.
+
+        Same fault as this class's own bug and the same fix — 102px was
+        written from the no-tab-row case, and the chrome is 134px with tabs.
+        Comments stripped first, because the rule's comment quotes the
+        constant it replaced."""
+        import re
+
+        body = client.get("/app").text
+        css = re.sub(r"/\*.*?\*/", "", body, flags=re.S)
+        arrows = re.search(r"#phone-scroll\s*\{[^}]*\}", css)
+        assert arrows, "the peek's scroll control should still be styled"
+        assert "var(--chrome-h" in arrows.group(0)
+        assert "102px + env" not in css
+
+    def test_the_peek_arrows_appear_only_on_a_screen_that_scrolls(self, client):
+        """The density is tuned so most screens fit whole, which makes a
+        permanent pair of arrows furniture that does nothing — and furniture
+        sitting over the phone's own controls at that. The phone is the only
+        thing that knows, so it says."""
+        body = client.get("/app").text
+        assert "body.peeking:not(.asleep).scrolls #phone-scroll" in body
+        # The flag has to survive the whole way: the phone's own attribute →
+        # the fragment → a class the CSS above can see.
+        fragment = (Path(__file__).resolve().parents[1]
+                    / "src/apt_log/ui/templates/_screen.html"
+                    ).read_text(encoding="utf-8")
+        assert "data-scrolls" in fragment
+        source = self.SCRIPT.read_text(encoding="utf-8")
+        assert "dataset.scrolls" in source
+        assert "'scrolls'" in source
+
+    def test_a_screen_that_scrolls_says_so_in_the_fragment(self):
+        """End of the same chain, from the model rather than the markup."""
+        from apt_log.ui.screenview import build
+
+        doc = {"id": "f", "elements": [], "statics": [], "size": [720, 1600],
+               "scrollable": True}
+        assert build(doc)["scrollable"] is True
+        doc["scrollable"] = False
+        assert build(doc)["scrollable"] is False
+
     def test_the_code_box_is_not_inside_the_controls_that_go_inert(self, client):
         """The fault behind two field reports, and the only one that mattered.
 
