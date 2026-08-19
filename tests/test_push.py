@@ -206,6 +206,16 @@ class TestTheKey:
         assert "-----" not in pair["private"]     # and the sender can read it
         assert json.loads(push.KEY_PATH.read_text())["private"] == pair["private"]
 
+    def test_the_subject_passes_the_signer_own_check(self):
+        """py_vapid validates `sub` against its own regex and refuses a
+        domain with no dot, reporting "Missing 'sub' from claims" — which is
+        true of nothing: the claim was present and rejected for its shape.
+        Asserted against the signer's own validator rather than a regex of
+        mine, so it stays true if theirs changes."""
+        from py_vapid import _check_sub
+
+        assert _check_sub(push.VAPID_SUBJECT)
+
     def test_it_lives_where_the_services_can_actually_write(self):
         """/var/lib/aptlog is the service user's; /etc/aptlog is root's."""
         assert "/var/lib/" in str(push.KEY_PATH)

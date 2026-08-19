@@ -61,7 +61,15 @@ STORE_PATH = Path(os.environ.get("APTLOG_PUSH_PATH",
 
 # Who the push service should complain to. Not a real inbox — it is a contact
 # of last resort in the VAPID spec, and this fleet is one machine.
-VAPID_SUBJECT = os.environ.get("APTLOG_VAPID_SUBJECT", "mailto:aptlog@invalid")
+#
+# The domain has to have a DOT in it. py_vapid checks the address against its
+# own regex and refuses `sub` without one, saying "Missing 'sub' from claims"
+# — which is true of nothing: the claim was there and was rejected for its
+# shape. `aptlog@invalid` failed exactly that way. `.invalid` is the TLD
+# RFC 2606 reserves for addresses that must never resolve, so this stays
+# honestly unreachable while being well formed.
+VAPID_SUBJECT = os.environ.get("APTLOG_VAPID_SUBJECT",
+                               "mailto:aptlog@aptlog.invalid")
 
 _lock = threading.Lock()
 
