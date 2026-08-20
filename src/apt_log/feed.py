@@ -50,6 +50,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import struct
 import subprocess
 import threading
@@ -2004,10 +2005,22 @@ def tap(claimed_frame: str, element: dict, serial: str | None = None,
 
 TYPABLE = ("EditText", "AutoCompleteTextView", "SearchView",
            "MultiAutoCompleteTextView")
-# A short plain token: the case this exists for is a verification code
-# read off a family member's phone. Letters and digits only — nothing
-# that needs shell quoting, nothing essay-length.
-_TYPABLE_VALUE = re.compile(r"^[A-Za-z0-9]{1,32}$")
+# Two shapes go into a field, and no third.
+#
+# A verification code, which is what this channel was built for: letters and
+# digits, nothing that needs quoting at all.
+#
+# And a NAME, typed into a search box — which is a real need ("some input
+# fields like search for patient that we should try to integrate") and
+# cannot be spelled without spaces and accents. So the allowed set widens
+# to letters in any language, digits, spaces, and the three marks names
+# carry: apostrophe, hyphen, full stop. It does NOT widen to anything a
+# shell reads — no $ ` \ " ; | & ( ) < > * ? newline — because the value
+# crosses `adb shell`, where the device's own sh parses the line. The
+# quoting below is the guard that matters; this is the belt.
+#
+# Still capped short. A field takes a code or a name, never a message.
+_TYPABLE_VALUE = re.compile(r"^[^\W_](?:[\w .'\-]{0,30}[^\W_])?$", re.UNICODE)
 
 
 def type_into(claimed_frame: str, element: dict, value: str,
@@ -2047,7 +2060,14 @@ def type_into(claimed_frame: str, element: dict, value: str,
     if focus.returncode != 0:
         raise StaleAim("adb refused to focus the field")
     time.sleep(0.6)
-    result = _adb(["shell", "input", "text", value], serial, timeout=20.0)
+    # QUOTED FOR THE DEVICE'S OWN SHELL. `adb shell` does not take an argv —
+    # it joins what it is given into a command line and hands it to sh on the
+    # phone. An unquoted "Rojas Batista" arrives there as two words and only
+    # the first one is typed; anything sh reads as syntax would be read as
+    # syntax. `_TYPABLE_VALUE` already refuses every such character, and this
+    # is the guard that does not depend on that list staying right.
+    result = _adb(["shell", "input", "text", shlex.quote(value)], serial,
+                  timeout=20.0)
     if result.returncode != 0:
         raise StaleAim("adb refused the text")
 

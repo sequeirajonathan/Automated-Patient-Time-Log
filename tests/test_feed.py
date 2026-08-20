@@ -1391,11 +1391,78 @@ class TestTypeInto:
         with pytest.raises(feed.StaleAim):
             feed.type_into("f1", dict(row), "123456", frame_path=p)
 
-    def test_only_a_short_plain_token_travels(self, tmp_path):
+    def test_nothing_a_shell_reads_as_syntax_travels(self, tmp_path):
         p = self._publish(tmp_path, [dict(self.FIELD)])
-        for bad in ("", "with space", "semi;colon", "x" * 33, "$(rm)"):
+        for bad in ("", "semi;colon", "x" * 33, "$(rm)", "a`b`", "a|b",
+                    "a&b", "a>b", 'a"b', "a\\b", "a\nb", "a*b", " lead",
+                    "trail ", "-dash"):
             with pytest.raises(ValueError):
                 feed.type_into("f1", dict(self.FIELD), bad, frame_path=p)
+
+    # ------------------------------------------------------------ and a NAME
+    def test_a_name_with_a_space_in_it_travels(self, tmp_path):
+        """The patients tab searches by name, and a name has a space in it.
+        The old rule stripped everything but letters and digits, which turned
+        "Rojas Batista" into "RojasBatista" — a search that matches nothing.
+        """
+        p = self._publish(tmp_path, [dict(self.FIELD)])
+        calls = []
+        with patch.object(feed, "_adb",
+                          side_effect=lambda a, *_, **__: calls.append(a)
+                          or MagicMock(returncode=0)):
+            feed.type_into("f1", dict(self.FIELD), "Rojas Batista",
+                           frame_path=p)
+        inputs = [c for c in calls if c[:2] == ["shell", "input"]]
+        assert inputs[1][:3] == ["shell", "input", "text"]
+
+    def test_and_it_arrives_as_ONE_word_to_the_phones_shell(self, tmp_path):
+        """`adb shell` has no argv — it joins what it is given and hands the
+        line to sh on the phone. Unquoted, "Rojas Batista" arrives there as
+        two arguments and only the first is typed."""
+        p = self._publish(tmp_path, [dict(self.FIELD)])
+        calls = []
+        with patch.object(feed, "_adb",
+                          side_effect=lambda a, *_, **__: calls.append(a)
+                          or MagicMock(returncode=0)):
+            feed.type_into("f1", dict(self.FIELD), "Rojas Batista",
+                           frame_path=p)
+        import shlex
+
+        sent = [c for c in calls if c[:2] == ["shell", "input"]][1][3]
+        assert " " not in shlex.split("input text " + sent)[2] or \
+            shlex.split("input text " + sent)[2] == "Rojas Batista"
+        assert len(shlex.split("input text " + sent)) == 3
+
+    def test_a_name_that_carries_marks_travels(self, tmp_path):
+        p = self._publish(tmp_path, [dict(self.FIELD)])
+        with patch.object(feed, "_adb",
+                          side_effect=lambda *a, **k: MagicMock(returncode=0)):
+            for good in ("María Ángeles", "O'Brien", "Ana-Lucía", "St. John",
+                         "123456"):
+                feed.type_into("f1", dict(self.FIELD), good, frame_path=p)
+
+    def test_an_apostrophe_cannot_break_out_of_the_quoting(self, tmp_path):
+        """The one allowed character that quoting has to actually handle."""
+        import shlex
+
+        p = self._publish(tmp_path, [dict(self.FIELD)])
+        calls = []
+        with patch.object(feed, "_adb",
+                          side_effect=lambda a, *_, **__: calls.append(a)
+                          or MagicMock(returncode=0)):
+            feed.type_into("f1", dict(self.FIELD), "O'Brien", frame_path=p)
+        sent = [c for c in calls if c[:2] == ["shell", "input"]][1][3]
+        assert shlex.split("input text " + sent) == ["input", "text",
+                                                     "O'Brien"]
+
+    def test_the_value_is_still_capped_short(self, tmp_path):
+        """A field takes a code or a name, never a message."""
+        p = self._publish(tmp_path, [dict(self.FIELD)])
+        with patch.object(feed, "_adb",
+                          side_effect=lambda *a, **k: MagicMock(returncode=0)):
+            feed.type_into("f1", dict(self.FIELD), "a" * 32, frame_path=p)
+        with pytest.raises(ValueError):
+            feed.type_into("f1", dict(self.FIELD), "a" * 33, frame_path=p)
 
 
 class TestNotificationShade:

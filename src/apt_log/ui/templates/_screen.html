@@ -95,9 +95,24 @@
                 {% if not it.txt %}aria-label="{{ it.aim.cls }}{% if it.aim.rid %} {{ it.aim.rid }}{% endif %}"{% endif %}
           >{{ it.txt or '···' }}</button>
       {% elif it.kind == 'field' %}
-        <button type="button" class="a-field{% if it.focused %} focus{% endif %}"
-                data-aim='{{ it.aim | tojson }}'
-          >{{ it.txt or '' }}</button>
+        {# The app's own box, drawn as a box: its placeholder inside it and
+           its own magnifier in the corner it sits in on the phone. An empty
+           rectangle with the words floating beside it was three items for
+           one control and looked like nowhere to type. #}
+        <span class="a-fieldwrap">
+          <button type="button" class="a-field{% if it.focused %} focus{% endif %}{% if not it.txt %} empty{% endif %}"
+                  data-aim='{{ it.aim | tojson }}'
+                  {% if it.hint %}data-hint="{{ it.hint }}"{% endif %}
+            >{{ it.txt or it.hint or '' }}</button>
+          {% if it.submit %}
+          <button type="button" class="a-fieldgo" data-aim='{{ it.submit | tojson }}'
+                  aria-label="{{ it.hint or t('papp.search') }}"
+            ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                  stroke-width="2" stroke-linecap="round"
+              ><circle cx="7" cy="7" r="4.5"/><path d="M10.4 10.4 L14 14"/></svg
+          ></button>
+          {% endif %}
+        </span>
       {% elif it.kind == 'toggle' and it.check %}
         {# A CHECKBOX, drawn as one. An iOS on/off switch says "this setting
            is on"; a plan of care asks "did you do this", which is a tick in

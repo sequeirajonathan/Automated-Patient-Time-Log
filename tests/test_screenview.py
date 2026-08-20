@@ -1796,3 +1796,119 @@ class TestATabBarWhoseCurrentTabIsNotAControl:
             statics=[st([90, 795, 300, 815], "127 - Toilet Use")]))
         seg = self._segment(model)
         assert seg is None or all(p.get("aim") for p in seg["parts"])
+
+
+class TestASearchBoxIsOneControl:
+    """The patients tab and the visit search, at the bounds the phone
+    published during a live scrub.
+
+    "There are some input fields like search for patient in the patients tab
+    that we should try to integrate / make nice for searching."
+
+    Both arrived as an empty rectangle with its words floating loose beside
+    or above it, and — on the patients tab — the app's own magnifier as an
+    unlabelled "···" bubble. Three items for one box, and nothing that
+    looked like somewhere to type a name.
+    """
+
+    def _fields(self, model):
+        return [it for row in model["rows"] for it in row["items"]
+                if it["kind"] == "field"]
+
+    def _patients(self):
+        return screenview.build(doc(
+            elements=[el("patient_screen_title_bar", "EditText",
+                         [7, 131, 713, 169]),
+                      el("patient_screen_title_bar_search_icon", "View",
+                         [682, 134, 708, 159])],
+            statics=[st([15, 140, 98, 153], "Buscar por nombre")]))
+
+    # ------------------------------------------------ the hint sits INSIDE it
+    def test_the_words_in_the_box_are_the_boxs_own(self):
+        assert self._fields(self._patients())[0]["hint"] == "Buscar por nombre"
+
+    def test_the_loose_caption_is_gone_from_the_page(self):
+        said = [it.get("txt") for row in self._patients()["rows"]
+                for it in row["items"] if it["kind"] == "label"]
+        assert "Buscar por nombre" not in said
+
+    def test_the_apps_own_magnifier_belongs_to_the_box(self):
+        field = self._fields(self._patients())[0]
+        assert field["submit"]["rid"] == "patient_screen_title_bar_search_icon"
+
+    def test_and_is_no_longer_a_bubble_of_its_own(self):
+        rows = [it for row in self._patients()["rows"] for it in row["items"]
+                if it["kind"] == "row"]
+        assert not any((it.get("aim") or {}).get("rid", "").endswith(
+            "search_icon") for it in rows)
+
+    def test_the_box_is_still_the_thing_that_gets_typed_into(self):
+        """The fold must not cost the field its own aim, or there would be
+        nowhere to put the name."""
+        assert self._fields(self._patients())[0]["aim"]["rid"] \
+            == "patient_screen_title_bar"
+
+    # ----------------------------------------------- ...or directly above it
+    def _visit_search(self):
+        return screenview.build(doc(
+            elements=[el("search_visit_screen_patient_name_field", "EditText",
+                         [7, 120, 713, 158]),
+                      el("search_visit_screen_search_button", "View",
+                         [7, 270, 713, 295], "Buscar")],
+            statics=[st([7, 105, 97, 118], "Nombre del paciente"),
+                     st([346, 277, 375, 288], "Buscar")]))
+
+    def test_a_caption_written_above_the_box_is_the_boxs_name_too(self):
+        assert self._fields(self._visit_search())[0]["hint"] \
+            == "Nombre del paciente"
+
+    def test_a_heading_further_up_the_page_is_not(self):
+        """Directly above, left-aligned, and alone on its line — a section
+        heading with a field somewhere under it is not a caption."""
+        model = screenview.build(doc(
+            elements=[el("f", "EditText", [7, 600, 713, 638])],
+            statics=[st([7, 105, 200, 118], "Buscar visitas")]))
+        assert not self._fields(model)[0].get("hint")
+
+    def test_the_page_still_has_its_search_button(self):
+        """Folding the caption must not swallow the action."""
+        said = [line for row in self._visit_search()["rows"]
+                for it in row["items"] for line in (it.get("lines") or [])]
+        assert "Buscar" in said
+
+
+class TestWhatTalkBackIsToldToSay:
+    """An app hangs instructions on a control so a screen reader can explain
+    how to work it. The portal is not a screen reader, and the visit search's
+    date range came through reading "Ingrese el formato de datos como mes,
+    fecha, año, doble toque para activar" — a sentence about double-tapping,
+    on a page where nothing is double-tapped.
+    """
+
+    def _lines(self, caption):
+        model = screenview.build(doc(
+            elements=[el("date_range", "View", [7, 173, 713, 202])],
+            statics=[st([7, 173, 713, 202], caption),
+                     st([12, 181, 331, 194], "07/19/2026"),
+                     st([382, 181, 702, 194], "08/18/2026")]))
+        return [line for row in model["rows"] for it in row["items"]
+                for line in (it.get("lines") or [])]
+
+    def test_the_instruction_does_not_reach_the_page(self):
+        lines = self._lines("Ingrese el formato de datos como mes, fecha, "
+                            "año, doble toque para activar")
+        assert not any("doble toque" in line for line in lines)
+
+    def test_but_the_dates_still_do(self):
+        lines = self._lines("Ingrese el formato de datos como mes, fecha, "
+                            "año, doble toque para activar")
+        assert "07/19/2026" in lines and "08/18/2026" in lines
+
+    def test_english_says_it_too(self):
+        assert not any("double tap" in line.lower()
+                       for line in self._lines("Date range, double tap to "
+                                               "activate"))
+
+    def test_an_ordinary_sentence_is_left_alone(self):
+        assert any("Carmen" in line
+                   for line in self._lines("Carmen Villalon, 8:00 PM"))

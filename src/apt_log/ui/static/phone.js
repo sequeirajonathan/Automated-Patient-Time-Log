@@ -135,6 +135,16 @@
             openTypeBar(aim, (el.textContent || '').trim());
             return;
           }
+          // A SEARCH BOX TAKES TEXT TOO. Tapping one used to focus it on the
+          // phone and stop there — the phone's keyboard came up on a screen
+          // nobody is looking at, and from the portal there was no way to put
+          // a name in. The bar was held back because a "type here" prompt on
+          // the patients list read as the sign-in code asking again; the fix
+          // for that is the field's OWN words, which is what the hint carries.
+          if (el.dataset.hint) {
+            openTypeBar(aim, el.dataset.hint, 'search');
+            return;
+          }
         }
         // No overlays and no sentences for a tap: the screen dims and
         // shimmers until its successor arrives, the way a native app treats
@@ -150,8 +160,14 @@
   // phone and gets typed here. Letters and digits, capped short; the
   // server enforces the same and refuses if the field moved.
   let typeAim = null;
-  function openTypeBar(aim, label) {
+  // Which shape of thing is being typed. A code is letters and digits; a
+  // name has spaces, accents and the odd apostrophe in it, and stripping
+  // those left "Rojas Batista" arriving as "RojasBatista" — a search that
+  // matches nothing. The server holds the same two shapes.
+  let typeKind = 'code';
+  function openTypeBar(aim, label, kind) {
     typeAim = aim;
+    typeKind = kind === 'search' ? 'search' : 'code';
     const bar = document.getElementById('typebar');
     if (!bar) return;
     // The hint names the FIELD when the field names itself; the generic
@@ -187,7 +203,13 @@
   }
   function sendTyped() {
     const box = document.getElementById('typebox');
-    const value = (box.value || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 32);
+    const raw = box.value || '';
+    const value = (typeKind === 'search'
+      // A person's name: letters in any language, spaces, and the marks
+      // names actually carry. Everything else is dropped here and refused
+      // again on the server — this is a search box, not a shell.
+      ? raw.replace(/[^\p{L}\p{N} .'\-]/gu, '').replace(/\s+/g, ' ').trim()
+      : raw.replace(/[^A-Za-z0-9]/g, '')).slice(0, 32);
     if (!value || !typeAim || !socket || socket.readyState !== 1) return;
     tapping(true);
     socket.send(JSON.stringify({ type: 'text', frame: frameId,
