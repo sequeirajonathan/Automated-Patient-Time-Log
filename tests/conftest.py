@@ -16,7 +16,7 @@ import importlib
 
 import pytest
 
-from apt_log import flight, macros, prefs, sms, versions
+from apt_log import flight, macros, prefs, schedule, sms, versions
 from apt_log.ui import mirror, state
 
 
@@ -106,6 +106,20 @@ def _isolated_prefs(tmp_path, monkeypatch):
     # forwards a code silences the next one for twenty seconds, and which
     # tests those are depends on the order they run in.
     monkeypatch.setattr(sms, "_last_poll", [0.0])
+
+    # AND NOTHING MAY READ THE REAL SCHEDULE.
+    #
+    # Not state that could leak — the opposite direction, and the same shape
+    # as the SMS stub above: /etc/aptlog/schedule.json holds who is cared for,
+    # at whose home, at what hour, and the deploy gate runs this suite on the
+    # machine that has it. A test calling `load()` with no argument would read
+    # six people's health information into a test process, on the Pi, and
+    # pass either way — which is how a leak gets to be invisible.
+    #
+    # Every test here passes its own path. This is the belt for the next one
+    # that forgets.
+    monkeypatch.setattr(schedule, "SCHEDULE_PATH",
+                        tmp_path / "schedule.json")
     yield
 
 

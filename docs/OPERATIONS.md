@@ -201,7 +201,57 @@ How it behaves:
 renumbers between versions. **On a new phone, verify it** with the self-text probe
 documented beside that constant before trusting it.
 
-### 2.6 Deliberate limits
+### 2.6 The visit schedule
+
+`/etc/aptlog/schedule.json`, mode 0600, service-user readable. **It is not in this
+repository and must not be put there.** It names who is cared for, at whose home, at what
+hour — a git history is permanent, and this is the same argument `config.py` makes at the
+top of itself about the site's own particulars. `sanitize-for-image.sh` removes it.
+
+```json
+{
+  "zone": "America/New_York",
+  "visits": [
+    {"patient": "…", "app": "com.inmyteam.inmyteam",
+     "days": ["mon","tue","wed","thu","fri"], "start": "05:00", "end": "06:00"},
+    {"patient": "…", "app": "com.hhaexchange.uma", "agency": "…",
+     "days": ["mon","wed","fri"], "start": "20:05", "end": "21:05",
+     "part": 1, "of": 2}
+  ]
+}
+```
+
+- `app` is the package: `com.inmyteam.inmyteam`, `com.hhaexchange.uma` (Exchange+),
+  `com.tellus.evv.v2` (Mobile Care).
+- `days` accepts English or Spanish names.
+- `start`/`end` are the **nominal** times — what the app displays. Nothing recomputes them.
+- `part`/`of` split one stretch of care into separate entries.
+
+**Times are wall clock, and that is deliberate.** 5:00am is 5:00am in March and in July,
+which is what the agency means. Resolving those to real instants is `schedule.py`'s job,
+and it handles both awkward days: a wall time inside the March gap is refused rather than
+silently fired an hour out, and a repeated November hour takes the earlier of the two.
+
+#### The travel buffer
+
+A visit fires at its nominal start **unless a different patient's visit ends at exactly
+that minute**, in which case five minutes are added so the caregiver can drive there. The
+gap exists in no app and cannot be read from one.
+
+It is not applied where a gap already exists — the rule is "no gap at all", not "always
+five minutes" — and it is not applied between a patient's own split entries, because
+nobody drives anywhere between those.
+
+Whether it applies is a question about a **day**, not about a visit: the same block is
+buffered on a weekday when somebody precedes it and fires on time on Saturday when
+nobody does.
+
+#### Checking it
+
+The full-schedule view in the portal renders exactly what the engine computed, so the
+fastest check on a freshly edited file is to open that page and read the week back.
+
+### 2.7 Deliberate limits
 
 - Migrations aren't handled. Any schema change needs a manual step until there's a real
   migration story.
