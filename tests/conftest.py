@@ -102,6 +102,10 @@ def _isolated_prefs(tmp_path, monkeypatch):
     # silence things that legitimately shell out. Tests that mean to exercise
     # `_adb` itself hold a reference taken at import, before this runs.
     monkeypatch.setattr(sms, "_adb", lambda *a, **k: "")
+    # ...and the forwarder's throttle, which is module state: one test that
+    # forwards a code silences the next one for twenty seconds, and which
+    # tests those are depends on the order they run in.
+    monkeypatch.setattr(sms, "_last_poll", [0.0])
     yield
 
 

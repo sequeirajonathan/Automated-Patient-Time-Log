@@ -149,7 +149,10 @@ rescues it, and the vendor-API route becomes the only viable path.
 - Never accept a password as a CLI argument (leaks to `ps` and shell history).
 - Detect the login screen at the start of every run and re-authenticate if present.
 - Suppress screenshots while a password field has focus.
-- The phone's unlock PIN lives in the same store (OPERATIONS.md §1.4).
+- The phone's unlock PIN lives in the same store (OPERATIONS.md §1.4), as does the list
+  of people the inMyTeam code is texted onward to (`CODE_RECIPIENTS`, OPERATIONS.md
+  §2.5). That list widens who can sign in as the caregiver, so it is off unless somebody
+  sets it, and it is kept out of the repository because a git history is permanent.
 - Secrets are stripped by `sanitize-for-image.sh` and never ship in an image (REQ-13).
 
 ### REQ-4 — Patient check-off flow

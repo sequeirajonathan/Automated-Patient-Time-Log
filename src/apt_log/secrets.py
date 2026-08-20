@@ -43,6 +43,18 @@ INMYTEAM_PHONE = "INMYTEAM_PHONE"  # inMyTeam signs in with a cell number
                                    # number" — the SMS code lands on the
                                    # tethered phone itself)
 
+# Who the inMyTeam code is texted onward to, once the phone has received it.
+# Comma separated, optionally labelled: "Name:5551234567,Name:5559876543".
+#
+# HERE RATHER THAN IN THE SOURCE because these are private mobile numbers of
+# named people, and a repository remembers forever — a number committed once
+# is a number that cannot be taken back out of the history. This file is 0600
+# and is not in the disk image. See sms.recipients.
+#
+# Optional, unlike everything above it: absent, no code is forwarded and the
+# rest of the sign-in behaves exactly as it did before.
+CODE_RECIPIENTS = "CODE_RECIPIENTS"
+
 
 class SecretNotFound(KeyError):
     """Raised rather than returning None, so a missing secret cannot be typed."""

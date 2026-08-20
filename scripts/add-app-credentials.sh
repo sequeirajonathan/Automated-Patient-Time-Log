@@ -69,6 +69,22 @@ if [[ -n "${IMT_PHONE_VAL}" && ! "$IMT_PHONE_VAL" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
+echo
+echo "Who else should be TEXTED that code, from this phone's own SIM, as soon"
+echo "as it arrives. Comma separated, optionally labelled:"
+echo
+echo "    Jonathan:9995551234,Sadia:9995555678"
+echo
+echo "Understand what this is before setting it. A sign-in code is the second"
+echo "factor on an account whose records attest who delivered care to a"
+echo "patient — everyone on this list can sign in as the caregiver. Leave it"
+echo "empty and nothing is forwarded; the sign-in behaves as it always has."
+read -rp  "Text the code to            : " CODE_TO_VAL || true
+if [[ -n "${CODE_TO_VAL}" && ! "$CODE_TO_VAL" =~ ^[A-Za-z0-9:,+()@.\ -]+$ ]]; then
+    echo "names, numbers, colons and commas only" >&2
+    exit 1
+fi
+
 # Update-or-append each key, never disturbing the others.
 upsert() {
     local key="$1" value="$2"
@@ -89,8 +105,9 @@ upsert "MC_PIN"       "${MC_PIN_VAL:-}"
 upsert "MC_USERNAME" "${MC_USER:-}"
 upsert "MC_PASSWORD" "${MC_PASS:-}"
 upsert "INMYTEAM_PHONE" "${IMT_PHONE_VAL:-}"
+upsert "CODE_RECIPIENTS" "${CODE_TO_VAL:-}"
 
-unset UMA_PASS UMA_PASS2 MC_PIN_VAL MC_PASS MC_PASS2 IMT_PHONE_VAL
+unset UMA_PASS UMA_PASS2 MC_PIN_VAL MC_PASS MC_PASS2 IMT_PHONE_VAL CODE_TO_VAL
 
 chown "$SERVICE_USER:$SERVICE_USER" "$SECRETS"
 chmod 0600 "$SECRETS"
@@ -102,8 +119,8 @@ VENV="/opt/aptlog/.venv/bin/python"
 sudo -u "$SERVICE_USER" "$VENV" - <<'PY' 2>/dev/null || echo "  (could not verify)"
 import sys
 sys.path.insert(0, "/opt/aptlog/src")
-from apt_log.secrets import (INMYTEAM_PHONE, MC_PASSWORD, MC_PIN,
-                             MC_USERNAME, UMA_PASSWORD, UMA_USERNAME,
+from apt_log.secrets import (CODE_RECIPIENTS, INMYTEAM_PHONE, MC_PASSWORD,
+                             MC_PIN, MC_USERNAME, UMA_PASSWORD, UMA_USERNAME,
                              FileSecretProvider, SecretNotFound)
 p = FileSecretProvider()
 for label, key, masked in (("UMA_USERNAME", UMA_USERNAME, False),
@@ -111,7 +128,8 @@ for label, key, masked in (("UMA_USERNAME", UMA_USERNAME, False),
                            ("MC_PIN", MC_PIN, True),
                            ("MC_USERNAME", MC_USERNAME, False),
                            ("MC_PASSWORD", MC_PASSWORD, True),
-                           ("INMYTEAM_PHONE", INMYTEAM_PHONE, True)):
+                           ("INMYTEAM_PHONE", INMYTEAM_PHONE, True),
+                           ("CODE_RECIPIENTS", CODE_RECIPIENTS, True)):
     try:
         v = p.get(key)
         print("  %-13s: %s" % (label, v if not masked else f"set ({len(v)} chars)"))

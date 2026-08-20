@@ -1819,6 +1819,14 @@ def _fill_in_the_code(driver, report, sent: float) -> bool:
     if not code:
         return False
 
+    # PASSED ON BEFORE IT IS TYPED, and before anything that can fail. The
+    # people on that list are the fallback for this walk going wrong, so
+    # forwarding after a successful sign-in would send the code only in the
+    # case where nobody needed it. Forced past the poll interval because a
+    # code has demonstrably just landed; the dedup still holds, so the tick
+    # behind this will not send it a second time.
+    _pass_the_code_on()
+
     box = _code_box(driver)
     if box is None:
         # The screen moved under us between asking and answering. Better to
@@ -1855,6 +1863,26 @@ def _fill_in_the_code(driver, report, sent: float) -> bool:
 # can take half a minute on a bad day, and the cost of giving up early is
 # falling back to the human path, which is where this started.
 CODE_WAIT = 75.0
+
+
+def _pass_the_code_on() -> None:
+    """Text the code to whoever is on the list, if anybody is.
+
+    Never fatal, and never allowed to stop the walk: this is a courtesy to
+    people who are not standing at the phone, and the walk that IS at the
+    phone is one step from signing in. A carrier problem must not cost that.
+
+    Silent when no list is configured, which is the shipped state — see
+    `secrets.CODE_RECIPIENTS`.
+    """
+    try:
+        from apt_log import sms
+
+        sent = sms.forward_any_new(force=True)
+        if sent:
+            log.info("code texted onward to %d", sent)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not text the code onward (%s)", exc)
 
 
 def _push_the_code(code: str) -> None:

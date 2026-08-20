@@ -1610,6 +1610,7 @@ def run(path: Path, interval: float = DEFAULT_INTERVAL,
     # resident Appium session lives and UiAutomator2 allows exactly one. A second
     # session in the UI cost 14 seconds a tap when it was tried.
     from apt_log.macros import Runner
+    from apt_log import sms as sms_mod
     from apt_log import versions as versions_mod
 
     runner = Runner()
@@ -1632,6 +1633,16 @@ def run(path: Path, interval: float = DEFAULT_INTERVAL,
                 versions_mod.check(serial)
             except Exception as exc:  # noqa: BLE001
                 log.debug("version check failed: %s", exc)
+            try:
+                # Free on all but one tick in a few, for the same reason and
+                # by the same means — the timer lives inside the call. This is
+                # what makes a forwarded code true of sign-ins the portal
+                # never started: somebody logging in from their own phone
+                # makes inMyTeam text THIS one, and nothing else here would
+                # ever notice that happened.
+                sms_mod.forward_any_new(serial)
+            except Exception as exc:  # noqa: BLE001
+                log.debug("code forward failed: %s", exc)
             count += 1
             if iterations is None or count < iterations:
                 time.sleep(interval)
