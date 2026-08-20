@@ -104,8 +104,15 @@ def parse(text: str) -> dict[str, dict]:
     return found
 
 
-def stored(path: Path = VERSIONS_PATH) -> dict:
-    """What was on the phone last time anybody looked."""
+def stored(path: Path | None = None) -> dict:
+    """What was on the phone last time anybody looked.
+
+    The path is resolved on the call, not baked into the signature, so that
+    redirecting VERSIONS_PATH actually redirects it. The deploy gate runs the
+    whole suite ON THE PI against the real /var/lib/aptlog — see conftest —
+    and a default bound at import time would sail straight past that.
+    """
+    path = path or VERSIONS_PATH
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, ValueError):
@@ -147,12 +154,13 @@ def changes(before: dict, after: dict) -> list[dict]:
 
 
 def check(serial: str | None = None, force: bool = False,
-          path: Path = VERSIONS_PATH) -> list[dict]:
+          path: Path | None = None) -> list[dict]:
     """Read the versions if it is time, and say what changed.
 
     Safe to call every tick of the feed loop: the timer is in here, so the
     caller does not have to hold one and cannot get it wrong.
     """
+    path = path or VERSIONS_PATH
     with _lock:
         now = time.time()
         if not force and now - _last_check[0] < CHECK_EVERY:

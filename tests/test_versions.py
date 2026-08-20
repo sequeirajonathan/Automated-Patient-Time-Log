@@ -181,3 +181,23 @@ class TestTheTimerIsInside:
     def test_a_phone_that_will_not_answer_is_not_an_exception(self):
         with patch("subprocess.run", side_effect=OSError("no adb")):
             assert versions._shell(None) == ""
+
+
+class TestItCannotWriteTheMachinesOwnFile:
+    """The deploy gate runs this suite ON THE PI, against the real
+    /var/lib/aptlog. `feed.run` checks versions every tick, so the first
+    deploy of this module had a test take the machine's baseline before the
+    service had ever run. conftest redirects the path for every test; these
+    are the two things that have to be true for that to work."""
+
+    def test_the_path_is_resolved_on_the_call(self, tmp_path, monkeypatch):
+        """A default bound into the signature at import time would sail
+        straight past the fixture, which is exactly what happened."""
+        monkeypatch.setattr(versions, "VERSIONS_PATH", tmp_path / "v.json")
+        with patch.object(versions, "_shell", return_value=DUMP):
+            versions.check(force=True)
+        assert (tmp_path / "v.json").exists()
+        assert versions.stored()["apps"]["com.inmyteam.inmyteam"]
+
+    def test_the_fixture_has_moved_it_off_the_machine(self):
+        assert versions.VERSIONS_PATH != versions.STATE_DIR / "app-versions.json"
