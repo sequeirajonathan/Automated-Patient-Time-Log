@@ -1161,3 +1161,57 @@ class TestNamingTheAppsOwnSubmit:
         page = ('<node class="android.widget.Button" resource-id="" '
                 f'clickable="true" text="{word}" bounds="[642,74][678,110]"/>')
         assert "confirm" in sign._app_buttons(page)
+
+
+class TestRotatedLabelsScaleWithTheScreen:
+    """The legacy signature page draws its UI a quarter turn inside a
+    portrait activity, and the tell is single-line captions in boxes taller
+    than they are wide. The two box tests were measured in pixels on a
+    720-wide screen; a denser panel draws the same caption bigger in every
+    dimension, so a fixed 40px "narrow" ceiling would stop matching the very
+    labels it was written for."""
+
+    @staticmethod
+    def _rotated(width, height):
+        """A portrait window with two tall, narrow captions in it."""
+        narrow = int(width * 0.045)          # comfortably under the ceiling
+        tall = int(width * 0.14)             # and over the floor, and > 3x wide
+        labels = "".join(
+            f'<node class="android.widget.TextView" '
+            f'text="Firma del cuidador" '
+            f'bounds="[{80 + i * 200},400][{80 + i * 200 + narrow},{400 + tall}]"/>'
+            for i in range(2))
+        return (f'<hierarchy><node bounds="[0,0][{width},{height}]">'
+                f'{labels}</node></hierarchy>')
+
+    @pytest.mark.parametrize("width,height", [(720, 1600), (1080, 2400),
+                                              (1440, 3120)])
+    def test_the_rotated_page_is_recognised_on_every_panel(self, width,
+                                                           height):
+        assert sign.presentation_rotated(self._rotated(width, height)) is True
+
+    @pytest.mark.parametrize("width,height", [(720, 1600), (1080, 2400)])
+    def test_an_ordinary_portrait_page_is_not(self, width, height):
+        """Wide captions, the way horizontal text actually sits."""
+        rows = "".join(
+            f'<node class="android.widget.TextView" text="Registrar entrada" '
+            f'bounds="[20,{300 + i * 120}][{width - 20},{360 + i * 120}]"/>'
+            for i in range(4))
+        tree = (f'<hierarchy><node bounds="[0,0][{width},{height}]">'
+                f'{rows}</node></hierarchy>')
+        assert sign.presentation_rotated(tree) is False
+
+    def test_a_truly_sideways_window_needs_no_help(self):
+        """Injected coordinates already follow a rotated display, so the
+        turn must not be applied twice."""
+        assert sign.presentation_rotated(self._rotated(1600, 720)) is False
+
+    def test_one_tall_label_is_not_enough(self):
+        tree = ('<hierarchy><node bounds="[0,0][720,1600]">'
+                '<node class="android.widget.TextView" text="Firma del cuidador" '
+                'bounds="[80,400][112,500]"/></node></hierarchy>')
+        assert sign.presentation_rotated(tree) is False
+
+    def test_nothing_to_read_is_not_rotated(self):
+        for empty in ("", "<hierarchy/>"):
+            assert sign.presentation_rotated(empty) is False

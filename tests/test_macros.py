@@ -2132,11 +2132,46 @@ class TestTabAim:
         type(driver).page_source = property(lambda self: src)
         slots = macros._tab_slots(driver)
         assert len(slots) == 3
-        # Programación selected: no container, aim just above its label.
-        assert slots[0] == {"point": (114, 1387), "selected": True}
         # Pacientes and Menú: the container centre, up in the icon zone.
         assert slots[1] == {"point": (360, 1402), "selected": False}
         assert slots[2] == {"point": (606, 1402), "selected": False}
+        # Programación is selected and so has no container of its own. Its
+        # aim is BORROWED FROM ITS NEIGHBOURS rather than guessed: the tabs
+        # share one row, so their container centre is its container centre.
+        # This used to be "forty pixels above the caption", which is the
+        # icon zone only on a 720-wide screen at this phone's density.
+        assert slots[0] == {"point": (114, 1402), "selected": True}
+        assert slots[0]["point"][1] == slots[1]["point"][1]
+
+    def test_the_borrowed_aim_holds_at_another_resolution(self):
+        """The point of the change. Same bar, same proportions, a 1080-wide
+        panel: the selected tab still lands on its neighbours' row instead of
+        forty pixels above a caption that is now further from its icon."""
+        driver = MagicMock()
+        driver.get_window_size.return_value = {"width": 1080, "height": 2400}
+        src = (
+            '<node class="android.widget.TextView" text="Programación" '
+            'clickable="false" bounds="[0,2140][342,2212]"/>'
+            '<node class="android.widget.TextView" text="Pacientes" '
+            'clickable="false" bounds="[402,2140][678,2212]"/>'
+            '<node class="android.view.View" clickable="true" '
+            'bounds="[369,1968][711,2238]"/>')       # Pacientes container
+        type(driver).page_source = property(lambda self: src)
+        slots = macros._tab_slots(driver)
+        assert len(slots) == 2
+        assert slots[0]["selected"] is True
+        assert slots[0]["point"][1] == slots[1]["point"][1] == 2103
+
+    def test_a_lone_tab_falls_back_to_its_own_caption(self):
+        """Nothing to borrow from. A one-tab bar is not a bar worth
+        sweeping, so the honest fallback beats inventing an offset."""
+        driver = MagicMock()
+        driver.get_window_size.return_value = {"width": 720, "height": 1600}
+        src = ('<node class="android.widget.TextView" text="Solo" '
+               'clickable="false" bounds="[0,1427][228,1475]"/>')
+        type(driver).page_source = property(lambda self: src)
+        slots = macros._tab_slots(driver)
+        assert slots == [{"point": (114, 1427), "selected": True}]
 
 
 class TestWarmWaitsForTabBar:

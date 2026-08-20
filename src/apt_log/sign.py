@@ -413,16 +413,22 @@ def _dump_refusal(nodes, reason: str) -> None:
 # never does. Two such labels and a portrait extent mean the presentation
 # is rotated; a truly landscape screen (wide bounds) needs no help, because
 # injected coordinates already follow the rotated display.
+#
+# The two box tests are SHARES of the window's width, not pixels. They were
+# measured at 40 and 60 on a 720-wide screen, which is what these fractions
+# reproduce there — but a denser panel draws the same label bigger in every
+# dimension, and a fixed 40px ceiling on "narrow" would stop matching the
+# very labels it was written for.
 _ROT_LABEL_MIN_CHARS = 6
-_ROT_LABEL_MAX_W = 40
-_ROT_LABEL_MIN_H = 60
+_ROT_LABEL_MAX_W_SHARE = 40 / 720
+_ROT_LABEL_MIN_H_SHARE = 60 / 720
 
 
 def presentation_rotated(xml: str) -> bool:
     """Whether this screen draws its content turned 90° inside a portrait
     activity — the shape strokes must be turned to match."""
+    boxes = []
     max_x = max_y = 0
-    tall_labels = 0
     for raw in _NODE.findall(xml or ""):
         m = _BOUNDS.search(_attr(raw, "bounds"))
         if not m:
@@ -431,12 +437,21 @@ def presentation_rotated(xml: str) -> bool:
         if x2 <= x1 or y2 <= y1:
             continue
         max_x, max_y = max(max_x, x2), max(max_y, y2)
-        w, h = x2 - x1, y2 - y1
-        if (len(_attr(raw, "text")) >= _ROT_LABEL_MIN_CHARS
-                and w <= _ROT_LABEL_MAX_W
-                and h >= max(_ROT_LABEL_MIN_H, 3 * w)):
-            tall_labels += 1
-    return max_x < max_y and tall_labels >= 2
+        boxes.append((x2 - x1, y2 - y1, len(_attr(raw, "text"))))
+
+    if not max_x or max_x >= max_y:
+        # A truly landscape screen needs no help: injected coordinates
+        # already follow the rotated display.
+        return False
+
+    # Measured against the window this tree actually describes, so the same
+    # labels match at any resolution.
+    narrow = max_x * _ROT_LABEL_MAX_W_SHARE
+    tall = max_x * _ROT_LABEL_MIN_H_SHARE
+    tall_labels = sum(
+        1 for w, h, chars in boxes
+        if chars >= _ROT_LABEL_MIN_CHARS and w <= narrow and h >= max(tall, 3 * w))
+    return tall_labels >= 2
 
 
 # The legacy app draws its signature pages turned a quarter turn inside a
