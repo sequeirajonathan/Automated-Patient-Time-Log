@@ -698,6 +698,100 @@ _MC_SIGN_IN = ('//android.widget.Button'
                '[contains(@resource-id, ":id/login_button")]')
 
 
+# A WALL THAT IS NOT A LOCK.
+#
+# Found on the live phone while looking at this macro: Mobile Caregiver+ was
+# sitting on its dashboard behind a dialog with one button — "Actualizar
+# ahora", "Existe una nueva versión disponible en la Play Store". Not a
+# passcode, not an expired session, nothing this macro was written to answer,
+# and nothing it could see: it looked for a keypad, found none, looked for
+# the expiry wording, found none, waited six seconds for a sign-in form that
+# was never coming, and reported DONE over an app that could not be used.
+#
+# A macro reporting success over a wall is worse than one that fails, because
+# the next thing anybody does is trust it.
+#
+# The button is NOT pressed. It leads to the Play Store, and installing a new
+# version of an app this project reads by resource-id is a change to every
+# assumption in this file — a decision for a person on a morning when
+# somebody can check afterwards, not for a macro at 6am.
+UPDATE_WALL_MARKERS = {
+    "com.tellus.evv.v2": (
+        "actualizar ahora", "nueva versión disponible",
+        "nueva version disponible", "update now", "new version is available",
+    ),
+}
+
+
+def update_wall_on_screen(doc: dict | None) -> bool:
+    """Whether the app in front is blocked behind a forced-update dialog."""
+    markers = UPDATE_WALL_MARKERS.get((doc or {}).get("app") or "")
+    if not markers:
+        return False
+    words = " ".join(
+        (n.get("txt") or "")
+        for n in ((doc or {}).get("statics") or [])
+        + ((doc or {}).get("elements") or [])).lower()
+    return any(m in words for m in markers)
+
+
+# THE KEYPAD, READ ONCE.
+#
+# Mobile Caregiver+'s passcode screen is ten Buttons whose whole text is one
+# digit, a backspace ImageButton beside the zero, and "Log in as a new user"
+# under them. It was typed by asking the driver for each digit in turn — four
+# hierarchy dumps for a four-digit code, on a phone where one dump costs
+# seconds — and the first of those dumps is the dangerous one: a keypad caught
+# mid-draw answers with SOME of its buttons. The flight recorder has one, two
+# buttons into a ten-button keypad, and against that the old path raised "the
+# keypad is not where discovery saw it" about a keypad that was simply not
+# finished yet.
+#
+# So: one read, and only once every digit the code needs is on it.
+MC_KEYPAD_DIGITS = 10
+MC_KEYPAD_READY = 25.0
+
+
+def _mc_keypad(driver) -> dict:
+    """digit -> where to tap, read from a single hierarchy."""
+    from apt_log import feed as feed_mod
+
+    keys: dict[str, list[int]] = {}
+    for el in feed_mod.elements(driver.page_source or "", label=True):
+        if not el.get("cls", "").endswith("Button"):
+            continue
+        text = (el.get("txt") or "").strip()
+        if len(text) == 1 and text.isdigit() and text not in keys:
+            keys[text] = el["b"]
+    return keys
+
+
+def _mc_backspace(driver) -> list[int] | None:
+    """The keypad's own delete key: the ImageButton sitting among the digits.
+
+    Whatever is half-typed when this macro arrives is not this macro's, and
+    appending to it produces a WRONG passcode — which on an app that locks
+    after a few of those is a worse outcome than not trying. Cleared first,
+    always; backspace on an empty field does nothing.
+    """
+    from apt_log import feed as feed_mod
+
+    digits = [b for b in _mc_keypad(driver).values()]
+    if not digits:
+        return None
+    top = min(b[1] for b in digits)
+    bottom = max(b[3] for b in digits)
+    for el in feed_mod.elements(driver.page_source or "", label=True):
+        if el.get("cls", "").endswith("ImageButton") and top <= el["b"][1] \
+                and el["b"][3] <= bottom + (bottom - top):
+            return el["b"]
+    return None
+
+
+def _mc_tap(bounds: list[int]) -> None:
+    _tap_xy((bounds[0] + bounds[2]) // 2, (bounds[1] + bounds[3]) // 2)
+
+
 def _mobile_caregiver_pin(driver, report) -> None:
     """Mobile Caregiver+ — answer whichever of its two locks is up.
 
@@ -734,21 +828,52 @@ def _mobile_caregiver_pin(driver, report) -> None:
         return "login" in activity()
 
     # ------------------------------------------------------------- the PIN
-    if wait_for(on_pin_screen, timeout=4.0, poll=0.5):
+    #
+    # A COLD START IS NOT A MISSING KEYPAD. Four seconds was the whole budget
+    # for this app to draw its passcode screen, and this app opens on a splash
+    # — so a slow morning skipped the passcode path entirely and fell through
+    # to the password form, which is not what was on screen. The wait is now
+    # long enough to lose an argument with a cold start, and it waits for the
+    # KEYPAD rather than for the activity's name.
+    keys: dict = {}
+    if wait_for(on_pin_screen, timeout=MC_KEYPAD_READY, poll=0.6):
         # Read only once the keypad is actually up, and raised rather
         # than returned: an unlocked app must not even open the file.
         pin = FileSecretProvider().get(MC_PIN)
         report("macro.step.signing_in")
-        for digit in pin:
-            keys = driver.find_elements(
-                "xpath", f'//android.widget.Button[@text="{digit}"]')
-            if not keys:
-                raise RuntimeError("the keypad is not where discovery saw it")
-            keys[0].click()
-        report("macro.step.checking")
-        if not wait_for(lambda: not on_pin_screen(), timeout=15.0):
+
+        def keypad_ready() -> bool:
+            nonlocal keys
+            keys = _mc_keypad(driver)
+            # Every digit this passcode needs, not merely SOME buttons. A
+            # keypad two buttons into being drawn satisfied "find the 4" and
+            # failed on the "7" a moment later, and said the keypad had moved.
+            return all(d in keys for d in pin)
+
+        if not wait_for(keypad_ready, timeout=MC_KEYPAD_READY, poll=0.6):
             raise RuntimeError(
-                "still on the passcode screen after typing the PIN")
+                f"the passcode keypad drew {len(keys)} of "
+                f"{MC_KEYPAD_DIGITS} keys and stopped")
+
+        # Whatever is half-typed is not this macro's, and appending to it
+        # makes a WRONG passcode — which on an app that locks after a few is
+        # worse than not trying at all.
+        back = _mc_backspace(driver)
+        if back:
+            for _ in range(len(pin) + 2):
+                _mc_tap(back)
+                time.sleep(0.12)
+
+        for digit in pin:
+            _mc_tap(keys[digit])
+            time.sleep(0.18)
+        report("macro.step.checking")
+        if not wait_for(lambda: not on_pin_screen(), timeout=20.0):
+            # Deliberately NOT retried. A second attempt at a passcode that
+            # did not take is a second wrong passcode if the first was wrong,
+            # and this app locks. A person is told instead.
+            raise RuntimeError(
+                "still on the passcode screen after entering the code")
 
     # ------------------------------------------------- the expired session
     # "Sesión caducada" has one button and it only acknowledges; the form is
@@ -767,6 +892,14 @@ def _mobile_caregiver_pin(driver, report) -> None:
             break
     wait_for(on_login_screen, timeout=6.0, poll=0.5)
     if not on_login_screen():
+        # Not the sign-in form, and not necessarily nothing wrong. See
+        # UPDATE_WALL_MARKERS: this app can be sitting on its dashboard
+        # behind a dialog it will not move past, and "done" is a lie there.
+        if any(m in words for m in
+               UPDATE_WALL_MARKERS.get("com.tellus.evv.v2", ())):
+            report("macro.step.update_required")
+            raise RuntimeError(
+                "Mobile Caregiver+ is blocked behind its own update prompt")
         report("macro.step.checking")
         return
 

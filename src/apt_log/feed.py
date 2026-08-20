@@ -340,7 +340,15 @@ ACTIVITY_SCREENS = {
         "onboardingactivity": "startup",
         "homeactivity": "home",
     },
-    "com.tellus.evv.v2": {},
+    # Walked live and confirmed by the flight recorder. The passcode screen
+    # already answered "login" through the activity markers — "pin" is one of
+    # them — but the atlas is where a page's name belongs, and the dashboard
+    # had no name at all: the console said "unknown" about this app's main
+    # screen for as long as it has been installed.
+    "com.tellus.evv.v2": {
+        "pinactivity": "login",
+        "dashboardactivity": "home",
+    },
     "com.inmyteam.inmyteam": {},
 }
 
