@@ -152,7 +152,8 @@
            fact — "✓ Registros de entrada de EVV 6:00" — with the mark's
            colour as a soft chip and no chevron pretending it opens more. #}
         <span class="a-inforow{% if it.tone %} {{ it.tone }}{% endif %}">
-          {% for m in it.marks %}<span class="a-mark {{ m.tone }}">{{ m.sym }}</span>{% endfor %}
+          {% for m in it.marks %}<span class="a-mark {{ m.tone }}{% if m.txt %} named{% endif %}"
+            >{{ m.sym }}{% if m.txt %}<span class="a-mark-t">{{ m.txt }}</span>{% endif %}</span>{% endfor %}
           <span class="a-infotext">{{ it.txt or (it.lines[0] if it.lines else '') }}</span>
         </span>
       {% elif it.kind == 'row' %}
@@ -170,8 +171,14 @@
           <span class="a-line{% if not loop.first or it.txt %} sub{% endif %}">{{ line }}</span>
           {% endfor %}
           {% if it.marks %}
+          {# A tick that says WHAT it ticks. Two of these ride a visit row —
+             the check-in and the check-out — and drawn as bare glyphs they
+             were indistinguishable, with one tick ambiguous between them.
+             The app gives no caption; the id is the only thing that says
+             which, so the portal supplies the word. #}
           <span class="a-marks">
-            {% for m in it.marks %}<span class="a-mark {{ m.tone }}">{{ m.sym }}</span>{% endfor %}
+            {% for m in it.marks %}<span class="a-mark {{ m.tone }}{% if m.txt %} named{% endif %}"
+              >{{ m.sym }}{% if m.txt %}<span class="a-mark-t">{{ m.txt }}</span>{% endif %}</span>{% endfor %}
           </span>
           {% endif %}
           {% if it.badge %}<span class="a-badge">{{ it.badge }}</span>{% endif %}
