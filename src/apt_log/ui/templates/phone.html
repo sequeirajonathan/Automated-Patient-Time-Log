@@ -209,6 +209,33 @@
      outrank it, because each of those states says something truer than
      "loading" — and a screen behind the shade goes stale by definition,
      since the panel is what the watcher has been reading. */
+  /* Who else is on, and the coach switch, both quiet in the status line. */
+  .hdr-sub #watchers, .hdr-sub .coachbtn {
+      display:inline-flex; align-items:center; gap:4px; border:none;
+      background:var(--track); color:var(--muted); cursor:pointer;
+      border-radius:999px; padding:2px 8px; font:inherit; font-size:12px;
+      font-weight:650; line-height:1.7; }
+  .hdr-sub #watchers[hidden] { display:none; }
+  .hdr-sub #watchers svg, .hdr-sub .coachbtn svg { width:13px; height:13px; }
+  .hdr-sub .coachbtn { margin-left:auto; }
+  /* COACH MODE, ON. Loud on purpose — a mode that silently swallows taps is
+     worse than no mode at all, so it is impossible to be in it by accident
+     and not know. */
+  body.coaching .hdr-sub .coachbtn { background:var(--tint);
+                                     color:#fff; }
+  /* Nothing that reaches the phone is reachable. `pointer-events` rather
+     than `disabled`, because these are rebuilt from the socket constantly
+     and an attribute would have to be re-applied on every repaint; this is
+     one rule that cannot be missed. The script refuses the send as well —
+     CSS is the part she can see, not the part that makes it true. */
+  body.coaching #screenwrap, body.coaching .navbar, body.coaching #apptabs,
+  body.coaching #btn-tasks, body.coaching #sign-send, body.coaching .approw {
+      pointer-events:none; }
+  body.coaching #screenwrap { opacity:.92; }
+  /* The one exception: reading the page never touches it. */
+  body.coaching #btn-scan, body.coaching #btn-peek,
+  body.coaching #btn-apps, body.coaching #coach { pointer-events:auto; }
+
   body.stale .hdr-sub .dot::before,
   body.stale .hdr-sub .dot::after { background:hsl(38 92% 50%); }
   body.stale:not(.asleep):not(.offapp):not(.covered) #screenwrap { display:none; }
@@ -1094,6 +1121,28 @@
     <div class="hdr-sub">
       <span class="dot"></span><span id="live-label">{{ t('papp.live') }}</span>
       <span class="spin"></span>
+      {# Who else is on. Two people share this portal from two states and
+         every control on it drives ONE phone, so "somebody else is here" is
+         worth knowing before reaching for a button. Hidden when it is just
+         you: a badge reading "1" all day is furniture. #}
+      <button type="button" id="watchers" hidden
+              aria-label="{{ t('papp.watchers') }}"
+        ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+          ><path d="M16 20v-1.5a3.5 3.5 0 0 0-3.5-3.5h-5A3.5 3.5 0 0 0 4 18.5V20"/
+          ><circle cx="10" cy="8" r="3.2"/><path d="M20 20v-1.4a3.4 3.4 0 0 0-2.6-3.3"/
+          ><path d="M15.4 5.2a3.2 3.2 0 0 1 0 5.6"/></svg
+        ><span id="watchers-n"></span></button>
+      {# COACH MODE. The same screen, with nothing on it that can reach the
+         phone — for watching over somebody's shoulder from another state
+         without a stray thumb pressing Enviar on their behalf. #}
+      <button type="button" id="coach" class="coachbtn"
+              aria-label="{{ t('papp.coach') }}"
+        ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"
+          ><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z"/
+          ><circle cx="12" cy="12" r="2.6"/></svg
+        ><span class="coach-t">{{ t('papp.coach_on') }}</span></button>
     </div>
   </header>
   <div id="stage">
@@ -1322,6 +1371,9 @@
     scanning: {{ t('papp.scanning')|tojson }},
     clearing: {{ t('papp.clearing')|tojson }},
     checkingTasks: {{ t('macro.step.checking')|tojson }},
+    coachOn:   {{ t('papp.coach_on')|tojson }},
+    coachOff:  {{ t('papp.coach_off')|tojson }},
+    coachHeld: {{ t('papp.coach_held')|tojson }},
     {# The dot, explained on demand: tap the status and the current colour
        says what it means in a sentence. #}
     explainLive:    {{ t('papp.explain.live')|tojson }},

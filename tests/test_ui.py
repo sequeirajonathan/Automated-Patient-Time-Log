@@ -2514,3 +2514,130 @@ class TestAWideFrameInAPortraitBox:
         js = strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
         assert "toggle('sideways', !!meta.turn)" in js
         assert "toggle('wide', !!meta.landscape)" in js
+
+
+class TestCoachMode:
+    """"I also want to see how her front end looks like as she navigates so
+    I can coach her. Is this possible?"
+
+    It was — and so was reaching over from another state and pressing Enviar
+    on her behalf, because every control on the page drives ONE phone.
+
+    So: watch without touching. The CSS makes it visible and unreachable;
+    the script makes it true. The two halves matter separately — a mode that
+    only greys things out is a mode that fails silently the first time a
+    handler is bound somewhere new.
+    """
+
+    SCRIPT = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/static/phone.js")
+    PAGE = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/templates/phone.html")
+
+    def _js(self):
+        return strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
+
+    # ------------------------------------------------- every road to the phone
+    def test_every_path_that_moves_the_phone_asks_first(self):
+        """The list is derived from the source, not written down here, so a
+        NEW way to reach the phone fails this test instead of slipping past
+        it. Each call site must have a `driving()` check above it inside its
+        own handler."""
+        js = self._js()
+        reaches = [m for m in
+                   ("socket.send(JSON.stringify({ type: 'tap'",
+                    "socket.send(JSON.stringify({ type: 'text'",
+                    "name: 'read_page'", "name: 'clear_screen'",
+                    "name: 'check_tasks'", "'/sign'", "'/sign-action'",
+                    "type: 'device'")
+                   if m in js]
+        assert len(reaches) >= 7, f"only found {reaches}"
+        for marker in reaches:
+            if marker == "name: 'read_page'":
+                continue          # reading a page never touches it
+            before = js[:js.index(marker)]
+            assert "driving()" in before[-1400:], \
+                f"nothing holds back {marker}"
+
+    def test_reading_the_page_is_not_touching_it(self):
+        """The scan scrolls the phone and reads it back — no state changes,
+        and it is the one thing a coach most wants while talking her through
+        a screen."""
+        css = self.PAGE.read_text(encoding="utf-8")
+        assert "body.coaching #btn-scan" in css
+        assert "pointer-events:auto" in css
+
+    def test_the_photograph_is_not_touching_it_either(self):
+        css = self.PAGE.read_text(encoding="utf-8")
+        assert "body.coaching #btn-peek" in css
+
+    def test_a_held_press_says_why(self):
+        """Silence would read as the portal being broken."""
+        js = self._js()
+        body = js[js.index("function driving()"):]
+        assert "coachHeld" in body[:body.index("}\n")+200]
+
+    # -------------------------------------------------------------- the switch
+    def test_the_page_carries_the_switch(self, client):
+        assert 'id="coach"' in client.get("/app").text
+
+    def test_it_is_loud_when_it_is_on(self):
+        """A mode that silently swallows taps is worse than no mode: it must
+        be impossible to be in it and not know."""
+        css = self.PAGE.read_text(encoding="utf-8")
+        assert "body.coaching .hdr-sub .coachbtn { background:var(--tint)" in css
+
+    def test_it_survives_a_reload(self):
+        """A reload in the middle of watching somebody work must not quietly
+        hand the phone back."""
+        js = self._js()
+        assert "sessionStorage.setItem('aptlog-coach'" in js
+        assert "sessionStorage.getItem('aptlog-coach')" in js
+
+    def test_the_words_exist_in_both_languages(self):
+        base = Path(__file__).resolve().parents[1] / "src/apt_log/ui/locales"
+        for name in ("en.json", "es.json"):
+            words = json.loads((base / name).read_text(encoding="utf-8"))
+            for key in ("papp.coach", "papp.coach_on", "papp.coach_off",
+                        "papp.coach_held"):
+                assert words.get(key), f"{name} is missing {key}"
+
+
+class TestWhoElseIsOn:
+    """One phone, two sets of hands, in two states. "Somebody else is here"
+    is worth knowing before reaching for a button."""
+
+    SCRIPT = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/static/phone.js")
+
+    def test_the_count_reaches_the_page(self):
+        from pathlib import Path as P
+
+        src = (P(__file__).resolve().parents[1]
+               / "src/apt_log/ui/app.py").read_text(encoding="utf-8")
+        assert 'payload["viewers"] = last["viewers"] = _viewers' in src
+
+    def test_it_is_hidden_when_it_is_only_you(self):
+        """A badge reading "1" all day is furniture."""
+        js = strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
+        assert "badge.hidden = n < 2" in js
+
+    def test_the_stamp_survives_a_restart_of_this_process(self):
+        """The counter cannot: a deploy resets it to zero, and every deploy
+        took auto sign-in offline until a browser happened to reconnect."""
+        from pathlib import Path as P
+
+        src = (P(__file__).resolve().parents[1]
+               / "src/apt_log/ui/app.py").read_text(encoding="utf-8")
+        body = src[src.index("def _publish_viewers"):]
+        body = body[:body.index("\ntemplates =")]
+        assert "VIEWERS_PATH.read_text" in body      # reads the old stamp
+        assert '"seen": seen' in body
+
+    def test_the_stamp_only_moves_while_somebody_is_on(self):
+        from pathlib import Path as P
+
+        src = (P(__file__).resolve().parents[1]
+               / "src/apt_log/ui/app.py").read_text(encoding="utf-8")
+        body = src[src.index("def _publish_viewers"):]
+        assert "if _viewers > 0:" in body[:body.index("\ntemplates =")]

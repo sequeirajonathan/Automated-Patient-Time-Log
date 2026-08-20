@@ -191,16 +191,50 @@ WARM_TABBAR_WAIT = 6.0
 VIEWERS_PATH = STATE_DIR / "viewers.json"
 VIEWERS_FRESH = 40.0
 
+# A BROWSER THAT BACKGROUNDED IS NOT A PERSON WHO LEFT.
+#
+# The count above is live sockets, and a phone's browser drops its socket for
+# all the ordinary reasons: the screen locks, she switches to the camera, iOS
+# suspends the tab. Read strictly, that is "nobody is watching" — so on the
+# night this was found, the app's fifteen-minute timer signed the session out
+# mid-visit, the phone was left standing on the sign-in page, and the one
+# thing that exists to fix that refused to run. Reported as: "instead of an
+# auth trigger we were stranded on the signin page so I had to leave and
+# click on the app for her to trigger an auth."
+#
+# So a recent watcher counts. This does not reopen the case the gate was
+# built for — an unwatched phone looping sign-in against its own inactivity
+# timer all night — because at three in the morning nobody has been watching
+# for hours. It is deliberately longer than the app's own timeout: the whole
+# point is to still be inside the window when that timer fires.
+ATTENDED_WINDOW = 20 * 60.0
+
 
 def someone_is_watching(path: Path | None = None) -> bool:
+    """Whether anybody is on the portal, or was recently enough to count."""
     target = path or VIEWERS_PATH
     try:
-        if time.time() - target.stat().st_mtime > VIEWERS_FRESH:
-            return False
-        return int(json.loads(target.read_text(encoding="utf-8"))
-                   .get("n", 0)) > 0
+        payload = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return False
+    if not isinstance(payload, dict):
+        # Valid JSON is not the same as the shape this expects, and every
+        # refusal in this file goes the same way: nobody is watching.
+        return False
+    try:
+        if time.time() - target.stat().st_mtime <= VIEWERS_FRESH:
+            if int(payload.get("n", 0)) > 0:
+                return True
+    except (OSError, TypeError, ValueError):
+        pass
+    # Nobody on a socket this second. The stamp says when somebody last was,
+    # and it carries its own age, so a crashed UI cannot make it look newer
+    # than it is the way an mtime could.
+    try:
+        seen = float(payload.get("seen") or 0)
+    except (TypeError, ValueError):
+        return False
+    return bool(seen) and 0 <= time.time() - seen <= ATTENDED_WINDOW
 
 
 @dataclass
