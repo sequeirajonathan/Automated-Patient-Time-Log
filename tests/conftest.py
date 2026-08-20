@@ -76,6 +76,13 @@ def _isolated_prefs(tmp_path, monkeypatch):
     # publishes it, so any test that writes a frame wrote the machine's live
     # mirror — the document the portal renders from.
     monkeypatch.setattr(mirror, "MIRROR_PATH", tmp_path / "mirror.json")
+    # The auto-auth cooldown and the "we already said so" mark. Both are new
+    # and both would have leaked the same way — and the second one bit
+    # immediately: one test marking the notice as sent silenced the next,
+    # which is the same shape as a real machine going quiet for the wrong
+    # reason.
+    monkeypatch.setattr(macros, "AUTH_SEEN_PATH", tmp_path / "auto-auth.json")
+    monkeypatch.setattr(macros, "TOLD_PATH", tmp_path / "code-notice.json")
     yield
 
 

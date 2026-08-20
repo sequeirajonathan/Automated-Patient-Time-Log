@@ -45,6 +45,24 @@ STATE_DIR = Path("/var/lib/aptlog")
 REQUEST_PATH = STATE_DIR / "macro-request.json"
 STATUS_PATH = STATE_DIR / "macro-status.json"
 
+# WHEN EACH AUTO-AUTH LAST FIRED, ON DISK.
+#
+# The cooldowns below are the only thing standing between a login screen and a
+# sign-in attempt every few seconds, and for inMyTeam every attempt SENDS A
+# TEXT MESSAGE to a real person. They used to live in the Runner's memory,
+# which meant a restart forgot them — and the feed restarts on every deploy.
+#
+# What that cost, reported from the field as "over 100 notifications" with a
+# lock screen full of identical "inMyTeam needs the code": each deploy dropped
+# a fresh Runner onto a phone parked at a login screen, the fifteen-minute
+# guard read as never-fired, the walk pressed Sign in, and another code went
+# out. Ten deploys in an afternoon is ten texts nobody asked for and ten steps
+# toward the app's rate limit.
+#
+# Wall clock rather than monotonic, because monotonic means nothing across a
+# restart — which is the whole point of writing it down.
+AUTH_SEEN_PATH = STATE_DIR / "auto-auth.json"
+
 # A request older than this is ignored rather than run. The feed can be down when
 # a button is pressed, and a sign-in that fires when the process comes back
 # minutes later is a surprise on a phone nobody is holding.
@@ -1872,6 +1890,18 @@ def _say_the_code_is_waiting() -> None:
     relay reaches whoever configured it, from a machine that does not care
     whether this portal is healthy. Neither is enough on its own.
     """
+    if _told_recently():
+        # A SECOND GUARD, BEHIND THE COOLDOWN AND NOT INSTEAD OF IT.
+        #
+        # The cooldown stops the walk RUNNING again; this stops the same
+        # sentence being sent twice if it does — by a hand-pressed macro, by
+        # a second walk, by anything future. The reported symptom was a lock
+        # screen of identical notices, and identical is the operative word:
+        # the second one tells her nothing the first did not, and iOS does
+        # not reliably collapse them by tag the way the service worker asks.
+        log.info("code notice: already sent recently, not repeating")
+        return
+
     pushed = 0
     try:
         from apt_log import push
@@ -1884,7 +1914,35 @@ def _say_the_code_is_waiting() -> None:
     from apt_log import notify
 
     notify.send(CODE_WAITING, url=PORTAL_URL)
+    _mark_told()
     log.info("code notice: pushed to %d subscriber(s)", pushed)
+
+
+# How long one "the code is waiting" notice speaks for. The same window as
+# the sign-in cooldown, because it is the same event: a code that has been
+# asked for and not yet used.
+TOLD_QUIET = SMS_AUTH_COOLDOWN
+TOLD_PATH = STATE_DIR / "code-notice.json"
+
+
+def _told_recently(path: Path | None = None) -> bool:
+    try:
+        when = float(json.loads(
+            (path or TOLD_PATH).read_text(encoding="utf-8"))["at"])
+    except (OSError, json.JSONDecodeError, ValueError, KeyError, TypeError):
+        return False
+    since = time.time() - when
+    # A future timestamp is a clock that moved, not a notice from later.
+    return 0 <= since < TOLD_QUIET
+
+
+def _mark_told(path: Path | None = None) -> None:
+    try:
+        target = path or TOLD_PATH
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps({"at": time.time()}), encoding="utf-8")
+    except OSError as exc:
+        log.debug("cannot record the code notice (%s)", exc)
 
 
 # The words every version of this screen uses. Matched loosely because the
@@ -2852,10 +2910,43 @@ class Runner:
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
+        self._recall_auto_auth()
         self._reconcile()
         self._thread = threading.Thread(target=self._loop, daemon=True,
                                         name="aptlog-macros")
         self._thread.start()
+
+    def _auth_seen_path(self) -> Path:
+        """Beside the status file, wherever that is — so a test that
+        redirects one redirects both."""
+        if self._status_path is not None:
+            return self._status_path.parent / AUTH_SEEN_PATH.name
+        return AUTH_SEEN_PATH
+
+    def _recall_auto_auth(self) -> None:
+        """Load when each auto-auth last fired, from before the restart."""
+        try:
+            stored = json.loads(
+                self._auth_seen_path().read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, ValueError):
+            return
+        if not isinstance(stored, dict):
+            return
+        self._auto_auth_seen = {
+            name: float(when) for name, when in stored.items()
+            if isinstance(name, str) and isinstance(when, (int, float))}
+
+    def _remember_auto_auth(self) -> None:
+        """Write it down. Never fatal: failing to record a cooldown must not
+        stop the sign-in it was recorded for."""
+        try:
+            target = self._auth_seen_path()
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp = target.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self._auto_auth_seen), encoding="utf-8")
+            os.replace(tmp, target)
+        except OSError as exc:
+            log.warning("cannot record the auto-auth cooldown (%s)", exc)
 
     def _reconcile(self) -> None:
         """A macro cannot still be running if this process just started.
@@ -3187,11 +3278,16 @@ class Runner:
         # clock, so inMyTeam sat on its splash with somebody watching and
         # nothing happened. Seen exactly that way on the live phone.
         last = self._auto_auth_seen.get(macro_name)
-        if last is not None and time.monotonic() - last < cooldown:
+        now = time.time()
+        if last is not None and 0 <= now - last < cooldown:
+            # `0 <=` so a clock that jumped BACKWARDS cannot park a macro
+            # forever: a timestamp in the future is not a cooldown that has
+            # not elapsed, it is a reading that cannot be trusted.
             return False
 
         self._auto_auth_at = time.monotonic()
-        self._auto_auth_seen[macro_name] = self._auto_auth_at
+        self._auto_auth_seen[macro_name] = now
+        self._remember_auto_auth()
         log.info("login screen is up — signing in without being asked")
         self.execute(macro_name, f"auto-{uuid.uuid4().hex[:8]}")
         return True
