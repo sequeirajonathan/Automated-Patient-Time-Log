@@ -414,7 +414,17 @@ def _fold_label(cell_b: list[int], s: dict) -> tuple[str, str]:
     return "line", txt
 
 
-def _kind(cls: str) -> str:
+def _kind(cls: str, role: str = "") -> str:
+    """What to draw this as: its widget class, or the role the feed gave it.
+
+    A role only ever arrives on a control the app declared in words rather
+    than in attributes — HHAeXchange+'s care-plan ticks are plain Views whose
+    description says "no seleccionado … Toca dos veces para alternar". The
+    class stays what the phone published, because the class is half of what a
+    tap verifies itself against; the role is only about the drawing.
+    """
+    if role in ("toggle", "button", "field", "image", "text"):
+        return role
     if cls in BUTTONS:
         return "button"
     if cls in FIELDS:
@@ -660,7 +670,7 @@ def build(doc: dict) -> dict | None:
     # never an overlay.
     covers = [i for i, e in enumerate(elements)
               if not (e.get("rid") or "")
-              and _kind(e.get("cls", "")) == "row"
+              and _kind(e.get("cls", ""), e.get("role", "")) == "row"
               and (e["b"][3] - e["b"][1]) >= h * CURTAIN_MIN_HEIGHT
               and (e["b"][2] - e["b"][0]) >= w * 0.9
               and any(j < i and _contains(e["b"], o["b"])
@@ -731,7 +741,7 @@ def build(doc: dict) -> dict | None:
                    for o in elements)
 
     containers = [e for e in elements
-                  if _kind(e.get("cls", "")) == "row"
+                  if _kind(e.get("cls", ""), e.get("role", "")) == "row"
                   and not ((e["b"][3] - e["b"][1]) >= h * CURTAIN_MIN_HEIGHT
                            and _wraps_others(e))]
     folded: set[int] = set()
@@ -745,7 +755,7 @@ def build(doc: dict) -> dict | None:
 
     items: list[dict] = []
     for e in elements:
-        kind = _kind(e.get("cls", ""))
+        kind = _kind(e.get("cls", ""), e.get("role", ""))
         item = _item(e, kind)
         # A narrow button is a utility — a badge, a hamburger, an info dot —
         # and rendering it at full width promotes it to a call to action it
@@ -1370,7 +1380,7 @@ def _app_tabs(elements: list[dict], statics: list[dict],
     holders = [e for e in elements
                if _dev(e)[3] > band and _dev(e)[3] >= reach
                and (e["b"][2] - e["b"][0]) < narrow
-               and _kind(e.get("cls", "")) == "row"]
+               and _kind(e.get("cls", ""), e.get("role", "")) == "row"]
     caps = [s for s in statics
             if _dev(s)[1] > band and _dev(s)[3] >= reach
             and (s.get("txt") or "").strip()

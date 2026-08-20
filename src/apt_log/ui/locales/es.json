@@ -187,6 +187,8 @@
   "papp.scroll_up": "Desplazar el teléfono hacia arriba",
   "papp.search": "Buscar",
   "papp.syncing": "Sincronizando…",
+  "papp.task.done": "Se realizó",
+  "papp.task.not_done": "No realizado",
   "papp.type.cancel": "Cancelar",
   "papp.type.hint": "Escriba aquí y envíelo al teléfono",
   "papp.type.send": "Enviar",

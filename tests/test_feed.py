@@ -2293,3 +2293,133 @@ class TestTheVisitNoteIsReadable:
                            package="com.hhaexchange.caregiver",
                            size=(self.W, self.H))[0]
         assert not el.get("txt")
+
+
+class TestAControlThatDoesNotSayItIsOne:
+    """HHAeXchange+'s Funciones page — the care-plan tasks, ticked off at the
+    end of every visit.
+
+    Each task's Se realizó / No realizado pair is a plain View with
+    `clickable="false"`. They ARE controls: the app hand-writes their
+    description as "no seleccionado  Se realizó %1$s  Toca dos veces para
+    alternar" — TalkBack's own sentence for a node that HAS a click action,
+    with the selection state in front of it.
+
+    Read by the attribute alone, not one of the fourteen pairs reached the
+    portal: the page was a wall of task names with nothing to press and no
+    way to finish a visit. Found with the caregiver standing in a patient's
+    home with the page open in front of her.
+    """
+
+    DONE = "no seleccionado Se realizó %1$s Toca dos veces para alternar"
+    ON = "seleccionado Se realizó %1$s Toca dos veces para alternar"
+    NOT = "no seleccionado No realizado %1$s Toca dos veces para alternar"
+
+    @staticmethod
+    def _node(b, desc="", text="", click="false"):
+        return (f'<node class="android.view.View" resource-id="" '
+                f'clickable="{click}" text="{text}" content-desc="{desc}" '
+                f'bounds="[{b[0]},{b[1]}][{b[2]},{b[3]}]" '
+                f'package="com.hhaexchange.uma" />')
+
+    def _xml(self):
+        return "<hierarchy>" + "".join([
+            self._node([37, 150, 110, 160], text="Hair Care-Shampoo"),
+            self._node([636, 150, 667, 179], desc=self.DONE),
+            self._node([667, 150, 699, 179], desc=self.NOT),
+            self._node([37, 201, 73, 211], text="Toilet Use"),
+            self._node([636, 201, 667, 230], desc=self.ON),
+            self._node([667, 201, 699, 230], desc=self.NOT),
+        ]) + "</hierarchy>"
+
+    def _els(self, label=False):
+        return feed.elements(self._xml(), label=label,
+                             package="com.hhaexchange.uma", size=(720, 1600))
+
+    def test_every_tick_reaches_the_portal(self):
+        assert len(self._els()) == 4
+
+    def test_the_state_comes_from_the_sentence(self):
+        """The app never sets the attribute — "no seleccionado" IS the state,
+        so a task already ticked has to be read out of the words."""
+        assert [e["checked"] for e in self._els()] \
+            == [False, False, True, False]
+
+    def test_they_are_drawn_as_the_choice_they_are(self):
+        assert all(e.get("role") == "toggle" for e in self._els())
+
+    def test_the_class_is_still_what_the_phone_published(self):
+        """Half of what a tap verifies itself against. The role is about the
+        drawing and nothing else."""
+        assert all(e["cls"] == "View" for e in self._els())
+
+    def test_one_node_does_not_arrive_twice(self):
+        """Once as something to press and once as a caption beside it."""
+        spoken = [s for s in feed.statics(self._xml())
+                  if "seleccionado" in (s.get("txt") or "")]
+        assert spoken == []
+
+    def test_the_task_name_beside_it_is_still_a_caption(self):
+        assert [s["txt"] for s in feed.statics(self._xml())] \
+            == ["Hair Care-Shampoo", "Toilet Use"]
+
+    # ------------------------------------------------------------- the words
+    def test_the_sentence_is_read_down_to_what_it_means(self):
+        assert feed.reader_control(self.DONE) == ("Se realizó", False)
+        assert feed.reader_control(self.ON) == ("Se realizó", True)
+        assert feed.reader_control(self.NOT) == ("No realizado", False)
+
+    def test_an_unfilled_placeholder_is_not_part_of_the_name(self):
+        """%1$s — the argument the app forgot to fill, sitting where the
+        task's own name was meant to go."""
+        assert "%" not in feed.reader_control(self.DONE)[0]
+
+    def test_an_ordinary_description_is_not_a_control(self):
+        assert feed.reader_control("La visita está programada para las 8:00")\
+            is None
+        assert feed.reader_control("") is None
+
+    def test_english_says_it_too(self):
+        assert feed.reader_control("not selected Performed, double tap to "
+                                   "toggle") == ("Performed", False)
+
+    # ------------------------------- named by the portal, in her own language
+    def test_the_pair_is_named_by_the_portal(self):
+        """The app's words arrive only inside a screen reader's sentence, and
+        the words of a page with a patient on it do not cross the wire. These
+        two captions are fixed chrome — the same on every task of every visit
+        — so the portal says them itself."""
+        keys = [e.get("name_key") for e in self._els()]
+        assert keys == [feed.TASK_DONE_KEY, feed.TASK_NOT_DONE_KEY,
+                        feed.TASK_DONE_KEY, feed.TASK_NOT_DONE_KEY]
+
+    def test_not_done_is_not_read_as_done(self):
+        """"no realizado" contains "realizado"."""
+        assert feed.task_key("No realizado") == feed.TASK_NOT_DONE_KEY
+        assert feed.task_key("Se realizó") == feed.TASK_DONE_KEY
+
+    def test_a_control_this_does_not_recognise_gets_no_name(self):
+        assert feed.task_key("Abrir el mapa") == ""
+
+    def test_both_languages_have_the_words(self):
+        import json as json_mod
+        from pathlib import Path
+
+        base = Path(__file__).resolve().parents[1] / "src/apt_log/ui/locales"
+        for name in ("en.json", "es.json"):
+            words = json_mod.loads((base / name).read_text(encoding="utf-8"))
+            assert words.get(feed.TASK_DONE_KEY)
+            assert words.get(feed.TASK_NOT_DONE_KEY)
+
+    # ------------------------------------------------------ and end to end
+    def test_the_page_comes_out_as_task_rows_with_a_choice_on_each(self):
+        from apt_log.ui import screenview
+
+        model = screenview.build({
+            "id": "f", "size": [720, 1600], "blocked": "", "notice": "",
+            "elements": self._els(), "statics": feed.statics(self._xml())})
+        segments = [it for row in model["rows"] for it in row["items"]
+                    if it["kind"] == "segment"]
+        assert len(segments) == 2
+        assert [p["checked"] for p in segments[0]["parts"]] == [False, False]
+        assert all(p.get("aim") for p in segments[0]["parts"])

@@ -187,6 +187,8 @@
   "papp.scroll_up": "Scroll the phone up",
   "papp.search": "Search",
   "papp.syncing": "Syncing…",
+  "papp.task.done": "Done",
+  "papp.task.not_done": "Not done",
   "papp.type.cancel": "Cancel",
   "papp.type.hint": "Type here, then send it to the phone",
   "papp.type.send": "Send",

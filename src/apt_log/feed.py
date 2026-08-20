@@ -1461,6 +1461,96 @@ def _label(raw: str) -> str:
     return _attr(raw, "text") or _attr(raw, "content-desc")
 
 
+# A CONTROL THAT DOES NOT SAY IT IS ONE.
+#
+# HHAeXchange+'s "Funciones" page — the care-plan tasks, ticked off at the
+# end of every visit — draws each task's Se realizó / No realizado pair as
+# plain Views with `clickable="false"`. They ARE controls: the app hand-writes
+# their description as "no seleccionado  Se realizó %1$s  Toca dos veces para
+# alternar", which is TalkBack's own sentence for a node that HAS a click
+# action, plus the selection state in front of it.
+#
+# Read by the attribute alone, none of the fourteen pairs reached the portal
+# and the whole page was a wall of text with nothing to press. Found while
+# the caregiver was standing in a patient's home with the page open.
+#
+# So the description is taken at its word: a node that tells a screen reader
+# to double-tap it is a node that can be tapped. The tap lands on the pixel
+# either way — `input tap` goes to a coordinate, not to a node — so this
+# publishes what the phone already responds to.
+_READER_TAPPABLE = ("toca dos veces", "toque dos veces", "pulsa dos veces",
+                    "pulse dos veces", "double tap", "double-tap")
+# The state the same sentence opens with. Order matters: "no seleccionado"
+# contains "seleccionado".
+_READER_OFF = ("no seleccionado", "no marcado", "not selected", "unselected",
+               "not checked")
+_READER_ON = ("seleccionado", "marcado", "selected", "checked")
+
+
+def reader_control(desc: str) -> tuple[str, bool] | None:
+    """A screen reader's sentence, read back as (label, checked).
+
+    None when the sentence is not one of these. The label is what is left
+    once the state in front and the instruction behind are taken off, with
+    the format placeholder the app forgot to fill dropped as well.
+    """
+    text = (desc or "").strip()
+    low = text.lower()
+    if not any(m in low for m in _READER_TAPPABLE):
+        return None
+    checked = False
+    for word in _READER_OFF:
+        if low.startswith(word):
+            text, low = text[len(word):].strip(), low[len(word):].strip()
+            break
+    else:
+        for word in _READER_ON:
+            if low.startswith(word):
+                checked = True
+                text, low = text[len(word):].strip(), low[len(word):].strip()
+                break
+    for marker in _READER_TAPPABLE:
+        cut = low.find(marker)
+        if cut >= 0:
+            text, low = text[:cut].strip(), low[:cut].strip()
+            break
+    # "%1$s" — an unfilled format argument, sitting in the middle of the
+    # sentence where the app meant to put the task's own name.
+    text = re.sub(r"%\d*\$?[sd]", " ", text)
+    # The comma that joined the label to the instruction behind it goes with
+    # the instruction: "Performed, double tap to toggle" names a control
+    # called "Performed".
+    return " ".join(text.split()).strip(" ,.;:"), checked
+
+
+# THE PORTAL'S OWN WORDS FOR THE PAIR.
+#
+# The app's arrive only inside a screen reader's sentence, and the words of a
+# page with a patient on it do not cross the wire — `text_is_disclosable` says
+# text travels on credential screens and nowhere else, which is right and is
+# not being changed here. Named this way instead, through the same `name_key`
+# path the agency filter uses: these two captions are the app's fixed chrome,
+# identical on every task of every visit, so the portal can say them itself
+# and say them in her language.
+#
+# Not-done is tested first: "no realizado" contains "realizado".
+_TASK_NOT_DONE_WORDS = ("no realizado", "no se realiz", "no realiz",
+                        "not performed", "not done", "not completed")
+_TASK_DONE_WORDS = ("se realiz", "realizado", "performed", "done", "completed")
+TASK_DONE_KEY = "papp.task.done"
+TASK_NOT_DONE_KEY = "papp.task.not_done"
+
+
+def task_key(label: str) -> str:
+    """Which half of a care-plan task's pair this is, or ""."""
+    low = (label or "").strip().lower()
+    if any(low.startswith(w) for w in _TASK_NOT_DONE_WORDS):
+        return TASK_NOT_DONE_KEY
+    if any(low.startswith(w) for w in _TASK_DONE_WORDS):
+        return TASK_DONE_KEY
+    return ""
+
+
 def elements(xml: str, label: bool = False, package: str = "",
              size: tuple[int, int] | None = None) -> list[dict]:
     """The tappable structure of a screen, carrying no text.
@@ -1488,7 +1578,11 @@ def elements(xml: str, label: bool = False, package: str = "",
     naming = controls_mod.naming(xml or "", package, w, h)
     found = []
     for raw in _NODE.findall(xml or ""):
-        if _attr(raw, "clickable") != "true":
+        # Clickable, or telling a screen reader to double-tap it — which is
+        # the same claim, made in the only place this app makes it. See
+        # `reader_control`.
+        spoken = reader_control(_attr(raw, "content-desc"))
+        if _attr(raw, "clickable") != "true" and spoken is None:
             continue
         # The status bar's and shade's own nodes are never care content —
         # and the shade's are the owner's private notifications, which a
@@ -1525,15 +1619,33 @@ def elements(xml: str, label: bool = False, package: str = "",
             "enabled": _attr(raw, "enabled") != "false",
             "has_text": bool(_label(raw)),
         }
+        if spoken is not None:
+            # The state is IN the sentence — "no seleccionado Se realizó" —
+            # because the app never sets the attribute. Taken from there, so
+            # a task already ticked comes through ticked.
+            entry["checked"] = entry["checked"] or spoken[1]
+            entry["has_text"] = bool(spoken[0])
+            # And a role, so the reflow can draw a pair of these as the
+            # choice they are rather than as two mystery boxes. Not the
+            # class — the class is what the tap verifies against, and it has
+            # to stay exactly what the phone published.
+            entry["role"] = "toggle"
         # The portal's own name for a control the app ships nameless, decided
         # here rather than in the reflow because this is where the raw text
         # is and where the disclosure below has to be decided with it.
         name_key = naming.key(short, entry["rid"], entry["b"], _label(raw))
+        if not name_key and spoken is not None:
+            name_key = task_key(spoken[0])
         if name_key:
             entry["name_key"] = name_key
         if label and (short not in EDITABLE or _is_showing_hint(raw)
                       or naming.discloses(short, entry["rid"], entry["b"])):
-            entry["txt"] = _clean(_label(raw))
+            # The spoken sentence never travels whole: what it means is the
+            # label at the middle of it, and the rest is state and stage
+            # directions. "no seleccionado Se realizó %1$s Toca dos veces
+            # para alternar" is a control named "Se realizó".
+            entry["txt"] = (_clean(spoken[0]) if spoken is not None
+                            else _clean(_label(raw)))
         found.append(entry)
     return found
 
@@ -1581,6 +1693,10 @@ def statics(xml: str) -> list[dict]:
     out = []
     for raw in _NODE.findall(xml or ""):
         if _attr(raw, "clickable") == "true":
+            continue
+        # Published as a control instead — one node must not arrive twice,
+        # once as something to press and once as a caption beside it.
+        if reader_control(_attr(raw, "content-desc")) is not None:
             continue
         if _attr(raw, "package") == "com.android.systemui":
             continue                      # see elements(): never care content
