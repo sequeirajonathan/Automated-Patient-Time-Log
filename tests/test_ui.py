@@ -2244,3 +2244,96 @@ class TestTheSearchBoxAsDrawn:
     def test_and_it_never_sits_on_top_of_the_words(self):
         css = self.STYLE.read_text(encoding="utf-8")
         assert ":has(.a-fieldgo) .a-field { padding-right" in css
+
+
+class TestTheButtonThatTicksTheTasks:
+    """A macro she cannot press is not a feature.
+
+    `check_tasks` has been reachable only through the API since the day it
+    was written. It belongs on the plan of care and nowhere else — a control
+    that is always there and usually does nothing is a control pressed at
+    the wrong moment, which is the argument this project already makes about
+    the sign-in macros — so it is offered on the strength of the page's own
+    count and hidden everywhere else.
+    """
+
+    SCRIPT = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/static/phone.js")
+    PAGE = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/templates/phone.html")
+
+    def _js(self):
+        return strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
+
+    # --------------------------------------------------------- the counting
+    def _doc(self, count=14, app="com.hhaexchange.uma"):
+        els = []
+        for i in range(count):
+            top = 150 + i * 51
+            els.append({"rid": "poc_task_item_status_completed_false",
+                        "cls": "View", "b": [636, top, 667, top + 29],
+                        "checked": False, "focused": False, "enabled": True})
+            els.append({"rid": "poc_task_item_status_refused_false",
+                        "cls": "View", "b": [667, top, 698, top + 29],
+                        "checked": False, "focused": False, "enabled": True})
+        return {"id": "f", "size": [720, 1600], "app": app,
+                "elements": els, "statics": []}
+
+    def test_the_count_is_what_the_macro_would_tick(self):
+        from apt_log.ui.app import _pending_task_count
+
+        assert _pending_task_count(self._doc()) == 14
+
+    def test_the_refused_column_is_not_counted(self):
+        """Half the elements on that page are the other column."""
+        from apt_log.ui.app import _pending_task_count
+
+        assert _pending_task_count(self._doc(count=3)) == 3
+
+    def test_every_other_screen_counts_zero(self):
+        from apt_log.ui.app import _pending_task_count
+
+        assert _pending_task_count({"id": "f", "size": [720, 1600],
+                                    "app": "com.hhaexchange.uma",
+                                    "elements": [], "statics": []}) == 0
+
+    def test_a_page_shaped_unexpectedly_costs_the_button_not_the_frame(self):
+        """One field of a payload that carries the whole screen."""
+        from apt_log.ui.app import _pending_task_count
+
+        assert _pending_task_count({"size": "nonsense"}) == 0
+        assert _pending_task_count({}) == 0
+
+    # ---------------------------------------------------------- the offering
+    def test_the_button_ships_hidden(self, client):
+        body = client.get("/app").text
+        assert 'id="btn-tasks" hidden' in body
+
+    def test_it_appears_only_where_there_is_something_to_tick(self):
+        js = self._js()
+        assert "tasksBtn.hidden = left <= 0" in js
+
+    def test_it_says_how_many(self):
+        """The number is the reason the button is there — she can see the
+        work before pressing anything."""
+        js = self._js()
+        assert "btn-tasks-n" in js
+        assert ".tasks-n" in self.PAGE.read_text(encoding="utf-8")
+
+    def test_pressing_it_runs_the_macro_and_nothing_else(self):
+        js = self._js()
+        run = js[js.index("const tasksRun ="):]
+        run = run[:run.index("const scanClose")]
+        assert "name: 'check_tasks'" in run
+        assert "'/macro'" in run
+
+    def test_the_wait_is_named_in_both_languages(self, client):
+        assert "checkingTasks:" in client.get("/app").text
+
+    def test_the_payload_carries_the_count(self, client):
+        """Without this the button never appears, whatever the page holds."""
+        from pathlib import Path as P
+
+        src = (P(__file__).resolve().parents[1]
+               / "src/apt_log/ui/app.py").read_text(encoding="utf-8")
+        assert '"tasks": _pending_task_count(screen_doc)' in src

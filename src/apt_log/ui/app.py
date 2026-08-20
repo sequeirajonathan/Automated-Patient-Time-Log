@@ -609,6 +609,31 @@ def _sans_at(doc: dict) -> dict:
     return {k: v for k, v in doc.items() if k != "at"}
 
 
+def _pending_task_count(doc: dict) -> int:
+    """How many required tasks this page is still missing.
+
+    Zero everywhere that is not a plan of care, which is what makes it safe
+    to hang a button on. The count comes from `macros.pending_tasks` — the
+    same reading the macro itself runs — so the number she is shown is the
+    number that will be ticked, and the button cannot appear over a page the
+    macro would then decline to act on.
+
+    Never raises: this is one field of a payload that carries the whole
+    screen, and a page shaped unexpectedly must cost the button, not the
+    frame.
+    """
+    from apt_log import macros as macros_mod
+
+    try:
+        size = doc.get("size") or [0, 0]
+        return len(macros_mod.pending_tasks(
+            doc.get("elements") or [], doc.get("statics") or [],
+            size[0] if len(size) == 2 else 0, doc.get("app") or ""))
+    except Exception:
+        log.exception("counting the page's unticked tasks")
+        return 0
+
+
 def _sheet_actions(doc: dict, model: dict | None) -> list[dict]:
     """The app's own buttons on a signature sheet, as aims.
 
@@ -938,6 +963,14 @@ async def live(ws: WebSocket):
                     # reach the app underneath while this is true, so the page
                     # stops pretending otherwise and offers the way out.
                     "covered": bool(screen_doc.get("covered")),
+                    # How many required tasks this plan of care is still
+                    # missing — 0 on every other screen in both apps. The
+                    # button that ticks them appears on the strength of this
+                    # and nowhere else: a control that is always there and
+                    # usually does nothing is a control pressed at the wrong
+                    # moment. Counted from the SAME reading the macro runs,
+                    # so the number on the button is the number it will tick.
+                    "tasks": _pending_task_count(screen_doc),
                     # The signature sheet's OWN buttons — inMyTeam's Done and
                     # Clear — carried so the pad can show them beside her own
                     # controls. Without this she draws in the portal, switches
