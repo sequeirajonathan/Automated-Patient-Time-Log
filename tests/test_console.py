@@ -303,9 +303,20 @@ class TestOperations:
         learn to click through."""
         from apt_log import macros
 
-        assert set(macros.CONFIRM) == {"restart_phone", "update_app"}
+        assert set(macros.CONFIRM) == {
+            "restart_phone", "update_app", "update_hhax_uma",
+            "update_mobile_caregiver", "update_inmyteam"}
         assert [name for name in macros.OPERATIONS
                 if name in macros.CONFIRM] == ["restart_phone"]
+
+    def test_every_update_macro_asks(self):
+        """There are four of them now — one per app plus the wall's own — and
+        the answer must not depend on which one somebody reached for."""
+        from apt_log import macros
+
+        updates = [n for n in macros.MACROS if n.startswith("update_")]
+        assert len(updates) == 4
+        assert all(n in macros.CONFIRM for n in updates)
 
 
 class TestWhoIsOn:
@@ -482,3 +493,67 @@ class TestWhichBuildIsOnThePhone:
 
 def _no_subprocess_allowed(*args, **kwargs):
     raise AssertionError("the console page must not shell out for versions")
+
+
+class TestUpdatingFromTheVersionPanel:
+    """The update, offered beside the build number it is about.
+
+    The app page offers it only on a wall, which can only ever be the app
+    that raised one — and only Mobile Caregiver+ has wall wording. Without
+    this there is no way to update the other two from anywhere.
+    """
+
+    APPS = {"com.tellus.evv.v2": {"name": "26.17", "code": "980"},
+            "com.hhaexchange.uma": {"name": "26.07.01", "code": "251368"},
+            "com.inmyteam.inmyteam": {"name": "4.3.5", "code": "148"},
+            "com.android.vending": {"name": "52.7.34-31", "code": "85273430"}}
+
+    def _panel(self, monkeypatch):
+        from apt_log import versions as versions_mod
+
+        monkeypatch.setattr(versions_mod, "stored",
+                            lambda *a, **k: {"apps": self.APPS})
+        return machine_mod._app_versions()
+
+    def test_every_care_app_row_carries_its_own_macro(self, monkeypatch):
+        rows = {r["package"]: r["macro"] for r in self._panel(monkeypatch)}
+        assert rows["com.tellus.evv.v2"] == "update_mobile_caregiver"
+        assert rows["com.hhaexchange.uma"] == "update_hhax_uma"
+        assert rows["com.inmyteam.inmyteam"] == "update_inmyteam"
+
+    def test_the_store_is_not_offered_one(self, monkeypatch):
+        """It updates itself, and it is not somewhere the phone is sent."""
+        rows = {r["package"]: r["macro"] for r in self._panel(monkeypatch)}
+        assert rows["com.android.vending"] == ""
+
+    def test_every_macro_it_names_actually_exists(self, monkeypatch):
+        """A button posting a name the registry does not know is a button
+        that silently does nothing — /macro answers unknown and redirects."""
+        from apt_log import macros
+
+        for row in self._panel(monkeypatch):
+            if row["macro"]:
+                assert row["macro"] in macros.MACROS
+
+    def test_the_button_is_on_the_page_and_asks_first(self, client,
+                                                      monkeypatch):
+        monkeypatch.setattr(machine_mod, "_app_versions", lambda: [
+            {"package": "com.hhaexchange.uma", "name": "26.07.01",
+             "code": "251368", "changed": False, "macro": "update_hhax_uma"}])
+        machine_mod.read(force=True)
+        body = client.get("/console").text
+        assert 'value="update_hhax_uma"' in body
+        # The confirm rides the form, the same way the reboot's does.
+        head = body[:body.index('value="update_hhax_uma"')]
+        assert "data-confirm" in head.rsplit("<form", 1)[-1]
+
+    def test_a_row_without_a_macro_gets_no_button(self, client, monkeypatch):
+        monkeypatch.setattr(machine_mod, "_app_versions", lambda: [
+            {"package": "com.android.vending", "name": "52.7.34-31",
+             "code": "85273430", "changed": False, "macro": ""}])
+        machine_mod.read(force=True)
+        body = client.get("/console").text
+        # Scoped to update buttons rather than to a slice of the page: the
+        # operations section further down posts to /macro too, and the first
+        # version of this test caught rescan and called it a failure.
+        assert 'value="update_' not in body

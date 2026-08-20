@@ -3456,3 +3456,73 @@ class TestWaitingCostsRealTime:
 
         with patch("apt_log.macros.time.sleep"), fast_clock(step=0.5):
             assert macros.wait_for(exploding, timeout=2.0) is False
+
+
+class TestUpdatingAnAppThatIsNotInFront:
+    """The wall card can only ever offer the app that raised a wall, and only
+    Mobile Caregiver+ has wall wording written down. On the other two there
+    would be no way to update at all until one of them blocked itself — which
+    is the moment you least want to be discovering the path.
+
+    So one macro per app, named, offered from the console's version panel.
+    Named rather than parameterised because `/macro` takes a name from the
+    registry and nothing else: a route that accepted a package from a browser
+    would be a route that installs whatever it is handed.
+    """
+
+    @pytest.mark.parametrize("macro,package", [
+        ("update_hhax_uma", "com.hhaexchange.uma"),
+        ("update_mobile_caregiver", "com.tellus.evv.v2"),
+        ("update_inmyteam", "com.inmyteam.inmyteam"),
+    ])
+    def test_each_app_has_one_and_it_comes_back_to_that_app(self, macro,
+                                                            package):
+        from unittest.mock import patch as patch_mod
+
+        driver, _ = TestAnsweringTheUpdateWall()._driver()
+        calls = []
+        seen = [{"code": "1"}, {"code": "2"}]
+
+        def front():
+            return package if any("monkey" in a for a in calls) \
+                else "com.android.vending"
+
+        def version_of(_p, serial=None):
+            return seen.pop(0) if len(seen) > 1 else seen[0]
+
+        with patch_mod.object(macros, "_front_package", front), \
+                patch_mod.object(macros, "wake_display", lambda: None), \
+                patch_mod.object(macros, "_forget_stitched", lambda _p: None), \
+                patch_mod("apt_log.feed._adb",
+                          lambda args, *a, **k: calls.append(args)), \
+                patch_mod("apt_log.versions.of", version_of), \
+                patch_mod("apt_log.versions.check", lambda **k: []), \
+                patch_mod.object(macros, "STORE_POLL", 0.0), \
+                patch_mod.object(macros, "STORE_BUTTON_WAIT", 0.0), \
+                patch_mod.object(macros, "STORE_INSTALL_TIMEOUT", 0.6):
+            macros.MACROS[macro].run(driver, lambda _k: None)
+
+        sent = [" ".join(a) for a in calls]
+        assert any(f"market://details?id={package}" in line for line in sent)
+        # ...and comes back to THAT app, not to whatever happened to be in
+        # front when somebody pressed the button on the console.
+        assert any("monkey" in line and package in line for line in sent)
+
+    def test_it_does_not_care_what_is_in_front(self):
+        """The whole point of the named ones: the console can update an app
+        the phone is not currently showing."""
+        import inspect
+
+        source = inspect.getsource(macros._update_app_for)
+        assert "_last_care_package" not in source
+
+    def test_the_retired_app_has_no_update_macro(self):
+        """It is off the picker and the phone never goes there; an update to
+        it changes nothing."""
+        assert not any("legacy" in name for name in macros.MACROS
+                       if name.startswith("update_"))
+
+    def test_the_store_has_no_update_macro_either(self):
+        """It updates itself, and it is not somewhere the phone is sent."""
+        assert not any("vending" in name or "play" in name
+                       for name in macros.MACROS if name.startswith("update_"))

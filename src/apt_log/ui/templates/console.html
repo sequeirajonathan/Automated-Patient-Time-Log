@@ -482,7 +482,20 @@
         </b>
         <small>{{ a.package }}{{ ' · ' ~ a.code if a.code }}</small>
       </div>
-      <span class="v">{{ a.name or '—' }}</span>
+      <span class="v">{{ a.name or '—' }}
+        {# The update, offered beside the build number it is about. This is
+           the operator's page — the app page offers it only on a wall,
+           which can only ever be the app that raised one. It asks first
+           either way: there is no going back to the old build. #}
+        {% if a.macro %}
+        <form method="post" action="/macro" style="display:inline"
+              data-confirm="{{ t('macro.sure.update_app') }}">
+          <input type="hidden" name="name" value="{{ a.macro }}">
+          <button type="submit" class="small"
+                  style="margin-left:8px">{{ t('console.phone.update') }}</button>
+        </form>
+        {% endif %}
+      </span>
     </div>
     {% endfor %}
     <p class="sub">{{ t('console.phone.versions_explain') }}</p>
