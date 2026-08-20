@@ -152,9 +152,11 @@ Notifications carry a `--url`, so tapping one opens the portal at the thing it i
 They never carry a patient, a visit, or a credential: this goes to a public relay and
 lands on a lock screen, and neither is a place for any of that.
 
-**No web push, and no service worker.** Web push would be a second outbound channel to
-configure, break and forget, for one sentence a year — and the phone view has gone
-without a service worker on purpose since it was written.
+Web Push from the portal itself was added later and is now the *first* road for the
+login code, with the relay behind it — see `apt_log/push.py`. It is worth the second
+channel for one reason: a push notification comes from the portal, so tapping it opens
+the portal at the code screen. A relay can only open a browser at a URL, which is the
+wrong app on the one notice whose entire job is to be tapped.
 
 Unconfigured, the script says so in the journal rather than failing quietly, because a
 silent alerting path is indistinguishable from a healthy system:
@@ -163,7 +165,43 @@ silent alerting path is indistinguishable from a healthy system:
 journalctl -t aptlog-alert -n 10 --no-pager
 ```
 
-### 2.5 Deliberate limits
+### 2.5 Texting the code onward
+
+The phone has a SIM and cell service, so a code that lands on it can be passed on to the
+people who would otherwise be locked out. Off by default. Turn it on by setting one key
+in `/etc/aptlog/secrets.env` — `sudo scripts/add-app-credentials.sh` prompts for it:
+
+```
+CODE_RECIPIENTS=Jonathan:9995551234,Sadia:9995555678
+```
+
+**Know what this is before setting it.** A sign-in code is the second factor on an
+account whose records attest who delivered care to a patient. Everyone on that list can
+sign in as the caregiver. That is the owner's call to make, not a default.
+
+The numbers live there and *not* in this repository, because a git history is the one
+place a phone number can never be taken back out of.
+
+How it behaves:
+
+- Sent from the phone's own SIM via `service call isms`, not through the messaging app.
+  The moment a code needs forwarding is the moment inMyTeam is holding its code screen
+  open, and walking away to Messages would abandon the sign-in this exists to help.
+- **Once per code, ever.** Keyed on the message's own timestamp, written to
+  `/var/lib/aptlog/code-forwarded.json`. A guard that lives in a process is a guard a
+  deploy forgets — which is exactly how the "over 100 notifications" storm happened.
+- Forwarded **before** the code is typed, because these people are the fallback for the
+  typing going wrong.
+- Also forwarded for codes this system never asked for: a poll behind the feed's tick
+  notices a text arriving because *somebody else* tried to sign in.
+- Carries no patient, no visit and no agency. It lands on lock screens.
+
+`SEND_TXN` in `apt_log/sms.py` is the `ISms` transaction number for
+`sendTextForSubscriber` — a fact about the *device*, not about Android, because the AIDL
+renumbers between versions. **On a new phone, verify it** with the self-text probe
+documented beside that constant before trusting it.
+
+### 2.6 Deliberate limits
 
 - Migrations aren't handled. Any schema change needs a manual step until there's a real
   migration story.

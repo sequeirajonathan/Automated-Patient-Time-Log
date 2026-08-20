@@ -161,6 +161,38 @@ class TestWriteFrame:
 
 
 class TestRun:
+    def test_the_tick_looks_for_a_code_to_pass_on(self, tmp_path):
+        """This loop is the only thing in the system that would notice a
+        sign-in code arriving for a login the portal never started —
+        somebody signing in from their own phone makes inMyTeam text THIS
+        one, and nothing else here is watching."""
+        from apt_log import sms
+
+        looked = []
+        with patch.object(feed, "write_frame", return_value="ok"), \
+             patch.object(feed, "read_hierarchy", return_value=None), \
+             patch.object(sms, "forward_any_new",
+                          side_effect=lambda *a, **k: looked.append(1) or 0), \
+             patch.object(feed.time, "sleep"):
+            feed.run(tmp_path / "s.png", interval=0, iterations=3)
+        assert len(looked) == 3
+
+    def test_a_phone_that_will_not_answer_does_not_stop_the_watcher(self,
+                                                                   tmp_path):
+        """The same rule the version check lives under. A courtesy that can
+        fail must not take the picture down with it."""
+        from apt_log import sms
+
+        frames = []
+        with patch.object(feed, "write_frame",
+                          side_effect=lambda *a, **k: frames.append(1) or "ok"), \
+             patch.object(feed, "read_hierarchy", return_value=None), \
+             patch.object(sms, "forward_any_new",
+                          side_effect=RuntimeError("no adb")), \
+             patch.object(feed.time, "sleep"):
+            feed.run(tmp_path / "s.png", interval=0, iterations=3)
+        assert len(frames) == 3
+
     def test_one_bad_frame_does_not_stop_the_watcher(self, tmp_path):
         calls = []
 

@@ -3805,6 +3805,83 @@ class TestTypingTheCodeItself:
         assert "notify" not in source
 
 
+class TestTheCodeIsPassedOnBeforeItIsTyped:
+    """Asked for twice, in his words: everyone should get the code, by text,
+    because the phone has cell service.
+
+    The people on that list are the FALLBACK for this walk going wrong — so
+    the order matters and it is the whole design. Forwarding after a
+    successful sign-in would text the code only in the case where nobody
+    needed it.
+    """
+
+    def _driver(self, **kwargs):
+        return TestTypingTheCodeItself()._driver(**kwargs)
+
+    def test_it_goes_out_before_the_code_is_typed(self):
+        from unittest.mock import patch as patch_mod
+
+        driver, box, _ = self._driver()
+        order = []
+        box.send_keys.side_effect = lambda _c: order.append("typed")
+        with patch_mod("apt_log.sms.wait_for_code", return_value="604820"), \
+                patch_mod.object(macros, "_push_the_code"), \
+                patch_mod.object(macros, "_pass_the_code_on",
+                                 lambda: order.append("texted")), \
+                patch_mod("apt_log.macros.time.sleep"), fast_clock():
+            macros._fill_in_the_code(driver, lambda _s: None, sent=0.0)
+        assert order[:2] == ["texted", "typed"]
+
+    def test_it_goes_out_even_when_the_screen_moved(self):
+        """No box to type into is precisely when somebody else needs the
+        code — and the version that forwarded last would send nothing."""
+        from unittest.mock import patch as patch_mod
+
+        driver, box, _ = self._driver(boxes=0)
+        with patch_mod("apt_log.sms.wait_for_code", return_value="604820"), \
+                patch_mod.object(macros, "_pass_the_code_on") as texted:
+            assert macros._fill_in_the_code(
+                driver, lambda _s: None, sent=0.0) is False
+        texted.assert_called_once()
+
+    def test_nothing_is_forwarded_when_no_code_arrived(self):
+        from unittest.mock import patch as patch_mod
+
+        driver, _, _ = self._driver()
+        with patch_mod("apt_log.sms.wait_for_code", return_value=""), \
+                patch_mod.object(macros, "_pass_the_code_on") as texted:
+            macros._fill_in_the_code(driver, lambda _s: None, sent=0.0)
+        texted.assert_not_called()
+
+    def test_a_carrier_problem_does_not_cost_the_sign_in(self):
+        """This is a courtesy to people who are not at the phone. The walk
+        that IS at the phone is one step from done."""
+        from unittest.mock import patch as patch_mod
+
+        driver, box, button = self._driver()
+        asking = {"still": True}
+        type(driver).page_source = property(
+            lambda self: "Enter your code" if asking["still"] else "Visits")
+        button.click.side_effect = lambda: asking.__setitem__("still", False)
+
+        with patch_mod("apt_log.sms.wait_for_code", return_value="604820"), \
+                patch_mod.object(macros, "_push_the_code"), \
+                patch_mod("apt_log.sms.forward_any_new",
+                          side_effect=RuntimeError("no signal")), \
+                patch_mod("apt_log.macros.time.sleep"), fast_clock():
+            assert macros._fill_in_the_code(
+                driver, lambda _s: None, sent=0.0) is True
+
+    def test_the_walk_skips_the_poll_interval_but_not_the_dedup(self):
+        """It has just spent a minute waiting for this code. `force` is the
+        throttle only — the tick behind it will not send a second copy."""
+        from unittest.mock import patch as patch_mod
+
+        with patch_mod("apt_log.sms.forward_any_new", return_value=1) as fwd:
+            macros._pass_the_code_on()
+        fwd.assert_called_once_with(force=True)
+
+
 class TestTheCooldownSurvivesARestart:
     """Reported from the field as "over 100 notifications", with a lock
     screen of identical "inMyTeam needs the code" banners.
