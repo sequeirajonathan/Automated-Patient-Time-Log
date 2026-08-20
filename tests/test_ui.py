@@ -1170,7 +1170,7 @@ class TestTheAppsOwnUpArrowDoesNotRideAlong:
         nav = self._nav([dict(self.UP, txt=caption)])
         assert nav["back"] is None
 
-    @pytest.mark.parametrize("caption", ["Anular", "Add Notes", "Help",
+    @pytest.mark.parametrize("caption", ["Anular", "Add Notes",
                                          "Volver a la lista"])
     def test_controls_that_are_not_back_stay(self, caption):
         """Anular is the signature screen's cancel and must never be quietly
@@ -1179,6 +1179,74 @@ class TestTheAppsOwnUpArrowDoesNotRideAlong:
         nav = self._nav([dict(self.UP, txt=caption)])
         assert nav["back"] is not None
         assert nav["back"]["txt"] == caption
+
+    @pytest.mark.parametrize("caption", ["Help", "Ayuda", "Información"])
+    def test_help_does_not_ride_along_either(self, caption):
+        """On the owner's instruction: "the question marks also sometimes
+        confuse me, not a useful thing on our end honestly — I don't see me
+        or my sister ever pressing that". It opens a documentation website,
+        which is the one place the phone may not go, and unlabelled in the
+        corner it has been taken for Back."""
+        assert self._nav([dict(self.UP, txt=caption)])["back"] is None
+
+    # The bar HHAeXchange+ actually ships, at the bounds recorded on the
+    # phone: two textless buttons whose only names are descriptions folded
+    # in as lines. Reading `txt` alone meant the word lists never saw a
+    # single one of them, and both came through as "···" bubbles in the
+    # corner — "these bubbles on the top right with … are confusing".
+    def _uma_bar(self, statics):
+        from apt_log.ui.screenview import build
+
+        return build({
+            "id": "f", "size": [720, 1600], "blocked": "", "notice": "",
+            "elements": [
+                {"rid": "menu_top_bar_back_button", "cls": "View",
+                 "b": [6, 68, 31, 93], "txt": "", "focused": False,
+                 "checked": False},
+                {"rid": "help_button", "cls": "View", "b": [691, 68, 718, 94],
+                 "txt": "", "focused": False, "checked": False},
+            ],
+            "statics": [{"cls": "TextView", "txt": "Visitas de búsqueda",
+                         "b": [310, 73, 410, 88]}] + statics,
+        })["nav"]
+
+    def test_neither_survives_when_only_a_description_names_them(self):
+        nav = self._uma_bar([
+            {"cls": "View", "txt": "Atrás", "b": [6, 68, 31, 93]},
+            {"cls": "View", "txt": "Ayuda", "b": [691, 69, 718, 93]},
+        ])
+        assert nav is not None
+        assert nav["back"] is None and nav["trailing"] == []
+
+    def test_and_the_page_keeps_its_title(self):
+        """Dropping the buttons must not drop the bar."""
+        nav = self._uma_bar([
+            {"cls": "View", "txt": "Atrás", "b": [6, 68, 31, 93]},
+            {"cls": "View", "txt": "Ayuda", "b": [691, 69, 718, 93]},
+        ])
+        assert nav["title"] == "Visitas de búsqueda"
+
+    def test_the_help_id_alone_is_enough(self):
+        """Some pages ship it with no description at all."""
+        nav = self._uma_bar([{"cls": "View", "txt": "Atrás",
+                              "b": [6, 68, 31, 93]}])
+        assert nav["back"] is None and nav["trailing"] == []
+
+    def test_the_help_ROW_inside_a_menu_page_is_untouched(self):
+        """A destination she chose to walk to, not a bubble in the chrome.
+        HHAeXchange+'s Menú lists Ayuda between Agencias and Idioma."""
+        from apt_log.ui.screenview import build
+
+        model = build({"id": "f", "size": [720, 1600], "blocked": "",
+                       "notice": "",
+                       "elements": [{"rid": "menu_screen_help", "cls": "View",
+                                     "b": [14, 342, 706, 369], "txt": "",
+                                     "focused": False, "checked": False}],
+                       "statics": [{"cls": "TextView", "txt": "Ayuda",
+                                    "b": [104, 349, 684, 362]}]})
+        said = [line for row in model["rows"] for it in row["items"]
+                for line in (it.get("lines") or [])]
+        assert "Ayuda" in said
 
     def test_the_rest_of_the_bar_survives_losing_it(self):
         other = {"cls": "Button", "b": [600, 64, 700, 106], "txt": "Add Notes"}
@@ -2088,3 +2156,91 @@ class TestTheAppsOwnButtonsWaitForTheInk:
     def test_the_lapse_sentence_reaches_the_script(self, client):
         """A key the template never passes is an empty toast."""
         assert "signLockLapsed:" in client.get("/app").text
+
+
+class TestTypingAName:
+    """A search box that could not be typed into.
+
+    Tapping one focused the field ON THE PHONE and stopped there: the
+    phone's keyboard came up on a screen nobody is looking at, and from the
+    portal there was no way to put a name in. The type bar was held back on
+    purpose — a "type here" prompt over the patients list read as the
+    sign-in code asking again — but the fix for that is the field's OWN
+    words, which is exactly what the folded hint carries.
+    """
+
+    SCRIPT = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/static/phone.js")
+
+    def _js(self):
+        return strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
+
+    def test_a_field_that_names_itself_opens_the_bar(self):
+        assert "openTypeBar(aim, el.dataset.hint, 'search')" in self._js()
+
+    def test_the_code_screen_still_comes_first(self):
+        """A code-asking screen keeps the OTP path, hint or no hint."""
+        js = self._js()
+        assert js.index("c[oó]digo") < js.index("el.dataset.hint")
+
+    def test_a_field_with_no_words_of_its_own_still_just_taps(self):
+        """No hint, no bar: an unnamed box is not a search box, and a
+        prompt over one is the OTP confusion coming back."""
+        assert "if (el.dataset.hint)" in self._js()
+
+    def test_a_name_keeps_its_spaces(self):
+        """The old sanitizer was OTP-shaped and stripped everything but
+        letters and digits, which turned "Rojas Batista" into a search that
+        matches nothing."""
+        js = self._js()
+        assert "typeKind === 'search'" in js
+        assert r"\p{L}" in js
+
+    def test_and_a_code_is_still_a_code(self):
+        assert "[^A-Za-z0-9]" in self._js()
+
+    def test_nothing_a_shell_reads_gets_through_the_browser_either(self):
+        """Belt to the server's braces. The character class is an allow
+        list — letters, digits, space, and the three marks a name carries."""
+        js = self._js()
+        line = next(l for l in js.splitlines() if r"\p{L}" in l)
+        for ch in ("$", "`", ";", "|", "&", "*"):
+            assert ch not in line
+
+
+class TestTheSearchBoxAsDrawn:
+    """One control, drawn as one: the placeholder inside the box and the
+    app's own magnifier in the corner it occupies on the phone."""
+
+    PAGE = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/templates/_screen.html")
+    STYLE = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/templates/phone.html")
+
+    def _markup(self):
+        return self.PAGE.read_text(encoding="utf-8")
+
+    def test_the_hint_reaches_the_script_through_the_markup(self):
+        """The script decides whether to offer the type bar from this
+        attribute; without it a search box is untypable again."""
+        assert 'data-hint="{{ it.hint }}"' in self._markup()
+
+    def test_an_empty_box_shows_its_placeholder(self):
+        assert "{{ it.txt or it.hint or '' }}" in self._markup()
+
+    def test_placeholder_grey_is_not_ink(self):
+        """Words she did not type must not read as a filled-in field."""
+        css = self.STYLE.read_text(encoding="utf-8")
+        assert ".a-field.empty" in css and "var(--muted)" in css
+
+    def test_the_magnifier_is_drawn_where_the_app_puts_it(self):
+        assert "a-fieldgo" in self._markup()
+        assert ".a-fieldgo { position:absolute; right:4px" \
+            in self.STYLE.read_text(encoding="utf-8")
+
+    def test_it_is_a_real_control_with_a_real_aim(self):
+        assert "data-aim='{{ it.submit | tojson }}'" in self._markup()
+
+    def test_and_it_never_sits_on_top_of_the_words(self):
+        css = self.STYLE.read_text(encoding="utf-8")
+        assert ":has(.a-fieldgo) .a-field { padding-right" in css

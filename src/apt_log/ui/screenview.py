@@ -336,6 +336,9 @@ ACTION_WORDS = (
     "continuar", "iniciar sesi\u00f3n", "iniciar visita", "guardar",
     "confirmar", "enviar", "comenzar", "empezar", "aceptar",
     "registrar entrada", "registrar salida", "ver detalles",
+    # The submit under a search form. "Visita Buscar" is the MENU ROW that
+    # opens that form and starts with its own word, so it is untouched.
+    "buscar", "search",
     "clock in", "clock out", "sign in", "start visit", "save", "submit",
     "confirm", "continue", "view details", "see details",
     "let's get started", "get started",
@@ -505,9 +508,70 @@ _UP_WORDS = frozenset((
 ))
 
 
+# What an app calls its own help, in both languages. Same whole-caption
+# rule: "Ayuda con la firma" would be a real control and is not this.
+_HELP_WORDS = frozenset((
+    "ayuda", "help", "información", "informacion", "info",
+    "más información", "mas informacion", "more information",
+))
+
+
+def _captions(item: dict) -> list[str]:
+    """Every word this control offers as its own name.
+
+    A nav button usually has NO text and one folded line — the description
+    the app hangs on it for a screen reader. HHAeXchange+'s back arrow is
+    exactly that: `menu_top_bar_back_button`, no text, described "Atrás".
+    Reading only `txt` meant the word list below never saw a single one of
+    them, so every app's back arrow and every app's help icon came through
+    as an unlabelled "···" bubble in the corner. Reported as: "these
+    bubbles on the top right with … are confusing".
+    """
+    words = [(item.get("txt") or "").strip()]
+    lines = item.get("lines") or []
+    if len(lines) == 1:
+        words.append((lines[0] or "").strip())
+    return [w.lower() for w in words if w]
+
+
+# What TalkBack is told to say, which is not what the screen says. An app
+# hangs these on a control so a screen reader can explain how to work it;
+# the portal is not a screen reader, and the visit search's date range came
+# through reading "Ingrese el formato de datos como mes, fecha, año, doble
+# toque para activar" — a sentence about double-tapping, on a page where
+# nothing is double-tapped.
+_READER_INSTRUCTIONS = (
+    "doble toque", "doble pulsación", "doble pulsacion", "toque dos veces",
+    "pulse dos veces", "double tap", "double-tap", "swipe up or down",
+    "deslice hacia arriba o hacia abajo",
+)
+
+
+def _is_screenreader_instruction(text: str) -> bool:
+    """Whether this line is spoken instructions rather than content."""
+    return any(m in (text or "").lower() for m in _READER_INSTRUCTIONS)
+
+
 def _is_up_affordance(item: dict) -> bool:
     """Whether this control is the app's own version of Back."""
-    return (item.get("txt") or "").strip().lower() in _UP_WORDS
+    return any(w in _UP_WORDS for w in _captions(item))
+
+
+def _is_help_affordance(item: dict) -> bool:
+    """Whether this control is the app's help icon.
+
+    Dropped from the title bar, on the owner's instruction: "the question
+    marks also sometimes confuse me, not a useful thing on our end honestly
+    — I don't see me or my sister ever pressing that". It opens a
+    documentation website, which is the one place the phone is not allowed
+    to go, and unlabelled in the corner it has been mistaken for Back more
+    than once. The help ROW inside a menu page is untouched — that is a
+    destination she chose to walk to, not a bubble in the chrome.
+    """
+    if (item.get("aim") or {}).get("rid", "").lower() in (
+            "help_button", "btn_info", "btn_help"):
+        return True
+    return any(w in _HELP_WORDS for w in _captions(item))
 
 
 def _is_dismiss(node: dict) -> bool:
@@ -701,7 +765,8 @@ def build(doc: dict) -> dict | None:
                 # No line twice: the legacy home repeats a subtitle node in
                 # its own hierarchy, and a cell reading the same sentence
                 # two times looks broken even when the tree really does.
-                if how == "line" and value and value not in lines:
+                if how == "line" and value and value not in lines \
+                        and not _is_screenreader_instruction(value):
                     lines.append(value)
                 elif how == "badge":
                     badge = value
@@ -1064,6 +1129,60 @@ def build(doc: dict) -> dict | None:
     for band in bands:
         band.sort(key=lambda n: n["b"][0])
 
+    # A SEARCH BOX IS ONE CONTROL, not three things that happen to overlap.
+    #
+    # The patients tab publishes its box as an EditText spanning the width,
+    # a separate caption "Buscar por nombre" sitting inside it, and a
+    # magnifier button inside its right edge. Banded as they arrive, the
+    # portal drew an empty rectangle, a loose phrase floating beside it, and
+    # a "···" bubble — three items for one box, and nothing that looked like
+    # somewhere to type a name.
+    #
+    # Anything INSIDE the field's own bounds belongs to the field: a word
+    # becomes its placeholder, a button becomes the button it already is on
+    # the phone, in the corner of the box where the app drew it.
+    for band in bands:
+        for field in [it for it in band if it["kind"] == "field"]:
+            fx1, fy1, fx2, fy2 = field["b"]
+
+            def _inside(it: dict, _f=(fx1, fy1, fx2, fy2)) -> bool:
+                return (it is not field and _f[0] <= it["b"][0]
+                        and it["b"][2] <= _f[2] and _f[1] <= it["b"][1]
+                        and it["b"][3] <= _f[3])
+
+            for it in [n for n in band if _inside(n)]:
+                caption = (it.get("txt") or "").strip() or (
+                    (it.get("lines") or [""])[0] or "").strip()
+                if it["kind"] == "label" and caption and not field.get("hint"):
+                    field["hint"] = caption
+                elif it.get("aim") and not field.get("submit"):
+                    field["submit"] = it["aim"]
+                else:
+                    continue
+                band.remove(it)
+
+    # ...and where the app writes the caption ABOVE the box instead of inside
+    # it — the visit search's "Nombre del paciente" — that caption is the
+    # box's own name just the same. Folded in as the placeholder so the field
+    # says what it wants, rather than standing over an empty rectangle. It
+    # has to be directly above, left-aligned with it, and alone on its line;
+    # a heading with a field somewhere under it is not this.
+    kept: list[list[dict]] = []
+    for band in bands:
+        fields = [it for it in band if it["kind"] == "field"]
+        if (len(band) == 1 and len(fields) == 1 and not fields[0].get("hint")
+                and kept and len(kept[-1]) == 1
+                and kept[-1][0]["kind"] == "label"
+                and (kept[-1][0].get("txt") or "").strip()):
+            cap, field = kept[-1][0], fields[0]
+            gap = field["b"][1] - cap["b"][3]
+            if (0 <= gap <= (field["b"][3] - field["b"][1])
+                    and abs(cap["b"][0] - field["b"][0]) <= max(8, 0.02 * w)):
+                field["hint"] = cap["txt"].strip()
+                kept.pop()
+        kept.append(band)
+    bands = kept
+
     # Side-by-side rows are CONTROLS, not statements: the visit detail's
     # "Visits | Plan of care" section switch is two half-width rows in one
     # band, and the left one matched the info-row shape. A statement
@@ -1161,11 +1280,15 @@ def build(doc: dict) -> dict | None:
             #
             # Suppressed rather than re-pointed: the pill's Back sends the
             # phone's own Back, which is what this arrow does, so there is
-            # nothing to chain it to that is not already there. Only a control
-            # that SAYS it goes up is dropped — the top-left button is
-            # otherwise whatever the app put there, and on HHAeXchange+ that
-            # was the help button (and on the signature page, Anular).
-            controls = [b for b in buttons if not _is_up_affordance(b)]
+            # nothing to chain it to that is not already there.
+            #
+            # Help goes with it, on the owner's instruction — see
+            # `_is_help_affordance`. What is left is whatever the app put in
+            # its title bar that is neither of those, and it rides as a
+            # trailing control under its own name.
+            controls = [b for b in buttons
+                        if not _is_up_affordance(b)
+                        and not _is_help_affordance(b)]
             nav = {
                 "back": controls[0] if controls else None,
                 "title": title["txt"] if title else "",
