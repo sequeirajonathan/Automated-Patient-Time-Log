@@ -245,10 +245,64 @@
       ? raw.replace(/[^\p{L}\p{N} .'\-]/gu, '').replace(/\s+/g, ' ').trim()
       : raw.replace(/[^A-Za-z0-9]/g, '')).slice(0, 32);
     if (!value || !typeAim || !socket || socket.readyState !== 1) return;
+    // WHAT SHE SENT, KEPT SO SHE CAN CHECK IT.
+    //
+    // The field she typed into never comes back: editable text is left out
+    // of the published screen on purpose (it is where typed credentials
+    // live), so the reflow redraws the code box empty a second after she
+    // fills it. Reported from the field — the prompt updates, the digits do
+    // not appear, and there is no way to tell a mistyped code from a wrong
+    // one. On a code that EXPIRES that is the difference between fixing a
+    // typo and starting the whole walk again.
+    //
+    // Nothing new crosses the wire: this browser is where the value was
+    // typed. Held in memory only — never storage — so a reload forgets it,
+    // which is the right lifetime for a one-time code.
+    sentEcho = (typeKind === 'code')
+      ? { aim: JSON.stringify(typeAim), value: value } : null;
     tapping(true);
     socket.send(JSON.stringify({ type: 'text', frame: frameId,
                                  element: typeAim, value: value }));
     closeTypeBar();
+  }
+
+  // The echo, re-applied after every render because the reflow is rebuilt
+  // from the server each frame and knows nothing about it.
+  let sentEcho = null;
+  function sameAim(a, b) {
+    try {
+      return JSON.stringify(JSON.parse(a)) === JSON.stringify(JSON.parse(b));
+    } catch (e) {
+      return false;
+    }
+  }
+  function paintSentCode() {
+    if (!sentEcho) return;
+    const root = wrap();
+    if (!root) return;
+    // Both sides go through the same parse-and-restringify. The server
+    // writes this attribute with Python's json, which puts a space after
+    // every colon; JSON.stringify writes none, so comparing the raw strings
+    // matches nothing at all and the echo would simply never appear.
+    const field = Array.from(root.querySelectorAll('.a-field'))
+      .find(f => sameAim(f.dataset.aim, sentEcho.aim));
+    // The field is gone: the app moved on, or this is a different screen.
+    // Either way the echo has outlived what it was about.
+    if (!field) { sentEcho = null; return; }
+    field.textContent = sentEcho.value;
+    field.classList.remove('empty');
+    field.classList.add('sent');
+    // Named as the PORTAL's echo, not the app's display. Without this the
+    // digits look like something the phone reported back, and "the app has
+    // my code" is exactly the wrong thing to believe when the next step is
+    // deciding whether to press Verify or ask for a new one.
+    const wrapEl = field.closest('.a-fieldwrap') || field.parentElement;
+    if (wrapEl && !wrapEl.querySelector('.a-senttag')) {
+      const tag = document.createElement('span');
+      tag.className = 'a-senttag';
+      tag.textContent = i18n.sentLabel || '';
+      wrapEl.appendChild(tag);
+    }
   }
 
   // The app's own tab bar, lifted into the control bar. Rebuilt whenever the
@@ -312,6 +366,7 @@
         const previous = frameId;
         root.innerHTML = html;
         bindWire();
+        paintSentCode();
         const wire = root.querySelector('.wire');
         frameId = wire ? (wire.dataset.frame || '') : '';
         // Whether the peek's scroll arrows have anything to do. The phone is
@@ -458,6 +513,11 @@
     // screen has one button, which opens the Store and gets bounced back —
     // so the page says what is happening and offers the act that works.
     body.classList.toggle('walled', !!meta.walled);
+    // On the code screen: the way to a NEW code, which the app itself does
+    // not offer. Shown for the whole screen rather than only once a code has
+    // expired — a mistyped code needs the same escape, and the expired
+    // wording has never been read off the live phone.
+    body.classList.toggle('codescreen', !!meta.code_screen);
     // The plan of care's own button, offered only where there is something
     // to tick. The count is the server's, read off the same page the macro
     // will read, so what the button says is what it will do.
@@ -1063,6 +1123,25 @@
     // it is about to remove. The ceiling is generous because the install is
     // a download — a spinner that gives up while Play is still working is
     // how a finished update gets reported as a failure.
+    // Ask inMyTeam to text another code. Asks first, because it closes the
+    // app, signs in again and sends a real message — and the code she is
+    // already holding stops working the moment a new one is issued.
+    const resendRun = document.getElementById('resend-code');
+    if (resendRun) resendRun.addEventListener('click', () => {
+      if (!driving()) return;
+      const ask = resendRun.getAttribute('data-confirm');
+      if (ask && !window.confirm(ask)) return;
+      // The echo is about the code that is being replaced.
+      sentEcho = null;
+      awaitingMacro = true;
+      busy(i18n.resending || '', 90000);
+      fetch('/macro', {
+        method: 'POST',
+        body: new URLSearchParams({ name: 'inmyteam_resend_code' }),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        redirect: 'follow'
+      }).catch(() => { awaitingMacro = false; unbusy(); toast(i18n.failed || ''); });
+    });
     const walledRun = document.getElementById('walled-update');
     if (walledRun) walledRun.addEventListener('click', () => {
       if (!driving()) return;
