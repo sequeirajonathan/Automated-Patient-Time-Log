@@ -1019,6 +1019,9 @@ async def live(ws: WebSocket):
                     "blocked": screen_doc.get("blocked", ""),
                     "notice": screen_doc.get("notice", ""),
                     "landscape": bool(screen_doc.get("landscape")),
+                    # Whether the PHOTOGRAPH is the wrong way up. Not the
+                    # same as the screen being wide — see feed's note.
+                    "turn": bool(screen_doc.get("turn")),
                     # A signature moment: canvas in front AND drawn
                     # sideways. The sign sheet shows its app-side Borrar
                     # and Salvar only here — they press real pixels, and

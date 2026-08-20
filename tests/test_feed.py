@@ -2457,12 +2457,17 @@ class TestATickBoxIsSmall:
         els = self._els("<hierarchy>" + self.TICK + "</hierarchy>")
         assert els and els[0]["role"] == "toggle"
 
-    def test_a_big_node_that_only_the_sentence_let_in_is_dropped(self):
-        """Not clickable, and too big to be a control: it reached `elements`
-        on the strength of that sentence alone and has no other claim."""
-        assert self._els("<hierarchy>"
-                         + self.CANVAS.format(click="false")
-                         + "</hierarchy>") == []
+    def test_a_big_node_the_sentence_let_in_is_still_published(self):
+        """Losing the ROLE is the whole correction. Dropping the element was
+        the first version of this guard, and it took the signature canvas off
+        the page altogether — the surface is not clickable in the tree, so
+        that sentence is the only thing saying it is there, and without it
+        the portal drew a signature screen with nothing to sign on."""
+        els = self._els("<hierarchy>"
+                        + self.CANVAS.format(click="false") + "</hierarchy>")
+        assert len(els) == 1
+        assert els[0].get("role") is None
+        assert els[0]["b"] == [18, 171, 1518, 525]
 
     def test_a_clickable_canvas_is_still_published(self):
         """It is a real control — the app says so in the ordinary way — and
@@ -2479,3 +2484,67 @@ class TestATickBoxIsSmall:
         tick = (31 * 29) / (720 * 1600)
         canvas = (1500 * 354) / (720 * 1600)
         assert tick * 60 < feed.READER_CONTROL_MAX_SHARE < canvas / 9
+
+
+class TestWhenThePhotographNeedsTurning:
+    """"Once I get to the signature part everything goes BLACK."
+
+    Two questions had one answer between them, and answering them together
+    is what turned the page black on the one screen the turn was written for.
+
+    "Is the screen wide?" and "is the photograph the wrong way up?" are the
+    same question ONLY for the legacy app, which draws its signature page
+    rotated inside a portrait activity: the screencap comes back portrait
+    with sideways content in it. HHAeXchange+ genuinely rotates the device —
+    the screencap arrives landscape and already upright — and the peek turned
+    it anyway, rotating a wide photograph a quarter turn and scaling it by a
+    factor computed for a portrait one. What is left on the stage is nearly
+    nothing.
+    """
+
+    UMA_PAD = ('<node class="android.view.View" resource-id="" '
+               'clickable="false" text="" '
+               'content-desc="Firma, toca dos veces para firmar" '
+               'bounds="[18,171][1518,525]"/>'
+               '<node class="android.view.View" '
+               'resource-id="app:id/signature_screen_submit_button" '
+               'clickable="true" text="" bounds="[1474,656][1529,681]"/>')
+
+    def test_a_genuinely_landscape_screen_is_wide(self):
+        assert feed._looks_landscape(self.UMA_PAD)
+
+    def test_but_its_photograph_is_already_upright(self):
+        """`sign.sideways` is the answer the INK turns by, and the file says
+        the peek and the ink must never disagree. It says no here."""
+        from apt_log import sign
+
+        assert not sign.sideways(self.UMA_PAD, package="com.hhaexchange.uma")
+
+    def test_the_legacy_pages_photograph_does_need_turning(self):
+        """Portrait bounds, a canvas on it, and an app that draws its
+        signature page a quarter turn round inside a portrait activity."""
+        from apt_log import sign
+
+        legacy = ('<node class="android.widget.FrameLayout" '
+                  'resource-id="app:id/gesturePatientSignature" '
+                  'bounds="[0,492][720,1142]"/>')
+        assert not feed._looks_landscape(legacy)
+        assert sign.sideways(legacy, package="com.hhaexchange.caregiver")
+
+    def test_the_two_answers_travel_as_two_fields(self):
+        """A page that has only one of them has to guess, and guessing is
+        what went black."""
+        from pathlib import Path
+
+        src = (Path(__file__).resolve().parents[1]
+               / "src/apt_log/feed.py").read_text(encoding="utf-8")
+        assert '"landscape": _looks_landscape(hierarchy),' in src
+        assert '"turn": bool(_has_canvas(hierarchy)' in src
+
+    def test_the_peek_turns_by_the_photographs_answer(self):
+        from pathlib import Path
+
+        js = (Path(__file__).resolve().parents[1]
+              / "src/apt_log/ui/static/phone.js").read_text(encoding="utf-8")
+        assert "toggle('sideways', !!meta.turn)" in js
+        assert "toggle('sideways', !!meta.landscape)" not in js

@@ -327,7 +327,11 @@
     // the app, and leaving an app here means the picker: flip to it once,
     // on the transition, so she is never stranded staring at a dead end.
     // A sideways screen (the signature moment) turns the peek upright.
-    body.classList.toggle('sideways', !!meta.landscape);
+    // Turned only when the PHOTOGRAPH is the wrong way up, which is not
+    // the same as the screen being wide: HHAeXchange+ rotates the device
+    // and its screencap arrives upright already. Turning that one anyway
+    // is what went black on the signature screen.
+    body.classList.toggle('sideways', !!meta.turn);
     // The app-side Borrar/Salvar only exist while a signature canvas is
     // in front — the buttons press real pixels there and nothing else.
     // The app's OWN buttons for this sheet, drawn INSIDE the pad so she is
