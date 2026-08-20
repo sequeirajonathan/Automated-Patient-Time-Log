@@ -580,6 +580,40 @@
   /* Placeholder grey: the words in the box are the app's prompt, not a
      value she typed, and showing them in ink read as a filled-in field. */
   .a-field.empty { color:var(--muted); }
+  /* What she just sent, echoed back from this browser's own memory — the
+     phone never publishes what is typed into a field. Spaced like a code
+     because it is one: at this size a transposed pair of digits in six is
+     the whole difference between a typo and a wrong code, and she is
+     checking it against a text message under time pressure. Marked as the
+     portal's own word, not the app's, by the label beside it. */
+  .a-field.sent { color:var(--ink); font-variant-numeric:tabular-nums;
+                  letter-spacing:.14em; font-weight:600; }
+  /* The way to a new code. Deliberately NOT a filled pill: on this screen
+     the filled pill is Verify, and two of them would be the page shouting
+     two instructions at somebody whose code is expiring. */
+  #resend { display:none; flex-direction:column; gap:6px; align-items:center;
+            margin:2px 16px 14px; text-align:center; }
+  #resend p { margin:0; font-size:12.5px; color:var(--muted); }
+  #resend button { font:inherit; font-size:14px; font-weight:600;
+                   padding:9px 16px; border-radius:10px;
+                   border:.5px solid var(--line); background:var(--card);
+                   color:var(--tint); -webkit-tap-highlight-color:transparent; }
+  #resend button:active { transform:scale(.97); }
+  body.codescreen:not(.covered):not(.walled):not(.offapp) #resend
+    { display:flex; }
+  /* ...directly under the screen, not a scroll below it. `#screenwrap` is
+     min-height:100% so the reflow fills the glass, which puts anything
+     following it off the bottom of the viewport: measured at y=942 on a
+     932-tall screen, so the way out of an expiring code sat behind a
+     screenful of nothing. The code screen is three rows tall and has no use
+     for the fill. */
+  body.codescreen #screenwrap { min-height:0; }
+
+  .a-senttag { position:absolute; right:8px; top:50%;
+               transform:translateY(-50%); font-size:11px; font-weight:600;
+               letter-spacing:.02em; color:var(--muted); pointer-events:none;
+               text-transform:uppercase; }
+  .a-fieldwrap:has(.a-senttag) .a-field { padding-right:60px; }
   .a-fieldwrap:has(.a-fieldgo) .a-field { padding-right:46px; }
   .a-fieldgo { position:absolute; right:4px; top:50%;
                transform:translateY(-50%);
@@ -1245,6 +1279,16 @@
               data-confirm="{{ t('macro.sure.update_app') }}"
               style="flex:none">{{ t('papp.walled_action') }}</button>
     </div>
+    {# Offered only on the code screen, and quietly — Verify is the thing to
+       press, and this is the thing to press when Verify will not work. It
+       asks first: it closes the app, signs in again and sends a real text
+       message, which invalidates the code she is holding. #}
+    <div id="resend">
+      <p class="muted">{{ t('papp.expired_hint') }}</p>
+      <button type="button" id="resend-code"
+              data-confirm="{{ t('macro.sure.inmyteam_resend_code') }}"
+        >{{ t('papp.expired_action') }}</button>
+    </div>
     <div id="peekwrap"><img id="peek" alt=""></div>
     <div id="peek-cap" hidden></div>
     <div id="busy"><div class="spinner"></div><p id="busy-text"></p></div>
@@ -1413,6 +1457,8 @@
     webTitle: {{ t('papp.web')|tojson }},
     scanning: {{ t('papp.scanning')|tojson }},
     clearing: {{ t('papp.clearing')|tojson }},
+    sentLabel: {{ t('papp.sent')|tojson }},
+    resending: {{ t('papp.resending')|tojson }},
     updating: {{ t('papp.updating')|tojson }},
     checkingTasks: {{ t('macro.step.checking')|tojson }},
     coachOn:   {{ t('papp.coach_on')|tojson }},

@@ -1493,7 +1493,45 @@ def _area(element) -> float:
 
 
 def _inmyteam_login(driver, report) -> None:
-    """inMyTeam — get as far as the code, and stop there.
+    """inMyTeam — get as far as the code, and stop there."""
+    _inmyteam_walk(driver, report, resend=False)
+
+
+def _inmyteam_resend_code(driver, report) -> None:
+    """Ask inMyTeam to text a NEW code, when the one she has has expired.
+
+    The app offers no way back. Its code screen has a field and a submit and
+    nothing else — no "send another", no way back to the number — so an
+    expired code is a dead end reached at the worst moment: the walk is one
+    step from done and the only exit anybody had found was to force-stop the
+    app and start the whole sign-in again.
+
+    Which is exactly what this does, deliberately and in one press, instead
+    of leaving it as folklore. The app is stopped, relaunched, walked
+    splash → number → Sign in, and the app texts a fresh code.
+
+    DELIBERATE, never automatic, and it asks first. `_inmyteam_login`'s
+    docstring already spells out why: a retry here is a second real text
+    message to a real person and a step toward a rate limit that would lock
+    the account out of the app entirely. That reasoning forbids a macro
+    deciding to do this on its own. It does not forbid a person deciding to.
+    """
+    from apt_log import feed as feed_mod
+
+    package = "com.inmyteam.inmyteam"
+    report("macro.step.clearing")
+    # Force-stopped rather than navigated: there is nothing to navigate. The
+    # code screen's only controls are its field and its submit, and Back on
+    # it either does nothing or retreats to a splash that resumes straight
+    # into the same expired screen.
+    _force_stop(package)
+    _forget_stitched(package)
+    time.sleep(1.5)
+    _inmyteam_walk(driver, report, resend=True)
+
+
+def _inmyteam_walk(driver, report, resend: bool = False) -> None:
+    """The sign-in walk. `resend` refuses to stop at a code screen.
 
     This app had no sign-in macro at all, so its tile ran the open-only one:
     the app came to the front, landed on its marketing splash, and waited for
@@ -1582,8 +1620,21 @@ def _inmyteam_login(driver, report) -> None:
     # code screen is where this macro is trying to get to — arriving to find
     # it already there is success, not a reason to start over.
     if _asks_for_a_code(driver):
-        report("macro.step.awaiting_code")
-        return
+        if not resend:
+            report("macro.step.awaiting_code")
+            return
+        # A RESEND that is still looking at the code screen has not got back
+        # to the start, and must not carry on. Both screens are one EditText
+        # and a button, so the next few lines would clear the code box, type
+        # a PHONE NUMBER into it and press submit — the trap the check above
+        # exists to prevent, sprung by the one caller allowed past it.
+        #
+        # The force-stop should have left the app at its splash. If it did
+        # not, that is a fact about this app worth surfacing rather than
+        # working around blind.
+        raise RuntimeError(
+            "inMyTeam came back to the code screen; it did not reset to the "
+            "number screen, so no new code was requested")
 
     # ---------------------------------------------------------- the splash
     if field() is None:
@@ -2303,6 +2354,8 @@ MACROS: dict[str, Macro] = {
         Macro("open_mobile_caregiver", "macro.open_mobile_caregiver",
               _open_app("com.tellus.evv.v2")),
         Macro("inmyteam_login", "macro.inmyteam_login", _inmyteam_login),
+        Macro("inmyteam_resend_code", "macro.inmyteam_resend_code",
+              _inmyteam_resend_code),
         Macro("open_inmyteam", "macro.open_inmyteam",
               _open_app("com.inmyteam.inmyteam")),
         Macro("read_page", "macro.read_page", _read_page),
@@ -2347,7 +2400,11 @@ OPERATIONS = ("rescan", "read_page", "clear_screen", "restart_app",
 # where an update is actually being demanded, because a button offering to
 # replace an app is not a thing to have standing by.
 CONFIRM = ("restart_phone", "update_app", "update_hhax_uma",
-           "update_mobile_caregiver", "update_inmyteam")
+           "update_mobile_caregiver", "update_inmyteam",
+           # Asks because it sends a real text message to a real phone and
+           # steps toward a rate limit that would lock the account out of
+           # the app. Cheap to press, not free.
+           "inmyteam_resend_code")
 
 
 # Session-expiry dialogs, per app. A dialog whose wording is recognised as

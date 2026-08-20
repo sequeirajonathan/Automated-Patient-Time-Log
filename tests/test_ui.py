@@ -2841,3 +2841,162 @@ class TestTheSuiteLeavesTheMachineAlone:
         for name, path in watched.items():
             assert self.REAL not in Path(path).parents and path != self.REAL, (
                 f"{name} still points at the machine's own state: {path}")
+
+
+class TestTheCodeSheSentComesBack:
+    """Reported from the field: the prompt updates when she sends the code,
+    the digits never appear, and there is no way to tell a mistyped code from
+    a wrong one.
+
+    The cause is a rule this project keeps on purpose — editable text is left
+    out of the published screen, because that is where typed credentials live
+    — so the reflow redraws the code box empty a moment after she fills it.
+    The fix is not to publish it. The browser that sent the value already has
+    it, so it echoes its own copy and nothing new crosses the wire.
+    """
+
+    SCRIPT = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/static/phone.js")
+
+    def source(self):
+        return strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
+
+    def test_the_value_is_kept_when_a_code_is_sent(self):
+        assert "sentEcho" in self.source()
+
+    def test_it_is_painted_back_after_every_render(self):
+        """The reflow is rebuilt from the server on each frame and knows
+        nothing about the echo, so re-applying it is the whole mechanism."""
+        source = self.source()
+        assert "paintSentCode()" in source
+        # ...specifically after the screen is written, not once at startup.
+        after_render = source.split("root.innerHTML = html;", 1)[-1][:200]
+        assert "paintSentCode()" in after_render
+
+    def test_only_codes_are_echoed_never_searches(self):
+        """A patient's name typed into a search box is not something to leave
+        painted on the page afterwards."""
+        source = self.source()
+        assert "typeKind === 'code'" in source
+
+    def test_the_aims_are_compared_through_the_same_encoder(self):
+        """The server writes data-aim with Python's json — a space after
+        every colon — and JSON.stringify writes none. Comparing the raw
+        strings matches nothing and the echo silently never appears."""
+        source = self.source()
+        assert "JSON.stringify(JSON.parse(a))" in source
+
+    def test_it_is_never_written_to_storage(self):
+        """A one-time code should not outlive the page that used it."""
+        source = self.source()
+        window = source[source.index("sentEcho"):]
+        assert "sessionStorage" not in window.split("function renderAppTabs")[0]
+        assert "localStorage" not in window.split("function renderAppTabs")[0]
+
+    def test_it_is_labelled_as_the_portals_own_echo(self, client):
+        """Not as something the phone reported back. "The app has my code" is
+        the wrong thing to believe when the next choice is Verify or ask for
+        another."""
+        assert "a-senttag" in self.source()
+        assert "a-senttag" in client.get("/app").text
+
+
+class TestVerifyIsTheThingToPress:
+    def test_verify_reads_as_a_call_to_action(self):
+        """It is the only thing to do on that screen, at the one moment she
+        is holding a code that expires — and it was rendering as an ordinary
+        row because this list decides which control gets the filled pill."""
+        from apt_log.ui.screenview import _looks_like_cta
+
+        for word in ("Verify", "Verificar", "VERIFY", "Verify code"):
+            assert _looks_like_cta(word) is True
+
+    def test_resend_is_deliberately_not_one(self):
+        """Two filled pills would be the page shouting two instructions at
+        somebody under time pressure."""
+        from apt_log.ui.screenview import _looks_like_cta
+
+        for word in ("Resend code", "Reenviar código"):
+            assert _looks_like_cta(word) is False
+
+
+class TestAskingForANewCode:
+    """The app offers no way out of an expired code: its code screen has a
+    field and a submit and nothing else. The only exit anybody had found was
+    to force-stop the app by hand and sign in again."""
+
+    SCRIPT = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/static/phone.js")
+
+    CODE_DOC = {
+        "app": "com.inmyteam.inmyteam",
+        "elements": [{"cls": "EditText", "b": [0, 0, 100, 40], "txt": ""}],
+        "statics": [{"cls": "TextView", "b": [0, 0, 100, 20],
+                     "txt": "Enter your code"}],
+    }
+
+    def test_the_code_screen_is_recognised(self):
+        from apt_log.ui.app import _code_screen
+
+        assert _code_screen(self.CODE_DOC) is True
+
+    def test_the_number_screen_is_not(self):
+        """Both screens are one field and a button; only one of them says
+        'code'. Typing a phone number into the other one is the mistake this
+        distinction exists to prevent."""
+        from apt_log.ui.app import _code_screen
+
+        doc = dict(self.CODE_DOC)
+        doc["statics"] = [{"cls": "TextView", "b": [0, 0, 100, 20],
+                           "txt": "Enter your cell phone number"}]
+        assert _code_screen(doc) is False
+
+    def test_another_apps_code_screen_is_not_offered_this(self):
+        from apt_log.ui.app import _code_screen
+
+        doc = dict(self.CODE_DOC)
+        doc["app"] = "com.tellus.evv.v2"
+        assert _code_screen(doc) is False
+
+    def test_a_page_shaped_unexpectedly_costs_the_button_not_the_frame(self):
+        from apt_log.ui.app import _code_screen
+
+        assert _code_screen({"app": "com.inmyteam.inmyteam",
+                             "elements": "not a list"}) is False
+
+    def test_the_button_is_on_the_page_and_asks_first(self, client):
+        """It closes the app, signs in again and sends a real text message —
+        and the code she is already holding stops working."""
+        import re
+
+        body = client.get("/app").text
+        button = re.search(r"<button[^>]*id=\"resend-code\"[^>]*>", body)
+        assert button, "the resend button is not on the page"
+        assert "data-confirm=" in button.group(0)
+
+    def test_it_runs_the_macro(self):
+        source = strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
+        assert "inmyteam_resend_code" in source
+
+    def test_it_is_hidden_off_the_code_screen(self, client):
+        import re
+
+        css = re.sub(r"/\*.*?\*/", "", client.get("/app").text, flags=re.S)
+        rule = re.search(r"#resend \{[^}]*\}", css)
+        assert rule and "display:none" in rule.group(0)
+        assert "body.codescreen" in css
+
+    def test_the_flag_reaches_the_browser(self):
+        source = (Path(__file__).resolve().parents[1]
+                  / "src/apt_log/ui/app.py").read_text(encoding="utf-8")
+        assert '"code_screen": _code_screen(screen_doc)' in source
+
+    def test_it_sits_under_the_screen_not_a_scroll_below_it(self, client):
+        """`#screenwrap` is min-height:100% so the reflow fills the glass,
+        which puts anything after it off the bottom: measured at y=942 on a
+        932-tall viewport, so the way out of an expiring code sat behind a
+        screenful of nothing. Caught by rendering it, not by reading it."""
+        import re
+
+        css = re.sub(r"/\*.*?\*/", "", client.get("/app").text, flags=re.S)
+        assert "body.codescreen #screenwrap { min-height:0; }" in css

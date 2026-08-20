@@ -677,6 +677,38 @@ def _update_wall(doc: dict) -> bool:
         return False
 
 
+def _code_screen(doc: dict) -> bool:
+    """Whether inMyTeam is asking for the code it just texted.
+
+    Gated on the CODE SCREEN rather than on the app's expired-code wording,
+    and that is a deliberate choice about what can be relied on. The words an
+    expired code produces have not been read off the live phone; the code
+    screen has — a field plus the app's own word for a code — and it is the
+    same test the sign-in macro stops at.
+
+    So the way to a new code is offered for as long as she is on the screen
+    where a code is what is wanted, rather than appearing only once the
+    portal recognises a sentence nobody has verified. Wrong-but-unexpired is
+    also a reason to want another one.
+
+    Never raises: one field of a payload carrying the whole screen.
+    """
+    from apt_log import macros as macros_mod
+
+    try:
+        if (doc.get("app") or "") != "com.inmyteam.inmyteam":
+            return False
+        items = (doc.get("elements") or []) + (doc.get("statics") or [])
+        if not any((e.get("cls") or "").endswith("EditText") for e in
+                   (doc.get("elements") or [])):
+            return False
+        words = " ".join((e.get("txt") or "") for e in items).lower()
+        return any(w in words for w in macros_mod._CODE_WORDS)
+    except Exception:
+        log.exception("looking for the code screen")
+        return False
+
+
 def _sheet_actions(doc: dict, model: dict | None) -> list[dict]:
     """The app's own buttons on a signature sheet, as aims.
 
@@ -1097,6 +1129,11 @@ async def live(ws: WebSocket):
                     # where the containment watchdog bounces her straight
                     # back — a loop with no way out from this side.
                     "walled": _update_wall(screen_doc),
+                    # She is on the code screen. The one thing the app gives
+                    # no way out of: an expired or mistyped code has no
+                    # "send another" on it, and the only path anybody had
+                    # found was to force-stop the app by hand.
+                    "code_screen": _code_screen(screen_doc),
                     # The signature sheet's OWN buttons — inMyTeam's Done and
                     # Clear — carried so the pad can show them beside her own
                     # controls. Without this she draws in the portal, switches

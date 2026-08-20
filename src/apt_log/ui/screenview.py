@@ -350,7 +350,17 @@ ACTION_WORDS = (
     "clock in", "clock out", "sign in", "start visit", "save", "submit",
     "confirm", "continue", "view details", "see details",
     "let's get started", "get started",
+    # The button under the texted code. Reported from the field as blending
+    # in — and it was, because this list decides which control gets the
+    # filled pill and "verify" was not on it. It is the only thing to do on
+    # that screen, at the one moment she is holding a code that expires.
+    "verify", "verificar", "verificación", "verificacion",
 )
+
+# NOT here on purpose: "resend" / "reenviar". It is a real control and it now
+# has a macro behind it, but it is the SECOND thing to reach for on that
+# screen — offering it in the same filled pill as Verify would have the page
+# shouting two different instructions at somebody under time pressure.
 
 
 # Actions the app itself plays DOWN, whatever their verb. "Iniciar
