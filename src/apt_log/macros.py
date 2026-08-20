@@ -2678,9 +2678,42 @@ class Runner:
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
+        self._reconcile()
         self._thread = threading.Thread(target=self._loop, daemon=True,
                                         name="aptlog-macros")
         self._thread.start()
+
+    def _reconcile(self) -> None:
+        """A macro cannot still be running if this process just started.
+
+        WHAT THIS COSTS WHEN IT IS MISSING, caught live: auto sign-in fired
+        for inMyTeam at 13:18:18 and wrote "running"; the deploy restarted
+        this service at 13:18:19 and killed the thread mid-macro. Nothing
+        ever wrote a terminal state, so the file said "running" for the next
+        thirteen minutes — and it would have said so until some other macro
+        happened to run.
+
+        Two things read that flag and both went wrong. The containment
+        watchdog stands down for a macro in flight, so the phone sat outside
+        its care apps unwatched. And auto-auth refuses to stack onto a
+        running macro, so the sign-in that was interrupted could never
+        restart — the app stayed on its marketing splash, which is exactly
+        where it was found.
+
+        The status is a claim about THIS process. On start it is either
+        finished or it was interrupted, and "interrupted" is the honest word
+        for it: not a macro that failed at its task, one that never got to
+        try.
+        """
+        was = read_status(self._status_path)
+        if was.state != "running":
+            return
+        log.warning("macro %s was interrupted by a restart; clearing it",
+                    was.name or "?")
+        write_status(Status(id=was.id, name=was.name, state="failed",
+                            step=was.step,
+                            error="interrupted by a restart"),
+                     self._status_path)
 
     def stop(self) -> None:
         self._stop.set()
