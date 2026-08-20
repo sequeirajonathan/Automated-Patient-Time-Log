@@ -357,7 +357,7 @@
           // button and left Done looking secondary. A word this does not
           // recognise simply gets no emphasis, which is the safe direction.
           for (const b of slot.children) {
-            if (/^(done|save|salvar|guardar|confirm|confirmar|ok|aceptar)$/i
+            if (/^(done|save|salvar|guardar|confirm|confirmar|ok|aceptar|enviar|submit|send)$/i
                 .test((b.textContent || '').trim())) {
               b.classList.add('primary');
             }
@@ -1036,10 +1036,18 @@
       }
     });
 
+    const openPad = () => { body.classList.toggle('signing'); padFit(); };
     const sign = document.getElementById('btn-sign');
-    if (sign) sign.addEventListener('click', () => {
-      body.classList.toggle('signing');
-      padFit();
+    if (sign) sign.addEventListener('click', openPad);
+    // The canvas drawn into the page opens the same pad. Delegated, because
+    // the page is re-rendered from the socket and a handler bound to the
+    // element itself would go with it on the first repaint.
+    const signSurface = document.getElementById('screenwrap');
+    if (signSurface) signSurface.addEventListener('click', (ev) => {
+      const hit = ev.target.closest && ev.target.closest('[data-sign]');
+      if (!hit) return;
+      ev.preventDefault();
+      if (!body.classList.contains('signing')) openPad();
     });
 
     // The lock explains itself when asked and stays quiet otherwise.

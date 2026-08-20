@@ -203,11 +203,19 @@ def _is_spelled_out(txt: str) -> bool:
     and a surname, which this test wrongly flagged when it asked for three,
     and a caught patient name is a worse outcome than a missed logo. Spelling
     is long by nature; a name with initials is short.
+
+    A DIGIT IS NOT A LETTER BEING SPELLED. "Paso 2 de 3" is four tokens, two
+    of them one character, and it was read as a spelled-out brand — so the
+    signature screens' step counter was thrown away, and the caregiver could
+    not tell the patient's signature from her own until after she had
+    collected one. Nobody spells a brand out in numbers.
     """
     tokens = txt.split()
     if len(tokens) < 4:
         return False
-    singles = sum(1 for t in tokens if len(t.strip(".·-")) <= 1)
+    singles = sum(1 for t in tokens
+                  if len((stripped := t.strip(".·-"))) <= 1
+                  and not stripped.isdigit())
     return singles * 2 >= len(tokens)
 
 
@@ -1252,6 +1260,26 @@ def build(doc: dict) -> dict | None:
                               max(p["b"][3] for p in parts)],
                         "parts": parts}]
 
+    # THE THING SHE SIGNS ON IS NOT A ROW.
+    #
+    # HHAeXchange+'s canvas is a bare View half the screen wide with no words
+    # in it, and every reading the reflow has drew it as something else: as a
+    # blank list cell, and — once a screen reader's "double tap" was taken as
+    # evidence of a control — as an on/off SWITCH, on the page where a
+    # caregiver is trying to collect a patient's signature.
+    #
+    # It gets its own kind, and the page says what it is: an empty rectangle
+    # is the one thing a signature screen must never look like.
+    if doc.get("canvas"):
+        for band in bands:
+            for item in band:
+                if _is_canvas_item(item, w, h):
+                    item["kind"] = "canvas"
+                    break
+            else:
+                continue
+            break
+
     # --------------------------------------------------------------- segments
     for band in bands:
         _pair_segments(band, w)
@@ -1282,6 +1310,14 @@ def build(doc: dict) -> dict | None:
             # app's own name, which is always true.
             honest = [n for n in titles if _is_honest_title(n["txt"])]
             title = max(honest, key=lambda n: len(n["txt"]), default=None)
+            # WHERE SHE IS IN A WALK OF SEVERAL. A title bar carries one
+            # title, so the shorter line beside it was simply dropped — and
+            # on HHAeXchange+'s signature screen that line is "Paso 2 de 3",
+            # which is the difference between the patient's signature and
+            # the caregiver's. She has to know which one she is collecting
+            # before she collects it, not after.
+            rest = [n for n in honest if n is not title]
+            step = min(rest, key=lambda n: n["b"][1], default=None)
             # The app's own up-arrow does not ride along. The pill already has
             # a Back and this would be a second control meaning the same
             # thing, three inches away, in different words — "Navigate up"
@@ -1302,6 +1338,7 @@ def build(doc: dict) -> dict | None:
             nav = {
                 "back": controls[0] if controls else None,
                 "title": title["txt"] if title else "",
+                "step": step["txt"] if step else "",
                 "trailing": controls[1:],
             }
             bands = bands[1:]
@@ -1350,6 +1387,15 @@ TAB_BAND_TOP = 0.88
 # watched live: 'agosto 21', patient names and their times consumed as a
 # sixteen-tab bar, and the page's last two days vanished from the portal.
 TAB_REACH = 0.95
+
+# An ACTION bar's own reach, and looser on purpose. A tab bar is pinned to
+# the very edge; a page's action pair sits above whatever inset the app keeps
+# for the system gesture bar, so demanding it touch the edge asks for
+# something it never does. HHAeXchange+'s signature screen missed by three
+# pixels — its Borrar and Enviar end at 681 of 720, 94.6% — and Borrar came
+# out as a list row with a chevron, pointing at somewhere to browse, next to
+# the button that submits a patient's signature.
+ACTION_REACH = 0.92
 
 
 def _dev(item: dict) -> list[int]:
@@ -1538,6 +1584,26 @@ def _tiled(band: list[dict]) -> bool:
                for i in range(len(ordered) - 1))
 
 
+# A canvas is the biggest wordless thing on a screen the feed has already
+# marked as holding one. Deliberately not a re-implementation of the replay's
+# own finder: that one has to be certain enough to put ink somewhere, this one
+# only has to be certain enough to draw a panel, and the two answering
+# slightly differently costs a panel in the wrong place rather than a
+# signature in the wrong place.
+CANVAS_ITEM_MIN_SHARE = 0.15
+
+
+def _is_canvas_item(item: dict, width: int, height: int) -> bool:
+    """Whether this item is the surface she signs on."""
+    if item["kind"] not in ("row", "toggle", "button", "image"):
+        return False
+    if (item.get("txt") or "").strip() or item.get("lines"):
+        return False
+    b = item["b"]
+    return ((b[2] - b[0]) * (b[3] - b[1])
+            >= width * height * CANVAS_ITEM_MIN_SHARE)
+
+
 def _slot_tabs(band: list[dict], width: int) -> list[dict] | None:
     """A tab bar whose current tab was published as a caption, not a control.
 
@@ -1666,7 +1732,7 @@ def _band_shape(band: list[dict], height: int) -> dict:
             and all(i["kind"] == "row" and (i.get("txt") or i.get("lines"))
                     for i in interactive)
             and _tiled(interactive)
-            and all(i["aim"]["b"][3] >= height * TAB_REACH
+            and all(i["aim"]["b"][3] >= height * ACTION_REACH
                     for i in interactive)):
         return {"actions": True}
     return {}

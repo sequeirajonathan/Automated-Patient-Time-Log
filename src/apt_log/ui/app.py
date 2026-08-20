@@ -652,6 +652,19 @@ def _sheet_actions(doc: dict, model: dict | None) -> list[dict]:
     The captions are the app's own words, because they name the app's
     buttons and not the portal's.
     """
+    # A SIGNATURE SCREEN IS NOT ALWAYS A SHEET. inMyTeam puts its pad in a
+    # bottom sheet, which is where the `dismiss` gate comes from; HHAeXchange+
+    # gives the pad a whole screen of its own, so the gate said no and the pad
+    # fell back to the LEGACY pair — two presses at coordinates derived for a
+    # different app's rotated page, aimed at nothing in particular.
+    #
+    # Where the app names its own Borrar and Enviar, they are real elements
+    # with real bounds and they ride as ordinary verified taps. The pad shows
+    # what the phone actually has, on either shape of signature screen.
+    if doc.get("canvas"):
+        named = _canvas_actions(doc)
+        if named:
+            return named
     if not model or not model.get("dismiss"):
         return []
     for row in model.get("rows") or ():
@@ -662,6 +675,59 @@ def _sheet_actions(doc: dict, model: dict | None) -> list[dict]:
                  "aim": it["aim"]}
                 for it in row["items"] if it.get("aim")]
     return []
+
+
+def _canvas_actions(doc: dict) -> list[dict]:
+    """The signature screen's own clear and submit, as aims.
+
+    Read off the published elements rather than the raw tree, so the aims are
+    the same ones every other tap on this page uses and are verified the same
+    way. The captions are the app's own words, taken from the labels it lays
+    over its buttons — a signature screen shows a patient's name, so the text
+    does not travel, and these two come from the screen's own chrome.
+
+    Clear first, submit last: the pad emphasises the last one, and the last
+    one has to be the affirmative.
+    """
+    from apt_log import sign as sign_mod
+
+    order = {"clear": 0, "confirm": 1}
+    found: list[tuple[int, dict]] = []
+    for element in doc.get("elements") or []:
+        rid = (element.get("rid") or "").lower()
+        for kind, ids in (("clear", sign_mod._CLEAR_IDS),
+                          ("confirm", sign_mod._SAVE_IDS)):
+            if not any(i in rid for i in ids):
+                continue
+            if not any(h in rid for h in sign_mod.CANVAS_ID_HINTS):
+                continue          # see sign._app_buttons: a generic id is not
+            caption = _caption_over(doc, element["b"])
+            if not caption:
+                continue
+            found.append((order[kind],
+                          {"txt": caption,
+                           "aim": {"rid": element.get("rid", ""),
+                                   "cls": element.get("cls", ""),
+                                   "b": element["b"]}}))
+            break
+    return [action for _, action in sorted(found, key=lambda p: p[0])]
+
+
+def _caption_over(doc: dict, bounds: list[int]) -> str:
+    """The word the app laid over a button, or "".
+
+    HHAeXchange+'s buttons carry no text of their own: "Borrar" and "Enviar"
+    are separate labels drawn on top of them. Overlapping is the whole
+    relationship — the label sits inside the button's box.
+    """
+    x1, y1, x2, y2 = bounds
+    for static in doc.get("statics") or []:
+        b = static.get("b") or []
+        text = (static.get("txt") or "").strip()
+        if len(b) == 4 and text and x1 <= b[0] and b[2] <= x2 \
+                and y1 <= b[1] and b[3] <= y2:
+            return text
+    return ""
 
 
 def _render_key(doc: dict) -> dict:
