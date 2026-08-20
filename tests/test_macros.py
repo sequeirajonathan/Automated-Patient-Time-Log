@@ -374,7 +374,7 @@ class TestAutoAuth:
     bad-credential day from becoming a loop.
     """
 
-    def _doc(self, tmp_path, app="com.hhaexchange.caregiver", screen="login",
+    def _doc(self, tmp_path, app="com.hhaexchange.uma", screen="login",
              age=0.0, blocked=""):
         import datetime as dt
 
@@ -390,10 +390,10 @@ class TestAutoAuth:
         return path
 
     def _secrets(self):
-        from apt_log.secrets import (APP_PASSWORD, APP_USERNAME,
+        from apt_log.secrets import (UMA_PASSWORD, UMA_USERNAME,
                                      MemorySecretProvider)
 
-        return MemorySecretProvider(**{APP_USERNAME: "u", APP_PASSWORD: "p"})
+        return MemorySecretProvider(**{UMA_USERNAME: "u", UMA_PASSWORD: "p"})
 
     def _runner(self, tmp_path):
         return macros.Runner(tmp_path / "req.json", tmp_path / "status.json",
@@ -406,7 +406,7 @@ class TestAutoAuth:
         runner = self._runner(tmp_path)
         with patch.object(runner, "execute") as execute:
             assert runner.maybe_auto_auth() is True
-        assert execute.call_args.args[0] == "hhax_legacy_login"
+        assert execute.call_args.args[0] == "hhax_uma_login"
 
     def test_the_cooldown_prevents_a_retry_storm(self, tmp_path):
         self._doc(tmp_path)
@@ -617,22 +617,33 @@ class TestAuthMacroFor:
 
     def test_each_credentialed_app_maps_to_its_own_macro(self):
         provider = self._full_provider()
-        assert (macros.auth_macro_for("com.hhaexchange.caregiver", provider)
-                == "hhax_legacy_login")
         assert (macros.auth_macro_for("com.hhaexchange.uma", provider)
                 == "hhax_uma_login")
         assert (macros.auth_macro_for("com.tellus.evv.v2", provider)
                 == "mobile_caregiver_pin")
 
+    def test_a_retired_app_never_signs_itself_in(self):
+        """Its one patient moved to HHAeXchange+, so a session on it is a
+        session nobody is going to use — and signing one in unprompted is
+        exactly the churn the watcher's gate exists to avoid. Credentials
+        for it are still on the device; that is not what decides this."""
+        assert macros.auth_macro_for("com.hhaexchange.caregiver",
+                                     self._full_provider()) is None
+
+    def test_but_its_macro_is_still_there_to_be_asked_for(self):
+        """Retired, not demolished: fetching an old record deliberately is
+        the case retirement should still allow."""
+        assert "hhax_legacy_login" in macros.MACROS
+
     def test_a_missing_secret_withholds_the_macro(self):
-        """Only the legacy credentials exist: the PIN app stays manual."""
-        from apt_log.secrets import (APP_PASSWORD, APP_USERNAME,
+        """Only HHAeXchange+'s credentials exist: the PIN app stays manual."""
+        from apt_log.secrets import (UMA_PASSWORD, UMA_USERNAME,
                                      MemorySecretProvider)
 
-        provider = MemorySecretProvider(**{APP_USERNAME: "u",
-                                           APP_PASSWORD: "p"})
-        assert (macros.auth_macro_for("com.hhaexchange.caregiver", provider)
-                == "hhax_legacy_login")
+        provider = MemorySecretProvider(**{UMA_USERNAME: "u",
+                                           UMA_PASSWORD: "p"})
+        assert (macros.auth_macro_for("com.hhaexchange.uma", provider)
+                == "hhax_uma_login")
         assert macros.auth_macro_for("com.tellus.evv.v2", provider) is None
 
     def test_the_legacy_credentials_serve_both_hhaexchange_apps(self):
@@ -1362,14 +1373,22 @@ class TestExpiryDialogsAreTheAsk:
             assert runner.maybe_auto_auth() is True
         assert execute.call_args.args[0] == "hhax_uma_login"
 
-    def test_the_legacy_expiry_alert_fires_its_auth_macro(self, tmp_path):
+    def test_a_retired_apps_expiry_alert_fires_nothing(self, tmp_path):
+        """Its wordings stay in the table — they are the record of what that
+        app said — but an expired session on an app nobody uses is not a
+        request to sign in. It is a phone that should be somewhere else."""
         runner = self._runner(tmp_path, {
             "app": "com.hhaexchange.caregiver", "screen": "home",
             "blocked": "",
             "statics": [{"txt": "Su sesión ha expirado"}], "elements": []})
         with patch.object(runner, "execute") as execute:
-            assert runner.maybe_auto_auth() is True
-        assert execute.call_args.args[0] == "hhax_legacy_login"
+            assert runner.maybe_auto_auth() is False
+        execute.assert_not_called()
+
+    def test_the_wordings_are_kept_even_so(self):
+        """Deleting them would delete the evidence for how this app behaved,
+        which is most of what an archive is for."""
+        assert macros.EXPIRY_MARKERS.get("com.hhaexchange.caregiver")
 
     def test_an_unrecognised_dialog_fires_nothing(self, tmp_path):
         runner = self._runner(tmp_path, {
