@@ -130,6 +130,7 @@
   "macro.step.nothing_to_check": "Todas las tareas obligatorias ya están marcadas.",
   "macro.step.opening_store": "Abriendo Play Store…",
   "macro.step.reading": "Leyendo la página…",
+  "macro.step.reading_the_code": "Leyendo el código del mensaje…",
   "macro.step.restarting": "Reiniciando el teléfono…",
   "macro.step.signing_in": "Iniciando sesión…",
   "macro.step.starting": "Comenzando…",

@@ -130,6 +130,7 @@
   "macro.step.nothing_to_check": "Every required task is already ticked.",
   "macro.step.opening_store": "Opening the Play Store…",
   "macro.step.reading": "Reading the page…",
+  "macro.step.reading_the_code": "Reading the texted code…",
   "macro.step.restarting": "Restarting the phone…",
   "macro.step.signing_in": "Signing in…",
   "macro.step.starting": "Starting…",
