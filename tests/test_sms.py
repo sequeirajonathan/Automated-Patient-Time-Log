@@ -550,8 +550,9 @@ class TestTheTickBehindTheWalk:
         """Every read is an adb subprocess against a phone that is busy
         driving an app."""
         asked = []
-        with patch.object(sms, "_newest",
-                          lambda **k: asked.append(1) or (0.0, "")):
+        with patch.object(sms, "recipients", lambda *a, **k: ["5551110000"]), \
+                patch.object(sms, "_newest",
+                             lambda **k: asked.append(1) or (0.0, "")):
             sms.forward_any_new(now=100.0)
             sms.forward_any_new(now=101.0)
             sms.forward_any_new(now=100.0 + sms.FORWARD_POLL + 1)
@@ -570,3 +571,22 @@ class TestTheTickBehindTheWalk:
 
     def test_an_empty_inbox_is_not_an_error(self):
         assert self._tick(code="", when=0.0, now=100.0) == 0
+
+    def test_nobody_to_tell_means_the_inbox_is_never_read(self):
+        """The shipped state, and the right shape for it. A feature that is
+        switched off must not be querying a caregiver's message store every
+        twenty seconds on the chance that somebody switches it on."""
+        asked = []
+        with patch.object(sms, "recipients", lambda *a, **k: []), \
+                patch.object(sms, "_newest",
+                             lambda **k: asked.append(1) or (0.0, "")):
+            assert sms.forward_any_new(now=100.0) == 0
+        assert not asked
+
+    def test_and_the_walk_forcing_it_does_not_change_that(self):
+        asked = []
+        with patch.object(sms, "recipients", lambda *a, **k: []), \
+                patch.object(sms, "_newest",
+                             lambda **k: asked.append(1) or (0.0, "")):
+            assert sms.forward_any_new(now=100.0, force=True) == 0
+        assert not asked

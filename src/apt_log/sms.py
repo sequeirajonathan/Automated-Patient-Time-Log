@@ -451,6 +451,16 @@ def forward_any_new(serial: str | None = None, now: float | None = None,
     if not force and at - _last_poll[0] < FORWARD_POLL:
         return 0
     _last_poll[0] = at
+    # NOBODY TO TELL MEANS THE INBOX IS NOT READ AT ALL. Stamped above first,
+    # so this costs one small local file read a minute rather than one a tick.
+    #
+    # This is the shipped state, and it is the right shape for it: a feature
+    # that is switched off should not be querying a caregiver's message store
+    # every twenty seconds on the chance that somebody switches it on. The
+    # walk's own read is separate and still happens — it is answering a
+    # question the app asked.
+    if not recipients():
+        return 0
     when, code = _newest(serial=serial, now=at)
     if not code:
         return 0
