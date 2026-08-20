@@ -316,11 +316,18 @@ def send(number: str, body: str, serial: str | None = None,
 # It says which app, so somebody holding two codes can tell them apart, and it
 # says the code is short-lived, because the failure this whole feature exists
 # to prevent is a person typing a code that expired while they looked for it.
-FORWARD_TEXT = "inMyTeam sign-in code {code} — expires in a few minutes."
+#
+# PLAIN ASCII, and that is not a style preference. A message that is entirely
+# GSM-7 characters fits 160 to a part; one non-GSM character — an em dash, a
+# curly quote, an accent — switches the whole message to UCS-2 and the limit
+# drops to 70. The prose in this file is written with em dashes throughout, so
+# this line is the one place that rule has to be broken deliberately.
+FORWARD_TEXT = "inMyTeam sign-in code {code} - expires in a few minutes."
 
 # One part. `sendTextForSubscriber` sends a single message and does not split
 # one, so a body over the limit is a body that arrives truncated or not at
-# all. There is a test on this.
+# all — and truncation takes the tail, which is where the code is. There is a
+# test on this and on the encoding that decides which limit applies.
 SMS_ONE_PART = 160
 
 

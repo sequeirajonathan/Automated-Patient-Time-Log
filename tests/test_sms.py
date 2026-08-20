@@ -439,6 +439,13 @@ class TestTheMessageTheyReceive:
         end, which is the half that would be lost."""
         assert len(sms.FORWARD_TEXT.format(code="120740")) <= sms.SMS_ONE_PART
 
+    def test_it_is_plain_ascii(self):
+        """Not a style rule. One non-GSM character — an em dash, a curly
+        quote, an accent — switches the whole message to UCS-2 and drops the
+        limit from 160 characters to 70. Every other line in that module is
+        written with em dashes; this one cannot be."""
+        sms.FORWARD_TEXT.format(code="120740").encode("ascii")
+
     def test_it_names_the_app_so_two_codes_can_be_told_apart(self):
         assert "inMyTeam" in sms.FORWARD_TEXT
 
