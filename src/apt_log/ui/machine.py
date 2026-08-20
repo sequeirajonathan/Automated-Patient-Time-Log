@@ -169,6 +169,10 @@ _BATTERY_PLUG = re.compile(r"^\s*(?:AC|USB|Wireless) powered:\s*(\w+)", re.M)
 _DENSITY_OVERRIDE = re.compile(r"Override density:\s*(\d+)")
 _DENSITY_PHYSICAL = re.compile(r"Physical density:\s*(\d+)")
 
+# How long an app update stays worth pointing at. Long enough to still be
+# on the panel on Monday when something that worked on Friday does not.
+RECENT_UPDATE = 7 * 24 * 3600.0
+
 
 def _phone(serial: str | None = None) -> dict:
     """Battery, charge state and the density actually in force.
@@ -178,7 +182,11 @@ def _phone(serial: str | None = None) -> dict:
     """
     doc: dict = {"attached": "unknown", "serial": serial or "",
                  "battery": None, "charging": None, "temp_c": None,
-                 "density": None, "density_physical": None}
+                 "density": None, "density_physical": None,
+                 # Read off a file, not the phone — so it still answers with
+                 # the cable out, which is one of the times somebody is most
+                 # likely to be asking what changed.
+                 "apps": _app_versions()}
     try:
         from apt_log.transport import attached_devices
 
@@ -224,6 +232,38 @@ def _phone(serial: str | None = None) -> dict:
     elif physical:
         doc["density"] = int(physical.group(1))
     return doc
+
+
+def _app_versions() -> list[dict]:
+    """Which build of each app is on the phone, newest change first.
+
+    Read off the file the feed writes rather than off the phone: this runs on
+    a page render, and a version that changes twice a year does not need an
+    adb call every time somebody opens the console.
+    """
+    try:
+        from apt_log import versions as versions_mod
+
+        doc = versions_mod.stored()
+    except Exception as exc:  # noqa: BLE001
+        log.debug("cannot read app versions: %s", exc)
+        return []
+    apps = doc.get("apps") or {}
+    if not isinstance(apps, dict):
+        return []
+    # The stored change is the LAST one ever recorded, which may be from
+    # months ago. Only a recent one is news; an old one is history, and a
+    # badge that never clears is a badge nobody sees.
+    recent = time.time() - float(doc.get("changed_at") or 0) < RECENT_UPDATE
+    moved = {c.get("package") for c in (doc.get("changed") or [])
+             if isinstance(c, dict)} if recent else set()
+    return [{"package": pkg,
+             "name": (info or {}).get("name", ""),
+             "code": (info or {}).get("code", ""),
+             # Flagged so the panel can say WHICH app moved. "An app updated
+             # last week" is not the news; "this one did" is.
+             "changed": pkg in moved}
+            for pkg, info in sorted(apps.items())]
 
 
 # ------------------------------------------------------------------- assembly

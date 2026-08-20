@@ -451,6 +451,45 @@ def activity_of(focus: str) -> str:
 PICKER_MARKS = ("agency_configuration_screen_add_connection_button",)
 
 
+# A PASSCODE KEYPAD IS A CREDENTIAL SCREEN WHEREVER IT IS DRAWN.
+#
+# Every credential test in this file reads the ACTIVITY's name, and Mobile
+# Caregiver+ puts its keypad up under two different ones: `PinActivity`,
+# which the markers catch, and `DashboardActivity`, which they do not. Caught
+# live — a complete keypad, ten digits and a delete key, published as
+# `screen=home, blocked=''`. Nothing recognised it: no credential refusal, so
+# the picture was taken and auto sign-in never even reached its own gate.
+# Reported as "Mobile Care+ needs better auto auth", and this is most of it.
+#
+# The shape is unmistakable and needs no activity's help: eight or more
+# BUTTONS whose whole text is one digit. A list of numbers is not buttons; a
+# keypad missing a key or two while it draws still counts, which is the
+# point.
+#
+# Read one node at a time rather than with a single pattern spanning both
+# attributes, because the two dialects order them differently — `uiautomator
+# dump` writes text before class, Appium's page_source writes class before
+# text. A pattern that wanted one order would have found the keypad on one
+# read path and missed it on the other, which is the worse of the two bugs:
+# a credential screen recognised only sometimes.
+_NODE_TAG = re.compile(r"<[A-Za-z][^>]*>")
+_BUTTON_CLASS = re.compile(r'\bclass="[^"]*Button"')
+_DIGIT_TEXT = re.compile(r'\btext="(\d)"')
+KEYPAD_MIN_KEYS = 8
+
+
+def keypad_on_screen(xml: str | None) -> bool:
+    """Whether a numeric passcode keypad is on screen."""
+    digits = set()
+    for tag in _NODE_TAG.findall(xml or ""):
+        if not _BUTTON_CLASS.search(tag):
+            continue
+        key = _DIGIT_TEXT.search(tag)
+        if key:
+            digits.add(key.group(1))
+    return len(digits) >= KEYPAD_MIN_KEYS
+
+
 def screen_for(focus: str, hierarchy: str | None = None) -> str:
     """Map a focused window to the mirror's vocabulary, package by package.
 
@@ -468,6 +507,11 @@ def screen_for(focus: str, hierarchy: str | None = None) -> str:
     if package in LAUNCHER_APPS:
         return "launcher"
     activity = activity_of(focus)
+    # A keypad outranks the atlas, because the atlas names ACTIVITIES and
+    # this app draws its passcode under whichever one it happens to be in.
+    # Called "home" over a lock screen is worse than "unknown" ever was.
+    if package in CARE_APPS and keypad_on_screen(hierarchy):
+        return "login"
     named = ACTIVITY_SCREENS.get(package, {}).get(activity)
     if named == "startup" and hierarchy and any(
             mark in hierarchy for mark in PICKER_MARKS):
@@ -891,7 +935,11 @@ def capture(serial: str | None = None,
         # app of a black screen is how "Live" ended up over darkness.
         return None, "", NO_FOCUS
 
-    if looks_like_a_login_screen(focus):
+    if looks_like_a_login_screen(focus) or keypad_on_screen(hierarchy):
+        # The keypad half is the one the activity name misses. Refusing the
+        # picture is right either way — nobody needs a photograph of a
+        # passcode screen — and it is what lets the words through, which is
+        # how auto sign-in knows there is something here to answer.
         return None, focus, LOGIN_ACTIVITY
 
     if password_field_in(hierarchy) is True:
@@ -1476,6 +1524,7 @@ def run(path: Path, interval: float = DEFAULT_INTERVAL,
     # resident Appium session lives and UiAutomator2 allows exactly one. A second
     # session in the UI cost 14 seconds a tap when it was tried.
     from apt_log.macros import Runner
+    from apt_log import versions as versions_mod
 
     runner = Runner()
     runner.start()
@@ -1489,6 +1538,14 @@ def run(path: Path, interval: float = DEFAULT_INTERVAL,
             except Exception as exc:  # noqa: BLE001
                 # A watcher that dies on one bad read stops being a watcher.
                 log.warning("frame failed: %s", exc)
+            try:
+                # Free on all but one tick in a few hundred — the timer is
+                # inside `check`. This is the only thing on either machine
+                # that would notice Play replacing an app underneath us, so
+                # it rides the loop that is always running.
+                versions_mod.check(serial)
+            except Exception as exc:  # noqa: BLE001
+                log.debug("version check failed: %s", exc)
             count += 1
             if iterations is None or count < iterations:
                 time.sleep(interval)

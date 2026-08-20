@@ -464,6 +464,29 @@
               else t('console.phone.on_battery') }}
       {% endif %}
     </p>
+
+    {# Which build of each app is on the glass. Every rule this portal has for
+       reading these apps is an assumption about a version Play can replace
+       overnight, so when something that worked yesterday does not, this is
+       the first row to look at. #}
+    {% if m.phone.apps %}
+    <h3 class="sub" style="margin:16px 0 4px">{{ t('console.phone.versions') }}</h3>
+    {% for a in m.phone.apps %}
+    {% set brand = apps | selectattr('package', 'equalto', a.package)
+                        | map(attribute='name') | first %}
+    <div class="row">
+      <div class="k">
+        <b>{{ brand or (t('console.phone.store')
+                        if a.package == 'com.android.vending' else a.package) }}
+          {% if a.changed %}<span class="chip unknown">{{ t('console.phone.updated') }}</span>{% endif %}
+        </b>
+        <small>{{ a.package }}{{ ' · ' ~ a.code if a.code }}</small>
+      </div>
+      <span class="v">{{ a.name or '—' }}</span>
+    </div>
+    {% endfor %}
+    <p class="sub">{{ t('console.phone.versions_explain') }}</p>
+    {% endif %}
   </section>
 
   {# ------------------------------------------------------------ 6. the Pi #}
