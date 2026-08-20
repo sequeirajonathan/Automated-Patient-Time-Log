@@ -2450,3 +2450,67 @@ class TestTheCanvasOpensThePad:
         for name in ("en.json", "es.json"):
             assert json.loads(
                 (base / name).read_text(encoding="utf-8")).get("sign.here")
+
+
+class TestAWideFrameInAPortraitBox:
+    """"As soon as she went to the signature screen and the phone changed
+    orientation the only thing I could see is BLACK on the phone peek."
+
+    Not dark mode, though it is a fair thing to suspect: the peek's bed was
+    a hard-coded #000 in both themes. It was invisible for a portrait
+    photograph, which covers the box edge to edge — and a landscape one
+    covers 22% of it, leaving 78% flat black under a strip of screen.
+    """
+
+    PAGE = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/templates/phone.html")
+    CSS = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/static/design.css")
+    SCRIPT = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/static/phone.js")
+
+    def test_the_arithmetic_that_made_it_black(self):
+        """400px wide box, 800 tall — roughly her phone."""
+        covered = (400 * 720 / 1600) / 800
+        assert covered < 0.25
+
+    def test_a_wide_frame_is_fitted_rather_than_stretched(self):
+        css = self.PAGE.read_text(encoding="utf-8")
+        assert "body.wide:not(.sideways) #peek" in css
+        assert "max-height:100%" in css
+
+    def test_and_centred_in_what_is_left(self):
+        css = self.PAGE.read_text(encoding="utf-8")
+        assert "body.peeking.wide:not(.sideways) #peekwrap" in css
+
+    def test_the_rotated_case_is_left_exactly_as_it_was(self):
+        """Its transform and negative margins are measured against a
+        full-width block box; fitting one would move it off the stage."""
+        css = self.PAGE.read_text(encoding="utf-8")
+        assert "body.sideways #peek {" in css
+        assert "margin: -88.6% 0" in css
+        # Both new rules exclude it by name.
+        for rule in ("body.wide:not(.sideways) #peek",
+                     "body.peeking.wide:not(.sideways) #peekwrap"):
+            assert rule in css
+
+    def test_the_bed_is_a_surface_not_a_hard_coded_void(self):
+        assert "background:var(--peek-bed)" in self.PAGE.read_text(
+            encoding="utf-8")
+
+    def test_the_bed_is_defined_in_both_themes(self):
+        css = self.CSS.read_text(encoding="utf-8")
+        assert css.count("--peek-bed:") == 2
+        light, dark = css.split("prefers-color-scheme: dark")
+        assert "--peek-bed:" in light and "--peek-bed:" in dark
+
+    def test_the_page_knows_when_the_frame_is_wide(self):
+        js = strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
+        assert "toggle('wide', !!meta.landscape)" in js
+
+    def test_wide_and_turned_are_still_two_different_facts(self):
+        """One says the photograph is shaped differently; the other says it
+        is the wrong way up. Conflating them is what went black first."""
+        js = strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
+        assert "toggle('sideways', !!meta.turn)" in js
+        assert "toggle('wide', !!meta.landscape)" in js

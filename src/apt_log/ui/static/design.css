@@ -24,6 +24,13 @@
   --shadow-pill: 0 8px 30px -8px rgb(0 0 0 / .35);
   --spring: cubic-bezier(.22, 1, .36, 1);
   /* The dashboard's brand colour is the same tint, not a second blue. */
+  /* The bed a phone photograph sits on. Black by default and deliberately
+     so — a photo viewer's own darkness, and invisible while a portrait
+     frame covers the box edge to edge. A LANDSCAPE frame covers 22% of
+     it, and the other 78% read as a failure rather than as a margin
+     ("the only thing I could see is BLACK"), so it is a surface now
+     rather than a void. */
+  --peek-bed: hsl(220 14% 88%);
   --accent: var(--tint);
 }
 @media (prefers-color-scheme: dark) {
@@ -41,5 +48,6 @@
     --track: hsl(240 6% 60% / .18);
     --chrome: hsl(222 47% 4.5% / .85);
     --shadow-card: 0 1px 2px 0 rgb(0 0 0 / .3), 0 8px 24px -12px rgb(0 0 0 / .5);
+    --peek-bed: hsl(222 30% 15%);
   }
 }

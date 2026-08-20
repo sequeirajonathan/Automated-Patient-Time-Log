@@ -332,6 +332,10 @@
     // and its screencap arrives upright already. Turning that one anyway
     // is what went black on the signature screen.
     body.classList.toggle('sideways', !!meta.turn);
+    // And whether the photograph is WIDE, which is a different fact
+    // again: a landscape frame stretched across a portrait box covers
+    // a fifth of it and leaves the rest bare.
+    body.classList.toggle('wide', !!meta.landscape);
     // The app-side Borrar/Salvar only exist while a signature canvas is
     // in front — the buttons press real pixels there and nothing else.
     // The app's OWN buttons for this sheet, drawn INSIDE the pad so she is

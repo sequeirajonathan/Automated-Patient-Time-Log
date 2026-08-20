@@ -675,9 +675,21 @@
      anchored to the top of the stage's content, so a pre-scrolled list
      left it half off-screen with the reflow bleeding through under it. */
   #peekwrap { position:absolute; inset:0; display:none; z-index:4;
-              background:#000; overflow-y:auto;
+              background:var(--peek-bed); overflow-y:auto;
               -webkit-overflow-scrolling:touch; }
   body.peeking #peekwrap { display:block; }
+  /* A LANDSCAPE PHOTOGRAPH IN A PORTRAIT BOX IS MOSTLY BOX.
+     `width:100%` fills the wrapper edge to edge for a 720x1600 phone and
+     covers 22% of it for a 1600x720 one — the other 78% being flat
+     backdrop, which on the signature screen was reported as "the only
+     thing I could see is BLACK". So a wide frame is fitted to the box
+     instead of stretched across it, and centred in what is left.
+     Scoped away from the rotated case, whose transform and negative
+     margins are measured against a full-width block box. */
+  body.peeking.wide:not(.sideways) #peekwrap {
+      display:flex; align-items:center; justify-content:center; }
+  body.wide:not(.sideways) #peek {
+      width:auto; max-width:100%; max-height:100%; }
   body.peeking #stage { overflow:hidden; }
   /* The wire has no business showing while the photo is open: any row
      that wins a stacking-context fight paints ON TOP of the photo —
