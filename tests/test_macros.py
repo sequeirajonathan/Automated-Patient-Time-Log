@@ -847,46 +847,146 @@ class TestUmaLogin:
 
 
 class TestMobileCaregiverPin:
-    """Mobile Caregiver+ unlocks by tapping its own keypad."""
+    """Mobile Caregiver+ unlocks by tapping its own keypad.
 
-    def test_the_pin_is_typed_digit_by_digit(self):
+    Ten Buttons whose whole text is one digit, a backspace ImageButton beside
+    the zero, and "Log in as a new user" under them. The bounds below are the
+    ones the flight recorder caught on the real phone.
+    """
+
+    # Three across, laid out the way the recording shows.
+    KEY_W, KEY_H = 34, 34
+
+    def _keypad(self, digits="1234567890", backspace=True):
+        rows = []
+        for i, d in enumerate(digits):
+            x = 299 + (i % 3) * 44
+            y = 784 + (i // 3) * 44
+            rows.append(f'<node class="android.widget.Button" resource-id="" '
+                        f'clickable="true" text="{d}" content-desc="" '
+                        f'bounds="[{x},{y}][{x + self.KEY_W},{y + self.KEY_H}]"'
+                        f' package="com.tellus.evv.v2"/>')
+        if backspace:
+            rows.append('<node class="android.widget.ImageButton" '
+                        'resource-id="" clickable="true" text="" '
+                        'content-desc="Suprimir" bounds="[387,916][421,950]" '
+                        'package="com.tellus.evv.v2"/>')
+        rows.append('<node class="android.widget.Button" clickable="true" '
+                    'resource-id="com.tellus.evv:id/buttonLoginAsNewUser" '
+                    'text="Log in as a new user" content-desc="" '
+                    'bounds="[296,955][423,985]" package="com.tellus.evv.v2"/>')
+        return "<hierarchy>" + "".join(rows) + "</hierarchy>"
+
+    def _run(self, driver, pin="2580"):
         import itertools
-        from unittest.mock import PropertyMock
 
         from apt_log.secrets import MC_PIN, MemorySecretProvider
 
-        state = {"activity": "com.tellus.evv.v2.PinActivity"}
-        pressed = []
-        driver = MagicMock()
-        type(driver).current_activity = PropertyMock(
-            side_effect=lambda: state["activity"])
-
-        def find_elements(_by, selector):
-            digit = selector.split('"')[1]
-            button = MagicMock()
-
-            def click(d=digit):
-                pressed.append(d)
-                if len(pressed) == 4:      # the screen advances by itself
-                    state["activity"] = "com.tellus.evv.v2.HomeActivity"
-            button.click.side_effect = click
-            return [button]
-
-        driver.find_elements.side_effect = find_elements
+        taps = []
         with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.macros._tap_xy",
+                   side_effect=lambda x, y: taps.append((x, y))), \
              patch("apt_log.secrets.FileSecretProvider",
-                   return_value=MemorySecretProvider(**{MC_PIN: "2580"})), \
+                   return_value=MemorySecretProvider(**{MC_PIN: pin})), \
              patch("apt_log.macros.time.sleep"), \
              patch("apt_log.macros.time.monotonic",
                    side_effect=itertools.count(step=0.5)):
             macros.MACROS["mobile_caregiver_pin"].run(driver, lambda _k: None)
-        assert pressed == ["2", "5", "8", "0"]
+        return taps
+
+    def _driver(self, sources, advance_after=4):
+        """A phone that hands back each hierarchy in turn and unlocks once
+        the code is in."""
+        from unittest.mock import PropertyMock
+
+        state = {"activity": "com.tellus.evv.v2.PinActivity", "taps": 0}
+        driver = MagicMock()
+        type(driver).current_activity = PropertyMock(
+            side_effect=lambda: state["activity"])
+        pages = list(sources)
+
+        def source():
+            return pages[0] if len(pages) == 1 else pages.pop(0)
+
+        type(driver).page_source = PropertyMock(side_effect=source)
+        return driver, state
+
+    def test_the_code_is_tapped_into_the_keypad(self):
+        driver, state = self._driver([self._keypad()])
+        # The screen advances by itself once the last digit lands.
+        original = macros._mc_tap
+
+        def tap(bounds, _o=original):
+            state["taps"] += 1
+            _o(bounds)
+            if state["taps"] >= 4 + 6:      # six clears, then four digits
+                state["activity"] = "com.tellus.evv.v2.HomeActivity"
+
+        with patch.object(macros, "_mc_tap", side_effect=tap):
+            taps = self._run(driver)
+        # The last four are the code, in order, on the right keys — the
+        # centres derived from the same layout the fixture draws, so a
+        # mistyped expectation cannot pass by agreeing with itself.
+        def centre(d):
+            i = "1234567890".index(d)
+            x = 299 + (i % 3) * 44
+            y = 784 + (i // 3) * 44
+            return (x + self.KEY_W // 2, y + self.KEY_H // 2)
+
+        assert taps[-4:] == [centre(d) for d in "2580"]
+
+    def test_whatever_was_half_typed_is_cleared_first(self):
+        """Appending to somebody else's two digits makes a WRONG passcode,
+        and this app locks after a few of those."""
+        driver, state = self._driver([self._keypad()])
+        original = macros._mc_tap
+
+        def tap(bounds, _o=original):
+            state["taps"] += 1
+            _o(bounds)
+            if state["taps"] >= 10:
+                state["activity"] = "com.tellus.evv.v2.HomeActivity"
+
+        with patch.object(macros, "_mc_tap", side_effect=tap):
+            taps = self._run(driver)
+        assert taps[:6] == [(404, 933)] * 6      # the backspace, six times
+
+    def test_a_keypad_still_being_drawn_is_waited_for(self):
+        """The recorder caught one two buttons into ten. Asking for the "4"
+        then answered, and the "7" a moment later did not."""
+        driver, state = self._driver([self._keypad("12"),
+                                      self._keypad("12345"),
+                                      self._keypad()])
+        original = macros._mc_tap
+
+        def tap(bounds, _o=original):
+            state["taps"] += 1
+            _o(bounds)
+            if state["taps"] >= 10:
+                state["activity"] = "com.tellus.evv.v2.HomeActivity"
+
+        with patch.object(macros, "_mc_tap", side_effect=tap):
+            taps = self._run(driver)
+        assert len(taps) == 10
+
+    def test_a_keypad_that_never_finishes_says_what_it_saw(self):
+        driver, _ = self._driver([self._keypad("12")])
+        with pytest.raises(RuntimeError, match="of 10 keys"):
+            self._run(driver)
+
+    def test_a_code_that_did_not_take_is_never_retyped(self):
+        """A second attempt at a passcode that did not take is a second
+        WRONG passcode if the first was wrong, and this app locks."""
+        driver, _ = self._driver([self._keypad()])
+        with pytest.raises(RuntimeError, match="passcode screen"):
+            taps = self._run(driver)
 
     def test_an_unlocked_app_is_left_alone(self):
         import itertools
 
         driver = MagicMock()
         driver.current_activity = "com.tellus.evv.v2.HomeActivity"
+        driver.page_source = "<hierarchy/>"
         with patch("apt_log.macros.wake_display"), \
              patch("apt_log.secrets.FileSecretProvider") as provider_cls, \
              patch("apt_log.macros.time.sleep"), \
@@ -894,7 +994,6 @@ class TestMobileCaregiverPin:
                    side_effect=itertools.count(step=0.5)):
             macros.MACROS["mobile_caregiver_pin"].run(driver, lambda _k: None)
         provider_cls.assert_not_called()
-        driver.find_elements.assert_not_called()
 
 
 class TestInMyTeamWalksToTheCode:
@@ -3016,3 +3115,83 @@ class TestSomeoneIsWatching:
 
     def test_a_missing_file_is_nobody(self, tmp_path):
         assert not macros.someone_is_watching(tmp_path / "nope.json")
+
+
+class TestTheUpdateWall:
+    """Found on the live phone while looking at this macro: Mobile
+    Caregiver+ sitting on its dashboard behind a dialog with one button —
+    "Actualizar ahora", "Existe una nueva versión disponible en la Play
+    Store".
+
+    Not a passcode, not an expired session, nothing the auth macro was
+    written to answer, and nothing it could see. It looked for a keypad,
+    found none; looked for the expiry wording, found none; waited six seconds
+    for a sign-in form that was never coming, and reported DONE over an app
+    that could not be used.
+
+    A macro reporting success over a wall is worse than one that fails,
+    because the next thing anybody does is trust it.
+    """
+
+    WALL = {"app": "com.tellus.evv.v2",
+            "statics": [{"txt": "Actualizar ahora"},
+                        {"txt": "Existe una nueva versión disponible en la "
+                                "Play Store"}],
+            "elements": [{"txt": "Actualizar ahora"}]}
+
+    def test_the_wall_is_recognised(self):
+        assert macros.update_wall_on_screen(self.WALL)
+
+    def test_the_english_wording_too(self):
+        assert macros.update_wall_on_screen({
+            "app": "com.tellus.evv.v2",
+            "statics": [{"txt": "A new version is available"}],
+            "elements": []})
+
+    def test_an_ordinary_dashboard_is_not_a_wall(self):
+        assert not macros.update_wall_on_screen({
+            "app": "com.tellus.evv.v2",
+            "statics": [{"txt": "Mis visitas"}], "elements": []})
+
+    def test_another_apps_words_do_not_count(self):
+        """Per app, like every other wording table here."""
+        assert not macros.update_wall_on_screen({
+            "app": "com.inmyteam.inmyteam",
+            "statics": [{"txt": "Actualizar ahora"}], "elements": []})
+
+    def test_a_doc_of_nothing_is_not_a_wall(self):
+        assert not macros.update_wall_on_screen(None)
+        assert not macros.update_wall_on_screen({})
+
+    def test_the_button_is_never_pressed(self):
+        """It leads to the Play Store, and installing a new version of an app
+        this project reads by resource-id changes every assumption in that
+        file. That is a decision for a person on a morning when somebody can
+        check afterwards."""
+        import ast
+        import inspect
+        import textwrap
+
+        tree = ast.parse(textwrap.dedent(
+            inspect.getsource(macros._mobile_caregiver_pin)))
+        strings = {n.value for n in ast.walk(tree)
+                   if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+        assert not any("actualizar" in s.lower() and "//" in s
+                       for s in strings)
+
+    def test_the_macro_says_so_instead_of_claiming_success(self):
+        """The whole point: what it used to do here was return quietly."""
+        import inspect
+
+        body = inspect.getsource(macros._mobile_caregiver_pin)
+        assert "macro.step.update_required" in body
+        assert "blocked behind its own update prompt" in body
+
+    def test_it_says_so_in_both_languages(self):
+        import json as json_mod
+        from pathlib import Path
+
+        base = Path(__file__).resolve().parents[1] / "src/apt_log/ui/locales"
+        for name in ("en.json", "es.json"):
+            words = json_mod.loads((base / name).read_text(encoding="utf-8"))
+            assert words.get("macro.step.update_required")

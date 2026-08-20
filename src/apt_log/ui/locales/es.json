@@ -125,6 +125,7 @@
   "macro.step.restarting": "Reiniciando el teléfono…",
   "macro.step.signing_in": "Iniciando sesión…",
   "macro.step.starting": "Comenzando…",
+  "macro.step.update_required": "Mobile Caregiver+ pide actualizarse. Nada de aquí puede responder a eso: hace falta la Play Store, en el teléfono.",
   "macro.sure": "¿Reiniciar el teléfono? Nada funciona durante un minuto mientras vuelve.",
   "macro.title": "Atajos",
   "macro.unknown": "Ese atajo no es uno que esta página ofrezca.",
