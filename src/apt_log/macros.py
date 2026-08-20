@@ -1871,7 +1871,28 @@ def _store_update_button(driver):
 
 
 def _update_app(driver, report) -> None:
-    """Take the app in front through the Play Store's update, and come back.
+    """Update whatever care app is in front. The update wall's own button."""
+    _update(driver, report, _last_care_package())
+
+
+def _update_app_for(package: str):
+    """Update ONE named app, whether or not it is the one on screen.
+
+    The wall card above can only ever offer the app that raised a wall, and
+    only Mobile Caregiver+ has wall wording written down — so on the other
+    two there would be no way to update at all until one of them blocked
+    itself, which is the moment you least want to be discovering the path.
+
+    Offered from the console's version panel instead: the operator's page,
+    beside the build number it is about, asking first.
+    """
+    def run(driver, report) -> None:
+        _update(driver, report, package)
+    return run
+
+
+def _update(driver, report, package: str) -> None:
+    """Take one app through the Play Store's update, and come back to it.
 
     Watched to completion by the VERSION, not by the Store's own screen: the
     button that says "Open" when it is done is the same button that said
@@ -1882,7 +1903,6 @@ def _update_app(driver, report) -> None:
     from apt_log import feed as feed_mod
     from apt_log import versions as versions_mod
 
-    package = _last_care_package()
     if package not in feed_mod.CARE_APPS:
         raise RuntimeError("the phone is not showing one of the care apps")
     if feed_mod.retired(package):
@@ -2294,6 +2314,16 @@ MACROS: dict[str, Macro] = {
         Macro("phone_settings", "macro.phone_settings", _phone_settings),
         Macro("restart_phone", "macro.restart_phone", _restart_phone),
         Macro("update_app", "macro.update_app", _update_app),
+        # One per app, for the console's version panel. Named rather than
+        # parameterised because /macro takes a name from this registry and
+        # nothing else — a route that accepted a package from a browser
+        # would be a route that installs whatever it is handed.
+        Macro("update_hhax_uma", "macro.update_hhax_uma",
+              _update_app_for("com.hhaexchange.uma")),
+        Macro("update_mobile_caregiver", "macro.update_mobile_caregiver",
+              _update_app_for("com.tellus.evv.v2")),
+        Macro("update_inmyteam", "macro.update_inmyteam",
+              _update_app_for("com.inmyteam.inmyteam")),
     )
 }
 
@@ -2316,7 +2346,8 @@ OPERATIONS = ("rescan", "read_page", "clear_screen", "restart_app",
 # also deliberately absent from OPERATIONS — it appears only on the screen
 # where an update is actually being demanded, because a button offering to
 # replace an app is not a thing to have standing by.
-CONFIRM = ("restart_phone", "update_app")
+CONFIRM = ("restart_phone", "update_app", "update_hhax_uma",
+           "update_mobile_caregiver", "update_inmyteam")
 
 
 # Session-expiry dialogs, per app. A dialog whose wording is recognised as

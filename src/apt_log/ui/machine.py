@@ -173,6 +173,15 @@ _DENSITY_PHYSICAL = re.compile(r"Physical density:\s*(\d+)")
 # on the panel on Monday when something that worked on Friday does not.
 RECENT_UPDATE = 7 * 24 * 3600.0
 
+# Which macro updates which app. Spelled out rather than derived from the
+# package name so that adding a row here is a deliberate act: every one of
+# these replaces software this project reads by resource-id.
+UPDATE_MACROS = {
+    "com.hhaexchange.uma": "update_hhax_uma",
+    "com.tellus.evv.v2": "update_mobile_caregiver",
+    "com.inmyteam.inmyteam": "update_inmyteam",
+}
+
 
 def _phone(serial: str | None = None) -> dict:
     """Battery, charge state and the density actually in force.
@@ -262,7 +271,11 @@ def _app_versions() -> list[dict]:
              "code": (info or {}).get("code", ""),
              # Flagged so the panel can say WHICH app moved. "An app updated
              # last week" is not the news; "this one did" is.
-             "changed": pkg in moved}
+             "changed": pkg in moved,
+             # The macro that updates this row, or "" for a package there is
+             # no macro for — the Play Store, which updates itself and is
+             # not somewhere the phone is sent.
+             "macro": UPDATE_MACROS.get(pkg, "")}
             for pkg, info in sorted(apps.items())]
 
 

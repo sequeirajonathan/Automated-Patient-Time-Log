@@ -69,6 +69,18 @@ QUICK_TIMEOUT = 120.0
 DEPLOY_ANSWER_BY = 45.0
 DEPLOY_POLL = 3.0
 
+# The same rule for macros, arrived at the same way. `update_app` downloads an
+# APK: it ran for minutes and the caller was cut off at sixty seconds while it
+# went on to finish perfectly. That one is not even a mismatch to be tuned
+# away — no caller's window covers an app install, and the ones for the other
+# three apps will be no shorter.
+#
+# Note this is a REPORTING window and nothing else. Whatever is in flight
+# keeps running on the Pi; the portal's own spinner waits eight minutes, so
+# the person driving the phone never sees any of this.
+MACRO_ANSWER_BY = 45.0
+MACRO_POLL = 2.0
+
 
 class TailnetDown(RuntimeError):
     """The tailnet could not be brought up, so the Pi cannot be reached."""
@@ -249,9 +261,12 @@ def aptlog_status() -> str:
     """What the controller and the phone are doing right now.
 
     The deployed revision, whether the services are up and healthy, whether
-    the phone is attached and authorised, which app is in front, and how old
-    the published screen is — the questions that decide whether anything else
-    is worth trying.
+    the phone is attached and authorised, which app is in front, how old the
+    published screen is, and any macro still in flight — the questions that
+    decide whether anything else is worth trying.
+
+    The macro line appears only when one is running or has just finished, and
+    it is what makes "still running" a checkable answer rather than a shrug.
     """
     probe = r"""
 echo "revision: $(git -C /opt/aptlog rev-parse --short HEAD 2>/dev/null)"
@@ -287,6 +302,30 @@ except Exception:
 print("screen:   %s / %s (%s ago), blocked=%r, %d tappable" % (
     d.get("app") or "-", d.get("activity") or "-", age,
     d.get("blocked") or "", len(d.get("elements") or [])))
+PY
+# What the controller is DOING, which is the other half of what it is doing.
+# A macro can hold the phone for minutes — an app install does — and without
+# this line the only reading available was "the screen has not changed",
+# which looks identical to a machine that has stopped.
+python3 - <<'PY'
+import datetime, json
+try:
+    s = json.load(open("/var/lib/aptlog/macro-status.json"))
+except Exception:
+    raise SystemExit
+state = s.get("state") or "idle"
+if state == "idle":
+    raise SystemExit
+age = ""
+try:
+    age = " for %.0fs" % (datetime.datetime.now() -
+                          datetime.datetime.fromisoformat(s["at"])).total_seconds()
+except Exception:
+    pass
+print("macro:    %s %s%s%s" % (
+    s.get("name") or "?", state, age,
+    (" — " + s["error"]) if s.get("error") else
+    ((" (%s)" % s["step"]) if s.get("step") else "")))
 PY
 """
     return _text(ssh(probe)) or "no answer from the controller"
@@ -398,15 +437,24 @@ def aptlog_run_macro(
         description="The macro's registered name, e.g. 'hhax_legacy_login', "
                     "'hhax_uma_login', 'mobile_caregiver_pin', 'read_page'.")],
 ) -> str:
-    """Run one of the controller's macros and report how it ended.
+    """Run one of the controller's macros and report how it ended — or that
+    it is still going.
 
     Macros fill and navigate; none of them commits a visit — no clock-in,
     no clock-out, no signature is saved by a macro. Sign-in macros refuse
     unless the app is actually showing a credential screen.
+
+    THREE answers, all normal: done, failed, and STILL RUNNING. The last one
+    is not a timeout and not a failure — `update_app` downloads an APK and
+    takes minutes, and no caller's window covers that. The macro carries on
+    regardless of what this call returns; `aptlog_status` names what is in
+    flight, and the portal's own spinner is what the person driving the phone
+    actually sees.
     """
     safe = "".join(c for c in name if c.isalnum() or c == "_")
     if not safe:
         return "a macro name is letters, digits and underscores"
+    rounds = max(1, int(MACRO_ANSWER_BY // MACRO_POLL))
     probe = f"""
 sudo -u apt /opt/aptlog/.venv/bin/python - <<'PY'
 import sys, time
@@ -419,14 +467,18 @@ except KeyError:
     print("known:", ", ".join(sorted(macros.MACROS)))
     raise SystemExit
 print("requested", rid)
-for _ in range(60):
-    time.sleep(2)
+for _ in range({rounds}):
+    time.sleep({MACRO_POLL})
     s = macros.read_status()
     if s.state in ("done", "failed"):
         print("%s | %s | %s" % (s.state, s.step, s.error or ""))
         break
 else:
-    print("still running after two minutes")
+    # Reported as a state, not as an apology. The step is the useful half:
+    # "installing" and "signing in" fail in completely different ways.
+    s = macros.read_status()
+    print("STILL RUNNING | %s | nothing has failed; it keeps going on the "
+          "Pi. Check aptlog_status." % (s.step or "no step reported",))
 PY
 """
     return _text(ssh(probe, timeout=DEPLOY_TIMEOUT)) or "no answer"
