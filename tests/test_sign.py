@@ -1111,3 +1111,53 @@ class TestHHAeXchangePlusPatientSignature:
         assert min(ys) >= self.CANVAS[1] and max(ys) <= self.CANVAS[3]
         # Clear of the button row entirely.
         assert max(ys) < 656
+
+
+class TestNamingTheAppsOwnSubmit:
+    """HHAeXchange+'s pad buttons carry no text of their own — "Borrar" and
+    "Enviar" are separate TextViews laid over them — so a rule that needed
+    the caption could not see either one, on the very screen the pad exists
+    for.
+
+    The caption was earning its keep, though, and the guard below is why
+    this is not simply "an id is enough": the legacy app's ORDINARY VISIT
+    PAGE carries `button_save` with no text, and that is a different save
+    entirely.
+    """
+
+    UMA = ('<node class="android.view.View" '
+           'resource-id="app:id/signature_screen_clear_button" '
+           'clickable="true" text="" bounds="[14,656][44,681]"/>'
+           '<node class="android.view.View" '
+           'resource-id="app:id/signature_screen_submit_button" '
+           'clickable="true" text="" bounds="[1474,656][1529,681]"/>')
+
+    def test_a_submit_that_names_the_signature_screen_is_a_save(self):
+        assert sign._app_buttons(self.UMA)["confirm"]["rid"] \
+            .endswith("signature_screen_submit_button")
+
+    def test_and_its_clear_is_a_clear(self):
+        assert sign._app_buttons(self.UMA)["clear"]["rid"] \
+            .endswith("signature_screen_clear_button")
+
+    def test_a_bare_button_save_with_no_caption_is_still_not_one(self):
+        """The legacy visit page's own save. Its pad's Salvar appears and
+        disappears WITH the pad, which is what makes the caption the
+        evidence there — and what stops the portal offering a Save over a
+        page with nothing to save."""
+        page = ('<node class="android.widget.Button" '
+                'resource-id="app:id/button_save" clickable="true" text="" '
+                'bounds="[642,74][678,110]"/>')
+        assert "confirm" not in sign._app_buttons(page)
+
+    def test_a_captioned_save_is_a_save_wherever_it_is(self):
+        page = ('<node class="android.widget.Button" '
+                'resource-id="app:id/button_save" clickable="true" '
+                'text="Salvar" bounds="[642,74][678,110]"/>')
+        assert "confirm" in sign._app_buttons(page)
+
+    @pytest.mark.parametrize("word", ["Enviar", "Submit", "Send"])
+    def test_the_words_this_app_uses_for_saving_count(self, word):
+        page = ('<node class="android.widget.Button" resource-id="" '
+                f'clickable="true" text="{word}" bounds="[642,74][678,110]"/>')
+        assert "confirm" in sign._app_buttons(page)

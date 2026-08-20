@@ -604,9 +604,12 @@ _MIN_STRIP = 12
 #
 # ANULAR IS NEITHER of these — it is cancel, it throws the signature away, and
 # a rule loose enough to catch it would eventually press it.
-_SAVE_IDS = ("button_save", "btn_save", "save_button")
+_SAVE_IDS = ("button_save", "btn_save", "save_button",
+             # HHAeXchange+ calls it submit, and its caption is "Enviar" —
+             # the word for sending the signature on, not for saving it.
+             "submit_button", "button_submit")
 _CLEAR_IDS = ("button_clear", "btn_clear", "clear_button", "button_erase")
-_SAVE_WORDS = ("salvar", "save", "guardar")
+_SAVE_WORDS = ("salvar", "save", "guardar", "enviar", "submit", "send")
 _CLEAR_WORDS = ("borrar", "clear", "limpiar")
 
 
@@ -660,7 +663,26 @@ def _app_buttons(xml: str) -> dict:
                                  ("clear", _CLEAR_IDS, _CLEAR_WORDS)):
             if kind in found:
                 continue                      # first match wins, in tree order
-            if low in words or (low and any(i in rid for i in ids)):
+            # A CAPTION, OR AN ID THAT NAMES THE SIGNATURE SCREEN ITSELF.
+            #
+            # HHAeXchange+'s buttons carry no text — "Borrar" and "Enviar"
+            # are separate TextViews laid over them — so a rule that needed
+            # the caption could not see either one, on the very screen the
+            # pad exists for.
+            #
+            # But the caption was earning its keep, and the tests said so
+            # before this shipped: the legacy app's ORDINARY VISIT PAGE
+            # carries `button_save` with no text, and that is a different
+            # save entirely. Its pad's Salvar appears and disappears WITH the
+            # pad, which is what makes the caption the evidence there.
+            #
+            # So an id stands alone only when it names the signature screen
+            # as well as the action. `signature_screen_submit_button` does;
+            # a bare `button_save` does not, and still needs its word.
+            names_the_screen = any(h in rid for h in CANVAS_ID_HINTS)
+            if ((low and low in words)
+                    or (any(i in rid for i in ids)
+                        and (low or names_the_screen))):
                 found[kind] = {"rid": full, "txt": txt,
                                "b": b,
                                "xy": [(b[0] + b[2]) // 2, (b[1] + b[3]) // 2]}
