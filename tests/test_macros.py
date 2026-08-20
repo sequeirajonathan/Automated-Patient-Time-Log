@@ -3526,3 +3526,79 @@ class TestUpdatingAnAppThatIsNotInFront:
         """It updates itself, and it is not somewhere the phone is sent."""
         assert not any("vending" in name or "play" in name
                        for name in macros.MACROS if name.startswith("update_"))
+
+
+class TestAMacroCannotOutliveItsProcess:
+    """Caught live, and it had the phone loose for thirteen minutes.
+
+    Auto sign-in fired for inMyTeam at 13:18:18 and wrote "running". A deploy
+    restarted the feed at 13:18:19 and killed the thread mid-macro. Nothing
+    wrote a terminal state, so the file said "running" until something else
+    happened to run — which nothing did, because the two things that read
+    that flag both stand down for it.
+
+    The containment watchdog stands down for a macro in flight, so the phone
+    sat outside its care apps unwatched. Auto-auth refuses to stack onto a
+    running macro, so the interrupted sign-in could never restart, and the
+    app stayed on the marketing splash where it was found.
+    """
+
+    def _runner(self, tmp_path):
+        return macros.Runner(tmp_path / "req.json", tmp_path / "status.json",
+                             screen_path=tmp_path / "screen.json",
+                             viewers_path=tmp_path / "viewers.json")
+
+    def test_a_running_status_from_a_dead_process_is_cleared(self, tmp_path):
+        macros.write_status(
+            macros.Status(id="abc", name="inmyteam_login", state="running",
+                          step="macro.step.launching"),
+            tmp_path / "status.json")
+        self._runner(tmp_path)._reconcile()
+        after = macros.read_status(tmp_path / "status.json")
+        assert after.state == "failed"
+        assert "interrupted" in after.error
+
+    def test_it_keeps_what_the_macro_was_so_the_line_still_reads(self,
+                                                                tmp_path):
+        """"Something was interrupted" is worth less than naming which."""
+        macros.write_status(
+            macros.Status(id="abc", name="inmyteam_login", state="running",
+                          step="macro.step.launching"),
+            tmp_path / "status.json")
+        self._runner(tmp_path)._reconcile()
+        after = macros.read_status(tmp_path / "status.json")
+        assert after.name == "inmyteam_login"
+        assert after.step == "macro.step.launching"
+
+    @pytest.mark.parametrize("state", ["done", "failed", "idle"])
+    def test_a_finished_macro_is_left_exactly_as_it_was(self, tmp_path,
+                                                        state):
+        macros.write_status(macros.Status(id="abc", name="rescan",
+                                          state=state, step="x"),
+                            tmp_path / "status.json")
+        self._runner(tmp_path)._reconcile()
+        assert macros.read_status(tmp_path / "status.json").state == state
+
+    def test_no_status_at_all_is_not_an_error(self, tmp_path):
+        self._runner(tmp_path)._reconcile()
+        assert macros.read_status(tmp_path / "status.json").state == "idle"
+
+    def test_starting_the_runner_reconciles(self, tmp_path):
+        """The clearing has to happen on start, not on the first request —
+        the watchdog and auto-auth read the flag long before any request."""
+        import inspect
+
+        assert "_reconcile" in inspect.getsource(macros.Runner.start)
+
+    def test_the_watchdog_stands_down_only_for_a_live_macro(self, tmp_path):
+        """The pairing this exists to protect: an interrupted macro must not
+        keep containment switched off."""
+        from apt_log import feed as feed_mod
+
+        macros.write_status(
+            macros.Status(id="abc", name="inmyteam_login", state="running"),
+            tmp_path / "status.json")
+        self._runner(tmp_path)._reconcile()
+        with patch.object(macros, "STATUS_PATH", tmp_path / "status.json"):
+            assert macros.read_status().state != "running"
+        assert feed_mod.CONTAIN_DWELL > 0      # the watchdog is still armed
