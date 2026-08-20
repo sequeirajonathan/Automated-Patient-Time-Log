@@ -2667,3 +2667,95 @@ class TestTheProviderPickerIsNotASplash:
         for name in ("en.json", "es.json"):
             words = json_mod.loads((base / name).read_text(encoding="utf-8"))
             assert words.get("mirror.screen.agency")
+
+
+class TestAKeypadIsALockWhereverItIsDrawn:
+    """Mobile Caregiver+ raises its passcode keypad under two activities.
+
+    `PinActivity` the login markers catch. `DashboardActivity` they do not —
+    and that is where it was found live: ten digit keys and a delete key,
+    published as `screen=home, blocked=''`. Nothing refused the picture and
+    auto sign-in never reached its own gate, because everything that decides
+    "this is a credential screen" was reading the activity's NAME.
+
+    So the keypad answers for itself. Both dialects are checked because the
+    two read paths disagree on attribute order, and a lock recognised on only
+    one of them is worse than one recognised on neither.
+    """
+
+    MC = "com.tellus.evv.v2"
+    DASHBOARD = f"{MC}/com.tellus.evv.v2.ui.dashboard.DashboardActivity"
+
+    @staticmethod
+    def _dumped(digits="0123456789") -> str:
+        """`uiautomator dump`'s shape: text BEFORE class."""
+        keys = "".join(
+            f'<node index="{i}" text="{d}" resource-id="" '
+            f'class="android.widget.Button" package="com.tellus.evv.v2" '
+            f'bounds="[{i * 60},1000][{i * 60 + 50},1060]"/>'
+            for i, d in enumerate(digits))
+        return f'<hierarchy rotation="0">{keys}</hierarchy>'
+
+    @staticmethod
+    def _sourced(digits="0123456789") -> str:
+        """Appium page_source's shape: class BEFORE text, tag named."""
+        keys = "".join(
+            f'<android.widget.Button index="{i}" package="com.tellus.evv.v2" '
+            f'class="android.widget.Button" text="{d}" '
+            f'bounds="[{i * 60},1000][{i * 60 + 50},1060]" />'
+            for i, d in enumerate(digits))
+        return f'<hierarchy rotation="0">{keys}</hierarchy>'
+
+    def test_the_keypad_is_seen_in_both_dialects(self):
+        assert feed.keypad_on_screen(self._dumped()) is True
+        assert feed.keypad_on_screen(self._sourced()) is True
+
+    def test_a_keypad_still_being_drawn_counts(self):
+        """Two keys short is still a lock. Waiting for all ten is how the
+        picture gets taken during the frame the app is laying out."""
+        assert feed.keypad_on_screen(self._dumped("01234567")) is True
+
+    def test_a_handful_of_numbered_buttons_is_not_a_keypad(self):
+        assert feed.keypad_on_screen(self._dumped("0123")) is False
+
+    def test_numbers_that_are_not_buttons_are_not_a_keypad(self):
+        """A schedule is full of digits. Only BUTTONS carrying a single digit
+        as their whole text make a keypad."""
+        rows = "".join(
+            f'<node index="{i}" text="{i}" class="android.widget.TextView" '
+            f'bounds="[0,{i * 60}][720,{i * 60 + 50}]"/>' for i in range(10))
+        assert feed.keypad_on_screen(f"<hierarchy>{rows}</hierarchy>") is False
+
+    def test_a_missing_hierarchy_is_not_a_keypad(self):
+        assert feed.keypad_on_screen(None) is False
+        assert feed.keypad_on_screen("") is False
+
+    def test_the_keypad_outranks_the_atlas(self):
+        """The atlas maps `dashboardactivity` to "home", and it is right about
+        the activity. It is wrong about this screen, and calling a lock screen
+        "home" is worse than the "unknown" it replaced."""
+        assert feed.screen_for(self.DASHBOARD) == "home"
+        assert feed.screen_for(self.DASHBOARD, self._dumped()) == "login"
+
+    def test_the_real_dashboard_is_still_home(self):
+        tree = ('<hierarchy rotation="0"><node index="0" text="Visitas" '
+                'class="android.widget.TextView" bounds="[0,0][720,80]"/>'
+                '</hierarchy>')
+        assert feed.screen_for(self.DASHBOARD, tree) == "home"
+
+    def test_another_app_showing_digits_is_not_second_guessed(self):
+        """The calculator is not a care app and its keys are not a lock."""
+        calc = "com.android.calculator2/.Calculator"
+        assert feed.screen_for(calc, self._dumped()) == "unknown"
+
+    def test_the_picture_is_refused_over_a_keypad(self):
+        with patch.object(feed, "window_state",
+                          return_value=(self.DASHBOARD, True, "")):
+            png, _, reason = feed.capture(hierarchy=self._dumped())
+        assert png is None
+        assert reason == feed.LOGIN_ACTIVITY
+
+    def test_and_the_words_are_let_through_so_the_macro_can_answer(self):
+        """The refusal is what makes the screen disclosable: no photograph,
+        but the page and the auth trigger both get to see there is a lock."""
+        assert feed.text_is_disclosable(feed.LOGIN_ACTIVITY) is True
