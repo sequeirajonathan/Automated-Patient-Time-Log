@@ -66,8 +66,17 @@ def strip(doc: dict) -> dict:
         # rid survives for statics too: a named state image (the visits
         # list's drawable checks) has no text at all, and its resource-id
         # IS its meaning — without it a replay loses the marks.
+        #
+        # ONLY for the textless ones, which is exactly how the feed publishes
+        # them. Recording it on every static made replays lie: the reflow
+        # hands an item an aim when its node carries a resource-id, so every
+        # caption in a replayed screen came back tappable, and a nav bar whose
+        # title had quietly become a button stopped being read as a nav bar
+        # at all. The offline replay is the tool this whole loop is tuned
+        # with; a tool that reports a fault the phone does not have costs
+        # more than the screens it was built to reach.
         "statics": [{"cls": s.get("cls", ""), "b": s.get("b"),
-                     "rid": s.get("rid", ""),
+                     **({"rid": s.get("rid", "")} if not s.get("txt") else {}),
                      "len": len(s.get("txt", "") or "")}
                     for s in doc.get("statics") or []],
     }
@@ -155,6 +164,11 @@ def replay(entry: dict) -> dict:
         "elements": [{**e, "txt": words(e.get("len", 0)),
                       "has_text": bool(e.get("len"))}
                      for e in entry.get("elements") or []],
-        "statics": [{**s, "txt": words(s.get("len", 0))}
+        # The same guard as `strip`, applied on the way back out so the
+        # entries recorded before it existed replay honestly too: a static
+        # with text is a caption, and a caption is not something to press.
+        "statics": [{k: v for k, v in s.items()
+                     if k != "rid" or not s.get("len")}
+                    | {"txt": words(s.get("len", 0))}
                     for s in entry.get("statics") or []],
     }

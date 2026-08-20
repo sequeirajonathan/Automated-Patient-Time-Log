@@ -1686,3 +1686,113 @@ class TestTheWayOutOfAModal:
         wrong "Close" is a button she presses to escape that does something
         else."""
         assert self._sheet(extra_small=([60, 946, 92, 978],))["dismiss"] is None
+
+
+class TestATabBarWhoseCurrentTabIsNotAControl:
+    """HHAeXchange+'s EVV screen, as the phone actually publishes it.
+
+    Two tabs — "GPS" and "Dispositivo o FOB" — and only ONE of them is an
+    element. The app marks the tab you are on by taking its click handler
+    away, so the open tab arrives as a bare word centred in its half of the
+    screen and nothing in the tree says it is a tab at all.
+
+    Rendered as they arrive, the portal showed a loose caption beside one
+    live button, and the only thing that looked current was the tab she was
+    NOT on. Reported from the field on a real check-in: "the GPS tab wasn't
+    selected, it doesn't say which option is selected and we need that
+    indicator."
+
+    Bounds below are the ones recorded on the phone, not invented.
+    """
+
+    def _model(self, **kw):
+        return screenview.build(doc(
+            elements=[el("map_screen_tab_bar_security_token", "View",
+                         [360, 105, 713, 130])],
+            statics=[st([175, 112, 192, 123], "GPS"),
+                     st([506, 112, 568, 123], "Dispositivo o FOB")],
+            **kw))
+
+    def _segment(self, model):
+        for row in model["rows"]:
+            for item in row["items"]:
+                if item["kind"] == "segment":
+                    return item
+        return None
+
+    def test_the_pair_becomes_one_control(self):
+        assert self._segment(self._model()) is not None
+
+    def test_and_it_says_which_one_she_is_on(self):
+        parts = self._segment(self._model())["parts"]
+        assert [p["checked"] for p in parts] == [True, False]
+
+    def test_the_open_tab_reads_in_screen_order(self):
+        parts = self._segment(self._model())["parts"]
+        assert [p["txt"] for p in parts] == ["GPS", "Dispositivo o FOB"]
+
+    def test_the_open_tab_is_not_pressable(self):
+        """It is not a control on the phone either — there is nothing to
+        aim at, and a press that goes nowhere reads as the portal being
+        broken."""
+        parts = self._segment(self._model())["parts"]
+        assert parts[0]["aim"] is None
+
+    def test_the_other_tab_still_switches(self):
+        parts = self._segment(self._model())["parts"]
+        assert parts[1]["aim"]["rid"] == "map_screen_tab_bar_security_token"
+
+    def test_three_slots_work_the_same_way(self):
+        """The app's own bottom bar, recorded on the schedule: three tabs,
+        the open one published as a caption and the other two as containers.
+        Left over by the lifted tab bar, which needs all three."""
+        model = screenview.build(doc(
+            elements=[el("", "View", [246, 1312, 474, 1492]),
+                      el("", "View", [492, 1312, 720, 1492])],
+            statics=[st([0, 1427, 228, 1475], "Programación"),
+                     st([268, 1427, 452, 1475], "Mensajes"),
+                     st([552, 1427, 659, 1475], "Menú")]))
+        parts = self._segment(model)["parts"]
+        assert [p["checked"] for p in parts] == [True, False, False]
+        assert [p["txt"] for p in parts] == ["Programación", "Mensajes", "Menú"]
+
+    # ------------------------------------------------- and what it must NOT do
+    def test_a_spent_action_beside_a_live_one_is_not_a_tab_bar(self):
+        """The legacy visit detail's "Registrar entrada", already used, is a
+        non-clickable BUTTON filling its half beside a live Clock Out — the
+        same shape as a tab bar and not one. Reading it as tabs would have
+        the portal announce "you are on the check-in tab" about two things
+        that are neither tabs nor a choice. The class is what tells them
+        apart: a caption is a TextView."""
+        model = screenview.build(doc(
+            elements=[el("btn_clock_out", "Button", [365, 148, 715, 174],
+                         "Registrar salida")],
+            statics=[st([5, 148, 354, 174], "Registrar entrada", cls="Button")]))
+        assert self._segment(model) is None
+
+    def test_a_list_row_is_not_a_tab_bar(self):
+        """A caption at its left margin beside a button is a row. Only a
+        caption on the slot's CENTRE line is a tab."""
+        model = screenview.build(doc(
+            elements=[el("btn_go", "Button", [360, 105, 713, 130], "Abrir")],
+            statics=[st([20, 112, 200, 123], "Notas del paciente")]))
+        assert self._segment(model) is None
+
+    def test_a_half_filled_bar_is_refused_rather_than_guessed(self):
+        """One tab, one caption, and a slot with nothing in it: a tab bar
+        drawn with the wrong tab lit is worse than one drawn plainly."""
+        model = screenview.build(doc(
+            elements=[el("tab_c", "View", [480, 105, 713, 130])],
+            statics=[st([175, 112, 192, 123], "GPS")],
+            size=(720, 1600)))
+        seg = self._segment(model)
+        assert seg is None or all(p.get("aim") for p in seg["parts"])
+
+    def test_chips_are_too_small_to_be_tabs(self):
+        """A tab is a big target. The care plan's ✓/✗ pair is not one, and
+        it has its own reading a few rules further down."""
+        model = screenview.build(doc(
+            elements=[el("chk_yes", "RadioButton", [640, 775, 690, 835], "✓")],
+            statics=[st([90, 795, 300, 815], "127 - Toilet Use")]))
+        seg = self._segment(model)
+        assert seg is None or all(p.get("aim") for p in seg["parts"])
