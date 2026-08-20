@@ -14,12 +14,21 @@ from __future__ import annotations
 
 import pytest
 
-from apt_log import prefs
+from apt_log import prefs, versions
 
 
 @pytest.fixture(autouse=True)
 def _isolated_prefs(tmp_path, monkeypatch):
     monkeypatch.setattr(prefs, "PREFS_PATH", tmp_path / "prefs.json")
+    # The app-version record, for the same reason and caught the same way:
+    # `feed.run` checks versions on every tick, so a test exercising the loop
+    # on the Pi wrote the machine's real file during the deploy gate. Nothing
+    # was lost — it wrote the truth — but it wrote it BEFORE the service ever
+    # ran, which is how a baseline nobody meant to take gets taken.
+    monkeypatch.setattr(versions, "VERSIONS_PATH",
+                        tmp_path / "app-versions.json")
+    # The timer is module state, so one test's reading silences the next.
+    monkeypatch.setattr(versions, "_last_check", [0.0])
     yield
 
 
