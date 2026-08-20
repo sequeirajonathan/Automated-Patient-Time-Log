@@ -34,7 +34,7 @@ chown "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR"
 log "clearing secrets"
 rm -f /etc/aptlog/secrets.env /etc/aptlog/*.key 2>/dev/null || true
 # The schedule is not a credential and it is removed for a different reason:
-# it names six people, their homes' hours, and who cares for them. An image is
+# it names the people cared for, their hours, and who cares for them. An image is
 # copied, handed over and archived, and none of that is a place for it.
 # site.conf goes with it — it is one building's particulars (config.py).
 rm -f /etc/aptlog/schedule.json /etc/aptlog/site.conf 2>/dev/null || true

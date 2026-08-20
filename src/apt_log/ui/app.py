@@ -42,6 +42,7 @@ from fastapi.templating import Jinja2Templates
 from apt_log import __version__
 from apt_log import macros as macros_mod
 from apt_log import prefs
+from apt_log import schedule as schedule_mod
 from apt_log import video as video_mod
 from apt_log.ui import machine as machine_mod
 from apt_log.ui import screenview as screenview_mod
@@ -324,6 +325,7 @@ def phone_app(request: Request):
             "languages": SUPPORTED,
             "apps": PHONE_APPS,
             "m": model,
+            "plan": _schedule_model(),
             "screen_doc": screen_doc or {},
             "pending": queue.current(),
             "KIND_SIGNATURE": KIND_SIGNATURE,
@@ -617,6 +619,96 @@ def api_state():
         "mirror": _mirror_payload(s),
         "generated_at": s.generated_at.isoformat(),
     })
+
+
+# --------------------------------------------------------------- the schedule
+# Which app a visit belongs to, in the words she uses for it. The schedule file
+# names packages, because that is what the machine will have to open; a tile
+# says "Exchange+".
+def _app_label(package: str) -> str:
+    for entry in PHONE_APPS:
+        if entry.get("package") == package:
+            return entry.get("name") or package
+    return package
+
+
+def _a_visit(visit, now) -> dict:
+    """One visit as the front end needs it.
+
+    Times are pre-formatted HERE rather than in the browser, and that is
+    deliberate: the phone showing this page may be in another timezone —
+    Texas has been used for exactly this project's testing — and a browser
+    formatting an instant would quietly render Eastern visits in whatever
+    zone the person holding it is standing in. The times a caregiver's round
+    runs on are the agency's, wherever she reads them.
+    """
+    return {
+        "patient": visit.patient,
+        "app": _app_label(visit.app),
+        "agency": visit.agency,
+        "starts": visit.starts.strftime("%-I:%M %p").lower(),
+        "ends": visit.ends.strftime("%-I:%M %p").lower(),
+        "fires": visit.fires.strftime("%-I:%M %p").lower(),
+        "day": visit.fires.strftime("%A"),
+        "date": visit.fires.date().isoformat(),
+        # The buffer is worth showing, not hiding: it is the one time on the
+        # page that is NOT what the app says, and a caregiver who spots the
+        # difference should find it explained rather than be left to wonder
+        # which of the two is wrong.
+        "buffered": visit.buffered,
+        "part": visit.block.part,
+        "of": visit.block.of,
+        "running": visit.running(now),
+        # Seconds, for a client that wants to count down without re-reading
+        # the clock's timezone. Negative once it has fired.
+        "in_seconds": int((visit.fires - now).total_seconds()),
+    }
+
+
+def _schedule_model() -> dict:
+    """What the home screen shows, and what /api/schedule answers with.
+
+    A schedule that will not parse is reported rather than swallowed. The
+    portal still renders — she has a phone to drive and this module is not
+    what she opened it for — but the module says it cannot read the file
+    instead of showing an empty week, which looks exactly like a day off.
+    """
+    from datetime import datetime
+
+    try:
+        plan = schedule_mod.load()
+    except schedule_mod.BadSchedule as exc:
+        log.warning("the schedule will not load: %s", exc)
+        return {"ok": False, "error": str(exc), "current": None,
+                "next": None, "queue": [], "week": []}
+    now = datetime.now(plan.zone)
+    current = plan.current(now)
+    upcoming = plan.upcoming(now, limit=6)
+    week = plan.week(now.date())
+    return {
+        "ok": True,
+        "error": "",
+        "configured": bool(len(plan)),
+        "current": _a_visit(current, now) if current else None,
+        "next": _a_visit(upcoming[0], now) if upcoming else None,
+        # Everything after the next one — what the reveal cycles through and
+        # what a caller counting ahead reads.
+        "queue": [_a_visit(v, now) for v in upcoming[1:]],
+        "week": [_a_visit(v, now) for v in week],
+    }
+
+
+@app.get("/api/schedule")
+def api_schedule():
+    """The round, refreshed without a reload.
+
+    The home screen is server-rendered, which is right for the first paint
+    and wrong ten minutes later: the next visit becomes the current one while
+    the page sits open on a kitchen counter. The client re-reads this rather
+    than reloading, because a reload would take her out of whatever else she
+    was doing on the page.
+    """
+    return JSONResponse(_schedule_model())
 
 
 def _read_json(path, fallback):

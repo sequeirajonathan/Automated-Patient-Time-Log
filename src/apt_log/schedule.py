@@ -1,7 +1,7 @@
 """The week's visits: when each one starts, and when the machine must move.
 
-Three apps, six patients, and a caregiver whose first visit begins while she is
-driving to her other job. The portal has always been able to show what the
+Three apps, several patients, and a caregiver whose first visit begins while
+she is driving to her other job. The portal has always been able to show what the
 phone is doing right now; what it could not say is what is coming, or when
 anything has to happen. This is that answer.
 
