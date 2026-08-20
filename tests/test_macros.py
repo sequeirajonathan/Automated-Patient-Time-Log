@@ -12,6 +12,7 @@ import time
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
+from conftest import fast_clock
 
 from apt_log import macros
 from apt_log.macros import AUTO_AUTH_COOLDOWN
@@ -290,7 +291,7 @@ class TestAuthOnlyMacro:
                        return_value=auth_result) as auth, \
              patch_mod("apt_log.screens.login.LoginScreen") as login_cls, \
              patch_mod("apt_log.macros.dismiss_autofill", return_value=True), \
-             patch_mod("apt_log.macros.time.sleep"):
+             patch_mod("apt_log.macros.time.sleep"), fast_clock():
             login_cls.return_value.is_displayed.return_value = still_login_after
             MACROS["hhax_legacy_login"].run(driver, steps.append)
         return auth
@@ -1687,7 +1688,7 @@ class TestMigrationPitch:
         import itertools
 
         driver = self._driver(button_after_swipes=1)
-        with patch("apt_log.macros.time.sleep"), \
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
              patch("apt_log.macros.time.monotonic",
                    side_effect=itertools.count(step=0.5)):
             macros._skip_migration_pitch(driver, lambda _k: None)
@@ -1699,7 +1700,7 @@ class TestMigrationPitch:
         import itertools
 
         driver = self._driver(button_after_swipes=None)
-        with patch("apt_log.macros.time.sleep"), \
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
              patch("apt_log.macros.time.monotonic",
                    side_effect=itertools.count(step=0.5)):
             macros._skip_migration_pitch(driver, lambda _k: None)
@@ -1714,7 +1715,7 @@ class TestMigrationPitch:
         driver.find_elements.side_effect = lambda *_a: []
         type(driver).current_activity = PropertyMock(
             return_value="com.hhaexchange.caregiver.MigrationWebViewActivity")
-        with patch("apt_log.macros.time.sleep"), \
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
              patch("apt_log.macros.time.monotonic",
                    side_effect=itertools.count(step=0.5)):
             with pytest.raises(RuntimeError, match="nothing to aim at"):
@@ -1725,7 +1726,7 @@ class TestMigrationPitch:
 
         driver = MagicMock()
         driver.current_activity = "com.hhaexchange.caregiver.HomeActivity"
-        with patch("apt_log.macros.time.sleep"), \
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
              patch("apt_log.macros.time.monotonic",
                    side_effect=itertools.count(step=0.5)):
             macros._skip_migration_pitch(driver, lambda _k: None)
@@ -1739,7 +1740,7 @@ class TestMigrationPitch:
         driver.tap.side_effect = None            # the tap changes nothing
         type(driver).current_activity = PropertyMock(
             return_value="com.hhaexchange.caregiver.MigrationWebViewActivity")
-        with patch("apt_log.macros.time.sleep"), \
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
              patch("apt_log.macros.time.monotonic",
                    side_effect=itertools.count(step=0.5)):
             with pytest.raises(RuntimeError, match="did not close"):
@@ -1977,7 +1978,7 @@ class TestSkipPreamble:
     def test_a_fresh_page_skips_the_scroll_to_top(self, tmp_path, monkeypatch):
         monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
         driver = self._driver()
-        with patch("apt_log.macros.time.sleep"), \
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
              patch("apt_log.macros._scroll_to_top") as to_top:
             macros._stitch_walk(driver, assume_top=True)
         to_top.assert_not_called()
@@ -1985,7 +1986,7 @@ class TestSkipPreamble:
     def test_a_rescan_still_scrolls_to_top(self, tmp_path, monkeypatch):
         monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
         driver = self._driver()
-        with patch("apt_log.macros.time.sleep"), \
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
              patch("apt_log.macros._scroll_to_top") as to_top:
             macros._stitch_walk(driver, assume_top=False)
         to_top.assert_called_once()
@@ -2013,7 +2014,7 @@ class TestWarmSweep:
         the sweep warms the others and comes home."""
         monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
         driver = self._driver(tabs=3)
-        with patch("apt_log.macros.time.sleep"), \
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
              patch("apt_log.macros._stitch_walk", return_value=True) as walk:
             warmed = macros._warm_sweep(driver, tmp_path / "req.json",
                                         tmp_path / "deep.json",
@@ -2024,7 +2025,7 @@ class TestWarmSweep:
     def test_a_screen_without_tabs_is_left_alone(self, tmp_path, monkeypatch):
         monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
         driver = self._driver(tabs=1)
-        with patch("apt_log.macros.time.sleep"), \
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
              patch("apt_log.macros._stitch_walk", return_value=True) as walk:
             assert macros._warm_sweep(driver, tmp_path / "req.json",
                                       tmp_path / "deep.json",
@@ -2037,7 +2038,7 @@ class TestWarmSweep:
         req = tmp_path / "req.json"
         req.write_text("{}", encoding="utf-8")
         driver = self._driver(tabs=3)
-        with patch("apt_log.macros.time.sleep"), \
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
              patch("apt_log.macros._stitch_walk", return_value=True) as walk:
             macros._warm_sweep(driver, req, tmp_path / "deep.json",
                                tmp_path / "poke")
@@ -2160,7 +2161,7 @@ class TestWarmWaitsForTabBar:
             return seq[i]
         type(driver).page_source = property(src)
 
-        with patch("apt_log.macros.time.sleep"), \
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
              patch("apt_log.macros.time.monotonic",
                    side_effect=[0, 1, 2, 3, 4, 5, 6, 7]), \
              patch("apt_log.macros._stitch_walk", return_value=True) as walk, \
@@ -2190,7 +2191,7 @@ class TestScanOwnsTheSession:
 
         def spy_swipe(*a, **k):
             seen["during"] = macros.SCAN_ACTIVE.is_set()
-        with patch("apt_log.macros.time.sleep"), \
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
              patch("apt_log.macros._swipe", spy_swipe):
             macros.SCAN_ACTIVE.clear()
             macros._stitch_walk(driver, assume_top=True)
@@ -2267,7 +2268,7 @@ class TestAccordionScan:
             assert (x, y) == (362, 417)     # the folded row's centre
             state["page"] = "expanded"
 
-        with patch("apt_log.macros.time.sleep"), \
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
              patch("apt_log.macros._tap_xy", side_effect=tap) as tapped:
             assert macros._stitch_walk(driver, assume_top=True) is True
         tapped.assert_called_once()
@@ -2297,7 +2298,7 @@ class TestAccordionScan:
             state["page"] = "collapsed"
 
         driver.press_keycode.side_effect = back
-        with patch("apt_log.macros.time.sleep"), \
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
              patch("apt_log.macros._tap_xy", side_effect=tap) as tapped:
             assert macros._stitch_walk(driver, assume_top=True) is True
         tapped.assert_called_once()          # never a second gamble
@@ -2308,7 +2309,7 @@ class TestAccordionScan:
         pages = {"collapsed": self._dates() + self._card(401, "PACIENTE")}
         driver = self._driver({"page": "collapsed"}, pages,
                               package="com.tellus.evv.v2")
-        with patch("apt_log.macros.time.sleep"), \
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
              patch("apt_log.macros._tap_xy") as tapped:
             macros._stitch_walk(driver, assume_top=True)
         tapped.assert_not_called()
@@ -2321,7 +2322,7 @@ class TestAccordionScan:
         monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
         pages = {"collapsed": self._dates(2) + self._card(401, "PACIENTE")}
         driver = self._driver({"page": "collapsed"}, pages)
-        with patch("apt_log.macros.time.sleep"), \
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
              patch("apt_log.macros._tap_xy") as tapped:
             macros._stitch_walk(driver, assume_top=True)
         tapped.assert_not_called()
@@ -2332,7 +2333,7 @@ class TestAccordionScan:
         pages = {"collapsed": self._dates() + self._card(
             401, "PACIENTE", folded=False, details=True)}
         driver = self._driver({"page": "collapsed"}, pages)
-        with patch("apt_log.macros.time.sleep"), \
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
              patch("apt_log.macros._tap_xy") as tapped:
             macros._stitch_walk(driver, assume_top=True)
         tapped.assert_not_called()
@@ -2364,7 +2365,7 @@ class TestAccordionScan:
             state["page"] = "below"      # the next viewport scrolls in
 
         driver.swipe.side_effect = swipe
-        with patch("apt_log.macros.time.sleep"), \
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
              patch("apt_log.macros._tap_xy", side_effect=tap) as tapped:
             assert macros._stitch_walk(driver, assume_top=True) is True
         tapped.assert_called_once()      # the below-the-fold card: never
@@ -2377,7 +2378,7 @@ class TestAccordionScan:
         monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
         pages = {"collapsed": self._dates() + self._card(401, "PACIENTE")}
         driver = self._driver({"page": "collapsed"}, pages)
-        with patch("apt_log.macros.time.sleep"), \
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
              patch("apt_log.macros._tap_xy") as tapped:
             macros._stitch_walk(driver, assume_top=False)
         tapped.assert_not_called()
@@ -2407,7 +2408,7 @@ class TestAccordionScan:
         def tap(x, y):
             state["taps"].append((x, y))
 
-        with patch("apt_log.macros.time.sleep"), \
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
              patch("apt_log.macros._tap_xy", side_effect=tap):
             assert macros._stitch_walk(driver, assume_top=True) is True
         assert state["taps"] == [(362, 417), (362, 517)]   # today only
@@ -2423,7 +2424,7 @@ class TestAccordionScan:
             for i in range(3))
         pages = {"collapsed": dates + self._card(401, "PACIENTE")}
         driver = self._driver({"page": "collapsed"}, pages)
-        with patch("apt_log.macros.time.sleep"), \
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
              patch("apt_log.macros._tap_xy") as tapped:
             macros._stitch_walk(driver, assume_top=True)
         tapped.assert_not_called()
@@ -3353,3 +3354,47 @@ class TestAnsweringTheUpdateWall:
                         "macro.sure.restart_phone", "macro.step.opening_store",
                         "macro.step.updating", "macro.step.installing"):
                 assert words.get(key), f"{key} missing from {name}"
+
+
+class TestWaitingCostsRealTime:
+    """`wait_for` is the most-used helper in this file and the most expensive
+    thing in the suite when it is mocked wrongly.
+
+    Patching `time.sleep` to a no-op looks like the way to make a test fast.
+    It is the opposite: the deadline is real time, so a predicate that never
+    comes true stops pausing between polls and spins flat out until the
+    timeout passes anyway — the same seconds, now at full CPU. Four tests did
+    that and cost the Pi's deploy gate twenty-five seconds every run.
+
+    These pin the property `conftest.fast_clock` depends on, so the fix cannot
+    quietly stop working.
+    """
+
+    def test_it_gives_up_when_the_clock_passes_the_deadline(self):
+        with patch("apt_log.macros.time.sleep"), fast_clock(step=0.5):
+            assert macros.wait_for(lambda: False, timeout=2.0) is False
+
+    def test_it_still_polls_while_it_waits(self):
+        """Not merely "returns False quickly" — a wait that never asks is not
+        a wait, and would pass a test that only checked the answer."""
+        asked = []
+        with patch("apt_log.macros.time.sleep"), fast_clock(step=0.5):
+            macros.wait_for(lambda: asked.append(1) or False, timeout=2.0)
+        assert len(asked) > 1
+
+    def test_a_predicate_that_comes_true_stops_the_wait(self):
+        asked = []
+        with patch("apt_log.macros.time.sleep"), fast_clock(step=0.5):
+            got = macros.wait_for(lambda: len(asked) >= 2 or asked.append(1),
+                                  timeout=30.0)
+        assert got is True
+        assert len(asked) == 2
+
+    def test_a_screen_mid_transition_reads_as_a_no_not_a_crash(self):
+        """The reason the loop swallows exceptions: a tree read while the app
+        is redrawing raises, and that is "not yet", not a failure."""
+        def exploding():
+            raise RuntimeError("stale element")
+
+        with patch("apt_log.macros.time.sleep"), fast_clock(step=0.5):
+            assert macros.wait_for(exploding, timeout=2.0) is False

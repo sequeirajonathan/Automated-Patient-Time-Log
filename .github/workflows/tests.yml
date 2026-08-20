@@ -1,0 +1,64 @@
+# The suite, run somewhere that is not the Pi.
+#
+# The controller has gated every deploy on this suite since the beginning, and
+# that gate stays exactly where it is — it runs against the real venv, on the
+# real architecture, on the machine that will actually serve the portal, and it
+# rolls back when a revision does not come up. Nothing here replaces it.
+#
+# What this adds is the part the Pi cannot give: an answer BEFORE the revision
+# is anywhere near Florida. A pull request that would have failed the gate now
+# says so on the pull request, in about a minute, instead of being discovered
+# by a controller in someone else's building deciding whether to roll itself
+# back. The gate should be a confirmation, not the first line of defence.
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main, release]
+
+# A second push supersedes the first: nobody needs the verdict on a revision
+# that has already been replaced.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Matches `requires-python` in pyproject.toml. Pinned to the minor
+          # rather than left to drift, for the same reason every dependency
+          # below it is pinned: a gate that tests something other than what
+          # ships is not a gate.
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install
+        # The same install the controller performs, so a revision that adds a
+        # dependency fails here rather than on the Pi. `[dev]` and nothing
+        # else — `[tools]` is deliberately excluded from what the controller
+        # installs, and this must not quietly test a fuller environment than
+        # the one that will run the code.
+        run: python -m pip install -e ".[dev]"
+
+      - name: Tests
+        # No adb and no phone here, so the tests that need a device skip
+        # themselves — the same way they do on any machine without one. The
+        # Pi still runs those.
+        run: python -m pytest -q --durations=15
+
+      - name: Shipped JavaScript parses
+        # Not covered by pytest, and it has taken the whole portal down once:
+        # a duplicate `const` in phone.js is a syntax error, the page renders
+        # blank, and nothing on the Python side notices. "I can't open the
+        # app", from Florida.
+        run: |
+          for f in src/apt_log/ui/static/*.js; do
+            node --check "$f"
+          done

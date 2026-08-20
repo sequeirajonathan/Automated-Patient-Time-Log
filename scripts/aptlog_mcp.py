@@ -53,6 +53,22 @@ REPO = os.environ.get("APTLOG_REPO", os.getcwd())
 DEPLOY_TIMEOUT = 600.0
 QUICK_TIMEOUT = 120.0
 
+# HOW LONG THIS TOOL MAY WAIT BEFORE ANSWERING.
+#
+# Not how long the deploy takes — how long the CALLER is willing to sit there.
+# The two were the same number for a long time and it made every deploy look
+# like a failure: the gate needs roughly ninety seconds end to end, the client
+# calling this tool gives up at sixty, so the call was killed every single
+# time while the deploy went on to succeed on the Pi without anybody watching.
+# "The deployment keeps failing" was the reasonable conclusion and it was
+# never true.
+#
+# So the tool now answers inside the window with whatever is actually true at
+# that moment, and says plainly when the gate is still running. A deploy in
+# progress is a normal answer, like a refused one.
+DEPLOY_ANSWER_BY = 45.0
+DEPLOY_POLL = 3.0
+
 
 class TailnetDown(RuntimeError):
     """The tailnet could not be brought up, so the Pi cannot be reached."""
@@ -125,11 +141,20 @@ def aptlog_deploy(
         description="What to deploy — any revision this checkout can name "
                     "(e.g. 'HEAD', a branch, a sha).")] = "HEAD",
 ) -> str:
-    """Deploy a revision to the Pi and wait for the verdict.
+    """Deploy a revision to the Pi and report what is true within the minute.
 
     Pushes to the controller and runs its gate: install dependencies, run the
     whole test suite against the revision, restart the services, check health,
-    and roll back if it does not come up. Takes about a minute.
+    and roll back if it does not come up. About a minute and a half end to
+    end.
+
+    THREE answers, all of them normal. DEPLOYED means the working tree the
+    services run from is on the revision asked for. REFUSED means the gate
+    rejected it and the machine is untouched. GATE RUNNING means neither has
+    happened yet — the gate is still working, and `aptlog_status` will show it
+    land. That third answer is why this tool no longer blocks: the gate
+    outlasts what a caller will wait, so waiting for it reported a failure on
+    every successful deploy for months.
 
     A refused deploy is a normal answer. Git cannot fail a push from the hook
     that runs the gate, so the answer here is read from the machine afterwards
@@ -154,21 +179,51 @@ def aptlog_deploy(
     except subprocess.CalledProcessError:
         return f"'{ref}' is not a revision in {REPO}."
 
-    push = subprocess.run(
+    # The push is left to run on its own rather than waited on, because the
+    # hook on the other end holds it open for the whole gate — tests, restart,
+    # health check — and that is longer than the caller will wait. It is NOT
+    # abandoned: it keeps running, the gate still gates, and the loop below
+    # watches the machine for its result. Killing this tool's call does not
+    # stop the deploy either, which is precisely why the old version looked
+    # like it failed while succeeding.
+    push = subprocess.Popen(
         ["git", "-C", REPO, "push", "pi", f"{ref}:{DEPLOY_REF}"],
-        capture_output=True, timeout=DEPLOY_TIMEOUT, env=env)
-    log = _text(push)
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+
+    deadline = time.monotonic() + DEPLOY_ANSWER_BY
+    running = ""
+    while True:
+        # What is actually checked out where the services run. This is the
+        # answer — a branch can point anywhere.
+        running = _text(ssh(f"git -C {DEPLOY_TREE} rev-parse HEAD")).strip()
+        if running == wanted or push.poll() is not None:
+            break
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(DEPLOY_POLL)
+
+    finished = push.poll() is not None
+    log = ""
+    if finished and push.stdout is not None:
+        log = push.stdout.read().decode("utf-8", "replace").strip()
+
+    if running == wanted:
+        return f"DEPLOYED {wanted[:7]} — live and healthy.\n\n{log}".strip()
+
+    if not finished:
+        # The honest middle answer, and the one that was missing. The gate is
+        # still working; nothing has gone wrong; ask again in a moment.
+        return (
+            f"GATE RUNNING for {wanted[:7]}. The controller is still on "
+            f"{running[:7] or 'its previous revision'} — tests, restart and "
+            f"health check take about a minute and a half in total. Nothing "
+            f"has failed; call aptlog_status to see when it lands.")
 
     landed = subprocess.run(
         ["git", "-C", REPO, "ls-remote", "pi", DEPLOY_REF],
         capture_output=True, timeout=60, env=env
     ).stdout.decode().split("\t")[0].strip()
 
-    # What is actually checked out where the services run. This is the answer.
-    running = _text(ssh(f"git -C {DEPLOY_TREE} rev-parse HEAD")).strip()
-
-    if running == wanted:
-        return f"DEPLOYED {wanted[:7]} — live and healthy.\n\n{log}"
     if landed != wanted:
         return (
             f"REFUSED. {wanted[:7]} did not deploy; the controller is still "
