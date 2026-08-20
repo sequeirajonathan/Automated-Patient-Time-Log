@@ -639,15 +639,47 @@ APP_DENSITY = {
 # patient draw with a finger on the physical phone. 105 is the density
 # the one proven signature landed at; the sweet spot is tuned here.
 SIGNATURE_DENSITY = 105
-_LANDSCAPE_X = re.compile(r"\[(?:8\d{2}|9\d{2}|1\d{3}),")
+# THE WINDOW'S OWN SHAPE, not a number that happens to be true on one phone.
+#
+# This used to hunt for an x-coordinate of 800 or more, which reads as
+# "sideways" only because a 720-wide screen has none of those in portrait.
+# On a 1080-wide phone every portrait screen carries coordinates past 800, so
+# the rule would have fired on all of them — and `landscape` turns the
+# console's phone preview a quarter turn and puts the app page in its wide
+# layout, so every screen would have rendered sideways, always.
+#
+# Found by auditing for a faster device rather than by watching it happen,
+# which is the only reason this is not a story about a morning.
+#
+# Comparing the tree's own extent asks the actual question and cannot go out
+# of date: a window wider than it is tall is sideways, at any resolution.
+_BOUNDS_PAIR = re.compile(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]")
 _density_now = [0]
 
 
+def screen_extent(xml: str | None) -> tuple[int, int]:
+    """The widest and tallest coordinates the tree mentions, or (0, 0).
+
+    Read off the bounds rather than asked of the device: this runs on every
+    frame, the hierarchy is already in hand, and an adb round trip per frame
+    to learn something the document already states would be a poor trade.
+    """
+    max_x = max_y = 0
+    for _x1, _y1, x2, y2 in _BOUNDS_PAIR.findall(xml or ""):
+        max_x = max(max_x, int(x2))
+        max_y = max(max_y, int(y2))
+    return max_x, max_y
+
+
 def _looks_landscape(hierarchy: str | None) -> bool:
-    """A bounds x-coordinate past the portrait width means the screen is
-    sideways — the reflow has recognised the signature screen this way
-    since its first real clock-out."""
-    return bool(hierarchy and _LANDSCAPE_X.search(hierarchy))
+    """Whether the window itself is sideways.
+
+    The reflow has recognised the signature screen this way since its first
+    real clock-out — the legacy app is the one that turns, and it turns for
+    exactly that moment.
+    """
+    width, height = screen_extent(hierarchy)
+    return bool(width and height and width > height)
 
 
 def _density_wanted(focus: str, hierarchy: str | None = None) -> int | None:

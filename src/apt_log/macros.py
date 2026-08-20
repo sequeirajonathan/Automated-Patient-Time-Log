@@ -177,6 +177,11 @@ WARM_ENABLED = False
 # their tab bars (HHAeXchange+'s captions sit at 0.89).
 WARM_TAB_BAND = 0.82
 WARM_TAB_MAX_WIDTH = 0.5
+
+# How far inside a webview's bottom edge its footer button sits, as a share
+# of that view's own height. Measured at 80px on the 1406-tall migration
+# webview; kept as a fraction so it means the same on a different panel.
+MIGRATION_FOOT = 80 / 1406
 WARM_SETTLE = 0.9
 # The sign-in's activate_app can leave the app mid-reload when the sweep
 # starts, its tab bar not yet drawn; wait this long for it before
@@ -435,8 +440,14 @@ def _skip_migration_pitch(driver, report) -> None:
         if not views:
             raise RuntimeError("the migration screen offers nothing to aim at")
         rect = views[0].rect
+        # A share of the webview's OWN height rather than eighty pixels: the
+        # button sits just inside its bottom edge, and "just inside" is a
+        # proportion of the box, not a count of pixels on one phone. 80 of
+        # the 1406-tall webview this was measured on is what MIGRATION_FOOT
+        # reproduces there.
         driver.tap([(rect["x"] + rect["width"] // 2,
-                     rect["y"] + rect["height"] - 80)])
+                     int(rect["y"] + rect["height"]
+                         * (1 - MIGRATION_FOOT)))])
     if not wait_for(lambda: not on_migration(), timeout=10.0):
         raise RuntimeError("the migration pitch did not close")
 
@@ -1384,6 +1395,19 @@ def _tab_slots(driver) -> list[dict]:
     containers = [e for e in feed_mod.elements(src)
                   if e["b"][3] > band and (e["b"][2] - e["b"][0]) < narrow]
 
+    # WHERE THE SELECTED TAB IS PRESSED, borrowed from its neighbours.
+    #
+    # The selected tab has no container of its own, so its aim has to be
+    # inferred — and it used to be inferred as "forty pixels above the
+    # caption", which is only the icon zone on a 720-wide screen at the
+    # density this phone happens to run. The tabs all sit in ONE row, so the
+    # neighbours' containers already state the answer at whatever resolution
+    # the device draws: same y, no arithmetic, nothing to re-tune.
+    row_y = 0
+    if containers:
+        mids = sorted((e["b"][1] + e["b"][3]) // 2 for e in containers)
+        row_y = mids[len(mids) // 2]
+
     slots: list[dict] = []
     for s in labels:
         cx = (s["b"][0] + s["b"][2]) // 2
@@ -1394,7 +1418,9 @@ def _tab_slots(driver) -> list[dict]:
                                     (holder["b"][1] + holder["b"][3]) // 2),
                           "selected": False})
         else:
-            slots.append({"point": (cx, s["b"][1] - 40), "selected": True})
+            # No neighbour to copy means a one-tab bar, which is not a bar
+            # worth sweeping; the caption's own top is the honest fallback.
+            slots.append({"point": (cx, row_y or s["b"][1]), "selected": True})
     return slots
 
 

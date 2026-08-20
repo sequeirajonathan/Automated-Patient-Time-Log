@@ -2759,3 +2759,51 @@ class TestAKeypadIsALockWhereverItIsDrawn:
         """The refusal is what makes the screen disclosable: no photograph,
         but the page and the auth trigger both get to see there is a lock."""
         assert feed.text_is_disclosable(feed.LOGIN_ACTIVITY) is True
+
+
+class TestSidewaysAtAnyResolution:
+    """`landscape` turns the console's phone preview a quarter turn and puts
+    the app page in its wide layout, so getting it wrong is not subtle.
+
+    It used to be decided by hunting for an x-coordinate of 800 or more,
+    which reads as "sideways" only because a 720-wide screen has none of
+    those in portrait. Every portrait screen on a 1080-wide phone carries
+    them, so the rule would have fired on all of them — every screen
+    rendered sideways, always. Found by auditing before swapping the device
+    rather than afterwards.
+    """
+
+    @staticmethod
+    def _tree(width, height):
+        return (f'<hierarchy rotation="0"><node bounds="[0,0][{width},{height}]">'
+                f'<node bounds="[10,20][{width - 10},{height // 2}]"/>'
+                f'</node></hierarchy>')
+
+    @pytest.mark.parametrize("width,height", [(720, 1600), (1080, 2400),
+                                              (1440, 3120)])
+    def test_portrait_is_portrait_on_every_panel(self, width, height):
+        assert feed._looks_landscape(self._tree(width, height)) is False
+
+    @pytest.mark.parametrize("width,height", [(1600, 720), (2400, 1080)])
+    def test_sideways_is_sideways_on_every_panel(self, width, height):
+        assert feed._looks_landscape(self._tree(width, height)) is True
+
+    def test_the_phone_this_was_written_on_still_reads_the_same(self):
+        """The 720x1600 device in Florida must not change behaviour."""
+        assert feed._looks_landscape(self._tree(720, 1600)) is False
+        assert feed._looks_landscape(self._tree(1600, 720)) is True
+
+    def test_a_1080_portrait_screen_is_the_case_that_used_to_break(self):
+        """Named on its own because it is the whole reason for the change:
+        the old rule matched any x past 800, and this tree is full of them."""
+        tree = self._tree(1080, 2400)
+        assert "[1070," in tree                     # coordinates past 800
+        assert feed._looks_landscape(tree) is False
+
+    def test_nothing_to_read_is_not_sideways(self):
+        for empty in (None, "", "<hierarchy/>"):
+            assert feed._looks_landscape(empty) is False
+
+    def test_the_extent_is_the_widest_and_tallest_the_tree_mentions(self):
+        assert feed.screen_extent(self._tree(720, 1600)) == (720, 1600)
+        assert feed.screen_extent(None) == (0, 0)
