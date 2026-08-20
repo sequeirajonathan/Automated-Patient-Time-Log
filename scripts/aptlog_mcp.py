@@ -484,5 +484,75 @@ PY
     return _text(ssh(probe, timeout=DEPLOY_TIMEOUT)) or "no answer"
 
 
+# ----------------------------------------------------------------------- tree
+@server.tool(
+    name="aptlog_tree",
+    annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+)
+def aptlog_tree(
+    grep: Annotated[str, Field(
+        description="Only nodes containing this, case-insensitively. Empty "
+                    "returns the whole tree.")] = "",
+    lines: Annotated[int, Field(
+        description="Most nodes to return (default 120).")] = 120,
+) -> str:
+    """The RAW accessibility tree, read the way the feed reads it.
+
+    `aptlog_screen` publishes the reflow's view — clickables, statics, the
+    words. This is the document underneath it, for the times that is not
+    enough: a resource-id on a node nobody taps, an attribute the reflow
+    drops, a screen being mapped on a phone for the first time.
+
+    READ FROM DISK, NOT FROM THE PHONE, and that is the whole point. There
+    are two ways to ask a device for its tree and both fight the feed.
+    `adb shell uiautomator dump` spawns a fresh instrumentation and competes
+    for the same service — doing it during setup work wedged Appium hard
+    enough to need a restart. Calling `read_hierarchy` from another process
+    is worse: it opens a SECOND Appium session, and UiAutomator2 allows
+    exactly one.
+
+    So the feed writes the tree down every time it reads one, and this reads
+    the file. Nothing is asked of the phone, nothing can contend, and the
+    answer is available even while Appium is restarting. Its age is printed
+    because a file is only as current as the last read.
+
+    TYPED TEXT IS BLANKED, and not as an afterthought. The published document
+    withholds the contents of editable fields on purpose — that is where a
+    passcode and a texted code live while she is typing them — and a raw tree
+    would hand back precisely what the rest of the system refuses to carry.
+    The node, its id and its bounds all survive; only what was typed into it
+    does not.
+    """
+    want = "".join(c for c in grep if c.isalnum() or c in " ._-:/")[:60]
+    probe = """
+python3 - <<'INNER'
+import os, time
+PATH = "/var/lib/aptlog/hierarchy.xml"
+try:
+    xml = open(PATH, encoding="utf-8").read()
+    age = time.time() - os.path.getmtime(PATH)
+except OSError as exc:
+    print("no tree on disk yet (%s)" % exc)
+    raise SystemExit
+
+nodes = []
+for n in xml.split("<"):
+    n = n.strip()
+    if n and not n.startswith("?") and not n.startswith("/"):
+        nodes.append("<" + n)
+want = WANT.lower()
+shown = [n for n in nodes if want in n.lower()] if want else nodes
+print("%d nodes%s, tree is %.0fs old"
+      % (len(shown), (" matching %r" % want) if want else "", age))
+for n in shown[:LIMIT]:
+    print(n[:400])
+if len(shown) > LIMIT:
+    print("... %d more" % (len(shown) - LIMIT))
+INNER
+"""
+    probe = probe.replace("WANT", repr(want)).replace("LIMIT", str(int(lines)))
+    return _text(ssh(probe, timeout=DEPLOY_TIMEOUT)) or "no answer"
+
+
 if __name__ == "__main__":
     server.run("stdio")
