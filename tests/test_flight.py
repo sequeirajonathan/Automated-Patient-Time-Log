@@ -84,3 +84,56 @@ class TestReplay:
         model = screenview.build(flight.replay(flight.entries(target)[0]))
         assert model is not None
         assert model["rows"]
+
+
+class TestAReplayThatDoesNotLie:
+    """The recorder's whole point is that a screen seen once can be tuned
+    offline. A replay that reports a fault the phone does not have costs
+    more than the screens it was built to reach.
+
+    It did: `strip` kept a resource-id on EVERY static, while the feed keeps
+    one only on the textless ones (a named state image, whose id IS its
+    meaning). The reflow hands an item an aim when its node carries an id —
+    so in a replay every caption came back tappable, and a nav bar whose
+    title had quietly become a button stopped being read as a nav bar at
+    all. Found while replaying a real check-in: the EVV screen's title bar
+    vanished offline and was perfectly fine on the phone.
+    """
+
+    def _entry(self, tmp_path):
+        target = tmp_path / "flight.jsonl"
+        flight.record(doc(statics=[
+            {"cls": "TextView", "b": [0, 60, 720, 120], "txt": "Un título"},
+            {"cls": "ImageView", "b": [0, 130, 40, 170], "txt": "",
+             "rid": "imgStartTime"},
+        ]), target, seen=set())
+        return flight.entries(target)[0]
+
+    def test_a_caption_carries_no_id_to_be_pressed_by(self, tmp_path):
+        assert "rid" not in flight.replay(self._entry(tmp_path))["statics"][0]
+
+    def test_a_named_state_image_still_does(self, tmp_path):
+        """Textless and named: the visits list's drawable check marks, whose
+        id is the only thing that says what they mean."""
+        assert flight.replay(self._entry(tmp_path))["statics"][1]["rid"] \
+            == "imgStartTime"
+
+    def test_an_entry_recorded_before_the_guard_replays_honestly(self):
+        """The file on the controller is a rolling record weeks deep. The
+        guard runs on the way out as well as the way in, so what is already
+        written replays the way the phone published it."""
+        old = {"id": "s1", "at": "", "app": "com.x", "screen": "visit",
+               "blocked": "", "size": [720, 1600], "elements": [],
+               "statics": [{"cls": "TextView", "b": [0, 60, 720, 120],
+                            "rid": "some_caption", "len": 9}]}
+        assert "rid" not in flight.replay(old)["statics"][0]
+
+    def test_a_replayed_caption_is_not_offered_as_a_control(self, tmp_path):
+        from apt_log.ui import screenview
+
+        model = screenview.build(flight.replay(self._entry(tmp_path)))
+        # The named state image beside it keeps its aim, live and replayed
+        # alike — that one really does carry an id. Only the caption changed.
+        captions = [i for row in model["rows"] for i in row["items"]
+                    if i["kind"] == "label" and len(i.get("txt") or "") > 1]
+        assert captions and not any(c.get("aim") for c in captions)

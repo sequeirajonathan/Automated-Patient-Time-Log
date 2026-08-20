@@ -51,6 +51,17 @@ BAND_OVERLAP = 0.5
 SEGMENT_MAX_WIDTH = 0.18
 SEGMENT_MAX_GAP = 0.02
 
+# A TAB BAR WHOSE CURRENT TAB IS NOT A CONTROL. HHAeXchange+ marks the EVV
+# screen's tab by taking its click handler away: "Dispositivo o FOB" is an
+# element with bounds, and "GPS" — the tab she is actually on — is nothing
+# but a word centred in the other half. What says "tab bar" is the geometry:
+# equal, screen-width-dividing slots with a caption on each slot's centre
+# line. A tab is a big target, never a chip, and an ordinary row's caption
+# sits at its left margin rather than on a centre line — which is what keeps
+# this from firing on lists.
+TAB_SLOT_MIN_WIDTH = 0.25
+TAB_SLOT_TOLERANCE = 0.06
+
 # The top of the screen, where an app keeps its own navigation bar: the
 # first band is a nav when it STARTS at the very top, ENDS above the
 # content, and every tappable in it is a small utility button — a back
@@ -459,6 +470,13 @@ def _item(node: dict, kind: str) -> dict:
         "enabled": node.get("enabled", True) is not False,
         # A tick box rather than an on/off switch. See CHECKS.
         "check": node.get("cls") in CHECKS,
+        # The widget class the app used, carried through because some
+        # readings need to know a caption from a spent control: HHAeXchange's
+        # visit detail publishes a used-up "Registrar entrada" as a
+        # non-clickable BUTTON, and HHAeXchange+ publishes the tab you are on
+        # as a non-clickable TEXTVIEW. Both arrive as statics; only one of
+        # them is a tab. See `_slot_tabs`.
+        "cls": node.get("cls", ""),
         "b": node["b"],
     }
     # A name the PORTAL supplies for a control the app left nameless, carried
@@ -1088,6 +1106,23 @@ def build(doc: dict) -> dict | None:
                           ordered[-1]["b"][2], ordered[-1]["b"][3]],
                     "parts": ordered}]
 
+    # ...and HHAeXchange+ says the same thing a third way: by publishing the
+    # tab she is on as no control at all. On the EVV screen only "Dispositivo
+    # o FOB" is an element; "GPS", the tab that is open, is a bare centred
+    # word. Rendered as they arrive, the portal showed a loose caption beside
+    # one live button — the only thing that looked current was the tab she
+    # was NOT on. Reported from the field during a real check-in: "the GPS
+    # tab wasn't selected, it doesn't say which option is selected".
+    for band in bands:
+        parts = _slot_tabs(band, w)
+        if parts:
+            band[:] = [{"kind": "segment",
+                        "b": [parts[0]["b"][0],
+                              min(p["b"][1] for p in parts),
+                              parts[-1]["b"][2],
+                              max(p["b"][3] for p in parts)],
+                        "parts": parts}]
+
     # --------------------------------------------------------------- segments
     for band in bands:
         _pair_segments(band, w)
@@ -1368,6 +1403,76 @@ def _tiled(band: list[dict]) -> bool:
     ordered = sorted(band, key=lambda n: n["b"][0])
     return all(ordered[i]["b"][2] <= ordered[i + 1]["b"][0]
                for i in range(len(ordered) - 1))
+
+
+def _slot_tabs(band: list[dict], width: int) -> list[dict] | None:
+    """A tab bar whose current tab was published as a caption, not a control.
+
+    Returns the parts of the segment it should become, in screen order, or
+    None when this band is not that. The test is entirely geometric, because
+    the tree gives nothing else to go on: the open tab has no click handler,
+    no state flag, and no name of its own — it is a word, and the only thing
+    that makes it a tab is where the word sits.
+
+    So: every tappable in the band is the same big width, that width divides
+    the screen into a whole number of slots, every item sits on its slot's
+    centre line, and no slot is either empty or doubly occupied. A list row
+    fails on the centre line, a chip row fails on the width, and a partial
+    match fails outright rather than guessing — a tab bar drawn with the
+    wrong tab lit is worse than one drawn plainly.
+    """
+    tabs = [i for i in band if i["kind"] != "label" and i.get("aim")]
+    # A caption, not a spent control. Both arrive as statics and both sit in
+    # their slot, so the class is the only thing that tells them apart: the
+    # legacy visit detail's used-up "Registrar entrada" is a non-clickable
+    # BUTTON beside a live Clock Out, and reading that pair as a tab bar
+    # would have the portal announce "you are on the check-in tab" about two
+    # things that are not tabs and not a choice.
+    captions = [i for i in band
+                if i["kind"] == "label" and i.get("cls") in TEXTS]
+    if not tabs or not captions or len(tabs) + len(captions) != len(band):
+        return None
+    if not _tiled(band):
+        return None
+    span = max(t["b"][2] - t["b"][0] for t in tabs)
+    if span < width * TAB_SLOT_MIN_WIDTH:
+        return None
+    if any(abs((t["b"][2] - t["b"][0]) - span) > 0.1 * span for t in tabs):
+        return None
+    slots = round(width / span)
+    if slots < 2 or abs(slots * span - width) > 0.1 * width:
+        return None
+
+    seat_width = width / slots
+    tolerance = width * TAB_SLOT_TOLERANCE
+    seats: dict[int, dict] = {}
+    for item in band:
+        centre = (item["b"][0] + item["b"][2]) / 2
+        seat = int(centre // seat_width)
+        if abs(centre - (seat + 0.5) * seat_width) > tolerance or seat in seats:
+            return None
+        seats[seat] = item
+    if len(seats) != slots:
+        return None
+
+    parts = []
+    for seat in sorted(seats):
+        item = seats[seat]
+        part = dict(item)
+        # The caption IS the open tab: it is the one the app took the click
+        # handler off. Nothing to press, and the template draws a checked
+        # part as "you are here" rather than as a disabled control.
+        part["checked"] = item["kind"] == "label"
+        if part["checked"]:
+            part["aim"] = None
+        # A segment part shows one caption, and a folded row keeps its own in
+        # `lines` — the same move the disabled pair above makes.
+        if not (part.get("txt") or "").strip() and part.get("lines"):
+            part["txt"] = part["lines"][0]
+        if not (part.get("txt") or "").strip():
+            return None
+        parts.append(part)
+    return parts
 
 
 def _band_shape(band: list[dict], height: int) -> dict:
