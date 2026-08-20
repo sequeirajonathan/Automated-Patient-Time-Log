@@ -677,10 +677,14 @@ class TestConsoleFormsAreOrdinaryForms:
         assert body.count("addEventListener('submit'") == 1
         assert "data-confirm" in body
 
-    def test_the_reboot_is_the_only_thing_that_asks(self, client):
+    def test_the_reboot_is_the_only_thing_here_that_asks(self, client):
         """Everything else is one press. A confirmation on a control that can
         be undone by pressing it again is a step people learn to click
-        through, which is how the one that matters gets clicked through too."""
+        through, which is how the one that matters gets clicked through too.
+
+        Scoped to what this page OFFERS. `update_app` also asks, and is
+        deliberately not among the standing operations — it appears on the
+        app page only where an update is actually being demanded."""
         import re
 
         from apt_log import macros
@@ -688,7 +692,8 @@ class TestConsoleFormsAreOrdinaryForms:
         body = client.get("/console").text
         asked = re.findall(r'data-confirm="[^"]*"[^>]*>\s*<input[^>]*value="([a-z_]+)"',
                            body)
-        assert set(asked) == set(macros.CONFIRM)
+        assert set(asked) == set(macros.CONFIRM) & set(macros.OPERATIONS)
+        assert asked == ["restart_phone"]
 
     def test_the_shadowed_property_is_never_dereferenced_anywhere(self):
         """The phone view does intercept — its controls ride the socket — so
@@ -1593,7 +1598,8 @@ class TestTheCoveredCard:
         been reading the panel. "Syncing" over the card would be two answers
         to one question."""
         css = client.get("/app").text
-        assert "body.stale:not(.asleep):not(.offapp):not(.covered)" in css
+        assert ("body.stale:not(.asleep):not(.offapp):not(.covered)"
+                ":not(.walled)") in css
 
     def test_the_button_runs_the_macro(self):
         source = strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
@@ -2680,3 +2686,116 @@ class TestTheTickThatSaysWhatItTicks:
                / "src/apt_log/ui/screenview.py").read_text(encoding="utf-8")
         body = src[src.index("def label_keys"):]
         assert 'walk(it.get("marks"))' in body[:body.index("\n    for row")]
+
+
+class TestTheUpdateWallCard:
+    """Mobile Caregiver+ raised its forced-update wall and the app became
+    unusable. Rendered as an ordinary page it is one button — and that button
+    opens the Play Store, where the containment watchdog bounces her back
+    within five seconds, so from this side it is a loop with no way out.
+
+    The card is the way out, and it is contextual for the same reason the
+    covered card is: a standing "replace this app" button is not a thing to
+    have within reach.
+    """
+
+    SCRIPT = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/static/phone.js")
+
+    def test_the_card_is_in_the_page(self, client):
+        body = client.get("/app").text
+        assert 'id="walled"' in body
+        assert 'id="walled-update"' in body
+
+    def test_it_is_hidden_until_an_update_is_being_demanded(self, client):
+        import re
+
+        css = re.sub(r"/\*.*?\*/", "", client.get("/app").text, flags=re.S)
+        rule = re.search(r"#walled \{[^}]*\}", css)
+        assert rule and "display:none" in rule.group(0)
+        assert "body.walled:not(.covered) #walled { display:flex; }" in css
+
+    def test_the_loading_skeleton_does_not_argue_with_it_either(self, client):
+        """A screen behind an update wall is stale by definition — the app is
+        never going to draw anything else. "Syncing" beside the card would be
+        two answers to one question, and it is the wrong one."""
+        css = client.get("/app").text
+        assert ("body.stale:not(.asleep):not(.offapp):not(.covered)"
+                ":not(.walled)") in css
+
+    def test_a_shade_over_a_wall_is_still_a_shade(self, client):
+        """Both cards answer "the app in front cannot be used", and only one
+        of them can be the answer. The panel wins: nothing she taps reaches
+        the app underneath it, including this card's own button."""
+        import re
+
+        css = re.sub(r"/\*.*?\*/", "", client.get("/app").text, flags=re.S)
+        assert "body.walled:not(.covered) #screenwrap" in css
+
+    def test_the_button_runs_the_macro(self):
+        source = strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
+        assert "walled-update" in source
+        assert "update_app" in source
+
+    def test_it_asks_before_replacing_the_app(self):
+        """The only button on this page that does. There is no going back to
+        the old build from the phone, and every rule the portal has for
+        reading that app was written against the one being removed."""
+        source = strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
+        assert "window.confirm(ask)" in source
+        assert 'data-confirm' in client_body_of()
+
+    def test_the_wait_outlasts_a_download(self):
+        """A spinner that gives up while Play is still working is how a
+        finished update gets reported as a failure."""
+        source = strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
+        assert "480000" in source
+
+    def test_the_class_follows_the_published_flag(self):
+        source = strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
+        assert "body.classList.toggle('walled', !!meta.walled)" in source
+
+    def test_the_flag_reaches_the_browser(self):
+        source = (Path(__file__).resolve().parents[1]
+                  / "src/apt_log/ui/app.py").read_text(encoding="utf-8")
+        assert '"walled": _update_wall(screen_doc)' in source
+
+    def test_the_flag_is_the_macros_own_answer(self):
+        """Not a second opinion about the same screen. The card appears on
+        exactly the reading the macro will act on."""
+        from apt_log.ui.app import _update_wall
+
+        wall = {"app": "com.tellus.evv.v2",
+                "statics": [{"txt": "Actualizar ahora"}],
+                "elements": [{"txt": "Actualizar ahora"}]}
+        assert _update_wall(wall) is True
+        assert _update_wall(
+            {"app": "com.tellus.evv.v2",
+             "statics": [{"txt": "Mis visitas"}], "elements": []}) is False
+
+    def test_a_page_shaped_unexpectedly_costs_the_card_not_the_frame(self):
+        from apt_log.ui.app import _update_wall
+
+        assert _update_wall({"app": "com.tellus.evv.v2",
+                             "statics": "not a list"}) is False
+
+    @pytest.mark.parametrize("key", ["papp.walled", "papp.walled_hint",
+                                     "papp.walled_action", "papp.updating",
+                                     "macro.update_app",
+                                     "macro.sure.update_app"])
+    def test_both_languages_say_it(self, key):
+        import json
+
+        base = Path(__file__).resolve().parents[1] / "src/apt_log/ui/locales"
+        for name in ("en.json", "es.json"):
+            words = json.loads((base / name).read_text(encoding="utf-8"))
+            assert words.get(key), f"{key} missing from {name}"
+
+
+def client_body_of() -> str:
+    """The app page's markup, for a test that needs both it and the script."""
+    from fastapi.testclient import TestClient
+
+    from apt_log.ui.app import app as fastapi_app
+
+    return TestClient(fastapi_app).get("/app").text

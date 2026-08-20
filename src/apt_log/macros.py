@@ -711,10 +711,15 @@ _MC_SIGN_IN = ('//android.widget.Button'
 # A macro reporting success over a wall is worse than one that fails, because
 # the next thing anybody does is trust it.
 #
-# The button is NOT pressed. It leads to the Play Store, and installing a new
-# version of an app this project reads by resource-id is a change to every
+# The button is NOT pressed HERE. It leads to the Play Store, and installing a
+# new version of an app this project reads by resource-id is a change to every
 # assumption in this file — a decision for a person on a morning when
 # somebody can check afterwards, not for a macro at 6am.
+#
+# There is now a way for that person to say yes: `_update_app`, offered on the
+# app page only while this wall is up, and confirmed before it runs. That is
+# the same reasoning, not a reversal of it — the objection was never to the
+# act, it was to the act happening unattended.
 UPDATE_WALL_MARKERS = {
     "com.tellus.evv.v2": (
         "actualizar ahora", "nueva versión disponible",
@@ -1750,6 +1755,151 @@ def _force_stop(package: str) -> None:
     feed_mod._adb(["shell", "am", "force-stop", package])
 
 
+# THE UPDATE WALL, ANSWERED — BY A PERSON, ON PURPOSE.
+#
+# `UPDATE_WALL_MARKERS` above says why the wall is never pressed automatically:
+# installing a new version of an app this project reads by resource-id changes
+# every assumption in this file, and that is a decision for a morning when
+# somebody can check afterwards, not for a macro at 6am.
+#
+# What that reasoning does NOT justify is having no way to do it at all. Mobile
+# Caregiver+ raised its wall and the app was simply unusable — no visit can be
+# recorded on a screen whose only control leads to the Play Store — and the
+# alternative to this macro is a person driving the Store through the phone
+# peek, on a device with the containment watchdog bouncing them back to the
+# care app every five seconds.
+#
+# So: deliberate, confirmed, and only offered where an update is actually
+# being demanded. It runs as a macro, which is what pauses containment — the
+# watchdog already stands down for a macro in flight, and resumes the moment
+# this one ends, however it ends.
+STORE_PACKAGE = "com.android.vending"
+
+# Play's own button, in the two languages this phone is ever in. Matched on
+# the wording rather than a resource-id because the Store's ids are generated
+# and change between its own releases — the one app here guaranteed to be
+# newer than anything written about it.
+STORE_UPDATE_WORDS = ("actualizar", "update")
+
+# ...and the wordings that START with those and mean something else. "Update
+# all" on a Store landing page updates eleven apps nobody asked about; the
+# settings row toggles automatic updates for the whole phone. Neither belongs
+# to the app this macro was pointed at.
+STORE_NOT_UPDATE = ("actualizar todo", "update all", "actualizaciones",
+                    "auto-actualizar", "auto-update", "updates")
+
+# An APK over Wi-Fi, with the download and the install both inside it. Long,
+# because the failure mode of a short wait here is a macro that reports
+# failure over an update that then lands anyway.
+STORE_INSTALL_TIMEOUT = 420.0
+STORE_POLL = 6.0
+
+# The listing draws in stages and the button is not in the first of them.
+STORE_BUTTON_TRIES = 6
+STORE_BUTTON_WAIT = 2.0
+
+
+def _store_update_button(driver):
+    """Play's Update button for the app this page is about, or None."""
+    hits = driver.find_elements(
+        "xpath",
+        '//*[@clickable="true" and ('
+        + " or ".join(
+            f'contains(translate(@text,'
+            f'"ABCDEFGHIJKLMNOPQRSTUVWXYZÁÉÍÓÚ",'
+            f'"abcdefghijklmnopqrstuvwxyzáéíóú"),"{word}") or '
+            f'contains(translate(@content-desc,'
+            f'"ABCDEFGHIJKLMNOPQRSTUVWXYZÁÉÍÓÚ",'
+            f'"abcdefghijklmnopqrstuvwxyzáéíóú"),"{word}")'
+            for word in STORE_UPDATE_WORDS)
+        + ')]')
+    for hit in hits:
+        try:
+            label = ((hit.text or "")
+                     or (hit.get_attribute("content-desc") or "")).lower()
+        except Exception:  # noqa: BLE001 — a stale node is not a button
+            continue
+        if any(bad in label for bad in STORE_NOT_UPDATE):
+            continue
+        return hit
+    return None
+
+
+def _update_app(driver, report) -> None:
+    """Take the app in front through the Play Store's update, and come back.
+
+    Watched to completion by the VERSION, not by the Store's own screen: the
+    button that says "Open" when it is done is the same button that said
+    "Update" a minute ago, drawn by an app that redesigns itself, while
+    `dumpsys package` answers the actual question — is a different build
+    installed than the one that was installed when this started.
+    """
+    from apt_log import feed as feed_mod
+    from apt_log import versions as versions_mod
+
+    package = _last_care_package()
+    if package not in feed_mod.CARE_APPS:
+        raise RuntimeError("the phone is not showing one of the care apps")
+    if feed_mod.retired(package):
+        raise RuntimeError("that app has been retired")
+
+    was = versions_mod.of(package)
+    report("macro.step.opening_store")
+    wake_display()
+    feed_mod._adb(["shell", "am", "start", "-a", "android.intent.action.VIEW",
+                   "-d", f"market://details?id={package}"])
+    if not wait_for(lambda: _front_package() == STORE_PACKAGE, timeout=25.0):
+        raise RuntimeError("the Play Store did not open")
+
+    report("macro.step.updating")
+    button = None
+    for _ in range(STORE_BUTTON_TRIES):
+        button = _store_update_button(driver)
+        if button is not None:
+            break
+        time.sleep(STORE_BUTTON_WAIT)
+    if button is None:
+        # Said plainly rather than waited out. "The Store is not offering one"
+        # is a real answer — it is what a phone whose update already landed in
+        # the background looks like — and it is not the same as a failure.
+        _back_to(package, report)
+        raise RuntimeError("the Play Store is not offering an update for this app")
+
+    rect = button.rect
+    driver.tap([(rect["x"] + rect["width"] // 2,
+                 rect["y"] + rect["height"] // 2)])
+
+    report("macro.step.installing")
+    end = time.time() + STORE_INSTALL_TIMEOUT
+    while time.time() < end:
+        time.sleep(STORE_POLL)
+        now = versions_mod.of(package)
+        if now and now.get("code") and now.get("code") != was.get("code"):
+            break
+    else:
+        _back_to(package, report)
+        raise RuntimeError("the update did not finish in time")
+
+    # The new build may draw its pages differently, and the whole-page cache
+    # is keyed by app rather than by version — so a stitched document from
+    # five minutes ago is now a picture of software that is no longer on the
+    # phone.
+    _forget_stitched(package)
+    _back_to(package, report)
+    # Records the change and logs it, so the console marks which app moved.
+    versions_mod.check(force=True)
+
+
+def _back_to(package: str, report) -> None:
+    """Out of the Store and back into the care app, whatever happened."""
+    from apt_log import feed as feed_mod
+
+    report("macro.step.launching")
+    feed_mod._adb(["shell", "monkey", "-p", package,
+                   "-c", "android.intent.category.LAUNCHER", "1"])
+    wait_for(lambda: _front_package() == package, timeout=30.0)
+
+
 def _close_app(driver, report) -> None:
     """Close the app in front, and leave the phone on the launcher.
 
@@ -2099,6 +2249,7 @@ MACROS: dict[str, Macro] = {
         Macro("check_tasks", "macro.check_tasks", _check_tasks),
         Macro("phone_settings", "macro.phone_settings", _phone_settings),
         Macro("restart_phone", "macro.restart_phone", _restart_phone),
+        Macro("update_app", "macro.update_app", _update_app),
     )
 }
 
@@ -2113,8 +2264,15 @@ MACROS: dict[str, Macro] = {
 OPERATIONS = ("rescan", "read_page", "clear_screen", "restart_app",
               "close_app", "phone_settings", "restart_phone")
 
-# The one that cannot be undone by pressing it again. The page asks first.
-CONFIRM = ("restart_phone",)
+# The ones that cannot be undone by pressing it again. The page asks first.
+#
+# `update_app` belongs here for a reason unlike the other's: a reboot costs a
+# minute, while an install replaces the software this whole project is written
+# against and there is no going back to the old build from the phone. It is
+# also deliberately absent from OPERATIONS — it appears only on the screen
+# where an update is actually being demanded, because a button offering to
+# replace an app is not a thing to have standing by.
+CONFIRM = ("restart_phone", "update_app")
 
 
 # Session-expiry dialogs, per app. A dialog whose wording is recognised as

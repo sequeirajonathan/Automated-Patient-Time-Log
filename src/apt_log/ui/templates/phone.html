@@ -238,8 +238,10 @@
 
   body.stale .hdr-sub .dot::before,
   body.stale .hdr-sub .dot::after { background:hsl(38 92% 50%); }
-  body.stale:not(.asleep):not(.offapp):not(.covered) #screenwrap { display:none; }
-  body.stale:not(.asleep):not(.offapp):not(.covered) #syncing { display:block; }
+  body.stale:not(.asleep):not(.offapp):not(.covered):not(.walled)
+    #screenwrap { display:none; }
+  body.stale:not(.asleep):not(.offapp):not(.covered):not(.walled)
+    #syncing { display:block; }
 
   /* The skeleton: the native loading language — placeholder rows breathing
      where content is about to be, never a spinner over old data. */
@@ -808,6 +810,23 @@
   body.covered #screenwrap, body.covered #offapp { display:none; }
   body.covered #covered { display:flex; }
 
+  /* The update wall, wearing the same clothes as the covered card: same
+     shape, same one button, because it is the same kind of moment — the app
+     is in front and nothing on it can be used. Ranked BELOW covered, since a
+     shade over an update wall is still a shade. */
+  #walled { display:none; flex-direction:column; align-items:center;
+            gap:8px; margin:12px 16px; padding:18px 16px;
+            border-radius:16px; background:var(--card);
+            box-shadow:var(--shadow-card); text-align:center;
+            color:var(--muted); }
+  #walled svg { width:30px; height:30px; opacity:.6; }
+  #walled p { margin:0; font-size:15.5px; color:var(--ink); }
+  #walled p.muted { font-size:13px; color:var(--muted); }
+  #walled .a-btn { margin-top:6px; min-width:170px; }
+  body.walled:not(.covered) #screenwrap,
+  body.walled:not(.covered) #offapp { display:none; }
+  body.walled:not(.covered) #walled { display:flex; }
+
   /* The phone-scroll pair lives in the photo view only — the owner's
      spec: the reflow already lists everything in the phone's viewport, so
      arrows there are noise; the photo IS the phone's screen, and moving
@@ -1209,6 +1228,23 @@
       <button type="button" class="a-btn" id="covered-clear"
               style="flex:none">{{ t('papp.covered_action') }}</button>
     </div>
+    {# The app is refusing to be used until a newer version is installed.
+       Its own screen has exactly one control, which opens the Play Store —
+       where the containment watchdog bounces her back within five seconds,
+       so from this side it is a loop with no way out. This card is the way
+       out: the same act, run as a macro, which is what stands the watchdog
+       down while it happens. It asks first, because an install replaces the
+       software this portal is written against and there is no undoing it
+       from the phone. #}
+    <div id="walled">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.6"><path d="M12 3.5v11"/><path d="M8 10.5 12 14.5 16 10.5"/><path d="M4.5 17.5v1.5a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5v-1.5"/></svg>
+      <p>{{ t('papp.walled') }}</p>
+      <p class="muted">{{ t('papp.walled_hint') }}</p>
+      <button type="button" class="a-btn" id="walled-update"
+              data-confirm="{{ t('macro.sure.update_app') }}"
+              style="flex:none">{{ t('papp.walled_action') }}</button>
+    </div>
     <div id="peekwrap"><img id="peek" alt=""></div>
     <div id="peek-cap" hidden></div>
     <div id="busy"><div class="spinner"></div><p id="busy-text"></p></div>
@@ -1377,6 +1413,7 @@
     webTitle: {{ t('papp.web')|tojson }},
     scanning: {{ t('papp.scanning')|tojson }},
     clearing: {{ t('papp.clearing')|tojson }},
+    updating: {{ t('papp.updating')|tojson }},
     checkingTasks: {{ t('macro.step.checking')|tojson }},
     coachOn:   {{ t('papp.coach_on')|tojson }},
     coachOff:  {{ t('papp.coach_off')|tojson }},

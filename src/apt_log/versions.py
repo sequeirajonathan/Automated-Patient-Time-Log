@@ -104,6 +104,28 @@ def parse(text: str) -> dict[str, dict]:
     return found
 
 
+def of(package: str, serial: str | None = None) -> dict:
+    """One app's version, read off the phone right now.
+
+    Straight from the device rather than from the record, because the two
+    callers that want this are asking "has it changed *since a second ago*" —
+    an update macro watching an install finish, and whatever checks afterwards
+    that it did.
+    """
+    script = (f"dumpsys package {package} | "
+              'grep -E "versionName=|versionCode="')
+    cmd = ["adb"] + (["-s", serial] if serial else []) + ["shell", script]
+    try:
+        out = subprocess.run(cmd, capture_output=True, timeout=20, check=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.debug("cannot read %s: %s", package, exc)
+        return {}
+    if out.returncode != 0:
+        return {}
+    found = parse(f"pkg={package}\n" + out.stdout.decode("utf-8", "replace"))
+    return found.get(package, {})
+
+
 def stored(path: Path | None = None) -> dict:
     """What was on the phone last time anybody looked.
 

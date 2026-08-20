@@ -3195,3 +3195,161 @@ class TestTheUpdateWall:
         for name in ("en.json", "es.json"):
             words = json_mod.loads((base / name).read_text(encoding="utf-8"))
             assert words.get("macro.step.update_required")
+
+
+class TestAnsweringTheUpdateWall:
+    """The other half of the wall: a way for a PERSON to say yes.
+
+    Refusing to press it automatically was right and stays right — an
+    install replaces the software every rule in macros.py was written
+    against. But refusing automatically is not the same as having no way at
+    all, and Mobile Caregiver+ proved the difference by raising its wall on
+    a phone that then could not record anything: the app's own button opens
+    the Play Store, where the containment watchdog bounces her back within
+    five seconds. From the portal that is a loop with no way out.
+    """
+
+    MC = "com.tellus.evv.v2"
+
+    def _driver(self, label="Actualizar"):
+        from unittest.mock import MagicMock
+
+        driver = MagicMock()
+        button = MagicMock()
+        button.text = label
+        button.rect = {"x": 100, "y": 900, "width": 200, "height": 60}
+        driver.find_elements.return_value = [button]
+        return driver, button
+
+    def _run(self, driver, versions_seq, steps=None):
+        """Run the macro against a scripted phone.
+
+        The phone reports the Play Store in front until the macro sends the
+        launcher intent that brings the care app back — which is what really
+        happens, and what keeps `_back_to` from waiting out its timeout in
+        every one of these tests. `versions_seq` is what `dumpsys` answers,
+        read in order, so an install can be made to land on any poll.
+        """
+        from unittest.mock import patch as patch_mod
+
+        seen = list(versions_seq)
+        calls = {"adb": [], "forgot": []}
+
+        def front_package():
+            came_back = any("monkey" in a for a in calls["adb"])
+            return self.MC if came_back else "com.android.vending"
+
+        def version_of(package, serial=None):
+            return seen.pop(0) if len(seen) > 1 else seen[0]
+        with patch_mod.object(macros, "_front_package", front_package), \
+                patch_mod.object(macros, "_last_care_package",
+                                 lambda: self.MC), \
+                patch_mod.object(macros, "wake_display", lambda: None), \
+                patch_mod.object(macros, "_forget_stitched",
+                                 calls["forgot"].append), \
+                patch_mod("apt_log.feed._adb",
+                          lambda args, *a, **k: calls["adb"].append(args)), \
+                patch_mod("apt_log.versions.of", version_of), \
+                patch_mod("apt_log.versions.check", lambda **k: []), \
+                patch_mod.object(macros, "STORE_POLL", 0.0), \
+                patch_mod.object(macros, "STORE_BUTTON_WAIT", 0.0), \
+                patch_mod.object(macros, "STORE_INSTALL_TIMEOUT", 0.6):
+            macros.MACROS["update_app"].run(
+                driver, (steps if steps is not None else []).append)
+        return calls
+
+    def test_it_opens_the_store_on_the_app_it_was_pointed_at(self):
+        driver, _ = self._driver()
+        calls = self._run(driver, [{"code": "979"}, {"code": "980"}])
+        opened = [" ".join(a) for a in calls["adb"]]
+        assert any(f"market://details?id={self.MC}" in line for line in opened)
+
+    def test_it_presses_the_stores_update_button(self):
+        driver, button = self._driver()
+        self._run(driver, [{"code": "979"}, {"code": "980"}])
+        driver.tap.assert_called_once()
+        (point,), = driver.tap.call_args.args,
+        assert point == [(200, 930)]
+
+    def test_it_waits_for_the_version_to_change_not_for_the_store_to_say_so(
+            self):
+        """Play's "Open" is the same button that said "Update", drawn by the
+        one app here guaranteed to be newer than anything written about it.
+        `dumpsys package` answers the actual question."""
+        driver, _ = self._driver()
+        steps = []
+        self._run(driver,
+                  [{"code": "979"}, {"code": "979"}, {"code": "980"}], steps)
+        assert "macro.step.installing" in steps
+
+    def test_an_install_that_never_lands_is_a_failure_not_a_success(self):
+        driver, _ = self._driver()
+        with pytest.raises(RuntimeError, match="did not finish"):
+            self._run(driver, [{"code": "979"}])
+
+    def test_and_it_still_puts_the_app_back_in_front(self):
+        """However it ends. Leaving the phone parked in the Play Store is the
+        one outcome worse than not having tried."""
+        driver, _ = self._driver()
+        steps = []
+        with pytest.raises(RuntimeError):
+            self._run(driver, [{"code": "979"}], steps)
+        assert "macro.step.launching" in steps
+
+    def test_a_store_offering_nothing_says_so_rather_than_waiting(self):
+        """Which is what a phone whose update already landed in the
+        background looks like. Not a failure of the phone — a fact."""
+        driver, _ = self._driver()
+        driver.find_elements.return_value = []
+        with pytest.raises(RuntimeError, match="not offering an update"):
+            self._run(driver, [{"code": "979"}])
+
+    def test_update_all_is_never_what_it_presses(self):
+        """On a Store landing page that button updates eleven apps nobody
+        asked about."""
+        driver, _ = self._driver(label="Actualizar todo")
+        with pytest.raises(RuntimeError, match="not offering an update"):
+            self._run(driver, [{"code": "979"}])
+        driver.tap.assert_not_called()
+
+    def test_it_refuses_when_the_phone_is_not_showing_a_care_app(self):
+        from unittest.mock import MagicMock, patch as patch_mod
+
+        with patch_mod.object(macros, "_last_care_package",
+                              lambda: "com.android.chrome"):
+            with pytest.raises(RuntimeError, match="care apps"):
+                macros.MACROS["update_app"].run(MagicMock(), lambda _k: None)
+
+    def test_it_refuses_for_the_retired_app(self):
+        from unittest.mock import MagicMock, patch as patch_mod
+
+        with patch_mod.object(macros, "_last_care_package",
+                              lambda: "com.hhaexchange.caregiver"):
+            with pytest.raises(RuntimeError, match="retired"):
+                macros.MACROS["update_app"].run(MagicMock(), lambda _k: None)
+
+    def test_the_stitched_page_is_thrown_away_after_an_update(self):
+        """The whole-page cache is keyed by app, not by version — so a
+        document from five minutes ago is a picture of software that is no
+        longer on the phone."""
+        driver, _ = self._driver()
+        calls = self._run(driver, [{"code": "979"}, {"code": "980"}])
+        assert calls["forgot"] == [self.MC]
+
+    def test_it_asks_first_and_is_not_a_standing_button(self):
+        """It replaces the app this project is written against, and there is
+        no going back to the old build from the phone."""
+        assert "update_app" in macros.CONFIRM
+        assert "update_app" not in macros.OPERATIONS
+
+    def test_both_languages_can_ask(self):
+        import json as json_mod
+        from pathlib import Path
+
+        base = Path(__file__).resolve().parents[1] / "src/apt_log/ui/locales"
+        for name in ("en.json", "es.json"):
+            words = json_mod.loads((base / name).read_text(encoding="utf-8"))
+            for key in ("macro.update_app", "macro.sure.update_app",
+                        "macro.sure.restart_phone", "macro.step.opening_store",
+                        "macro.step.updating", "macro.step.installing"):
+                assert words.get(key), f"{key} missing from {name}"
