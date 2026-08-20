@@ -1912,3 +1912,128 @@ class TestWhatTalkBackIsToldToSay:
     def test_an_ordinary_sentence_is_left_alone(self):
         assert any("Carmen" in line
                    for line in self._lines("Carmen Villalon, 8:00 PM"))
+
+
+class TestTheSignatureScreenSheIsStandingOn:
+    """HHAeXchange+'s patient signature, at the bounds recorded live while a
+    caregiver was on it — rotated, 1534x681 inside a 720x1600 activity.
+
+    "I need this page FLESHED out and perfect... prioritize the front end
+    view... on the app it's the patient first then the staff."
+
+    What it looked like before: a patient's name truncated into the title
+    slot, a loose date, the canvas drawn as an ON/OFF SWITCH, and the app's
+    Borrar as a list row with a chevron beside the button that submits a
+    signature. The step counter — the only thing that says WHICH signature
+    this is — was thrown away entirely.
+    """
+
+    CANVAS = [18, 171, 1518, 525]
+
+    def _doc(self, canvas_role=None):
+        canvas = {"rid": "", "cls": "View", "b": self.CANVAS, "txt": "",
+                  "checked": False, "focused": False, "enabled": True}
+        if canvas_role:
+            canvas["role"] = canvas_role
+        return {"id": "f", "size": [720, 1600], "canvas": True, "blocked": "",
+                "notice": "",
+                "elements": [
+                    canvas,
+                    {"rid": "signature_screen_clear_button", "cls": "View",
+                     "b": [14, 656, 44, 681], "txt": "", "checked": False,
+                     "focused": False, "enabled": True},
+                    {"rid": "signature_screen_submit_button", "cls": "View",
+                     "b": [1474, 656, 1529, 681], "txt": "", "checked": False,
+                     "focused": False, "enabled": True},
+                    {"rid": "menu_top_bar_back_button", "cls": "View",
+                     "b": [6, 17, 31, 42], "txt": "", "checked": False,
+                     "focused": False, "enabled": True},
+                    {"rid": "help_button", "cls": "View",
+                     "b": [1507, 17, 1534, 43], "txt": "", "checked": False,
+                     "focused": False, "enabled": True},
+                ],
+                "statics": [
+                    st([7, 54, 96, 67], "08/19/2026 10:04 p. m."),
+                    st([14, 662, 44, 675], "Borrar"),
+                    st([1488, 663, 1515, 674], "Enviar"),
+                    st([6, 17, 31, 42], "Atrás", cls="View"),
+                    st([747, 15, 790, 30], "Paso 2 de 3"),
+                    st([688, 30, 849, 45], "CARIDAD M ROJAS BATISTA Firma de"),
+                    st([1507, 18, 1534, 42], "Ayuda", cls="View"),
+                ]}
+
+    def _items(self, model):
+        return [it for row in model["rows"] for it in row["items"]]
+
+    # ------------------------------------------------------------ the canvas
+    def test_the_thing_she_signs_on_is_a_canvas(self):
+        kinds = [it["kind"] for it in self._items(screenview.build(self._doc()))]
+        assert "canvas" in kinds
+
+    def test_not_a_switch(self):
+        """A screen reader's "double tap" says a node accepts a tap, not that
+        it is a checkbox — and the canvas carries one. Drawn as a switch, on
+        the page where a patient's signature is collected."""
+        model = screenview.build(self._doc(canvas_role="toggle"))
+        canvas = [it for it in self._items(model) if it["b"] == self.CANVAS]
+        assert canvas and canvas[0]["kind"] == "canvas"
+
+    def test_and_not_an_empty_list_cell(self):
+        model = screenview.build(self._doc())
+        rows = [it for it in self._items(model)
+                if it["kind"] == "row" and it["b"] == self.CANVAS]
+        assert not rows
+
+    def test_it_does_not_tap_through_to_the_phone(self):
+        """A tap on a canvas is a dot of ink where the finger landed. The
+        only place a signature can be drawn from here is the pad."""
+        model = screenview.build(self._doc())
+        canvas = next(it for it in self._items(model) if it["kind"] == "canvas")
+        assert canvas["b"] == self.CANVAS
+
+    def test_a_page_with_no_canvas_grows_none(self):
+        doc = self._doc()
+        doc["canvas"] = False
+        assert "canvas" not in [it["kind"] for it in
+                                self._items(screenview.build(doc))]
+
+    # -------------------------------------------------------------- the step
+    def test_the_step_survives(self):
+        """"Paso 2 de 3" is the difference between the patient's signature
+        and the caregiver's, and she has to know which one she is collecting
+        BEFORE she collects it."""
+        assert screenview.build(self._doc())["nav"]["step"] == "Paso 2 de 3"
+
+    def test_the_page_still_has_its_title(self):
+        assert screenview.build(self._doc())["nav"]["title"] \
+            == "CARIDAD M ROJAS BATISTA Firma de"
+
+    def test_a_step_counter_is_not_a_spelled_out_brand(self):
+        """Four tokens, two of them one character — the shape the logo rule
+        was written for. Nobody spells a brand out in numbers."""
+        assert not screenview._is_spelled_out("Paso 2 de 3")
+        assert not screenview._is_spelled_out("Step 2 of 3")
+        assert screenview._is_spelled_out("Logotipo de H H AeXchange +")
+
+    def test_a_name_with_initials_is_still_safe(self):
+        assert not screenview._is_spelled_out("A B Smith")
+
+    # ----------------------------------------------------------- the actions
+    def test_borrar_and_enviar_are_the_pages_actions(self):
+        """Not a list row with a chevron pointing at somewhere to browse,
+        beside the button that submits a patient's signature."""
+        model = screenview.build(self._doc())
+        assert any(row.get("actions") for row in model["rows"])
+
+    def test_the_affirmative_one_comes_last(self):
+        """The template fills the last action; the last one has to be the
+        one that submits."""
+        model = screenview.build(self._doc())
+        row = next(r for r in model["rows"] if r.get("actions"))
+        captions = [(it.get("txt") or (it.get("lines") or [""])[0])
+                    for it in row["items"]]
+        assert captions == ["Borrar", "Enviar"]
+
+    def test_the_bubbles_are_gone_from_this_screen_too(self):
+        nav = screenview.build(self._doc())["nav"]
+        assert nav["back"] is None and nav["trailing"] == []

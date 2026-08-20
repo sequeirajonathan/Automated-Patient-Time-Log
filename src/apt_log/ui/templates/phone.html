@@ -515,6 +515,27 @@
      app puts one there — its own magnifier in the corner. Before this, a
      search box arrived as an empty rectangle, its caption floating loose
      beside it and its magnifier as an unlabelled "···". */
+  /* "Paso 2 de 3", beside the page's own title. Quiet, but present: the
+     title is visually hidden (the page chrome shows it), and this is not. */
+  .a-step { font-size:12.5px; font-weight:700; letter-spacing:.02em;
+            color:var(--tint); background:var(--tint-soft);
+            border-radius:8px; padding:3px 9px; margin-right:auto; }
+
+  /* The signature surface. A dashed rule and a pen, because an empty
+     rectangle is the one thing a signature screen must never look like —
+     and because what is under it on the phone is not something to tap: a
+     tap on a canvas is a dot of ink where the finger landed. */
+  .a-canvas { flex:1; display:flex; flex-direction:column; align-items:center;
+              justify-content:center; gap:8px; min-height:132px;
+              border:2px dashed var(--tint-soft); border-radius:14px;
+              background:var(--track); color:var(--tint); cursor:pointer;
+              padding:18px 14px; font:inherit;
+              transition:transform .3s var(--spring), border-color .2s ease; }
+  .a-canvas:active { transform:scale(.985); border-color:var(--tint);
+                     transition-duration:.05s; }
+  .a-canvas svg { width:26px; height:26px; }
+  .a-canvas-t { font-size:15px; font-weight:650; letter-spacing:-.01em; }
+
   .a-fieldwrap { position:relative; flex:1; display:flex; min-width:0; }
   .a-field { flex:1; border:none; border-radius:10px; background:var(--track);
              color:var(--ink); text-align:left; padding:11px 14px;

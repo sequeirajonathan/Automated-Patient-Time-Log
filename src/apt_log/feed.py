@@ -1540,6 +1540,13 @@ _TASK_DONE_WORDS = ("se realiz", "realizado", "performed", "done", "completed")
 TASK_DONE_KEY = "papp.task.done"
 TASK_NOT_DONE_KEY = "papp.task.not_done"
 
+# The largest share of a screen a spoken control may take up. There is a lot
+# of room between the two things it separates: HHAeXchange+'s care-plan ticks
+# are 31x29 on a 720x1600 screen — 0.078% — and the signature canvas on the
+# other side of it is 46% of the same screen. This sits 64x above the one and
+# 9x below the other, which is what makes it a boundary rather than a tuning.
+READER_CONTROL_MAX_SHARE = 0.05
+
 
 def task_key(label: str) -> str:
     """Which half of a care-plan task's pair this is, or ""."""
@@ -1619,6 +1626,21 @@ def elements(xml: str, label: bool = False, package: str = "",
             "enabled": _attr(raw, "enabled") != "false",
             "has_text": bool(_label(raw)),
         }
+        # A TICK BOX IS SMALL. HHAeXchange+'s signature canvas carries a
+        # double-tap description too — half the screen of it — and reading
+        # that as a control turned the thing she signs on into an on/off
+        # switch. A screen reader's "double tap" says a node ACCEPTS a tap,
+        # which a drawing surface certainly does; it does not say the node is
+        # a checkbox. Size is what tells them apart, and nothing on these
+        # screens comes near the boundary from either side: the care-plan
+        # ticks are 0.078% of the screen and the canvas is 46% of it.
+        if spoken is not None and w and h:
+            share = ((x2 - x1) * (y2 - y1)) / float(w * h)
+            if share > READER_CONTROL_MAX_SHARE:
+                spoken = None
+                if _attr(raw, "clickable") != "true":
+                    # It only got this far on the strength of that sentence.
+                    continue
         if spoken is not None:
             # The state is IN the sentence — "no seleccionado Se realizó" —
             # because the app never sets the attribute. Taken from there, so

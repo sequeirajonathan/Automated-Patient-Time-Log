@@ -2337,3 +2337,116 @@ class TestTheButtonThatTicksTheTasks:
         src = (P(__file__).resolve().parents[1]
                / "src/apt_log/ui/app.py").read_text(encoding="utf-8")
         assert '"tasks": _pending_task_count(screen_doc)' in src
+
+
+class TestThePadOnAFullScreenSignature:
+    """inMyTeam puts its pad in a bottom sheet; HHAeXchange+ gives it a whole
+    screen. The pad's step two — the app's OWN Borrar and Enviar — was gated
+    on the sheet, so on HHAeXchange+ it fell back to the LEGACY pair: two
+    presses at coordinates derived for a different app's rotated page.
+    """
+
+    def _doc(self, canvas=True):
+        return {"id": "f", "size": [720, 1600], "canvas": canvas,
+                "elements": [
+                    {"rid": "signature_screen_clear_button", "cls": "View",
+                     "b": [14, 656, 44, 681]},
+                    {"rid": "signature_screen_submit_button", "cls": "View",
+                     "b": [1474, 656, 1529, 681]},
+                    {"rid": "menu_top_bar_back_button", "cls": "View",
+                     "b": [6, 17, 31, 42]},
+                ],
+                "statics": [
+                    {"cls": "TextView", "b": [14, 662, 44, 675],
+                     "txt": "Borrar"},
+                    {"cls": "TextView", "b": [1488, 663, 1515, 674],
+                     "txt": "Enviar"},
+                ]}
+
+    def _actions(self, doc, model=None):
+        from apt_log.ui.app import _sheet_actions
+
+        return _sheet_actions(doc, model)
+
+    def test_the_apps_own_buttons_reach_the_pad(self):
+        assert [a["txt"] for a in self._actions(self._doc())] \
+            == ["Borrar", "Enviar"]
+
+    def test_they_are_real_aims_not_coordinates(self):
+        aims = [a["aim"]["rid"] for a in self._actions(self._doc())]
+        assert aims == ["signature_screen_clear_button",
+                        "signature_screen_submit_button"]
+
+    def test_the_submit_comes_last_so_the_pad_fills_it(self):
+        assert self._actions(self._doc())[-1]["txt"] == "Enviar"
+
+    def test_the_caption_comes_from_the_label_over_the_button(self):
+        """These buttons carry no text of their own — "Borrar" and "Enviar"
+        are separate labels drawn on top of them."""
+        doc = self._doc()
+        doc["statics"] = []
+        assert self._actions(doc) == []
+
+    def test_nothing_is_offered_off_a_signature_screen(self):
+        assert self._actions(self._doc(canvas=False)) == []
+
+    def test_a_generic_save_id_is_not_taken_for_the_pads(self):
+        """The legacy visit page's own `button_save`. An id has to name the
+        signature screen before it counts."""
+        doc = self._doc()
+        doc["elements"] = [{"rid": "button_save", "cls": "Button",
+                            "b": [642, 74, 678, 110]}]
+        doc["statics"] = [{"cls": "TextView", "b": [646, 80, 674, 100],
+                           "txt": "Salvar"}]
+        assert self._actions(doc) == []
+
+    def test_the_legacy_coordinate_pair_hides_when_these_exist(self):
+        from pathlib import Path
+
+        js = strip_js_comments((Path(__file__).resolve().parents[1]
+                                / "src/apt_log/ui/static/phone.js")
+                               .read_text(encoding="utf-8"))
+        assert "legacy.hidden = sheetActions.length > 0" in js
+
+    def test_enviar_leads_in_the_pad(self):
+        """The pad emphasises an affirmative caption, and this app's is not
+        "save" — it is "send"."""
+        from pathlib import Path
+
+        js = (Path(__file__).resolve().parents[1]
+              / "src/apt_log/ui/static/phone.js").read_text(encoding="utf-8")
+        line = next(l for l in js.splitlines() if "aceptar" in l)
+        assert "enviar" in line
+
+
+class TestTheCanvasOpensThePad:
+    PAGE = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/templates/_screen.html")
+    SCRIPT = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/static/phone.js")
+
+    def test_the_canvas_carries_the_marker(self):
+        assert 'data-sign="1"' in self.PAGE.read_text(encoding="utf-8")
+
+    def test_and_it_is_not_an_aim(self):
+        """It must not tap through: a tap on a canvas is a dot of ink."""
+        markup = self.PAGE.read_text(encoding="utf-8")
+        block = markup[markup.index("it.kind == 'canvas'"):]
+        block = block[:block.index("{% elif")]
+        assert "data-aim" not in block
+
+    def test_the_script_opens_the_pad_from_it(self):
+        js = strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
+        assert "closest('[data-sign]')" in js
+
+    def test_the_handler_is_delegated(self):
+        """The page is re-rendered from the socket; a handler bound to the
+        element itself would go with it on the first repaint."""
+        js = strip_js_comments(self.SCRIPT.read_text(encoding="utf-8"))
+        assert "signSurface.addEventListener('click'" in js
+
+    def test_it_says_what_it_is_in_both_languages(self):
+        base = Path(__file__).resolve().parents[1] / "src/apt_log/ui/locales"
+        for name in ("en.json", "es.json"):
+            assert json.loads(
+                (base / name).read_text(encoding="utf-8")).get("sign.here")

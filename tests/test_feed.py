@@ -2423,3 +2423,59 @@ class TestAControlThatDoesNotSayItIsOne:
         assert len(segments) == 2
         assert [p["checked"] for p in segments[0]["parts"]] == [False, False]
         assert all(p.get("aim") for p in segments[0]["parts"])
+
+
+class TestATickBoxIsSmall:
+    """The other half of the same signature screen.
+
+    HHAeXchange+'s canvas carries a double-tap description too — half the
+    screen of it — and reading that as a control turned the surface a patient
+    signs on into an ON/OFF SWITCH. A screen reader's "double tap" says a
+    node ACCEPTS a tap, which a drawing surface certainly does; it does not
+    say the node is a checkbox.
+    """
+
+    CANVAS = ('<node class="android.view.View" resource-id="" '
+              'clickable="{click}" text="" '
+              'content-desc="Firma, toca dos veces para firmar" '
+              'bounds="[18,171][1518,525]" package="com.hhaexchange.uma"/>')
+    TICK = ('<node class="android.view.View" resource-id="" clickable="false" '
+            'text="" content-desc="no seleccionado Se realizó %1$s Toca dos '
+            'veces para alternar" bounds="[636,150][667,179]" '
+            'package="com.hhaexchange.uma"/>')
+
+    def _els(self, xml):
+        return feed.elements(xml, label=False, package="com.hhaexchange.uma",
+                             size=(720, 1600))
+
+    def test_a_canvas_is_never_promoted_to_a_toggle(self):
+        els = self._els("<hierarchy>"
+                        + self.CANVAS.format(click="true") + "</hierarchy>")
+        assert els and els[0].get("role") is None
+
+    def test_a_real_tick_still_is(self):
+        els = self._els("<hierarchy>" + self.TICK + "</hierarchy>")
+        assert els and els[0]["role"] == "toggle"
+
+    def test_a_big_node_that_only_the_sentence_let_in_is_dropped(self):
+        """Not clickable, and too big to be a control: it reached `elements`
+        on the strength of that sentence alone and has no other claim."""
+        assert self._els("<hierarchy>"
+                         + self.CANVAS.format(click="false")
+                         + "</hierarchy>") == []
+
+    def test_a_clickable_canvas_is_still_published(self):
+        """It is a real control — the app says so in the ordinary way — and
+        the reflow needs it there to draw the signing surface at all."""
+        els = self._els("<hierarchy>"
+                        + self.CANVAS.format(click="true") + "</hierarchy>")
+        assert len(els) == 1 and els[0]["b"] == [18, 171, 1518, 525]
+
+    def test_the_ceiling_sits_well_clear_of_both(self):
+        """A care-plan tick is 31x29 on 720x1600 — 0.078% of the screen. The
+        canvas beside it is 46% of the same screen. The ceiling has 64x of
+        room under it and 9x over it, which is what makes it a boundary
+        rather than a tuning."""
+        tick = (31 * 29) / (720 * 1600)
+        canvas = (1500 * 354) / (720 * 1600)
+        assert tick * 60 < feed.READER_CONTROL_MAX_SHARE < canvas / 9
