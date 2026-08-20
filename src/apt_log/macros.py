@@ -1711,7 +1711,8 @@ REQUIRED_MARKS = ("*", "•", "•")
 TASK_TICK_MAX_X = 0.25
 
 
-def _starred_tasks(driver) -> list[dict]:
+def starred_tasks(elements: list[dict], statics: list[dict],
+                  width: int) -> list[dict]:
     """Every task tick that a star says is required and that is not yet on.
 
     Pairs by BASELINE: the star and the tick share a line, which is what
@@ -1720,17 +1721,16 @@ def _starred_tasks(driver) -> list[dict]:
     at the top carries one, and so do both signature captions — and it
     quietly matches nothing, which is the behaviour that keeps this macro
     from wandering off the task list.
-    """
-    from apt_log import feed as feed_mod
 
-    src = driver.page_source or ""
-    size = driver.get_window_size()
-    width = size.get("width") or 0
+    Takes a parsed page rather than a driver so the front end can ask the
+    same question of the screen it has already been published — one reading,
+    used both to offer the button and to run it.
+    """
     if not width:
         return []
-    stars = [s for s in feed_mod.statics(src)
+    stars = [s for s in statics
              if (s.get("txt") or "").strip() in REQUIRED_MARKS]
-    ticks = [e for e in feed_mod.elements(src)
+    ticks = [e for e in elements
              if e.get("cls") == "CheckBox"
              and e.get("enabled", True) is not False
              and e["b"][2] <= width * TASK_TICK_MAX_X]
@@ -1746,6 +1746,15 @@ def _starred_tasks(driver) -> list[dict]:
     return wanted
 
 
+def _starred_tasks(driver) -> list[dict]:
+    """`starred_tasks`, read off the live page."""
+    from apt_log import feed as feed_mod
+
+    src = driver.page_source or ""
+    return starred_tasks(feed_mod.elements(src), feed_mod.statics(src),
+                         (driver.get_window_size() or {}).get("width") or 0)
+
+
 # HHAeXchange+ writes the same page a different way. Every task carries a
 # pair of its own — "Se realizó" and "No realizado" — and names them, which
 # inMyTeam does not: `poc_task_item_status_completed_false` beside
@@ -1755,7 +1764,7 @@ POC_DONE_ID = "poc_task_item_status_completed"
 POC_REFUSED_ID = "poc_task_item_status_refused"
 
 
-def _poc_tasks(driver) -> list[dict]:
+def poc_tasks(elements: list[dict]) -> list[dict]:
     """Every HHAeXchange+ care-plan task not yet marked done.
 
     The refused column is never a candidate: nothing whose id says `refused`
@@ -1769,10 +1778,8 @@ def _poc_tasks(driver) -> list[dict]:
     alone and she decides. A tap here toggles, so a wrong read does not
     merely fail to help: it would take a tick BACK OFF.
     """
-    from apt_log import feed as feed_mod
-
     wanted: list[dict] = []
-    for element in feed_mod.elements(driver.page_source or ""):
+    for element in elements:
         rid = element.get("rid") or ""
         if not rid.startswith(POC_DONE_ID):
             continue
@@ -1784,17 +1791,41 @@ def _poc_tasks(driver) -> list[dict]:
     return wanted
 
 
-def _pending_tasks(driver) -> list[dict]:
-    """The unticked tasks on whichever plan of care is in front.
+def _poc_tasks(driver) -> list[dict]:
+    """`poc_tasks`, read off the live page."""
+    from apt_log import feed as feed_mod
+
+    return poc_tasks(feed_mod.elements(driver.page_source or ""))
+
+
+def pending_tasks(elements: list[dict], statics: list[dict], width: int,
+                  package: str) -> list[dict]:
+    """The unticked tasks on whichever plan of care this page is.
 
     One button for her, two readings underneath: the apps mark a required
     task in ways that have nothing in common — inMyTeam with a star in the
     margin and an anonymous CheckBox, HHAeXchange+ with a named pair — and
-    which app is in front is the only thing that decides which to use.
+    the package is the only thing that decides which to use.
+
+    Pure, so the front end can ask it of the screen document it already has
+    and offer the button only where there is something to press. A button
+    that is always there and usually does nothing is a button pressed at the
+    wrong moment, which is the argument this file already makes about the
+    sign-in macros.
     """
-    if _front_package() == "com.hhaexchange.uma":
-        return _poc_tasks(driver)
-    return _starred_tasks(driver)
+    if package == "com.hhaexchange.uma":
+        return poc_tasks(elements)
+    return starred_tasks(elements, statics, width)
+
+
+def _pending_tasks(driver) -> list[dict]:
+    """`pending_tasks`, read off the live page."""
+    from apt_log import feed as feed_mod
+
+    src = driver.page_source or ""
+    return pending_tasks(feed_mod.elements(src), feed_mod.statics(src),
+                         (driver.get_window_size() or {}).get("width") or 0,
+                         _front_package())
 
 
 def _check_tasks(driver, report) -> None:

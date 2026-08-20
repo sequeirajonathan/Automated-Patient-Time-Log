@@ -412,6 +412,16 @@
     // what "somehow inMyTeam ended up in the phone settings" felt like from
     // the other end.
     body.classList.toggle('covered', !!meta.covered);
+    // The plan of care's own button, offered only where there is something
+    // to tick. The count is the server's, read off the same page the macro
+    // will read, so what the button says is what it will do.
+    const tasksBtn = document.getElementById('btn-tasks');
+    if (tasksBtn) {
+      const left = Number(meta.tasks) || 0;
+      tasksBtn.hidden = left <= 0;
+      const badge = document.getElementById('btn-tasks-n');
+      if (badge) badge.textContent = left > 0 ? String(left) : '';
+    }
 
     // The large title names what is actually in front: the screen's own
     // nav-bar title, else the app the *phone* is showing — never the last
@@ -977,6 +987,21 @@
       fetch('/macro', {
         method: 'POST',
         body: new URLSearchParams({ name: 'clear_screen' }),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        redirect: 'follow'
+      }).catch(() => { awaitingMacro = false; unbusy(); toast(i18n.failed || ''); });
+    });
+    // Tick every required task on the plan of care in front. It only ADDS
+    // ticks and it never presses Salvar or Check out, so the worst a press
+    // at a bad moment costs is a page she then reads back — which she was
+    // going to do anyway. Saving stays hers.
+    const tasksRun = document.getElementById('btn-tasks');
+    if (tasksRun) tasksRun.addEventListener('click', () => {
+      awaitingMacro = true;
+      busy(i18n.checkingTasks || '', 60000);
+      fetch('/macro', {
+        method: 'POST',
+        body: new URLSearchParams({ name: 'check_tasks' }),
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         redirect: 'follow'
       }).catch(() => { awaitingMacro = false; unbusy(); toast(i18n.failed || ''); });
