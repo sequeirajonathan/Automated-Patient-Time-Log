@@ -1041,6 +1041,97 @@
     });
   }
 
+  // ---------------------------------------------------------- the schedule
+  //
+  // The page arrives with the answer already in it — server-rendered, because
+  // this is the module she opens the portal to read and a skeleton that fills
+  // in half a second later looks broken on a bad connection. Everything here
+  // is about what happens AFTER that first paint.
+  //
+  // Two jobs, and they are separate on purpose:
+  //
+  //   the reveal, which spins when pressed and never on its own. A thing that
+  //   moves by itself on a page somebody is trying to read is an annoyance the
+  //   second time and furniture by the tenth;
+  //
+  //   the refresh, because the next visit becomes the current one while the
+  //   page sits open on a kitchen counter. It re-reads rather than reloads —
+  //   a reload would take her out of whatever else she was doing.
+  const SCHEDULE_EVERY = 60000;
+  let slotAt = 0;
+
+  function spin() {
+    const list = document.getElementById('slotlist');
+    if (!list) return;
+    const rows = list.children.length;
+    // Row 0 is the invitation ("Tap to see"), so the names start at 1 and
+    // pressing again walks on to the next one rather than re-landing on the
+    // same name — which is what a reveal that only ever showed one answer
+    // would do, and it would read as broken.
+    if (rows < 2) return;
+    slotAt = slotAt >= rows - 1 ? 1 : slotAt + 1;
+    const step = list.children[0].offsetHeight || 26;
+    list.style.transform = 'translateY(-' + (slotAt * step) + 'px)';
+  }
+
+  function paintUpNext(plan) {
+    const card = document.getElementById('upnext');
+    if (!card || !plan || !plan.ok) return;
+    const v = plan.current || plan.next;
+    if (!v) return;
+    const cap = card.querySelector('.cap');
+    const who = card.querySelector('.who');
+    const when = card.querySelector('.when');
+    const where = card.querySelector('.where');
+    card.dataset.running = v.running ? '1' : '0';
+    if (cap) {
+      cap.innerHTML = '';
+      if (v.running) {
+        const dot = document.createElement('span');
+        dot.className = 'live';
+        cap.appendChild(dot);
+      }
+      // textContent, not innerHTML: a patient's name is somebody else's
+      // words and this page has no business interpreting them as markup.
+      cap.appendChild(document.createTextNode(
+        v.running ? i18n.schedNow : i18n.schedUpcoming));
+    }
+    if (who) who.textContent = v.patient;
+    if (when) {
+      when.textContent = v.fires + ' – ' + v.ends;
+      if (v.buffered) {
+        const tag = document.createElement('span');
+        tag.className = 'buffered';
+        tag.textContent = i18n.schedBuffered;
+        when.appendChild(document.createTextNode(' '));
+        when.appendChild(tag);
+      }
+    }
+    if (where) {
+      where.textContent = v.day + ' · ' + v.app
+        + (v.agency ? ' · ' + v.agency : '');
+    }
+  }
+
+  function refreshSchedule() {
+    fetch('/api/schedule', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((plan) => { if (plan) paintUpNext(plan); })
+      .catch(() => { /* the card keeps the last answer it had */ });
+  }
+
+  function wireSchedule() {
+    const reveal = document.getElementById('reveal');
+    if (reveal) reveal.addEventListener('click', spin);
+    const open = document.getElementById('btn-schedule');
+    if (open) open.addEventListener('click', () => view('schedule'));
+    // Back to Home, in the same place and with the same chevron the screen
+    // view puts its way back — one habit rather than two.
+    const back = document.getElementById('btn-sched-home');
+    if (back) back.addEventListener('click', () => view('launcher'));
+    setInterval(refreshSchedule, SCHEDULE_EVERY);
+  }
+
   // -------------------------------------------------------------------- wire
   document.addEventListener('DOMContentLoaded', () => {
     // Where to open. `?view=screen` wins, because that is a caller ASKING for
@@ -1054,13 +1145,19 @@
     try {
       asked = new URLSearchParams(location.search).get('view') || '';
     } catch (e) { /* no URL API */ }
+    // 'schedule' joins 'screen' as a view a caller may ask for. Both are
+    // remembered; neither is guessed — anything else falls through to the
+    // picker, which is where the page boots.
+    const DEEP = { screen: 1, schedule: 1 };
     try {
-      if (asked === 'screen' || sessionStorage.getItem('aptlog-view') === 'screen') {
-        view('screen');
-      }
+      const remembered = sessionStorage.getItem('aptlog-view') || '';
+      if (DEEP[asked]) view(asked);
+      else if (DEEP[remembered]) view(remembered);
     } catch (e) {
-      if (asked === 'screen') view('screen');
+      if (DEEP[asked]) view(asked);
     }
+
+    wireSchedule();
 
     const tsend = document.getElementById('typesend');
     const tcancel = document.getElementById('typecancel');

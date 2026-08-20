@@ -153,12 +153,94 @@
   #launcher .seg button[aria-pressed="true"] { background:rgba(255,255,255,.9);
                                                color:#111; }
 
+  /* --------------------------------------------------------- the next visit
+     The module she opens the portal to read. It sits under the tiles because
+     the tiles are what she came for when something is wrong; this is what she
+     came for when nothing is. */
+  .upnext { margin-top:20px; border-radius:20px; padding:14px 16px;
+            background:rgba(255,255,255,.09);
+            border:1px solid rgba(255,255,255,.14);
+            text-align:left; width:100%; color:inherit; font:inherit;
+            display:block; }
+  .upnext .cap { font-size:11px; letter-spacing:.09em; text-transform:uppercase;
+                 color:rgba(255,255,255,.58); }
+  .upnext .who { font-size:20px; font-weight:600; margin-top:3px;
+                 line-height:1.2; }
+  .upnext .when { font-size:15px; color:rgba(255,255,255,.82); margin-top:4px; }
+  .upnext .where { font-size:12px; color:rgba(255,255,255,.55); margin-top:3px; }
+  /* A visit in progress is the one fact on this page that changes what she
+     should do next, so it is the one thing allowed to be loud. */
+  .upnext[data-running="1"] { background:rgba(58,163,110,.20);
+                              border-color:rgba(88,214,141,.42); }
+  .upnext .live { display:inline-block; width:7px; height:7px; border-radius:50%;
+                  background:#5cd68d; margin-right:6px; vertical-align:middle;
+                  animation:pulse 2.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity:.35; } }
+  /* The five minutes that are in no app. Marked, because a caregiver who
+     notices the difference should find it explained rather than wonder which
+     of the two times is wrong. */
+  .buffered { font-size:11px; color:rgba(255,255,255,.62);
+              border:1px solid rgba(255,255,255,.2); border-radius:999px;
+              padding:1px 7px; margin-left:6px; white-space:nowrap; }
+
+  /* ------------------------------------------------------------ the reveal
+     A slot-machine strip: the names sit in a column and the column slides so
+     one of them lands in the window. Deliberately NOT automatic — it spins
+     when she presses it, once, and stops on the answer. A thing that spins
+     by itself on a page somebody is trying to read is an annoyance the second
+     time and furniture by the tenth. */
+  .reveal { margin-top:10px; border-radius:16px; width:100%; color:inherit;
+            font:inherit; padding:10px 14px; text-align:left;
+            background:rgba(255,255,255,.05);
+            border:1px dashed rgba(255,255,255,.2); display:block; }
+  .reveal .cap { font-size:11px; letter-spacing:.09em; text-transform:uppercase;
+                 color:rgba(255,255,255,.5); }
+  .slot { height:26px; overflow:hidden; position:relative; margin-top:2px; }
+  .slot ul { list-style:none; margin:0; padding:0;
+             transition: transform 1.15s cubic-bezier(.16,.9,.3,1); }
+  .slot li { height:26px; line-height:26px; font-size:16px; font-weight:600;
+             white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  /* Somebody who has asked not to be moved gets the answer without the
+     theatre — the reveal is decoration and the name is the content. */
+  @media (prefers-reduced-motion: reduce) { .slot ul { transition:none; } }
+
+  .fullbtn { margin-top:12px; width:100%; border-radius:14px; padding:11px;
+             font-size:15px; font-weight:600; color:#fff;
+             background:rgba(255,255,255,.12);
+             border:1px solid rgba(255,255,255,.18); }
+
   /* ---------------------------------------------------------- screen view */
   #screenview { background:var(--bg); }
   body[data-view="launcher"] #screenview { transform:translateX(102%);
                                            opacity:0; pointer-events:none; }
   body[data-view="screen"] #launcher { transform:scale(.92); opacity:0;
                                        pointer-events:none; }
+
+  /* -------------------------------------------------------- schedule view */
+  #scheduleview { background:var(--bg); }
+  body[data-view="launcher"] #scheduleview,
+  body[data-view="screen"] #scheduleview { transform:translateX(102%);
+                                           opacity:0; pointer-events:none; }
+  body[data-view="schedule"] #launcher,
+  body[data-view="schedule"] #screenview { transform:scale(.92); opacity:0;
+                                           pointer-events:none; }
+  #scheduleview .body { overflow-y:auto; -webkit-overflow-scrolling:touch;
+                        padding:0 16px calc(24px + env(safe-area-inset-bottom)); }
+  .dayhead { position:sticky; top:0; z-index:2; background:var(--bg);
+             padding:14px 0 6px; font-size:13px; font-weight:700;
+             letter-spacing:.06em; text-transform:uppercase;
+             color:var(--muted); }
+  .dayhead.today { color:var(--accent, #2b6cf6); }
+  .slotrow { display:flex; gap:12px; padding:10px 0;
+             border-top:1px solid var(--hair, rgba(128,128,128,.22)); }
+  .slotrow .time { flex:0 0 92px; font-variant-numeric:tabular-nums;
+                   font-size:14px; font-weight:600; }
+  .slotrow .who { font-size:15px; font-weight:600; }
+  .slotrow .meta { font-size:12px; color:var(--muted); margin-top:2px; }
+  .slotrow[data-running="1"] .time { color:#2e9c63; }
+  .slotrow .buffered { color:var(--muted); border-color:var(--hair, #ccc); }
+  .emptyday { padding:10px 0; color:var(--muted); font-size:14px;
+              border-top:1px solid var(--hair, rgba(128,128,128,.22)); }
 
   /* iOS large-title header: action row, then the title; the hairline appears
      only once content has scrolled beneath it. */
@@ -1119,6 +1201,59 @@
     </button>
     {% endfor %}
   </div>
+
+  {# ------------------------------------------------------- the next visit
+     Server-rendered so the first paint is the answer rather than a spinner —
+     this is the module she opens the portal to read, and a skeleton that
+     fills in half a second later is a module that looks broken on a bad
+     connection. The client re-reads /api/schedule as time passes. #}
+  <div id="upnext-wrap" data-configured="{{ '1' if plan.configured else '0' }}">
+    {% if not plan.ok %}
+    {# A file that will not parse says so. An empty week looks exactly like a
+       day off, and those two must never render the same. #}
+    <div class="upnext" id="upnext" data-state="error">
+      <div class="cap">{{ t('sched.upcoming') }}</div>
+      <div class="who">{{ t('sched.unreadable') }}</div>
+      <div class="where">{{ plan.error }}</div>
+    </div>
+    {% elif plan.current or plan.next %}
+    {% set v = plan.current or plan.next %}
+    <div class="upnext" id="upnext" data-running="{{ '1' if v.running else '0' }}">
+      <div class="cap">
+        {%- if v.running %}<span class="live"></span>{{ t('sched.now') }}
+        {%- else %}{{ t('sched.upcoming') }}{% endif -%}
+      </div>
+      <div class="who">{{ v.patient }}</div>
+      <div class="when">
+        {{ v.fires }} – {{ v.ends }}
+        {%- if v.buffered %} <span class="buffered">{{ t('sched.buffered') }}</span>{% endif -%}
+        {%- if v.of > 1 %} <span class="buffered">{{ t('sched.part', part=v.part, of=v.of) }}</span>{% endif -%}
+      </div>
+      <div class="where">
+        {{ v.day }} · {{ v.app }}{% if v.agency %} · {{ v.agency }}{% endif %}</div>
+    </div>
+    {% else %}
+    <div class="upnext" id="upnext" data-state="empty">
+      <div class="cap">{{ t('sched.upcoming') }}</div>
+      <div class="who">{{ t('sched.nothing') }}</div>
+    </div>
+    {% endif %}
+
+    {# The reveal. A button, because it does something when pressed and
+       nothing until then. #}
+    <button class="reveal" id="reveal" type="button"
+            aria-live="polite" {{ 'hidden' if not plan.queue }}>
+      <span class="cap">{{ t('sched.after_that') }}</span>
+      <span class="slot"><ul id="slotlist">
+        <li>{{ t('sched.tap_to_see') }}</li>
+        {% for v in plan.queue %}<li>{{ v.patient }}</li>{% endfor %}
+      </ul></span>
+    </button>
+
+    <button class="fullbtn" id="btn-schedule" type="button">
+      {{ t('sched.view_full') }}</button>
+  </div>
+
   <footer>
     {# data-navigate: this one must reload the page, because changing the
        language changes every word on it. The live-form wiring posts in the
@@ -1418,6 +1553,53 @@
   </div>
 </div>
 
+{# ----------------------------------------------------------- the full week
+   Server-rendered, and static once rendered: this is a reading of a file
+   nobody edits from a phone. It is grouped by day rather than listed flat
+   because "what am I doing Thursday" is the question it exists to answer,
+   and a flat list makes that a counting exercise.
+
+   Back to Home is the FIRST control in the header, in the same place the
+   screen view puts its way back, so there is one habit rather than two. #}
+<div class="view" id="scheduleview">
+  <header class="hdr">
+    <div class="hdr-row">
+      <button id="btn-sched-home">
+        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.4"><path d="M15 5 L8 12 L15 19"/></svg>
+        {{ t('phone.home') }}</button>
+      <span class="spacer"></span>
+    </div>
+    <div class="hdr-title"><h1>{{ t('sched.title') }}</h1></div>
+  </header>
+  <div class="body">
+    {% if not plan.ok %}
+    <p class="emptyday">{{ t('sched.unreadable') }} — {{ plan.error }}</p>
+    {% elif not plan.week %}
+    <p class="emptyday">{{ t('sched.none_configured') }}</p>
+    {% else %}
+    {% set ns = namespace(day='') %}
+    {% for v in plan.week %}
+      {% if v.date != ns.day %}
+        {% set ns.day = v.date %}
+        <div class="dayhead{{ ' today' if loop.first }}">{{ v.day }}</div>
+      {% endif %}
+      <div class="slotrow" data-running="{{ '1' if v.running else '0' }}">
+        <div class="time">{{ v.fires }}</div>
+        <div>
+          <div class="who">{{ v.patient }}
+            {%- if v.buffered %} <span class="buffered">+5</span>{% endif -%}
+            {%- if v.of > 1 %} <span class="buffered">{{ v.part }}/{{ v.of }}</span>{% endif -%}
+          </div>
+          <div class="meta">{{ t('sched.until', time=v.ends) }} ·
+            {{ v.app }}{% if v.agency %} · {{ v.agency }}{% endif %}</div>
+        </div>
+      </div>
+    {% endfor %}
+    {% endif %}
+  </div>
+</div>
+
 {# The whole page, as a reading: the phone scrolled its own screen end to
    end and these are every line it showed, in order. Read-only on purpose. #}
 <div id="scansheet" class="sheet">
@@ -1469,6 +1651,11 @@
     explainLive:    {{ t('papp.explain.live')|tojson }},
     explainSyncing: {{ t('papp.explain.syncing')|tojson }},
     explainOffline: {{ t('papp.explain.offline')|tojson }},
+    {# The next-visit card repaints itself as the hour passes, so the two
+       words that change with it have to reach the client. #}
+    schedNow: {{ t('sched.now')|tojson }},
+    schedUpcoming: {{ t('sched.upcoming')|tojson }},
+    schedBuffered: {{ t('sched.buffered')|tojson }},
     {# The lock's explanation, one tap away rather than a standing banner. #}
     blocked: {
       "": "",

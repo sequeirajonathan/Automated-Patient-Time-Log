@@ -3000,3 +3000,181 @@ class TestAskingForANewCode:
 
         css = re.sub(r"/\*.*?\*/", "", client.get("/app").text, flags=re.S)
         assert "body.codescreen #screenwrap { min-height:0; }" in css
+
+
+# ============================================================== the schedule
+class TestTheNextVisitOnTheHomeScreen:
+    """The module she opens the portal to read.
+
+    Every name here is invented, as in test_schedule.py and for the same
+    reason: the real round is health information and lives on the device.
+    """
+
+    def _plan(self, *visits, zone="America/New_York"):
+        from apt_log import schedule as sched
+
+        return sched.parse({"zone": zone, "visits": list(visits)})
+
+    def _one(self, patient="Ada", start="06:00", end="09:00",
+             days=("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
+             app="com.hhaexchange.uma", **extra):
+        return {"patient": patient, "app": app, "start": start, "end": end,
+                "days": list(days), **extra}
+
+    def _rendered(self, client, plan):
+        # English asked for explicitly. The portal follows the browser when
+        # nothing has been chosen, and the test client's default is not
+        # English — which made these assertions pass or fail on a header
+        # rather than on the markup.
+        with patch("apt_log.schedule.load", return_value=plan):
+            return client.get("/app", headers={"Accept-Language": "en"}).text
+
+    def test_the_next_visit_is_on_the_page_before_any_javascript_runs(
+            self, client):
+        """Server-rendered on purpose. This is what she came for, and a
+        skeleton that fills in half a second later looks broken on the kind
+        of connection a phone in a car actually has."""
+        page = self._rendered(client, self._plan(self._one("Ada")))
+        assert "Ada" in page
+        assert 'id="upnext"' in page
+
+    def test_a_visit_in_progress_is_marked_as_happening_now(self, client):
+        from apt_log import schedule as sched
+
+        page = self._rendered(client, self._plan(
+            self._one("Ada", "00:00", "23:59")))
+        assert 'data-running="1"' in page
+        assert Translator("en").t("sched.now") in page
+
+    def test_a_schedule_that_will_not_parse_says_so(self, client):
+        """An empty week looks exactly like a day off. Those two must never
+        render the same."""
+        from apt_log import schedule as sched
+
+        with patch("apt_log.schedule.load",
+                   side_effect=sched.BadSchedule("line 4 is nonsense")):
+            page = client.get("/app", headers={"Accept-Language": "en"}).text
+        assert Translator("en").t("sched.unreadable") in page
+        assert "line 4 is nonsense" in page
+
+    def test_a_controller_with_no_schedule_still_renders(self, client):
+        """It ships without one, and the portal is not for this module."""
+        page = self._rendered(client, self._plan())
+        assert "<html" in page.lower()
+        assert Translator("en").t("sched.nothing") in page
+
+    def test_the_five_minutes_that_are_in_no_app_are_labelled(self, client):
+        """A caregiver who notices the difference between the portal and the
+        app should find it explained rather than wonder which is wrong."""
+        page = self._rendered(client, self._plan(
+            self._one("Ada", "05:00", "06:00"),
+            self._one("Bea", "06:00", "09:00")))
+        assert Translator("en").t("sched.buffered") in page
+
+    def test_the_reveal_is_hidden_when_there_is_nothing_after_the_next_one(
+            self, client):
+        """One visit in the whole week: there is no queue to cycle, and a
+        control that reveals nothing should not be on the page."""
+        page = self._rendered(client, self._plan(
+            self._one("Ada", days=["mon"])))
+        head = page[page.index('id="reveal"'):page.index('id="reveal"') + 200]
+        assert "hidden" in head
+
+    def test_the_full_week_is_grouped_by_day(self, client):
+        page = self._rendered(client, self._plan(
+            self._one("Ada", "06:00", "09:00", days=["mon"]),
+            self._one("Bea", "10:00", "12:00", days=["tue"])))
+        assert 'id="scheduleview"' in page
+        assert page.count('class="dayhead') >= 2
+
+    def test_there_is_a_way_back_to_the_home_view(self, client):
+        """On the full-schedule screen, in the same place the phone view puts
+        its way back."""
+        page = self._rendered(client, self._plan(self._one("Ada")))
+        assert 'id="btn-sched-home"' in page
+
+    def test_and_a_way_into_it_from_the_home_view(self, client):
+        page = self._rendered(client, self._plan(self._one("Ada")))
+        assert 'id="btn-schedule"' in page
+
+
+class TestTheScheduleApi:
+    def _plan(self, *visits):
+        from apt_log import schedule as sched
+
+        return sched.parse({"zone": "America/New_York",
+                            "visits": list(visits)})
+
+    def test_it_answers_with_the_round(self, client):
+        plan = self._plan({"patient": "Ada", "app": "com.hhaexchange.uma",
+                           "start": "06:00", "end": "09:00",
+                           "days": ["mon", "tue", "wed", "thu", "fri",
+                                    "sat", "sun"]})
+        with patch("apt_log.schedule.load", return_value=plan):
+            doc = client.get("/api/schedule").json()
+        assert doc["ok"] is True
+        assert doc["week"] and doc["week"][0]["patient"] == "Ada"
+
+    def test_the_package_is_translated_into_the_name_she_uses(self, client):
+        """The file names packages because that is what has to be opened.
+        A tile says HHAeXchange+."""
+        plan = self._plan({"patient": "Ada", "app": "com.hhaexchange.uma",
+                           "start": "06:00", "end": "09:00",
+                           "days": ["mon", "tue", "wed", "thu", "fri",
+                                    "sat", "sun"]})
+        with patch("apt_log.schedule.load", return_value=plan):
+            doc = client.get("/api/schedule").json()
+        assert doc["week"][0]["app"] == "HHAeXchange+"
+
+    def test_times_are_formatted_on_the_server(self, client):
+        """The phone reading this page may be in another state — Texas has
+        been used for exactly this project's testing — and a browser
+        formatting an instant would render Eastern visits in whatever zone
+        the reader is standing in."""
+        plan = self._plan({"patient": "Ada", "app": "com.hhaexchange.uma",
+                           "start": "06:00", "end": "09:00",
+                           "days": ["mon", "tue", "wed", "thu", "fri",
+                                    "sat", "sun"]})
+        with patch("apt_log.schedule.load", return_value=plan):
+            doc = client.get("/api/schedule").json()
+        assert doc["week"][0]["starts"] == "6:00 am"
+
+    def test_a_bad_schedule_is_reported_rather_than_thrown(self, client):
+        from apt_log import schedule as sched
+
+        with patch("apt_log.schedule.load",
+                   side_effect=sched.BadSchedule("nope")):
+            r = client.get("/api/schedule")
+        assert r.status_code == 200
+        assert r.json()["ok"] is False
+        assert r.json()["error"] == "nope"
+
+
+class TestTheRevealDoesNotSpinByItself:
+    """A thing that moves on its own on a page somebody is trying to read is
+    an annoyance the second time and furniture by the tenth."""
+
+    def _js(self):
+        return strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+
+    def test_the_spin_is_bound_to_a_press(self):
+        js = self._js()
+        assert "reveal.addEventListener('click', spin)" in js
+
+    def test_nothing_puts_the_reveal_on_a_timer(self):
+        js = self._js()
+        for line in js.splitlines():
+            if "setInterval" in line or "setTimeout" in line:
+                assert "spin" not in line
+
+    def test_a_patients_name_is_never_written_as_markup(self):
+        """It is somebody else's words and this page has no business
+        interpreting them."""
+        js = self._js()
+        start = js.index("function paintUpNext")
+        end = js.index("function refreshSchedule")
+        body = js[start:end]
+        assert "innerHTML = ''" in body or "innerHTML=''" in body
+        assert ".innerHTML = v." not in body
+        assert "textContent" in body
