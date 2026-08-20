@@ -2738,7 +2738,7 @@ class TestCheckStarredTasks:
         with patch.object(macros, "_tap_xy",
                           side_effect=lambda x, y: taps.append((x, y))), \
              patch.object(macros.time, "sleep"), \
-             patch.object(macros, "_starred_tasks",
+             patch.object(macros, "_pending_tasks",
                           side_effect=[macros._starred_tasks(driver), []]):
             macros._check_tasks(driver, lambda step: None)
         assert len(taps) == 13
@@ -2751,7 +2751,7 @@ class TestCheckStarredTasks:
         pending = macros._starred_tasks(driver)
         with patch.object(macros, "_tap_xy"), \
              patch.object(macros.time, "sleep"), \
-             patch.object(macros, "_starred_tasks",
+             patch.object(macros, "_pending_tasks",
                           side_effect=[pending, pending[:2]]):
             with pytest.raises(RuntimeError, match="did not tick"):
                 macros._check_tasks(driver, lambda step: None)
@@ -2779,5 +2779,147 @@ class TestCheckStarredTasks:
         tree = ast.parse(textwrap.dedent(inspect.getsource(macros._check_tasks)))
         called = {n.func.id for n in ast.walk(tree)
                   if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
-        assert called <= {"_starred_tasks", "_tap_xy", "report", "len",
+        assert called <= {"_pending_tasks", "_tap_xy", "report", "len",
                           "RuntimeError"}, f"unexpected calls: {called}"
+
+
+class TestCheckingHHAeXchangePlusTasks:
+    """The same button, on the other app's plan of care.
+
+    HHAeXchange+ writes this page nothing like inMyTeam does. Every task
+    carries a named pair of its own — `poc_task_item_status_completed_false`
+    beside `poc_task_item_status_refused_false` — and neither is marked
+    clickable: the app declares them in a screen reader's sentence instead
+    ("no seleccionado  Se realizó  %1$s  Toca dos veces para activar").
+
+    Bounds and ids below are the live ones off the Funciones page at 720x1600,
+    recorded with the caregiver standing in the patient's home.
+    """
+
+    W, H = 720, 1600
+
+    def _page(self, done=(), refused=(), count=14):
+        def tick(kind, i, on, top):
+            state = "true" if on else "false"
+            word = "seleccionado" if on else "no seleccionado"
+            caption = "Se realizó" if kind == "completed" else "No realizado"
+            left = 636 if kind == "completed" else 667
+            return (f'<node class="android.view.View"'
+                    f' resource-id="poc_task_item_status_{kind}_{state}"'
+                    f' clickable="false" text=""'
+                    f' content-desc="{word} {caption} %1$s Toca dos veces'
+                    f' para activar"'
+                    f' bounds="[{left},{top}][{left + 31},{top + 29}]"'
+                    f' package="com.hhaexchange.uma" />')
+
+        rows = []
+        for i in range(count):
+            top = 150 + i * 51
+            rows.append(f'<node class="android.widget.TextView"'
+                        f' text="Tarea {i}" bounds="[37,{top}][110,{top+10}]"'
+                        f' package="com.hhaexchange.uma" />')
+            rows.append(tick("completed", i, i in done, top))
+            rows.append(tick("refused", i, i in refused, top))
+        rows.append('<node class="android.view.View" clickable="true"'
+                    ' resource-id="poc_task_save_button" text=""'
+                    ' content-desc="Salvar" bounds="[11,1500][709,1525]"'
+                    ' package="com.hhaexchange.uma" />')
+        return "<hierarchy>" + "".join(rows) + "</hierarchy>"
+
+    def _driver(self, xml):
+        driver = MagicMock()
+        driver.page_source = xml
+        driver.get_window_size.return_value = {"width": self.W,
+                                               "height": self.H}
+        return driver
+
+    def test_every_task_is_found(self):
+        assert len(macros._poc_tasks(self._driver(self._page()))) == 14
+
+    def test_the_refused_column_is_never_one_of_them(self):
+        """Saying "the patient refused this" on her behalf is not a thing
+        this macro will ever do. Nothing named `refused` is even looked at."""
+        found = macros._poc_tasks(self._driver(self._page()))
+        assert all(POC in t["rid"] for t in found
+                   for POC in [macros.POC_DONE_ID])
+        assert not [t for t in found if "refused" in t["rid"]]
+
+    def test_a_task_already_done_is_left_alone(self):
+        """A tap TOGGLES — this would take her tick back off."""
+        found = macros._poc_tasks(self._driver(self._page(done=(0, 3, 7))))
+        assert len(found) == 11
+
+    def test_a_fully_ticked_page_asks_for_nothing(self):
+        assert macros._poc_tasks(
+            self._driver(self._page(done=tuple(range(14))))) == []
+
+    def test_a_refused_task_is_still_offered(self):
+        """Refusing is a different statement from doing; whether both may be
+        on is the app's business, not this macro's."""
+        assert len(macros._poc_tasks(
+            self._driver(self._page(refused=(2,))))) == 14
+
+    def test_both_readings_have_to_agree_before_anything_is_pressed(self):
+        """The id's last word and the state written into the description come
+        from different places and are parsed by different code. If they ever
+        disagree the task is left alone and she decides — because a wrong
+        read here does not merely fail to help, it takes a tick BACK OFF."""
+        xml = self._page().replace(
+            'resource-id="poc_task_item_status_completed_false"'
+            ' clickable="false" text=""'
+            ' content-desc="no seleccionado Se realizó %1$s Toca dos veces'
+            ' para activar" bounds="[636,150][667,179]"',
+            'resource-id="poc_task_item_status_completed_true"'
+            ' clickable="false" text=""'
+            ' content-desc="no seleccionado Se realizó %1$s Toca dos veces'
+            ' para activar" bounds="[636,150][667,179]"', 1)
+        assert len(macros._poc_tasks(self._driver(xml))) == 13
+
+    def test_the_save_button_is_not_a_task(self):
+        found = macros._poc_tasks(self._driver(self._page()))
+        assert not [t for t in found if "save" in t["rid"]]
+
+    # ------------------------------------------------------- one button, two
+    def test_the_app_in_front_decides_which_reading(self):
+        driver = self._driver(self._page())
+        with patch.object(macros, "_front_package",
+                          return_value="com.hhaexchange.uma"):
+            assert len(macros._pending_tasks(driver)) == 14
+        with patch.object(macros, "_front_package",
+                          return_value="com.inmyteam.inmyteam"):
+            # inMyTeam's reading finds no stars on this page, and says so
+            # rather than pressing anything it half-recognises.
+            assert macros._pending_tasks(driver) == []
+
+    def test_it_taps_each_pending_pair_once_on_the_done_side(self):
+        driver = self._driver(self._page())
+        taps = []
+        with patch.object(macros, "_tap_xy",
+                          side_effect=lambda x, y: taps.append((x, y))), \
+             patch.object(macros.time, "sleep"), \
+             patch.object(macros, "_pending_tasks",
+                          side_effect=[macros._poc_tasks(driver), []]):
+            macros._check_tasks(driver, lambda step: None)
+        assert len(taps) == 14
+        # 636..667 is Se realizó; 667..698 is No realizado.
+        assert all(636 <= x <= 667 for x, _ in taps)
+
+    def test_a_tick_that_did_not_take_is_named(self):
+        driver = self._driver(self._page())
+        pending = macros._poc_tasks(driver)
+        with patch.object(macros, "_tap_xy"), \
+             patch.object(macros.time, "sleep"), \
+             patch.object(macros, "_pending_tasks",
+                          side_effect=[pending, pending[:3]]):
+            with pytest.raises(RuntimeError, match="did not tick"):
+                macros._check_tasks(driver, lambda step: None)
+
+    def test_it_still_only_taps_and_reads(self):
+        import ast
+        import inspect
+        import textwrap
+
+        tree = ast.parse(textwrap.dedent(inspect.getsource(macros._poc_tasks)))
+        called = {n.func.id for n in ast.walk(tree)
+                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+        assert not called & {"_tap_xy", "_press", "_swipe"}
