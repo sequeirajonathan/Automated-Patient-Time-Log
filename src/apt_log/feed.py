@@ -2300,6 +2300,12 @@ TYPABLE = ("EditText", "AutoCompleteTextView", "SearchView",
 # quoting below is the guard that matters; this is the belt.
 #
 # Still capped short. A field takes a code or a name, never a message.
+# How long the field is given to take focus before anything is typed into it.
+# Named rather than a bare 0.6 so the suite can stand it down: five typed
+# values in one test is three seconds of the deploy gate spent watching a
+# mock.
+TYPE_SETTLE = 0.6
+
 _TYPABLE_VALUE = re.compile(r"^[^\W_](?:[\w .'\-]{0,30}[^\W_])?$", re.UNICODE)
 
 
@@ -2339,7 +2345,7 @@ def type_into(claimed_frame: str, element: dict, value: str,
                  timeout=20.0)
     if focus.returncode != 0:
         raise StaleAim("adb refused to focus the field")
-    time.sleep(0.6)
+    time.sleep(TYPE_SETTLE)
     # QUOTED FOR THE DEVICE'S OWN SHELL. `adb shell` does not take an argv —
     # it joins what it is given into a command line and hands it to sh on the
     # phone. An unquoted "Rojas Batista" arrives there as two words and only

@@ -23,6 +23,11 @@ from apt_log import config
 
 log = logging.getLogger(__name__)
 
+# How long the tap is given to land before the row is read back. Named rather
+# than a bare 1.0 so the suite can stand it down — eight tests take this pause
+# and none of them is testing the pause.
+VERIFY_SETTLE = 1.0
+
 ID = "id"
 
 PACKAGE = "com.hhaexchange.caregiver"
@@ -97,7 +102,7 @@ class AgencyScreen:
         log.info("selected agency %s", chosen)
 
         if verify:
-            time.sleep(1.0)
+            time.sleep(VERIFY_SETTLE)
             self._verify_left_or_checked(wanted)
         return chosen
 
