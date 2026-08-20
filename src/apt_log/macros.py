@@ -2063,8 +2063,13 @@ def auth_macro_for(app: str, provider=None, doc: dict | None = None) -> str | No
                 or have(secrets_mod.APP_USERNAME, secrets_mod.APP_PASSWORD))
 
     if app == "com.hhaexchange.caregiver":
-        return AUTO_AUTH_MACRO if have(secrets_mod.APP_USERNAME,
-                                       secrets_mod.APP_PASSWORD) else None
+        # RETIRED. Its one patient moved to HHAeXchange+, so a session on it
+        # is a session nobody is going to use — and signing one in
+        # unprompted is the churn the watcher's whole gate exists to avoid.
+        # The macro stays registered: this refuses to run it BY ITSELF, not
+        # to run it at all, because fetching an old record deliberately is
+        # exactly the case retirement should still allow. See feed.retired.
+        return None
     if app == "com.hhaexchange.uma":
         return "hhax_uma_login" if uma_credentialed() else None
     if app == "com.android.chrome" and doc:

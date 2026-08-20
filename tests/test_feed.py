@@ -2548,3 +2548,122 @@ class TestWhenThePhotographNeedsTurning:
               / "src/apt_log/ui/static/phone.js").read_text(encoding="utf-8")
         assert "toggle('sideways', !!meta.turn)" in js
         assert "toggle('sideways', !!meta.landscape)" not in js
+
+
+class TestRetiringTheLegacyApp:
+    """Its one patient was migrated to HHAeXchange+ — the app itself had been
+    saying so for months, on the very interstitial this project mapped as
+    "startup": "If you do not see your Agency below, please use the
+    HHAeXchange+ Application."
+
+    Retired, not demolished. It stops being somewhere the phone GOES; it does
+    not stop being an app this code can read.
+    """
+
+    LEGACY = "com.hhaexchange.caregiver"
+
+    def test_it_is_named_as_retired(self):
+        assert feed.retired(self.LEGACY)
+
+    def test_the_apps_she_uses_are_not(self):
+        for app in ("com.hhaexchange.uma", "com.tellus.evv.v2",
+                    "com.inmyteam.inmyteam"):
+            assert not feed.retired(app)
+
+    def test_it_is_off_the_picker(self):
+        """A tile is an invitation, and there is nothing on the other side
+        of that one any more."""
+        from apt_log.ui.app import PHONE_APPS
+
+        assert self.LEGACY not in [a["package"] for a in PHONE_APPS]
+
+    def test_but_what_it_was_is_still_written_down(self):
+        """The tile was the only place this project recorded that app's
+        identity — package, brand, colour."""
+        from apt_log.ui.app import RETIRED_TILE
+
+        assert RETIRED_TILE["package"] == self.LEGACY
+
+    def test_it_never_signs_itself_in(self):
+        from apt_log import macros
+        from apt_log.secrets import (APP_PASSWORD, APP_USERNAME,
+                                     MemorySecretProvider)
+
+        provider = MemorySecretProvider(**{APP_USERNAME: "u",
+                                           APP_PASSWORD: "p"})
+        assert macros.auth_macro_for(self.LEGACY, provider) is None
+
+    # ------------------------------------ what deliberately did NOT move
+    def test_its_pages_are_still_in_the_atlas(self):
+        """The record of what its screens were."""
+        assert feed.ACTIVITY_SCREENS.get(self.LEGACY)
+
+    def test_the_rotated_signature_rule_stays(self):
+        """This is the ONLY app that draws its signature page a quarter turn
+        round inside a portrait activity, and that fact is the whole reason
+        the peek and the ink carry separate "wide" and "turned" answers.
+        Delete it and nobody can tell why either flag exists."""
+        from apt_log import sign
+
+        assert self.LEGACY in sign.ROTATED_CANVAS_APPS
+
+    def test_its_visits_list_marks_still_have_their_names(self):
+        from apt_log.ui import screenview
+
+        assert screenview.IMAGE_MARK_KEYS.get("imgstarttime")
+        assert screenview.IMAGE_MARK_KEYS.get("imgendtime")
+
+    def test_it_can_still_be_opened_deliberately(self):
+        """Fetching an old record on purpose is the case retirement should
+        still allow."""
+        from apt_log import macros
+
+        assert "open_hhax_legacy" in macros.MACROS
+        assert "hhax_legacy_login" in macros.MACROS
+
+    def test_its_screens_still_read_as_a_care_app(self):
+        """If it does come to the front, the portal renders it properly
+        rather than as a stranger."""
+        assert self.LEGACY in feed.CARE_APPS
+
+
+class TestTheProviderPickerIsNotASplash:
+    """HHAeXchange+ puts its provider picker inside `onboardingactivity`,
+    which on a single-provider account really is a splash — so the atlas is
+    right about the activity and wrong about this page. The console read
+    "the app is starting up" while she was being asked which agency to work
+    under."""
+
+    FOCUS = ("com.hhaexchange.uma/"
+             "com.hhaexchange.carehub.ui.activities.OnboardingActivity")
+    PICKER = ('<node resource-id="app:id/'
+              'agency_configuration_screen_add_connection_button" '
+              'bounds="[11,1532][709,1557]"/>')
+
+    def test_the_picker_is_called_what_it_is(self):
+        assert feed.screen_for(self.FOCUS, self.PICKER) == "agency"
+
+    def test_the_same_activity_without_it_is_still_a_splash(self):
+        """It really does flash past after sign-in on an account with one
+        provider, which is what it was mapped from."""
+        assert feed.screen_for(self.FOCUS, "<hierarchy/>") == "startup"
+
+    def test_and_with_no_hierarchy_at_all_the_atlas_still_answers(self):
+        assert feed.screen_for(self.FOCUS) == "startup"
+
+    def test_no_other_page_is_second_guessed(self):
+        """The atlas is the cheap answer and the one that survives a page
+        nobody has read yet — only an activity known to hold two pages is
+        looked into."""
+        home = ("com.hhaexchange.uma/"
+                "com.hhaexchange.carehub.ui.activities.HomeActivity")
+        assert feed.screen_for(home, self.PICKER) == "home"
+
+    def test_the_console_has_a_word_for_it(self):
+        import json as json_mod
+        from pathlib import Path
+
+        base = Path(__file__).resolve().parents[1] / "src/apt_log/ui/locales"
+        for name in ("en.json", "es.json"):
+            words = json_mod.loads((base / name).read_text(encoding="utf-8"))
+            assert words.get("mirror.screen.agency")

@@ -812,22 +812,30 @@ EMPTY_FRAME = {"id": "", "img": "", "size": [0, 0], "elements": [],
                "blocked": "", "notice": ""}
 SLOW_EVERY = 10.0
 
-# The four apps her patients are spread across, verified against
-# `pm list packages` on the device. Names are the vendors' own brands, which is
-# why they are not in the catalog: a brand does not translate.
+# The apps her patients are spread across, verified against `pm list packages`
+# on the device. Names are the vendors' own brands, which is why they are not
+# in the catalog: a brand does not translate.
 #
-# `macro` is what the tile runs. Only the legacy app has a proven sign-in
-# sequence; the other three run their open-only macro, which brings the app to
-# the front and touches nothing — the most a button may honestly do on screens
-# nobody has mapped yet.
+# `macro` is what the tile runs — for most, the open-only macro, which brings
+# the app to the front and touches nothing.
+#
+# THREE, not four. The legacy HHAeXchange app had one patient and that patient
+# was migrated to HHAeXchange+, so it is off the picker: a tile is an
+# invitation, and there is nothing on the other side of that one any more.
+# What it WAS is recorded in RETIRED_TILE below rather than deleted, because
+# the tile is the only place this project ever wrote down that app's identity
+# — its package, its brand, its colour — and that is worth keeping legible
+# next to the three that are live. See feed.RETIRED_APPS for the whole
+# argument and for the list of things that deliberately did not move.
+RETIRED_TILE = {"id": "hhax_legacy", "name": "HHAeXchange", "mark": "HX",
+                "package": "com.hhaexchange.caregiver",
+                "macro": "hhax_legacy_login", "open": "open_hhax_legacy",
+                "accent": "#1b6ed6"}
+
 PHONE_APPS = (
     # `open` is the app's open-only macro — activate and wait, touch
     # nothing. The client uses it to bounce an app back when a Back press
     # turns out to have exited it to the launcher.
-    {"id": "hhax_legacy", "name": "HHAeXchange", "mark": "HX",
-     "package": "com.hhaexchange.caregiver",
-     "macro": "hhax_legacy_login", "open": "open_hhax_legacy",
-     "accent": "#1b6ed6"},
     {"id": "hhax_uma", "name": "HHAeXchange+", "mark": "HX+",
      "package": "com.hhaexchange.uma",
      "macro": "hhax_uma_login", "open": "open_hhax_uma",

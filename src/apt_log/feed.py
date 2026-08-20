@@ -248,6 +248,38 @@ CARE_APPS = (
     "com.inmyteam.inmyteam",
 )
 
+# RETIRED, NOT DEMOLISHED.
+#
+# The legacy HHAeXchange app had one patient on it, and that patient has been
+# migrated to HHAeXchange+ — the app itself said so for months, on the very
+# interstitial this project mapped as "startup": "If you do not see your
+# Agency below, please use the HHAeXchange+ Application."
+#
+# So it stops being somewhere the phone GOES. It is off the picker, it never
+# signs itself in, and nothing here reopens it.
+#
+# It does NOT stop being an app this code can read, and everything that reads
+# it stays exactly where it is:
+#
+#   * the page atlas below, which is the record of what its screens were;
+#   * `presentation_rotated` and ROTATED_CANVAS_APPS in sign.py — this is the
+#     ONLY app that draws its signature page a quarter turn round inside a
+#     portrait activity, and that fact is the whole reason the peek and the
+#     ink carry separate "wide" and "turned" answers. Delete it and the next
+#     person to read that code cannot tell why either flag exists;
+#   * the EVV check marks on its visits list, and their entry/exit names;
+#   * its session-expiry wordings, and its sign-in macro, which stays
+#     registered so a record can still be fetched deliberately.
+#
+# The cost of keeping all of that is a table nobody reads. The cost of
+# deleting it is losing the evidence for rules that still run.
+RETIRED_APPS = ("com.hhaexchange.caregiver",)
+
+
+def retired(package: str) -> bool:
+    """Whether this app is one the portal no longer takes the phone into."""
+    return (package or "") in RETIRED_APPS
+
 # Android's own permission dialogs. Not a place the phone can wander to —
 # only a care app asking for something can raise one, and it is raised OVER
 # that app, mid-flow. Sanctioned for exactly that reason: bouncing it would
@@ -299,7 +331,13 @@ ACTIVITY_SCREENS = {
     # Walked in the second discovery session: sign-in end to end.
     "com.hhaexchange.uma": {
         "authenticationactivity": "login",
-        "onboardingactivity": "startup",   # flashes past after sign-in
+        # Two screens under one activity. It DOES flash past after sign-in on
+        # an account with a single provider — which is what it was mapped
+        # from — but on an account with more than one it stops there and
+        # asks, and the console said "the app is starting up" while she was
+        # being asked to choose. The activity cannot tell them apart, so
+        # `screen_for` looks at the page. See PICKER_MARKS.
+        "onboardingactivity": "startup",
         "homeactivity": "home",
     },
     "com.tellus.evv.v2": {},
@@ -395,7 +433,17 @@ def activity_of(focus: str) -> str:
     return (focus or "").split("/")[-1].split(".")[-1].lower()
 
 
-def screen_for(focus: str) -> str:
+# A screen that ASKS, under an activity whose name says it is still loading.
+# HHAeXchange+ puts its provider picker inside `onboardingactivity`, which on
+# a single-provider account really is a splash — so the atlas is right about
+# the activity and wrong about this page, and the console reported "the app
+# is starting up" while she was being asked which agency to work under.
+#
+# The id is the app's own and appears nowhere else.
+PICKER_MARKS = ("agency_configuration_screen_add_connection_button",)
+
+
+def screen_for(focus: str, hierarchy: str | None = None) -> str:
     """Map a focused window to the mirror's vocabulary, package by package.
 
     The atlas answers first. For a care app whose page is not in it yet, the
@@ -403,12 +451,19 @@ def screen_for(focus: str) -> str:
     mean the same thing here (HHAeXchange+ hosts its form under an "auth"
     activity, Mobile Caregiver+ parks behind a "pin" one), so a sign-in
     screen is called one even before anyone has mapped that app's pages.
+
+    The hierarchy is consulted only where an activity is known to hold more
+    than one page — never as a general rule, because the atlas is the cheap
+    answer and the one that survives a page nobody has read yet.
     """
     package = (focus or "").split("/")[0]
     if package in LAUNCHER_APPS:
         return "launcher"
     activity = activity_of(focus)
     named = ACTIVITY_SCREENS.get(package, {}).get(activity)
+    if named == "startup" and hierarchy and any(
+            mark in hierarchy for mark in PICKER_MARKS):
+        return "agency"
     if named:
         return named
     if package in CARE_APPS and looks_like_a_login_screen(activity):
@@ -1175,7 +1230,7 @@ def write_frame(path: Path, serial: str | None = None,
     often to pay for it. See `run`.
     """
     png, focus, reason = capture(serial, hierarchy)
-    screen = screen_for(focus)
+    screen = screen_for(focus, hierarchy)
 
     speak = text_is_disclosable(reason)
     els = elements(hierarchy, label=speak,
