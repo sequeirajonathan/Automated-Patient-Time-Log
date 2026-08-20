@@ -2807,3 +2807,71 @@ class TestSidewaysAtAnyResolution:
     def test_the_extent_is_the_widest_and_tallest_the_tree_mentions(self):
         assert feed.screen_extent(self._tree(720, 1600)) == (720, 1600)
         assert feed.screen_extent(None) == (0, 0)
+
+
+class TestTheTreeIsWrittenDownWithoutWhatWasTyped:
+    """Mapping a screen needs the document under the reflow, and both ways of
+    asking the phone for it fight the feed: `uiautomator dump` spawns a fresh
+    instrumentation competing for the same service (it wedged Appium hard
+    enough to need a restart during setup work), and calling `read_hierarchy`
+    from a second process opens a SECOND Appium session, which UiAutomator2
+    does not allow.
+
+    The feed already holds the tree every time it reads one. Writing it down
+    means every other reader gets it from a file.
+    """
+
+    TYPED = (
+        '<hierarchy rotation="0">'
+        '<node index="0" text="Enter your code" class="android.widget.TextView"'
+        ' bounds="[24,1040][100,1052]"/>'
+        '<node index="1" text="604820" resource-id="app:id/code"'
+        ' class="android.widget.EditText" bounds="[13,1042][707,1087]"/>'
+        '<node index="2" text="hunter2" class="android.widget.EditText"'
+        ' password="true" bounds="[13,1100][707,1145]"/>'
+        '</hierarchy>')
+
+    def test_a_typed_code_never_reaches_the_file(self):
+        hushed = feed.hush_typed(self.TYPED)
+        assert "604820" not in hushed
+        assert "hunter2" not in hushed
+
+    def test_but_the_node_survives_whole(self):
+        """Blanking the value, not dropping the field: its id and its bounds
+        are how the page aims at it."""
+        hushed = feed.hush_typed(self.TYPED)
+        assert 'resource-id="app:id/code"' in hushed
+        assert 'bounds="[13,1042][707,1087]"' in hushed
+        assert 'class="android.widget.EditText"' in hushed
+
+    def test_the_labels_around_it_are_left_alone(self):
+        """Only what was TYPED is withheld. The app's own words are the whole
+        reason to read the tree."""
+        assert "Enter your code" in feed.hush_typed(self.TYPED)
+
+    def test_nothing_to_hush_is_not_an_error(self):
+        assert feed.hush_typed(None) == ""
+        assert feed.hush_typed("") == ""
+
+    def test_the_frame_writes_it_beside_the_screen(self, tmp_path):
+        with patch.object(feed, "capture",
+                          return_value=(None, HOME, feed.NO_FOCUS)):
+            feed.write_frame(tmp_path / "last-screen.jpg",
+                             hierarchy=self.TYPED)
+        written = (tmp_path / feed.HIERARCHY_NAME).read_text(encoding="utf-8")
+        assert "Enter your code" in written
+        assert "604820" not in written
+
+    def test_a_frame_is_never_lost_because_the_tree_could_not_be_written(
+            self, tmp_path):
+        """It is a convenience for whoever is working on the machine. A full
+        disk must cost the convenience, not the mirror."""
+        with patch.object(feed, "capture",
+                          return_value=(None, HOME, feed.NO_FOCUS)), \
+                patch.object(feed, "hush_typed",
+                             side_effect=OSError("no space")):
+            try:
+                feed.write_frame(tmp_path / "last-screen.jpg",
+                                 hierarchy=self.TYPED)
+            except OSError:
+                pytest.fail("a write failure must not reach the caller")

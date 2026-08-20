@@ -1046,6 +1046,44 @@ def compress(shot: bytes) -> bytes:
 FRAME_NAME = "frame.json"
 SCREEN_NAME = "screen.json"
 
+# THE RAW TREE, WRITTEN DOWN WHERE ANYONE CAN READ IT WITHOUT ASKING THE PHONE.
+#
+# Mapping a new screen needs the document underneath the reflow — a
+# resource-id on a node nobody taps, an attribute the reflow drops. Getting it
+# used to mean `adb shell uiautomator dump`, which spawns a fresh
+# instrumentation and fights the resident session for the same service; doing
+# that during setup work wedged Appium hard enough to need a restart. The
+# other obvious route is worse: calling `read_hierarchy` from a second process
+# opens a SECOND Appium session, and UiAutomator2 allows exactly one.
+#
+# The feed already holds the tree every time it reads one. Writing it down
+# costs nothing anybody notices and means every other reader — a tool, a
+# script, a person over ssh — gets it from a file instead of from the device.
+HIERARCHY_NAME = "hierarchy.xml"
+
+# What is typed is never what gets written. The published document withholds
+# the contents of editable fields on purpose — that is where a passcode and a
+# texted code live while she is typing them — and a raw tree on disk would
+# quietly keep what the rest of the system refuses to carry. Blanked at the
+# moment of writing rather than by whoever reads it, so there is one place to
+# get it right instead of one per reader.
+_TYPED_TEXT = re.compile(r'( text=")[^"]*(")')
+
+
+def hush_typed(xml: str | None) -> str:
+    """The tree with the contents of editable and password fields blanked.
+
+    Matched on the NODE rather than on the value: an EditText's text IS its
+    typed contents, and a password field's is that plus a reason to care. The
+    node, its id and its bounds all survive — only what was typed does not.
+    """
+    out = []
+    for node in re.split(r"(?=<[A-Za-z])", xml or ""):
+        if 'password="true"' in node or "EditText" in node:
+            node = _TYPED_TEXT.sub(r"\1\2", node)
+        out.append(node)
+    return "".join(out)
+
 
 STITCH_DIRNAME = "stitched"
 
@@ -1308,6 +1346,21 @@ def write_screen(target: Path, frame: dict, screen: str, reason: str,
 TAP_FRAME_MAX_AGE = 15.0
 
 
+def _publish_hierarchy(where: Path, hierarchy: str | None) -> None:
+    """Write the tree down for other readers. Never fatal: this is a
+    convenience for whoever is working on the machine, and a frame must not
+    be lost because a disk was full."""
+    if not hierarchy:
+        return
+    try:
+        target = where / HIERARCHY_NAME
+        tmp = target.with_suffix(".tmp")
+        tmp.write_text(hush_typed(hierarchy), encoding="utf-8")
+        os.replace(tmp, target)
+    except OSError as exc:
+        log.debug("cannot publish the hierarchy: %s", exc)
+
+
 def write_frame(path: Path, serial: str | None = None,
                 hierarchy: str | None = None,
                 hierarchy_at: float = 0.0,
@@ -1319,6 +1372,7 @@ def write_frame(path: Path, serial: str | None = None,
     """
     png, focus, reason = capture(serial, hierarchy)
     screen = screen_for(focus, hierarchy)
+    _publish_hierarchy(path.parent, hierarchy)
 
     speak = text_is_disclosable(reason)
     els = elements(hierarchy, label=speak,

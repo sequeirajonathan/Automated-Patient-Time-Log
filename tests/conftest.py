@@ -17,7 +17,7 @@ import importlib
 import pytest
 
 from apt_log import flight, macros, prefs, versions
-from apt_log.ui import state
+from apt_log.ui import mirror, state
 
 
 @pytest.fixture(autouse=True)
@@ -71,6 +71,11 @@ def _isolated_prefs(tmp_path, monkeypatch):
     # instance, not the module that holds the constant.
     monkeypatch.setattr(importlib.import_module("apt_log.ui.app"),
                         "VIEWERS_PATH", tmp_path / "viewers.json")
+    # And the mirror, found by the same method a second time: delete
+    # /var/lib/aptlog, run the suite, see what grows back. `write_frame`
+    # publishes it, so any test that writes a frame wrote the machine's live
+    # mirror — the document the portal renders from.
+    monkeypatch.setattr(mirror, "MIRROR_PATH", tmp_path / "mirror.json")
     yield
 
 
