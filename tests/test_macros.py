@@ -3212,15 +3212,44 @@ class TestAnsweringTheUpdateWall:
 
     MC = "com.tellus.evv.v2"
 
-    def _driver(self, label="Actualizar"):
+    # The real listing, off the phone. The button is a clickable View with NO
+    # text; the word lives in a child that is not clickable; and "Last updated
+    # Aug 10, 2026" sits a few rows below it, which is what makes a substring
+    # match the wrong tool.
+    PAGE = [
+        ("", True, (831, 93, 306, 25)),        # the Update button itself
+        ("Update", False, (972, 100, 24, 11)),  # ...and its loose label
+        ("", True, (520, 93, 305, 25)),        # Uninstall's button
+        ("Uninstall", False, (658, 100, 30, 11)),
+        ("Last updated Aug 10, 2026", False, (520, 145, 79, 9)),
+        ("Mobile Caregiver+", False, (571, 49, 104, 17)),
+        ("", True, (0, 0, 1600, 720)),         # the page, which encloses all
+    ]
+
+    def _node(self, text, clickable, box):
         from unittest.mock import MagicMock
 
+        node = MagicMock()
+        node.text = text
+        node.get_attribute.return_value = ""
+        node.rect = {"x": box[0], "y": box[1],
+                     "width": box[2], "height": box[3]}
+        node._clickable = clickable
+        return node
+
+    def _driver(self, page=None):
+        from unittest.mock import MagicMock
+
+        rows = [self._node(*row) for row in (page or self.PAGE)]
+
+        def find(_how, xpath):
+            if "@clickable" in xpath:
+                return [n for n in rows if n._clickable]
+            return [n for n in rows if n.text]
+
         driver = MagicMock()
-        button = MagicMock()
-        button.text = label
-        button.rect = {"x": 100, "y": 900, "width": 200, "height": 60}
-        driver.find_elements.return_value = [button]
-        return driver, button
+        driver.find_elements.side_effect = find
+        return driver, rows
 
     def _run(self, driver, versions_seq, steps=None):
         """Run the macro against a scripted phone.
@@ -3265,12 +3294,38 @@ class TestAnsweringTheUpdateWall:
         opened = [" ".join(a) for a in calls["adb"]]
         assert any(f"market://details?id={self.MC}" in line for line in opened)
 
-    def test_it_presses_the_stores_update_button(self):
-        driver, button = self._driver()
+    def test_it_presses_the_button_the_word_sits_inside(self):
+        """The label and the button are different nodes: on the real listing
+        the clickable View carries no text at all. The centre asserted here
+        is the BUTTON's — [831,93] plus 306x25 — not the word's."""
+        driver, _ = self._driver()
         self._run(driver, [{"code": "979"}, {"code": "980"}])
         driver.tap.assert_called_once()
         (point,), = driver.tap.call_args.args,
-        assert point == [(200, 930)]
+        assert point == [(831 + 306 // 2, 93 + 25 // 2)]
+
+    def test_it_takes_the_smallest_box_around_the_word(self):
+        """The page encloses the word too, and tapping the page is not
+        pressing the button."""
+        driver, _ = self._driver()
+        found = macros._store_update_button(driver)
+        assert (found["x"], found["y"]) == (831, 93)
+
+    def test_the_neighbouring_button_is_not_the_one_pressed(self):
+        """Uninstall sits beside Update on the same row, the same shape, and
+        it is the one press on this page that cannot be taken back."""
+        driver, _ = self._driver()
+        found = macros._store_update_button(driver)
+        assert found["x"] != 520
+
+    def test_last_updated_is_not_an_update_button(self):
+        """"Last updated Aug 10, 2026" is a few rows under the button, and it
+        contains the word. Whole labels only, for exactly this reason."""
+        driver, _ = self._driver([
+            ("Last updated Aug 10, 2026", False, (520, 145, 79, 9)),
+            ("", True, (0, 0, 1600, 720)),
+        ])
+        assert macros._store_update_button(driver) is None
 
     def test_it_waits_for_the_version_to_change_not_for_the_store_to_say_so(
             self):
@@ -3300,15 +3355,18 @@ class TestAnsweringTheUpdateWall:
     def test_a_store_offering_nothing_says_so_rather_than_waiting(self):
         """Which is what a phone whose update already landed in the
         background looks like. Not a failure of the phone — a fact."""
-        driver, _ = self._driver()
-        driver.find_elements.return_value = []
+        driver, _ = self._driver([("Open", False, (972, 100, 24, 11)),
+                                  ("", True, (831, 93, 306, 25))])
         with pytest.raises(RuntimeError, match="not offering an update"):
             self._run(driver, [{"code": "979"}])
 
     def test_update_all_is_never_what_it_presses(self):
         """On a Store landing page that button updates eleven apps nobody
         asked about."""
-        driver, _ = self._driver(label="Actualizar todo")
+        driver, _ = self._driver([
+            ("Actualizar todo", False, (972, 100, 60, 11)),
+            ("", True, (831, 93, 306, 25)),
+        ])
         with pytest.raises(RuntimeError, match="not offering an update"):
             self._run(driver, [{"code": "979"}])
         driver.tap.assert_not_called()

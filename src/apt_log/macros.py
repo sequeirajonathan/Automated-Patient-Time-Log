@@ -1779,14 +1779,20 @@ STORE_PACKAGE = "com.android.vending"
 # the wording rather than a resource-id because the Store's ids are generated
 # and change between its own releases — the one app here guaranteed to be
 # newer than anything written about it.
-STORE_UPDATE_WORDS = ("actualizar", "update")
+#
+# WHOLE labels, not substrings, and that is not fussiness. The listing this
+# was walked against carries "Last updated Aug 10, 2026" a few rows under the
+# button; anything matching on `contains` finds that too, and the clickable
+# thing wrapping it is a different control entirely. An exact label is the
+# cheapest way to be sure which word was pressed.
+STORE_UPDATE_LABELS = ("update", "actualizar", "update now", "actualizar ahora")
 
-# ...and the wordings that START with those and mean something else. "Update
-# all" on a Store landing page updates eleven apps nobody asked about; the
-# settings row toggles automatic updates for the whole phone. Neither belongs
-# to the app this macro was pointed at.
+# ...and the labels that read almost the same and mean something else.
+# "Update all" on a Store landing page updates eleven apps nobody asked about;
+# the settings row toggles automatic updates for the whole phone.
 STORE_NOT_UPDATE = ("actualizar todo", "update all", "actualizaciones",
-                    "auto-actualizar", "auto-update", "updates")
+                    "auto-actualizar", "auto-update", "updates",
+                    "actualizar todas", "update all apps")
 
 # An APK over Wi-Fi, with the download and the install both inside it. Long,
 # because the failure mode of a short wait here is a macro that reports
@@ -1799,30 +1805,69 @@ STORE_BUTTON_TRIES = 6
 STORE_BUTTON_WAIT = 2.0
 
 
+def _rect(element) -> dict | None:
+    """An element's box, or None if it will not give one up."""
+    try:
+        r = element.rect
+        return {"x": int(r["x"]), "y": int(r["y"]),
+                "w": int(r["width"]), "h": int(r["height"])}
+    except Exception:  # noqa: BLE001 — a stale node has no box
+        return None
+
+
+def _encloses(outer: dict, inner: dict) -> bool:
+    return (outer["x"] <= inner["x"]
+            and outer["y"] <= inner["y"]
+            and outer["x"] + outer["w"] >= inner["x"] + inner["w"]
+            and outer["y"] + outer["h"] >= inner["y"] + inner["h"])
+
+
 def _store_update_button(driver):
-    """Play's Update button for the app this page is about, or None."""
-    hits = driver.find_elements(
-        "xpath",
-        '//*[@clickable="true" and ('
-        + " or ".join(
-            f'contains(translate(@text,'
-            f'"ABCDEFGHIJKLMNOPQRSTUVWXYZÁÉÍÓÚ",'
-            f'"abcdefghijklmnopqrstuvwxyzáéíóú"),"{word}") or '
-            f'contains(translate(@content-desc,'
-            f'"ABCDEFGHIJKLMNOPQRSTUVWXYZÁÉÍÓÚ",'
-            f'"abcdefghijklmnopqrstuvwxyzáéíóú"),"{word}")'
-            for word in STORE_UPDATE_WORDS)
-        + ')]')
-    for hit in hits:
+    """Where to tap to update this app, as a box, or None.
+
+    THE LABEL AND THE BUTTON ARE DIFFERENT NODES. Walked live on the Store
+    that ships on this phone: the button is a clickable View carrying no text
+    at all, and the word sits in a child that is not clickable —
+
+        clickable View  [831, 93][1137, 118]  ''
+        View            [972,100][ 996, 111]  'Update'
+
+    — so looking for a clickable element whose OWN text says Update finds
+    nothing, which is exactly what the first version of this did on a screen
+    that plainly had the button on it.
+
+    So: find the word, then take the smallest clickable box that encloses it.
+    Smallest because the whole page encloses it too, and tapping the page is
+    not pressing the button. This is the same shape as the caption-pairing
+    the screen reflow already does, for the same reason — apps draw a control
+    as a box with a label loose inside it.
+    """
+    labels = []
+    for node in driver.find_elements("xpath", "//*[@text or @content-desc]"):
         try:
-            label = ((hit.text or "")
-                     or (hit.get_attribute("content-desc") or "")).lower()
-        except Exception:  # noqa: BLE001 — a stale node is not a button
+            words = ((node.text or "")
+                     or (node.get_attribute("content-desc") or ""))
+        except Exception:  # noqa: BLE001 — a stale node is not a label
             continue
-        if any(bad in label for bad in STORE_NOT_UPDATE):
+        words = words.strip().lower()
+        if words not in STORE_UPDATE_LABELS or words in STORE_NOT_UPDATE:
             continue
-        return hit
-    return None
+        box = _rect(node)
+        if box:
+            labels.append(box)
+    if not labels:
+        return None
+
+    best = None
+    for node in driver.find_elements("xpath", '//*[@clickable="true"]'):
+        box = _rect(node)
+        if not box or not box["w"] or not box["h"]:
+            continue
+        if not any(_encloses(box, label) for label in labels):
+            continue
+        if best is None or box["w"] * box["h"] < best["w"] * best["h"]:
+            best = box
+    return best
 
 
 def _update_app(driver, report) -> None:
@@ -1865,9 +1910,8 @@ def _update_app(driver, report) -> None:
         _back_to(package, report)
         raise RuntimeError("the Play Store is not offering an update for this app")
 
-    rect = button.rect
-    driver.tap([(rect["x"] + rect["width"] // 2,
-                 rect["y"] + rect["height"] // 2)])
+    driver.tap([(button["x"] + button["w"] // 2,
+                 button["y"] + button["h"] // 2)])
 
     report("macro.step.installing")
     end = time.time() + STORE_INSTALL_TIMEOUT
