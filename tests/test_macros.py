@@ -3637,3 +3637,169 @@ class TestAMacroCannotOutliveItsProcess:
         with patch.object(macros, "STATUS_PATH", tmp_path / "status.json"):
             assert macros.read_status().state != "running"
         assert feed_mod.CONTAIN_DWELL > 0      # the watchdog is still armed
+
+
+class TestTypingTheCodeItself:
+    """When the account's number belongs to the phone the controller drives,
+    the text is in its inbox and the relay through a person is six digits
+    being retyped from two feet away.
+
+    The whole design rests on degrading well: where the code lands on
+    somebody ELSE's phone — which is where this started, and where it still
+    is today — the inbox holds nothing from that sender and the walk must
+    reach the human path exactly as before.
+    """
+
+    def _driver(self, asking=True, boxes=1, verify=True):
+        from unittest.mock import MagicMock
+
+        driver = MagicMock()
+        box = MagicMock()
+        box.is_displayed.return_value = True
+        button = MagicMock()
+        button.is_displayed.return_value = True
+
+        def find(_how, xpath):
+            if "EditText" in xpath:
+                return [box] * boxes
+            if "verify" in xpath.lower():
+                return [button] if verify else []
+            return []
+
+        driver.find_elements.side_effect = find
+        type(driver).page_source = property(
+            lambda self: "Enter your code" if asking else "Visits")
+        return driver, box, button
+
+    def test_a_fresh_code_is_typed_and_verified(self):
+        from unittest.mock import patch as patch_mod
+
+        driver, box, button = self._driver()
+        # The app stops asking once the code lands.
+        asking = {"still": True}
+        type(driver).page_source = property(
+            lambda self: "Enter your code" if asking["still"] else "Visits")
+        button.click.side_effect = lambda: asking.__setitem__("still", False)
+
+        steps = []
+        with patch_mod("apt_log.sms.wait_for_code", return_value="604820"), \
+                patch_mod.object(macros, "_push_the_code") as pushed, \
+                patch_mod("apt_log.macros.time.sleep"), fast_clock():
+            done = macros._fill_in_the_code(driver, steps.append, sent=0.0)
+
+        assert done is True
+        box.send_keys.assert_called_once_with("604820")
+        button.click.assert_called_once()
+        pushed.assert_called_once_with("604820")
+
+    def test_the_box_is_cleared_before_the_code_goes_in(self):
+        """It can already hold a rejected attempt, and inMyTeam appends."""
+        from unittest.mock import patch as patch_mod
+
+        driver, box, _ = self._driver()
+        with patch_mod("apt_log.sms.wait_for_code", return_value="604820"), \
+                patch_mod.object(macros, "_push_the_code"), \
+                patch_mod("apt_log.macros.time.sleep"), fast_clock():
+            macros._fill_in_the_code(driver, lambda _s: None, sent=0.0)
+        box.clear.assert_called_once()
+
+    def test_no_code_hands_back_to_the_human_path(self):
+        """The case that is true TODAY: the text goes to somebody else."""
+        from unittest.mock import patch as patch_mod
+
+        driver, box, _ = self._driver()
+        with patch_mod("apt_log.sms.wait_for_code", return_value=""):
+            assert macros._fill_in_the_code(
+                driver, lambda _s: None, sent=0.0) is False
+        box.send_keys.assert_not_called()
+
+    def test_the_walk_still_notifies_when_no_code_arrives(self):
+        """End to end: nothing typed, the person is told, and the console
+        ends on "waiting" rather than on "reading"."""
+        import itertools
+
+        from unittest.mock import patch as patch_mod
+
+        from apt_log.secrets import INMYTEAM_PHONE, MemorySecretProvider
+
+        steps = []
+        state = {"at": "splash"}
+        driver = TestInMyTeamWalksToTheCode()._driver(state)
+        with patch_mod("apt_log.macros.wake_display"), \
+                patch_mod("apt_log.secrets.FileSecretProvider",
+                          return_value=MemorySecretProvider(
+                              **{INMYTEAM_PHONE: "3055550123"})), \
+                patch_mod("apt_log.sms.wait_for_code", return_value=""), \
+                patch_mod.object(macros, "_say_the_code_is_waiting") as told, \
+                patch_mod("apt_log.macros.time.sleep"), \
+                patch_mod("apt_log.macros.time.monotonic",
+                          side_effect=itertools.count(step=0.5)):
+            macros.MACROS["inmyteam_login"].run(driver, steps.append)
+        told.assert_called_once()
+        assert steps[-1] == "macro.step.awaiting_code"
+
+    def test_a_screen_that_moved_is_not_typed_into(self):
+        """Between asking and answering the screen can change. Six digits at
+        whatever is in front now is the failure this avoids."""
+        from unittest.mock import patch as patch_mod
+
+        driver, box, _ = self._driver(boxes=0)
+        with patch_mod("apt_log.sms.wait_for_code", return_value="604820"):
+            assert macros._fill_in_the_code(
+                driver, lambda _s: None, sent=0.0) is False
+        box.send_keys.assert_not_called()
+
+    def test_two_fields_are_too_ambiguous_to_type_into(self):
+        from unittest.mock import patch as patch_mod
+
+        driver, box, _ = self._driver(boxes=2)
+        with patch_mod("apt_log.sms.wait_for_code", return_value="604820"):
+            assert macros._fill_in_the_code(
+                driver, lambda _s: None, sent=0.0) is False
+        box.send_keys.assert_not_called()
+
+    def test_a_code_the_app_rejects_is_not_reported_as_signed_in(self):
+        """inMyTeam's complaint is a dialog absent from the tree, so the only
+        honest signal is that it is STILL asking."""
+        from unittest.mock import patch as patch_mod
+
+        driver, _, _ = self._driver(asking=True)
+        with patch_mod("apt_log.sms.wait_for_code", return_value="604820"), \
+                patch_mod.object(macros, "_push_the_code"), \
+                patch_mod("apt_log.macros.time.sleep"), fast_clock():
+            assert macros._fill_in_the_code(
+                driver, lambda _s: None, sent=0.0) is False
+
+    def test_a_missing_verify_button_is_not_a_failure(self):
+        """The control is a clickable View with its caption in a child, and
+        Enter on the field submits too. So "no button" means "typed, now see
+        whether it stopped asking" rather than an error."""
+        from unittest.mock import MagicMock, patch as patch_mod
+
+        asking = {"still": True}
+        box = MagicMock()
+        box.is_displayed.return_value = True
+        # Typing is what submits when there is no button to press.
+        box.send_keys.side_effect = lambda _c: asking.__setitem__("still", False)
+
+        driver = MagicMock()
+        driver.find_elements.side_effect = (
+            lambda _how, xpath: [box] if "EditText" in xpath else [])
+        type(driver).page_source = property(
+            lambda self: "Enter your code" if asking["still"] else "Visits")
+
+        with patch_mod("apt_log.sms.wait_for_code", return_value="604820"), \
+                patch_mod.object(macros, "_push_the_code"), \
+                patch_mod("apt_log.macros.time.sleep"), fast_clock():
+            done = macros._fill_in_the_code(driver, lambda _s: None, sent=0.0)
+        assert done is True
+        box.send_keys.assert_called_once_with("604820")
+
+    def test_the_code_goes_by_push_and_never_by_the_relay(self):
+        """The relay is a public topic on somebody else's server, which is
+        not a place for a live second factor."""
+        import inspect
+
+        source = inspect.getsource(macros._push_the_code)
+        assert "push.send" in source
+        assert "notify" not in source

@@ -1698,6 +1698,9 @@ def _inmyteam_walk(driver, report, resend: bool = False) -> None:
     submit = by_words("Sign in", "Iniciar")
     if submit is None:
         raise RuntimeError("the sign-in button is not on this screen")
+    # Stamped before the press, so "a code that arrived after we asked" has a
+    # meaning. Anything older than this instant is a previous attempt's.
+    sent_at = time.time()
     submit.click()
 
     # ------------------------------------------------------------ the code
@@ -1709,10 +1712,26 @@ def _inmyteam_walk(driver, report, resend: bool = False) -> None:
     if not wait_for(lambda: _asks_for_a_code(driver), timeout=25.0):
         raise RuntimeError("the app did not ask for a code")
 
+    # THE CODE, IF IT CAME HERE. When the number on the account belongs to
+    # the phone this controller drives, the text is sitting in its inbox and
+    # the relay through a person is six digits being retyped from two feet
+    # away. See sms.py for what it does and does not read.
+    #
+    # `sent` is taken BEFORE the wait, not inside it: a code already in the
+    # inbox is the one that was rejected a minute ago, and typing it burns an
+    # attempt on an app that limits them.
+    if _fill_in_the_code(driver, report, sent=sent_at):
+        return
+
+    # Back to what is actually true. The read is over and it found nothing,
+    # so the state is "waiting for a person" again — leaving the console on
+    # "reading the texted code" would describe something that stopped.
+    report("macro.step.awaiting_code")
+
     # The text has been sent, so somebody has to be told. This is the one
-    # step in the whole system that cannot be waited out or refused — the
-    # code exists only on her phone — and a portal that sits there silently
-    # asking is a portal nobody discovers is asking.
+    # step in the whole system that cannot be waited out or refused when the
+    # code lands on somebody else's phone — and a portal that sits there
+    # silently asking is a portal nobody discovers is asking.
     _say_the_code_is_waiting()
 
 
@@ -1750,6 +1769,92 @@ PORTAL_URL = _portal_url()
 PUSH_TITLE = "inMyTeam needs the code"
 CODE_WAITING = ("inMyTeam texted you a sign-in code. Open the portal and "
                 "type it in — the app is waiting on it.")
+
+# When the code came to the phone the controller drives, it has already been
+# typed by the time anyone reads this — so the sentence reports rather than
+# asks. It carries the CODE, which the sentence above deliberately does not,
+# and that is only safe because it goes by Web Push: encrypted to a specific
+# subscription rather than to a public topic on a relay. See `_push_the_code`.
+CODE_ARRIVED = ("inMyTeam code {code} — entered for you. Nothing to do "
+                "unless the app is still asking.")
+
+
+def _fill_in_the_code(driver, report, sent: float) -> bool:
+    """Read the texted code off this phone and type it. True if signed in.
+
+    Only possible when the account's number belongs to the phone the
+    controller drives. Where it does not — which is where this started — the
+    inbox holds nothing from that sender, this returns False in a couple of
+    seconds, and the walk carries on to notify a human exactly as before.
+    That fallback is the point: this feature can be wrong about the phone
+    without being wrong about the outcome.
+
+    The code is pushed as well as typed. Web Push and NOT the relay: push is
+    encrypted to a specific subscription and opens the portal, while the
+    relay is a public topic on somebody else's server, which is not a place
+    for a live second factor. `notify` is deliberately not called here.
+    """
+    from apt_log import sms
+
+    report("macro.step.reading_the_code")
+    code = sms.wait_for_code(after=sent, timeout=CODE_WAIT)
+    if not code:
+        return False
+
+    box = _code_box(driver)
+    if box is None:
+        # The screen moved under us between asking and answering. Better to
+        # hand back to the human path than to type six digits at whatever is
+        # in front now.
+        log.warning("a code arrived but the code box is gone")
+        return False
+
+    report("macro.step.signing_in")
+    try:
+        box.clear()
+        box.send_keys(code)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not type the code (%s)", exc)
+        return False
+
+    _push_the_code(code)
+
+    verify = _verify_button(driver)
+    if verify is not None:
+        verify.click()
+    # Signed in means the app stopped asking. A wrong or expired code leaves
+    # the screen exactly where it was — inMyTeam's own complaint is a dialog
+    # that never reaches the tree — so the absence of the question is the
+    # only honest signal available.
+    if wait_for(lambda: not _asks_for_a_code(driver), timeout=25.0):
+        report("macro.step.finished")
+        return True
+    log.warning("the code was typed and the app is still asking")
+    return False
+
+
+# How long to wait for the text after pressing Sign in. Generous: a carrier
+# can take half a minute on a bad day, and the cost of giving up early is
+# falling back to the human path, which is where this started.
+CODE_WAIT = 75.0
+
+
+def _push_the_code(code: str) -> None:
+    """Send the code to whoever subscribed, and only to them.
+
+    Chosen over the relay deliberately — see `_fill_in_the_code`. The relay
+    is a public topic; this is encrypted per subscription and opens the
+    portal. It is a convenience and a record, never the primary path: the
+    code has already been typed by the time this runs.
+    """
+    try:
+        from apt_log import push
+
+        sent = push.send(PUSH_TITLE, CODE_ARRIVED.format(code=code),
+                         url=CODE_DEEP_LINK, tag="otp")
+        log.info("code pushed to %d subscriber(s)", sent)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not push the code (%s)", exc)
 
 
 def _say_the_code_is_waiting() -> None:
@@ -1806,6 +1911,49 @@ def _asks_for_a_code(driver) -> bool:
     except Exception:  # noqa: BLE001
         return False
     return any(w in words for w in _CODE_WORDS)
+
+
+def _code_box(driver):
+    """The field the code goes in, or None.
+
+    The same test `_asks_for_a_code` uses, kept separate because arriving at
+    the screen and typing into it are different moments: the screen can move
+    between them, and typing six digits at whatever is in front now is the
+    failure this exists to avoid.
+    """
+    try:
+        boxes = [e for e in driver.find_elements(
+            "xpath", '//*[@class="android.widget.EditText"]')
+            if e.is_displayed()]
+    except Exception:  # noqa: BLE001
+        return None
+    return boxes[0] if len(boxes) == 1 else None
+
+
+# What the button says, in the two languages this phone is ever in. Read off
+# the live screen: inMyTeam labels it "Verify", with "Call" beneath it as a
+# separate row — which is why this matches the word and not merely a button
+# near the bottom of the screen.
+_VERIFY_WORDS = ("verify", "verificar")
+
+
+def _verify_button(driver):
+    """inMyTeam's own Verify, or None.
+
+    None is a real answer, not a failure: on the live screen the control is a
+    clickable View carrying its caption in a child, and pressing Enter on the
+    field submits too. The caller treats a missing button as "typed, now see
+    whether it stopped asking" rather than as an error.
+    """
+    lowered = " ".join(
+        f'contains(translate(@text,"VERIFYCA","verifyca"),"{word}")'
+        for word in _VERIFY_WORDS)
+    try:
+        found = driver.find_elements(
+            "xpath", f'//*[@clickable="true" and ({lowered})]')
+    except Exception:  # noqa: BLE001
+        return None
+    return found[0] if found else None
 
 
 # --------------------------------------------------------------- operations
