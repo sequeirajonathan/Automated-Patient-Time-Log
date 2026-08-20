@@ -2799,3 +2799,45 @@ def client_body_of() -> str:
     from apt_log.ui.app import app as fastapi_app
 
     return TestClient(fastapi_app).get("/app").text
+
+
+class TestTheSuiteLeavesTheMachineAlone:
+    """conftest opens by saying nothing here may touch the machine's real
+    state. That was true of preferences and false of five other paths, which
+    is a thing you can only find by looking.
+
+    How it was found is worth recording: delete /var/lib/aptlog, run the
+    suite, see what grows back. It grew back four times before it stopped.
+
+    Two of those mattered beyond tidiness. `flight.jsonl` is the flight
+    recorder, so the deploy gate had been interleaving test fixtures with real
+    recorded visits on the live machine. `viewers.json` is what
+    `someone_is_watching` reads to decide whether auto sign-in may run
+    unattended — a safety interlock, written by the test suite, on the running
+    controller.
+
+    Neither ever failed anywhere: both are written inside try/except, so on CI
+    they silently did nothing and on the Pi they silently worked.
+    """
+
+    REAL = Path("/var/lib/aptlog")
+
+    def test_every_state_path_points_somewhere_temporary(self):
+        import importlib
+
+        from apt_log import flight, macros, prefs, versions
+        from apt_log.ui import state
+
+        watched = {
+            "prefs": prefs.PREFS_PATH,
+            "versions": versions.VERSIONS_PATH,
+            "paused flag": state.PAUSED_FLAG,
+            "state dir": state.STATE_DIR,
+            "flight recorder": flight.FLIGHT_PATH,
+            "viewers (macros)": macros.VIEWERS_PATH,
+            "viewers (web)": importlib.import_module(
+                "apt_log.ui.app").VIEWERS_PATH,
+        }
+        for name, path in watched.items():
+            assert self.REAL not in Path(path).parents and path != self.REAL, (
+                f"{name} still points at the machine's own state: {path}")

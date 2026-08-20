@@ -163,11 +163,17 @@ class TestTheKey:
                             lambda *a, **k: (_ for _ in ()).throw(OSError()))
         assert push.public_key() == ""
 
-    def test_the_private_half_is_what_the_sender_can_actually_read(self):
+    def test_the_private_half_is_what_the_sender_can_actually_read(self, store):
         """Not PEM. pywebpush reads a string private key as base64url of the
         raw 32-byte scalar; hand it PEM and it fails with "ASN.1 parsing
         error: invalid length", which says nothing about what it wanted. That
-        cost a real push, refused, into a log nobody was reading."""
+        cost a real push, refused, into a log nobody was reading.
+
+        `store` is not decoration. Without it this read the MACHINE's key file
+        — the live private half, on whichever box ran the suite — and passed
+        because that file happened to exist. On a clean machine it raised
+        KeyError, which is how CI found it on its first run.
+        """
         private = push.keys()["private"]
         assert "-----" not in private
         assert len(private) == 43          # 32 bytes, base64url, unpadded

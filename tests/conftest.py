@@ -12,9 +12,12 @@ automatically, whether or not the test knows preferences exist.
 
 from __future__ import annotations
 
+import importlib
+
 import pytest
 
-from apt_log import prefs, versions
+from apt_log import flight, macros, prefs, versions
+from apt_log.ui import state
 
 
 @pytest.fixture(autouse=True)
@@ -29,6 +32,45 @@ def _isolated_prefs(tmp_path, monkeypatch):
                         tmp_path / "app-versions.json")
     # The timer is module state, so one test's reading silences the next.
     monkeypatch.setattr(versions, "_last_check", [0.0])
+    # The pause flag, for the third time and found a third way: CI on a clean
+    # machine, where /var/lib/aptlog does not exist and cannot be created, so
+    # the test that presses Resume died with PermissionError. On the Pi and on
+    # a developer's box it had been quietly touching the real flag — which is
+    # the machine's actual "is the scheduler paused" switch — and passing.
+    #
+    # A test that only passes because the machine it runs on happens to let it
+    # write there is not testing what it claims to test. That is the whole
+    # argument at the top of this file, and it keeps needing to be made about
+    # one more path.
+    monkeypatch.setattr(state, "PAUSED_FLAG", tmp_path / "paused")
+
+    # ...and the rest of them, found by deleting /var/lib/aptlog and running
+    # the suite to see what grew back. Three did:
+    #
+    #   flight.jsonl     the flight recorder — the suite has been appending
+    #                    test fixtures to the real recording, on the Pi, on
+    #                    every deploy, mixed in with actual visits.
+    #   viewers.json     the live viewer count. `someone_is_watching` reads
+    #                    it to decide whether auto sign-in may run unattended,
+    #                    so a test writing it is a test reaching into a
+    #                    safety interlock on the running machine.
+    #   hierarchy-poke   the feed's "read the tree now" nudge.
+    #
+    # None of them FAILED anywhere — they are written inside try/except, so
+    # on CI they silently did nothing and on the Pi they silently worked.
+    # That is the worst shape a bug can have, and the only reason any of this
+    # came to light is that PAUSED_FLAG happened to be written somewhere that
+    # raises.
+    monkeypatch.setattr(state, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(flight, "FLIGHT_PATH", tmp_path / "flight.jsonl")
+    monkeypatch.setattr(macros, "VIEWERS_PATH", tmp_path / "viewers.json")
+    # The web process keeps its OWN handle on the same file, resolved at
+    # import, so redirecting STATE_DIR above does not move it — which is why
+    # this one survived the first attempt at the list. Reached through
+    # sys.modules because `from apt_log.ui import app` is the FastAPI
+    # instance, not the module that holds the constant.
+    monkeypatch.setattr(importlib.import_module("apt_log.ui.app"),
+                        "VIEWERS_PATH", tmp_path / "viewers.json")
     yield
 
 
