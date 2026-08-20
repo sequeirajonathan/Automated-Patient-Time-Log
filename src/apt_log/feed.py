@@ -1091,13 +1091,30 @@ def write_screen(target: Path, frame: dict, screen: str, reason: str,
         # ordinary wide boxes), so for the apps that do it, a signature
         # canvas on a portrait screen IS the evidence. Same rule the
         # stroke replay turns by — the peek and the ink must agree.
-        "landscape": (_looks_landscape(hierarchy)
-                      or (_has_canvas(hierarchy)
-                          and sign_mod.sideways(
-                              hierarchy or "",
-                              package=(hierarchy_package(hierarchy)
-                                       or (hierarchy_focus or "")
-                                       .split("/")[0])))),
+        #
+        # TWO QUESTIONS, NOT ONE, and answering them together turned the
+        # portal black on the signature screen it was written for.
+        #
+        # "Is the screen wide?" and "is the photograph the wrong way up?"
+        # are the same question only for the LEGACY app, which draws its
+        # signature page rotated inside a portrait activity: the screencap
+        # comes back portrait with sideways content in it, and the peek has
+        # to turn it. HHAeXchange+ genuinely rotates the device — the
+        # screencap arrives landscape and already upright — and turning it
+        # anyway rotated a wide photograph by a quarter turn and scaled it
+        # by a factor computed for a portrait one, leaving an all but empty
+        # stage. Reported, exactly, as "once I get to the signature part
+        # everything goes black".
+        "landscape": _looks_landscape(hierarchy),
+        # Whether the PHOTOGRAPH needs turning, which is `sign.sideways` and
+        # nothing else — the answer the ink already turns by, and the one
+        # the file says the peek and the ink must never disagree on.
+        "turn": bool(_has_canvas(hierarchy)
+                     and sign_mod.sideways(
+                         hierarchy or "",
+                         package=(hierarchy_package(hierarchy)
+                                  or (hierarchy_focus or "")
+                                  .split("/")[0]))),
         # A signature canvas is in front. The walker must not swipe (a
         # swipe on a canvas is ink), and the portal can dress the page
         # for signing instead of reading.
@@ -1637,10 +1654,15 @@ def elements(xml: str, label: bool = False, package: str = "",
         if spoken is not None and w and h:
             share = ((x2 - x1) * (y2 - y1)) / float(w * h)
             if share > READER_CONTROL_MAX_SHARE:
+                # NOT a toggle — and still published. Dropping it outright was
+                # the first version of this guard and it took the signature
+                # canvas off the page altogether: the surface is not clickable
+                # in the tree, so the spoken sentence is the ONLY thing that
+                # says it is there, and without it the portal drew a signature
+                # screen with nothing to sign on. Losing the role is the whole
+                # correction; losing the element is a bigger fault than the
+                # one being fixed.
                 spoken = None
-                if _attr(raw, "clickable") != "true":
-                    # It only got this far on the strength of that sentence.
-                    continue
         if spoken is not None:
             # The state is IN the sentence — "no seleccionado Se realizó" —
             # because the app never sets the attribute. Taken from there, so
