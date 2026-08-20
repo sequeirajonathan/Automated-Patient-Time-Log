@@ -3803,3 +3803,158 @@ class TestTypingTheCodeItself:
         source = inspect.getsource(macros._push_the_code)
         assert "push.send" in source
         assert "notify" not in source
+
+
+class TestTheCooldownSurvivesARestart:
+    """Reported from the field as "over 100 notifications", with a lock
+    screen of identical "inMyTeam needs the code" banners.
+
+    The cooldowns are the only thing between a login screen and a sign-in
+    attempt every few seconds, and for inMyTeam every attempt SENDS A TEXT
+    MESSAGE to a real person. They lived in the Runner's memory — so a
+    restart forgot them, and the feed restarts on every deploy. Ten deploys
+    in an afternoon was ten texts nobody asked for and ten steps toward the
+    app's rate limit.
+    """
+
+    def _runner(self, tmp_path):
+        return macros.Runner(tmp_path / "req.json", tmp_path / "status.json",
+                             screen_path=tmp_path / "screen.json",
+                             viewers_path=tmp_path / "viewers.json")
+
+    def test_a_firing_is_written_down(self, tmp_path):
+        import json as json_mod
+
+        runner = self._runner(tmp_path)
+        runner._auto_auth_seen = {"inmyteam_login": 1234.0}
+        runner._remember_auto_auth()
+        stored = json_mod.loads(
+            (tmp_path / "auto-auth.json").read_text(encoding="utf-8"))
+        assert stored == {"inmyteam_login": 1234.0}
+
+    def test_a_fresh_runner_reads_it_back(self, tmp_path):
+        """The whole point: this is a NEW process, as after a deploy."""
+        first = self._runner(tmp_path)
+        first._auto_auth_seen = {"inmyteam_login": 1234.0}
+        first._remember_auto_auth()
+
+        second = self._runner(tmp_path)
+        second._recall_auto_auth()
+        assert second._auto_auth_seen == {"inmyteam_login": 1234.0}
+
+    def test_starting_a_runner_recalls_before_it_can_fire(self, tmp_path):
+        import inspect
+
+        source = inspect.getsource(macros.Runner.start)
+        assert "_recall_auto_auth" in source
+
+    def test_a_recent_firing_still_gates_after_a_restart(self, tmp_path):
+        """The behaviour the whole change exists for."""
+        first = self._runner(tmp_path)
+        first._auto_auth_seen = {"inmyteam_login": time.time() - 60}
+        first._remember_auto_auth()
+
+        second = self._runner(tmp_path)
+        second._recall_auto_auth()
+        last = second._auto_auth_seen["inmyteam_login"]
+        assert time.time() - last < macros.SMS_AUTH_COOLDOWN
+
+    def test_an_old_firing_does_not_gate_forever(self, tmp_path):
+        first = self._runner(tmp_path)
+        first._auto_auth_seen = {
+            "inmyteam_login": time.time() - macros.SMS_AUTH_COOLDOWN - 60}
+        first._remember_auto_auth()
+
+        second = self._runner(tmp_path)
+        second._recall_auto_auth()
+        last = second._auto_auth_seen["inmyteam_login"]
+        assert time.time() - last > macros.SMS_AUTH_COOLDOWN
+
+    def test_a_clock_that_moved_backwards_cannot_park_it_forever(self):
+        """A timestamp in the future is a reading that cannot be trusted, not
+        a cooldown with a long time left to run."""
+        import inspect
+
+        source = inspect.getsource(macros.Runner.maybe_auto_auth)
+        assert "0 <= now - last" in source
+
+    def test_an_unreadable_file_is_not_fatal(self, tmp_path):
+        (tmp_path / "auto-auth.json").write_text("{ not json",
+                                                 encoding="utf-8")
+        runner = self._runner(tmp_path)
+        runner._recall_auto_auth()
+        assert runner._auto_auth_seen == {}
+
+    def test_rubbish_in_the_file_is_ignored_rather_than_trusted(self, tmp_path):
+        import json as json_mod
+
+        (tmp_path / "auto-auth.json").write_text(
+            json_mod.dumps({"inmyteam_login": "soon", "ok": 12.0}),
+            encoding="utf-8")
+        runner = self._runner(tmp_path)
+        runner._recall_auto_auth()
+        assert runner._auto_auth_seen == {"ok": 12.0}
+
+    def test_failing_to_record_never_stops_the_sign_in(self, tmp_path):
+        runner = self._runner(tmp_path)
+        runner._auto_auth_seen = {"inmyteam_login": 1.0}
+        with patch("apt_log.macros.os.replace", side_effect=OSError("full")):
+            runner._remember_auto_auth()      # must not raise
+
+
+class TestTheSameNoticeIsNotSentTwice:
+    """The second guard, behind the cooldown and not instead of it. iOS does
+    not reliably collapse notifications by tag the way the service worker
+    asks, so a repeat is a second identical banner telling her nothing."""
+
+    def test_the_first_notice_goes_out(self, tmp_path):
+        with patch.object(macros, "TOLD_PATH", tmp_path / "told.json"), \
+                patch("apt_log.push.send", return_value=1) as pushed, \
+                patch("apt_log.notify.send"):
+            macros._say_the_code_is_waiting()
+        pushed.assert_called_once()
+
+    def test_the_second_one_does_not(self, tmp_path):
+        with patch.object(macros, "TOLD_PATH", tmp_path / "told.json"), \
+                patch("apt_log.push.send", return_value=1) as pushed, \
+                patch("apt_log.notify.send"):
+            macros._say_the_code_is_waiting()
+            macros._say_the_code_is_waiting()
+            macros._say_the_code_is_waiting()
+        assert pushed.call_count == 1
+
+    def test_the_relay_is_silenced_too_not_just_the_push(self, tmp_path):
+        """Both roads carry the same sentence; repeating either is the same
+        noise on a different screen."""
+        with patch.object(macros, "TOLD_PATH", tmp_path / "told.json"), \
+                patch("apt_log.push.send", return_value=1), \
+                patch("apt_log.notify.send") as relayed:
+            macros._say_the_code_is_waiting()
+            macros._say_the_code_is_waiting()
+        assert relayed.call_count == 1
+
+    def test_a_notice_speaks_for_the_same_window_as_the_cooldown(self):
+        """It is the same event — a code asked for and not yet used."""
+        assert macros.TOLD_QUIET == macros.SMS_AUTH_COOLDOWN
+
+    def test_once_the_window_passes_it_speaks_again(self, tmp_path):
+        told = tmp_path / "told.json"
+        with patch.object(macros, "TOLD_PATH", told), \
+                patch("apt_log.push.send", return_value=1) as pushed, \
+                patch("apt_log.notify.send"):
+            macros._say_the_code_is_waiting()
+            told.write_text(
+                '{"at": %f}' % (time.time() - macros.TOLD_QUIET - 60),
+                encoding="utf-8")
+            macros._say_the_code_is_waiting()
+        assert pushed.call_count == 2
+
+    def test_no_mark_at_all_means_nobody_has_been_told(self, tmp_path):
+        assert macros._told_recently(tmp_path / "nothing.json") is False
+
+    def test_an_unreadable_mark_errs_toward_telling_her(self, tmp_path):
+        """Between a duplicate notice and a missed one, the missed one is
+        worse: the app is waiting and nobody knows."""
+        bad = tmp_path / "told.json"
+        bad.write_text("{ not json", encoding="utf-8")
+        assert macros._told_recently(bad) is False
