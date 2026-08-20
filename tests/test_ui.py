@@ -2641,3 +2641,42 @@ class TestWhoElseIsOn:
                / "src/apt_log/ui/app.py").read_text(encoding="utf-8")
         body = src[src.index("def _publish_viewers"):]
         assert "if _viewers > 0:" in body[:body.index("\ntemplates =")]
+
+
+class TestTheTickThatSaysWhatItTicks:
+    """The markup half of the named EVV marks. A name that never reaches the
+    page is a name nobody reads."""
+
+    PAGE = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/templates/_screen.html")
+    STYLE = Path(__file__).resolve().parents[1] / (
+        "src/apt_log/ui/templates/phone.html")
+
+    def test_the_name_is_drawn_beside_the_tick(self):
+        markup = self.PAGE.read_text(encoding="utf-8")
+        assert markup.count('<span class="a-mark-t">{{ m.txt }}</span>') == 2
+
+    def test_both_places_marks_are_drawn_carry_it(self):
+        """A row's marks and an info row's marks are two render sites, and a
+        fix applied to one of them is a fix half done."""
+        markup = self.PAGE.read_text(encoding="utf-8")
+        assert markup.count("{% if m.txt %} named{% endif %}") == 2
+
+    def test_a_nameless_mark_is_unchanged(self):
+        """Every other state mark is a glyph the app drew, which already
+        says what it means — it must not grow an empty label."""
+        markup = self.PAGE.read_text(encoding="utf-8")
+        assert "{% if m.txt %}<span" in markup
+
+    def test_the_named_pill_has_room_for_a_word(self):
+        css = self.STYLE.read_text(encoding="utf-8")
+        assert ".a-mark.named" in css and ".a-mark-t" in css
+
+    def test_the_marks_are_translated_with_the_rest(self):
+        """`label_keys` walks items; marks are not items and were skipped."""
+        from pathlib import Path as P
+
+        src = (P(__file__).resolve().parents[1]
+               / "src/apt_log/ui/screenview.py").read_text(encoding="utf-8")
+        body = src[src.index("def label_keys"):]
+        assert 'walk(it.get("marks"))' in body[:body.index("\n    for row")]

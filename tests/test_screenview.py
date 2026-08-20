@@ -2037,3 +2037,88 @@ class TestTheSignatureScreenSheIsStandingOn:
     def test_the_bubbles_are_gone_from_this_screen_too(self):
         nav = screenview.build(self._doc())["nav"]
         assert nav["back"] is None and nav["trailing"] == []
+
+
+class TestWhichTickIsWhich:
+    """The legacy Today Visits list marks a verified EVV record with a drawn
+    check — one for the check-in, one for the check-out — and the tree
+    carries them as textless ImageViews named `imgStartTime` and `imgEndTime`.
+
+    Both mapped to the same green tick, so a row that had recorded both
+    showed two identical marks, and a row that had recorded ONE showed a
+    single tick that could equally have been either. Which of the two is
+    recorded is the entire content of an EVV record, and it is what the list
+    is read for.
+
+    Bounds below are from the recording of a real visits list.
+    """
+
+    def _row(self, marks=("imgStartTime", "imgEndTime")):
+        statics = [st([39, 126, 529, 148], "CARMEN VILLALON"),
+                   st([39, 154, 535, 173], "1000 NW 1 ST, MIAMI FL")]
+        for i, rid in enumerate(marks):
+            statics.append({"cls": "ImageView", "rid": rid, "txt": "",
+                            "b": [594 + i * 83, 189, 611 + i * 83, 206]})
+        return screenview.build(doc(
+            elements=[el("", "RelativeLayout", [0, 120, 720, 226])],
+            statics=statics))
+
+    def _marks(self, model):
+        return next((it["marks"] for row in model["rows"]
+                     for it in row["items"] if it.get("marks")), [])
+
+    def test_both_ticks_reach_the_row(self):
+        assert len(self._marks(self._row())) == 2
+
+    def test_each_one_carries_a_name_of_its_own(self):
+        keys = [m.get("txt_key") for m in self._marks(self._row())]
+        assert keys == ["papp.mark.entry", "papp.mark.exit"]
+
+    def test_a_lone_tick_says_which_it_is(self):
+        """The case the bare glyph could not express at all."""
+        assert [m.get("txt_key") for m in
+                self._marks(self._row(marks=("imgStartTime",)))] \
+            == ["papp.mark.entry"]
+
+    def test_and_the_other_lone_tick_says_the_other(self):
+        assert [m.get("txt_key") for m in
+                self._marks(self._row(marks=("imgEndTime",)))] \
+            == ["papp.mark.exit"]
+
+    def test_they_are_still_green_ticks(self):
+        """The name is added to the mark, not instead of it."""
+        for m in self._marks(self._row()):
+            assert m["sym"] == "✓" and m["tone"] == "ok"
+
+    def test_the_names_arrive_in_her_language(self):
+        from apt_log.ui.i18n import Translator
+
+        model = self._row()
+        screenview.label_keys(model, Translator("es"))
+        assert [m["txt"] for m in self._marks(model)] == ["Entrada", "Salida"]
+
+    def test_and_in_his(self):
+        from apt_log.ui.i18n import Translator
+
+        model = self._row()
+        screenview.label_keys(model, Translator("en"))
+        assert [m["txt"] for m in self._marks(model)] == ["In", "Out"]
+
+    def test_a_mark_the_portal_has_no_name_for_stays_a_bare_glyph(self):
+        """Every other state mark is a character the app itself drew, and it
+        already says what it means."""
+        model = screenview.build(doc(
+            elements=[el("", "RelativeLayout", [0, 120, 720, 226])],
+            statics=[st([39, 126, 529, 148], "CARMEN VILLALON"),
+                     st([594, 189, 611, 206], "\uf00c")]))
+        marks = self._marks(model)
+        assert marks and not any(m.get("txt_key") for m in marks)
+
+    def test_both_languages_have_the_words(self):
+        import json as json_mod
+        from pathlib import Path
+
+        base = Path(__file__).resolve().parents[1] / "src/apt_log/ui/locales"
+        for name in ("en.json", "es.json"):
+            words = json_mod.loads((base / name).read_text(encoding="utf-8"))
+            assert words.get("papp.mark.entry") and words.get("papp.mark.exit")

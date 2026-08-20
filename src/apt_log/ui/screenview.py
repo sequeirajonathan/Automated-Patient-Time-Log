@@ -379,6 +379,24 @@ IMAGE_MARKS = {
     "imgendtime": "\u2713",
 }
 
+# TWO TICKS THAT MEAN DIFFERENT THINGS.
+#
+# Both of the above are the same green check, and on a visits list they sit
+# side by side: one says the check-IN was recorded, one says the check-OUT
+# was. Drawn as two identical ticks they are indistinguishable — and worse,
+# a visit checked in but not out shows ONE tick, exactly like a visit
+# checked out but not in. That distinction is the entire content of an EVV
+# record, and it is what the list is read for.
+#
+# So each named mark carries the portal's own word for what it marks. The
+# app supplies no caption at all — the tick is a drawable and its id is the
+# only thing that says which one it is — so this is the portal naming what
+# it can see, the same way the agency filter is named.
+IMAGE_MARK_KEYS = {
+    "imgstarttime": "papp.mark.entry",
+    "imgendtime": "papp.mark.exit",
+}
+
 
 def _mark_for(s: dict) -> str:
     """The state symbol a static stands for, or ''. Text glyphs and named
@@ -387,6 +405,15 @@ def _mark_for(s: dict) -> str:
     if txt:
         return ICON_MARKS.get(txt, "")
     return IMAGE_MARKS.get((s.get("rid") or "").lower(), "")
+
+
+def _mark_key(s: dict) -> str:
+    """What this mark is called, for the marks that stand for a moment in a
+    visit rather than for a state in general. "" for the rest — a tick with
+    no name renders exactly as it always did."""
+    if (s.get("txt") or "").strip():
+        return ""
+    return IMAGE_MARK_KEYS.get((s.get("rid") or "").lower(), "")
 
 
 def _fold_label(cell_b: list[int], s: dict) -> tuple[str, str]:
@@ -631,6 +658,10 @@ def label_keys(model: dict, t) -> dict:
             key = it.get("txt_key")
             if key:
                 it["txt"] = t(key)
+            # A row's state marks are named the same way. The EVV pair are
+            # two identical ticks until they say which is which, and which
+            # is which is the whole content of the record.
+            walk(it.get("marks"))
             walk(it.get("parts"))
     for row in model.get("rows") or ():
         walk(row.get("items"))
@@ -789,7 +820,7 @@ def build(doc: dict) -> dict | None:
                 elif how == "badge":
                     badge = value
                 elif how == "mark":
-                    marks.append(value)
+                    marks.append((value, _mark_key(s)))
             # An avatar chip's initial folded in among the row's first
             # lines ("H" beside the agency's name on the visits list): a
             # stub of capitals among real lines is the app's decoration,
@@ -823,8 +854,10 @@ def build(doc: dict) -> dict | None:
             # State marks stay their own field — a verified EVV check-in is
             # a green tick the caregiver scans for, not a "✓" buried in a
             # subtitle line. The template draws them as coloured status pills.
-            item["marks"] = [{"sym": m, "tone": MARK_TONE.get(m, "")}
-                             for m in marks]
+            item["marks"] = [
+                {"sym": m, "tone": MARK_TONE.get(m, ""),
+                 **({"txt_key": key} if key else {})}
+                for m, key in marks]
             item["cta"] = _looks_like_cta(lines[0] if lines else "")
             # A content-hugging row carrying one status line is the app
             # STATING something, not offering a door: the expanded visit
