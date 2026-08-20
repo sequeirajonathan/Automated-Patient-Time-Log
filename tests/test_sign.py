@@ -622,11 +622,15 @@ class TestTwoNamesForOneRectangle:
     def test_a_genuinely_ambiguous_pair_still_refuses(self):
         """De-duplicating must not become "pick one of two real candidates".
         Two DIFFERENT rectangles, neither inside the other, is still the case
-        where a wrong choice puts ink on the wrong control."""
+        where a wrong choice puts ink on the wrong control.
+
+        Both are canvas-SIZED, which is what makes them two real candidates
+        rather than two labels: a hinted name too small to sign on is not a
+        candidate at all any more, and would refuse for the other reason."""
         two = ('<node class="android.widget.FrameLayout" '
-               'resource-id="app:id/signature_one" bounds="[0,120][300,600]"/>'
+               'resource-id="app:id/signature_one" bounds="[0,0][700,700]"/>'
                '<node class="android.widget.FrameLayout" '
-               'resource-id="app:id/signature_two" bounds="[400,700][700,1200]"/>')
+               'resource-id="app:id/signature_two" bounds="[800,0][1500,700]"/>')
         bounds, reason = sign.find_canvas(two, dump=False)
         assert bounds is None and reason == "ambiguous"
 
@@ -1028,3 +1032,82 @@ class TestAStrokeThatDidNotLandIsDrawnAgain:
 
         body = inspect.getsource(sign.execute)
         assert "bounds=bounds" in body
+
+
+class TestHHAeXchangePlusPatientSignature:
+    """The pad HHAeXchange+ puts up at step 2 of 3 of a check-out.
+
+    Caught with the caregiver standing on it: the finder refused `ambiguous`
+    and she could not sign at all.
+
+    The app names its two BUTTONS after signatures and leaves the canvas
+    anonymous. Measured on the live screen, rotated, at 1534x681:
+
+        (no id)                          [18,171,1518,525]     50.83%
+        signature_screen_clear_button    [14,656,44,681]         0.07%
+        signature_screen_submit_button   [1474,656,1529,681]     0.13%
+
+    Both buttons matched the id hint, neither wrapped the other, and the
+    thing that draws was never looked at.
+    """
+
+    CANVAS = [18, 171, 1518, 525]
+
+    def _screen(self, canvas_clickable="true", with_buttons=True):
+        def node(b, rid="", clickable="false", cls="android.view.View"):
+            return (f'<node class="{cls}" resource-id="{rid}" '
+                    f'clickable="{clickable}" text="" '
+                    f'bounds="[{b[0]},{b[1]}][{b[2]},{b[3]}]"/>')
+
+        parts = [node(self.CANVAS, clickable=canvas_clickable)]
+        if with_buttons:
+            parts += [
+                node([14, 656, 44, 681], "app:id/signature_screen_clear_button",
+                     "true"),
+                node([1474, 656, 1529, 681],
+                     "app:id/signature_screen_submit_button", "true"),
+            ]
+        parts += [node([6, 17, 31, 42], "app:id/menu_top_bar_back_button", "true"),
+                  node([1507, 17, 1534, 43], "app:id/help_button", "true")]
+        return "<hierarchy>" + "".join(parts) + "</hierarchy>"
+
+    def test_the_canvas_is_found(self):
+        bounds, reason = sign.find_canvas(self._screen(), dump=False)
+        assert reason == ""
+        assert bounds == self.CANVAS
+
+    def test_a_button_named_after_signatures_is_not_a_canvas(self):
+        """0.07% of the screen. Nobody signs on that."""
+        bounds, _ = sign.find_canvas(self._screen(), dump=False)
+        assert bounds != [14, 656, 44, 681]
+
+    def test_a_clickable_canvas_is_still_a_canvas(self):
+        """A drawing surface is usually inert in the tree, and that quietness
+        is what tells it from a big clickable container. This one is not —
+        requiring quiet left the screen with no candidate at all."""
+        assert sign.find_canvas(self._screen("true"), dump=False)[0] \
+            == self.CANVAS
+
+    def test_and_so_is_a_quiet_one(self):
+        assert sign.find_canvas(self._screen("false"), dump=False)[0] \
+            == self.CANVAS
+
+    def test_a_clickable_surface_needs_the_app_to_have_said_signature(self):
+        """Without the hinted controls, a big clickable View is just a big
+        clickable View — a page's own scroll container, a card, a wrapper.
+        The evidence is what makes it a canvas, and with none there is none."""
+        bounds, reason = sign.find_canvas(
+            self._screen("true", with_buttons=False), dump=False)
+        assert bounds is None and reason == "no_canvas"
+
+    def test_the_replay_would_stay_inside_it(self):
+        """The paths the finder's answer produces land on the canvas, not on
+        the buttons under it."""
+        paths = sign.build_paths([[[0.1, 0.5], [0.9, 0.5]]], self.CANVAS,
+                                 aspect=(1518 - 18) / (525 - 171))
+        xs = [x for x, _ in paths[0]]
+        ys = [y for _, y in paths[0]]
+        assert min(xs) >= self.CANVAS[0] and max(xs) <= self.CANVAS[2]
+        assert min(ys) >= self.CANVAS[1] and max(ys) <= self.CANVAS[3]
+        # Clear of the button row entirely.
+        assert max(ys) < 656

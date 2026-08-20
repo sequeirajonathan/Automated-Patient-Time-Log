@@ -216,8 +216,7 @@ def find_canvas(xml: str, dump: bool = True) -> tuple[list[int] | None, str]:
     the shape rule matched something it should not have — both are refusals,
     because a wrong rectangle puts ink on the wrong control.
     """
-    named = []
-    shaped = []
+    named: list[list[int]] = []
 
     # The screen's own extent, for the area share. Falls back to the largest
     # bounds seen, which also handles the rotated signature screen without
@@ -238,20 +237,40 @@ def find_canvas(xml: str, dump: bool = True) -> tuple[list[int] | None, str]:
     if not screen_area:
         return None, "no_canvas"
 
+    # A NAME ABOUT SIGNATURES IS NOT THE SAME AS A SURFACE TO DRAW ON.
+    #
+    # HHAeXchange+'s patient signature screen names its two BUTTONS
+    # `signature_screen_clear_button` and `signature_screen_submit_button` —
+    # 0.07% and 0.13% of the screen — and leaves the canvas, half the screen
+    # wide, with no id at all. Both buttons matched the id hint, neither
+    # wrapped the other, and the finder refused "ambiguous" without ever
+    # looking at the thing that draws. Caught on the live pad with the
+    # caregiver standing on step 2 of 3 of a check-out.
+    #
+    # So a hinted node has to be big enough to sign on before it is a
+    # candidate. The small ones are not thrown away: they are the app SAYING
+    # this is a signature screen, which is worth more than the id.
+    hinted: list[list[int]] = []
+    surfaces: list[tuple[list[int], bool]] = []
     for raw, b in nodes:
         rid = _attr(raw, "resource-id").split("/")[-1].lower()
         cls = (_attr(raw, "class") or "").rsplit(".", 1)[-1]
-        if any(hint in rid for hint in CANVAS_ID_HINTS):
-            named.append(b)
+        big = (b[2] - b[0]) * (b[3] - b[1]) >= screen_area * CANVAS_MIN_SHARE
+        if (any(hint in rid for hint in CANVAS_ID_HINTS)
+                or any(hint in cls.lower() for hint in CANVAS_CLASS_HINTS)):
+            (named if big else hinted).append(b)
             continue
-        if any(hint in cls.lower() for hint in CANVAS_CLASS_HINTS):
-            named.append(b)
-            continue
-        if (cls in CANVAS_CLASSES
-                and not _attr(raw, "text")
-                and _attr(raw, "clickable") != "true"
-                and (b[2] - b[0]) * (b[3] - b[1]) >= screen_area * CANVAS_MIN_SHARE):
-            shaped.append(b)
+        if cls in CANVAS_CLASSES and not _attr(raw, "text") and big:
+            surfaces.append((b, _attr(raw, "clickable") == "true"))
+
+    # A drawing surface is usually inert in the tree, and that quietness is
+    # what tells it from a big clickable container. HHAeXchange+'s is not:
+    # its canvas reports clickable, so requiring quiet left the screen with
+    # no candidate at all. A clickable surface counts only where the app has
+    # already said, somewhere on this screen, that signing is what happens
+    # here — which is what the small hinted controls are evidence of.
+    quiet = [b for b, clickable in surfaces if not clickable]
+    shaped = quiet or ([b for b, _ in surfaces] if (hinted or named) else [])
 
     # Hint-matched candidates NEST: the live refusal was two full-page
     # "layout_tab_content_signature*" wrappers around the one real canvas
