@@ -454,6 +454,10 @@
     // what "somehow inMyTeam ended up in the phone settings" felt like from
     // the other end.
     body.classList.toggle('covered', !!meta.covered);
+    // The app in front will not do anything until it is updated. Its own
+    // screen has one button, which opens the Store and gets bounced back —
+    // so the page says what is happening and offers the act that works.
+    body.classList.toggle('walled', !!meta.walled);
     // The plan of care's own button, offered only where there is something
     // to tick. The count is the server's, read off the same page the macro
     // will read, so what the button says is what it will do.
@@ -1048,6 +1052,27 @@
       fetch('/macro', {
         method: 'POST',
         body: new URLSearchParams({ name: 'clear_screen' }),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        redirect: 'follow'
+      }).catch(() => { awaitingMacro = false; unbusy(); toast(i18n.failed || ''); });
+    });
+    // Answer the app's own update wall. Unlike every other button on this
+    // page, this one asks first: it replaces the version of the app on the
+    // phone, there is no going back to the old build from here, and every
+    // rule the portal has for reading that app was written against the build
+    // it is about to remove. The ceiling is generous because the install is
+    // a download — a spinner that gives up while Play is still working is
+    // how a finished update gets reported as a failure.
+    const walledRun = document.getElementById('walled-update');
+    if (walledRun) walledRun.addEventListener('click', () => {
+      if (!driving()) return;
+      const ask = walledRun.getAttribute('data-confirm');
+      if (ask && !window.confirm(ask)) return;
+      awaitingMacro = true;
+      busy(i18n.updating || '', 480000);
+      fetch('/macro', {
+        method: 'POST',
+        body: new URLSearchParams({ name: 'update_app' }),
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         redirect: 'follow'
       }).catch(() => { awaitingMacro = false; unbusy(); toast(i18n.failed || ''); });

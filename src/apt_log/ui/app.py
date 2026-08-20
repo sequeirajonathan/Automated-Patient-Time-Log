@@ -656,6 +656,27 @@ def _pending_task_count(doc: dict) -> int:
         return 0
 
 
+def _update_wall(doc: dict) -> bool:
+    """Whether the app in front is refusing to work until it is updated.
+
+    False on every ordinary screen, which is what makes it safe to hang a
+    card and a button on — and the card matters here more than most, because
+    the wall's own button leads to the Play Store and the containment
+    watchdog bounces her back out of it within five seconds. Without this she
+    is looking at a page with one control that cannot work.
+
+    Never raises, for the same reason as the task count: a page shaped
+    unexpectedly must cost the card, not the frame.
+    """
+    from apt_log import macros as macros_mod
+
+    try:
+        return macros_mod.update_wall_on_screen(doc)
+    except Exception:
+        log.exception("looking for an update wall")
+        return False
+
+
 def _sheet_actions(doc: dict, model: dict | None) -> list[dict]:
     """The app's own buttons on a signature sheet, as aims.
 
@@ -1070,6 +1091,12 @@ async def live(ws: WebSocket):
                     # moment. Counted from the SAME reading the macro runs,
                     # so the number on the button is the number it will tick.
                     "tasks": _pending_task_count(screen_doc),
+                    # The app is refusing to be used until it is updated.
+                    # Rendering that screen as an ordinary page is what it
+                    # did before: one button, which opens the Play Store,
+                    # where the containment watchdog bounces her straight
+                    # back — a loop with no way out from this side.
+                    "walled": _update_wall(screen_doc),
                     # The signature sheet's OWN buttons — inMyTeam's Done and
                     # Clear — carried so the pad can show them beside her own
                     # controls. Without this she draws in the portal, switches

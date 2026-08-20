@@ -294,10 +294,18 @@ class TestOperations:
         macros.MACROS["restart_phone"].run(None, lambda *a: None)
         assert sent == [["reboot"]]
 
-    def test_the_reboot_is_the_only_one_that_asks_first(self):
+    def test_only_the_ones_that_cannot_be_taken_back_ask_first(self):
+        """Two of them, for different reasons. A reboot costs a minute of
+        nothing working; an update replaces the software this whole project
+        is written against, and there is no going back to the old build from
+        the phone. Everything else on the console is one press, because a
+        confirmation on something you can simply do again is a step people
+        learn to click through."""
         from apt_log import macros
 
-        assert macros.CONFIRM == ("restart_phone",)
+        assert set(macros.CONFIRM) == {"restart_phone", "update_app"}
+        assert [name for name in macros.OPERATIONS
+                if name in macros.CONFIRM] == ["restart_phone"]
 
 
 class TestWhoIsOn:

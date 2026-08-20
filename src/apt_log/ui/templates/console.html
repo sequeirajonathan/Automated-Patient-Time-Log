@@ -572,7 +572,7 @@
     <div class="actions">
       {% for macro in operations %}
       <form method="post" action="/macro"
-            {% if macro.name in confirm %}data-confirm="{{ t('macro.sure') }}"{% endif %}>
+            {% if macro.name in confirm %}data-confirm="{{ t('macro.sure.' ~ macro.name) }}"{% endif %}>
         <input type="hidden" name="name" value="{{ macro.name }}">
         <button type="submit"
                 class="small {{ 'danger' if macro.name in confirm }}">
