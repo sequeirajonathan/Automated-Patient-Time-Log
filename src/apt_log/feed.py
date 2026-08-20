@@ -1524,6 +1524,7 @@ def run(path: Path, interval: float = DEFAULT_INTERVAL,
     # resident Appium session lives and UiAutomator2 allows exactly one. A second
     # session in the UI cost 14 seconds a tap when it was tried.
     from apt_log.macros import Runner
+    from apt_log import versions as versions_mod
 
     runner = Runner()
     runner.start()
@@ -1537,6 +1538,14 @@ def run(path: Path, interval: float = DEFAULT_INTERVAL,
             except Exception as exc:  # noqa: BLE001
                 # A watcher that dies on one bad read stops being a watcher.
                 log.warning("frame failed: %s", exc)
+            try:
+                # Free on all but one tick in a few hundred — the timer is
+                # inside `check`. This is the only thing on either machine
+                # that would notice Play replacing an app underneath us, so
+                # it rides the loop that is always running.
+                versions_mod.check(serial)
+            except Exception as exc:  # noqa: BLE001
+                log.debug("version check failed: %s", exc)
             count += 1
             if iterations is None or count < iterations:
                 time.sleep(interval)

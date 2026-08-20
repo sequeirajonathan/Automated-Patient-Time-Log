@@ -16,6 +16,7 @@ deliberate:
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -386,3 +387,90 @@ class TestItStaysMobile:
 
     def test_it_scales_to_the_device_width(self, client):
         assert "width=device-width" in client.get("/console").text
+
+
+class TestWhichBuildIsOnThePhone:
+    """Every reflow rule in this project is an assumption about an app version
+    Google Play can replace overnight. When something that worked on Friday
+    does not on Monday, this panel is the first row to look at."""
+
+    APPS = {"com.tellus.evv.v2": {"name": "26.15.1", "code": "979"},
+            "com.hhaexchange.uma": {"name": "26.07.01", "code": "251368"},
+            "com.android.vending": {"name": "52.7.34-31",
+                                    "code": "85273430"}}
+
+    def _stored(self, monkeypatch, doc):
+        from apt_log import versions as versions_mod
+
+        monkeypatch.setattr(versions_mod, "stored", lambda *a, **k: doc)
+
+    def test_the_versions_come_off_the_file_not_the_phone(self, monkeypatch):
+        """This runs on a page render. A version that moves twice a year does
+        not need an adb call every time somebody opens the console."""
+        self._stored(monkeypatch, {"apps": self.APPS})
+        monkeypatch.setattr(machine_mod.subprocess, "run",
+                            _no_subprocess_allowed)
+        rows = machine_mod._app_versions()
+        assert {r["package"] for r in rows} == set(self.APPS)
+        assert [r for r in rows
+                if r["package"] == "com.tellus.evv.v2"][0]["name"] == "26.15.1"
+
+    def test_a_recent_update_is_marked(self, monkeypatch):
+        self._stored(monkeypatch, {
+            "apps": self.APPS, "changed_at": time.time() - 3600,
+            "changed": [{"package": "com.tellus.evv.v2", "to": "26.15.1"}]})
+        marked = {r["package"] for r in machine_mod._app_versions()
+                  if r["changed"]}
+        assert marked == {"com.tellus.evv.v2"}
+
+    def test_an_old_update_is_history_not_news(self, monkeypatch):
+        """A badge that never clears is a badge nobody sees."""
+        self._stored(monkeypatch, {
+            "apps": self.APPS,
+            "changed_at": time.time() - machine_mod.RECENT_UPDATE - 60,
+            "changed": [{"package": "com.tellus.evv.v2", "to": "26.15.1"}]})
+        assert not any(r["changed"] for r in machine_mod._app_versions())
+
+    def test_nothing_recorded_yet_is_an_empty_panel_not_a_crash(
+            self, monkeypatch):
+        self._stored(monkeypatch, {})
+        assert machine_mod._app_versions() == []
+
+    def test_the_panel_names_the_apps_the_way_the_tiles_do(
+            self, client, monkeypatch):
+        monkeypatch.setattr(machine_mod, "_app_versions",
+                            lambda: [{"package": "com.tellus.evv.v2",
+                                      "name": "26.15.1", "code": "979",
+                                      "changed": True}])
+        machine_mod.read(force=True)
+        body = client.get("/console").text
+        assert "Mobile Caregiver+" in body
+        assert "26.15.1" in body
+
+    def test_they_still_answer_with_the_cable_out(self, monkeypatch):
+        """Which is one of the moments somebody is most likely to be asking
+        what changed. The record is a file; it does not need the phone."""
+        self._stored(monkeypatch, {"apps": self.APPS})
+        monkeypatch.setattr(machine_mod, "_app_versions",
+                            lambda: [{"package": "com.tellus.evv.v2",
+                                      "name": "26.15.1", "code": "979",
+                                      "changed": False}])
+        with patch("apt_log.transport.attached_devices",
+                   return_value=([], "usb")):
+            phone = machine_mod._phone()
+        assert phone["attached"] == "bad"
+        assert phone["apps"][0]["name"] == "26.15.1"
+
+    def test_the_store_gets_a_name_too(self, client, monkeypatch):
+        """It has no tile, because it is not somewhere the phone goes — but it
+        is the thing that changes the apps, so it is worth naming."""
+        monkeypatch.setattr(machine_mod, "_app_versions",
+                            lambda: [{"package": "com.android.vending",
+                                      "name": "52.7.34-31",
+                                      "code": "85273430", "changed": False}])
+        machine_mod.read(force=True)
+        assert "Play Store" in client.get("/console").text
+
+
+def _no_subprocess_allowed(*args, **kwargs):
+    raise AssertionError("the console page must not shell out for versions")
