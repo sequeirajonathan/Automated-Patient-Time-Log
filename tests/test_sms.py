@@ -17,6 +17,9 @@ from unittest.mock import patch
 import pytest
 
 from apt_log import sms
+# Captured at import, BEFORE conftest stubs the module attribute — these two
+# tests are about `_adb`'s own error handling, which a stub cannot exercise.
+from apt_log.sms import _adb as REAL_ADB
 
 
 def rows(*messages) -> str:
@@ -151,14 +154,14 @@ class TestWhenTheProviderWillNotAnswer:
 
     def test_adb_failing_is_not_an_exception(self):
         with patch("subprocess.run", side_effect=OSError("no adb")):
-            assert sms._adb(["shell", "true"]) == ""
+            assert REAL_ADB(["shell", "true"]) == ""
 
     def test_a_nonzero_exit_reads_as_nothing(self):
         class Done:
             returncode = 1
             stdout = b"Error while accessing provider:sms"
         with patch("subprocess.run", return_value=Done()):
-            assert sms._adb(["shell", "true"]) == ""
+            assert REAL_ADB(["shell", "true"]) == ""
 
 
 class TestWaitingForOneThatHasNotArrivedYet:
@@ -235,3 +238,36 @@ class TestQuotedForTheDevicesOwnShell:
         assert sms._rows(usage) == []
         with patch.object(sms, "_adb", lambda *a, **k: usage):
             assert sms.latest_code() == ""
+
+
+class TestNoTestCanReachThePhone:
+    """This did not leak state — it read a caregiver's SMS inbox, from the
+    deploy gate, on the live machine.
+
+    The sign-in walk now looks for a texted code, so every test exercising
+    the walk ran `content query --uri content://sms/inbox` for real. It hung
+    the gate for twenty minutes: each poll spawns an adb subprocess with a
+    twenty-second timeout, the walk waits over a minute, and a busy phone
+    answers slowly. Two managers queued behind a lock and the deploy that
+    looked like a slow gate was a test suite interrogating a phone.
+    """
+
+    def test_the_device_read_is_stubbed_for_every_test(self):
+        """Not a stub this test installs — one conftest installed, which is
+        what makes it true of tests that never think about messages."""
+        assert sms._adb(["shell", "content", "query"]) == ""
+
+    def test_so_reading_a_code_never_shells_out(self):
+        seen = []
+        with patch("subprocess.run", lambda *a, **k: seen.append(a)):
+            assert sms.latest_code() == ""
+        assert not seen, "a test reached for the phone's message store"
+
+    def test_and_waiting_for_one_does_not_either(self):
+        seen = []
+        with patch("subprocess.run", lambda *a, **k: seen.append(a)), \
+                patch.object(sms.time, "sleep", lambda _s: None), \
+                patch.object(sms.time, "monotonic",
+                             side_effect=[0.0, 1.0, 99.0]):
+            assert sms.wait_for_code(timeout=5.0) == ""
+        assert not seen

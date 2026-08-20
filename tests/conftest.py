@@ -16,7 +16,7 @@ import importlib
 
 import pytest
 
-from apt_log import flight, macros, prefs, versions
+from apt_log import flight, macros, prefs, sms, versions
 from apt_log.ui import mirror, state
 
 
@@ -83,6 +83,25 @@ def _isolated_prefs(tmp_path, monkeypatch):
     # reason.
     monkeypatch.setattr(macros, "AUTH_SEEN_PATH", tmp_path / "auto-auth.json")
     monkeypatch.setattr(macros, "TOLD_PATH", tmp_path / "code-notice.json")
+
+    # AND NOTHING MAY READ THE PHONE'S MESSAGES.
+    #
+    # This one did not leak state — it reached across the tailnet and read a
+    # caregiver's SMS inbox, from the deploy gate, on the live machine. The
+    # sign-in walk now looks for a texted code, so every test that exercises
+    # the walk called `content query --uri content://sms/inbox` for real.
+    #
+    # It hung the gate for twenty minutes: each poll spawns an adb subprocess
+    # with a twenty-second timeout, the walk waits over a minute for a code,
+    # and a phone that is busy answers slowly. Two managers ended up queued
+    # behind a lock, and the deploy that looked like a slow gate was a test
+    # suite interrogating a phone.
+    #
+    # Stubbed at `_adb` rather than at `subprocess.run`, because `subprocess`
+    # is shared with every other module and patching it globally would
+    # silence things that legitimately shell out. Tests that mean to exercise
+    # `_adb` itself hold a reference taken at import, before this runs.
+    monkeypatch.setattr(sms, "_adb", lambda *a, **k: "")
     yield
 
 
