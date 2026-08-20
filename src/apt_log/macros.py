@@ -1746,21 +1746,81 @@ def _starred_tasks(driver) -> list[dict]:
     return wanted
 
 
+# HHAeXchange+ writes the same page a different way. Every task carries a
+# pair of its own — "Se realizó" and "No realizado" — and names them, which
+# inMyTeam does not: `poc_task_item_status_completed_false` beside
+# `poc_task_item_status_refused_false`. The id even carries the state in its
+# last word, which is what makes this readable without a star to pair against.
+POC_DONE_ID = "poc_task_item_status_completed"
+POC_REFUSED_ID = "poc_task_item_status_refused"
+
+
+def _poc_tasks(driver) -> list[dict]:
+    """Every HHAeXchange+ care-plan task not yet marked done.
+
+    The refused column is never a candidate: nothing whose id says `refused`
+    is even looked at, and saying "the patient refused this" on her behalf is
+    not a thing this macro will ever do.
+
+    A task is a candidate only when BOTH readings of its state say off — the
+    id's last word, and the selection state the app writes into the
+    description ("no seleccionado …"). They come from different places and
+    are parsed by different code, so if they ever disagree the task is left
+    alone and she decides. A tap here toggles, so a wrong read does not
+    merely fail to help: it would take a tick BACK OFF.
+    """
+    from apt_log import feed as feed_mod
+
+    wanted: list[dict] = []
+    for element in feed_mod.elements(driver.page_source or ""):
+        rid = element.get("rid") or ""
+        if not rid.startswith(POC_DONE_ID):
+            continue
+        if element.get("enabled", True) is False:
+            continue
+        if element.get("checked") or rid.endswith("_true"):
+            continue
+        wanted.append(element)
+    return wanted
+
+
+def _pending_tasks(driver) -> list[dict]:
+    """The unticked tasks on whichever plan of care is in front.
+
+    One button for her, two readings underneath: the apps mark a required
+    task in ways that have nothing in common — inMyTeam with a star in the
+    margin and an anonymous CheckBox, HHAeXchange+ with a named pair — and
+    which app is in front is the only thing that decides which to use.
+    """
+    if _front_package() == "com.hhaexchange.uma":
+        return _poc_tasks(driver)
+    return _starred_tasks(driver)
+
+
 def _check_tasks(driver, report) -> None:
     """Tick every starred task on the plan of care.
 
     Thirteen tasks, each needing a tap in a 32px box, driven from Miami
     through a phone in another state — that is the clunkiness this removes.
 
+    Both apps' plans of care, one button: inMyTeam marks a required task
+    with a star in the margin, HHAeXchange+ with a named Se realizó /
+    No realizado pair. See `_pending_tasks`.
+
     Deliberately only ADDS ticks. A tap on a checkbox toggles it, so running
     this over a half-filled list would undo the caregiver's own work; already
     ticked boxes are read from the tree and left alone. It never touches the
-    "Patient refused" column, never presses Check out, and never signs
-    anything: what it does is the tedious half, and every consequential
+    "Patient refused" column, never presses Save or Check out, and never
+    signs anything: what it does is the tedious half, and every consequential
     decision on this page stays hers.
+
+    It sees what the phone is showing and nothing else. Both plans fit on one
+    screen at this density; a longer one would leave tasks below the fold
+    untouched AND unreported, since the read-back cannot see them either.
+    Worth knowing before this is pointed at a plan nobody has counted.
     """
     report("macro.step.reading")
-    pending = _starred_tasks(driver)
+    pending = _pending_tasks(driver)
     if not pending:
         report("macro.step.nothing_to_check")
         return
@@ -1773,7 +1833,7 @@ def _check_tasks(driver, report) -> None:
     # Read the page back rather than trusting the taps: a box that did not
     # take is the failure worth naming, because a plan of care submitted a
     # tick short is rejected by the agency and she finds out hours later.
-    left = _starred_tasks(driver)
+    left = _pending_tasks(driver)
     if left:
         raise RuntimeError(
             f"{len(left)} of {len(pending)} tasks did not tick")
