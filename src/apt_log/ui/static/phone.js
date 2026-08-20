@@ -63,6 +63,38 @@
     try { sessionStorage.setItem('aptlog-view', name); } catch (e) { /* private mode */ }
   }
 
+  // COACH MODE: watch, do not drive.
+  //
+  // Two people share this portal from two states and every control on it
+  // drives ONE phone. Watching over her shoulder to talk her through a screen
+  // meant one stray thumb away from pressing Enviar on her behalf, on a
+  // patient's signature.
+  //
+  // The CSS makes it visible and unreachable; this makes it true. Every path
+  // that can move the phone asks here first, so a mode that is on cannot be
+  // half on — and reading the page, taking a photograph and switching views
+  // are untouched, because none of them reach the phone.
+  let coaching = false;
+  function driving() {
+    if (!coaching) return true;
+    toast(i18n.coachHeld || '');
+    return false;
+  }
+
+  function setCoaching(on) {
+    coaching = !!on;
+    body.classList.toggle('coaching', coaching);
+    const btn = document.getElementById('coach');
+    if (btn) {
+      const label = btn.querySelector('.coach-t');
+      if (label) label.textContent = coaching ? (i18n.coachOff || '')
+                                              : (i18n.coachOn || '');
+      btn.setAttribute('aria-pressed', coaching ? 'true' : 'false');
+    }
+    try { sessionStorage.setItem('aptlog-coach', coaching ? '1' : ''); }
+    catch (e) { /* private mode */ }
+  }
+
   // ---------------------------------------------------------------- wireframe
   let tapTimer = 0;
   let blockedCode = '';
@@ -116,6 +148,7 @@
     for (const el of root.querySelectorAll('[data-aim]')) {
       el.addEventListener('click', (ev) => {
         ev.preventDefault();
+        if (!driving()) return;
         if (!socket || socket.readyState !== 1) {
           toast(i18n.explainOffline || '');
           return;
@@ -202,6 +235,7 @@
     body.classList.remove('typing');
   }
   function sendTyped() {
+    if (!driving()) return;
     const box = document.getElementById('typebox');
     const raw = box.value || '';
     const value = (typeKind === 'search'
@@ -736,6 +770,7 @@
   }
 
   function padSend() {
+    if (!driving()) return;
     if (!pad.strokes.length) { toast(i18n.signEmpty || ''); return; }
     const c = padCanvas();
     const rect = c.getBoundingClientRect();
@@ -914,6 +949,18 @@
           cap.classList.toggle('old', !!msg.mirror.stale);
         }
       }
+      // How many of us are on. Shown only when it is more than one: a badge
+      // reading "1" all day is furniture, and the fact worth having is that
+      // somebody ELSE is here — one phone, two sets of hands.
+      if (msg.viewers !== undefined) {
+        const badge = document.getElementById('watchers');
+        const n = Number(msg.viewers) || 0;
+        if (badge) {
+          badge.hidden = n < 2;
+          const count = document.getElementById('watchers-n');
+          if (count) count.textContent = String(n);
+        }
+      }
       if (msg.macro) applyMacro(msg.macro);
       if (msg.sign) applySign(msg.sign);
       if (msg.relay_html !== undefined || msg.relay_nonce !== undefined) {
@@ -975,7 +1022,12 @@
     // never waits on the socket, so Home still works offline.
     const home = document.getElementById('btn-home');
     if (home) home.addEventListener('click', () => {
+      // The view change is HERS ALONE and happens either way — going back to
+      // her own picker is not touching the phone. Sending the phone home is,
+      // and that half waits on watch-only like everything else. Found by the
+      // test that derives this list from the source rather than from memory.
       view('launcher');
+      if (!driving()) return;
       if (socket && socket.readyState === 1) {
         socket.send(JSON.stringify({ type: 'device', action: 'home' }));
       }
@@ -990,6 +1042,7 @@
     // is touched, so pressing it at a bad moment costs a second.
     const uncover = document.getElementById('covered-clear');
     if (uncover) uncover.addEventListener('click', () => {
+      if (!driving()) return;
       awaitingMacro = true;
       busy(i18n.clearing || '', 30000);
       fetch('/macro', {
@@ -1005,6 +1058,7 @@
     // going to do anyway. Saving stays hers.
     const tasksRun = document.getElementById('btn-tasks');
     if (tasksRun) tasksRun.addEventListener('click', () => {
+      if (!driving()) return;
       awaitingMacro = true;
       busy(i18n.checkingTasks || '', 60000);
       fetch('/macro', {
@@ -1043,6 +1097,15 @@
         refreshPeek();
       }
     });
+
+    const coachBtn = document.getElementById('coach');
+    if (coachBtn) coachBtn.addEventListener('click', () => setCoaching(!coaching));
+    // Remembered per browser, like the view is: a reload in the middle of
+    // watching somebody work must not quietly hand the phone back.
+    let wasCoaching = '';
+    try { wasCoaching = sessionStorage.getItem('aptlog-coach') || ''; }
+    catch (e) { /* private mode */ }
+    setCoaching(!!wasCoaching);
 
     const openPad = () => { body.classList.toggle('signing'); padFit(); };
     const sign = document.getElementById('btn-sign');
@@ -1099,6 +1162,7 @@
     // sign-status push the replay uses, so the toast comes back rendered
     // ("done" / "this screen has no signature box") without new plumbing.
     const appAction = (kind) => {
+      if (!driving()) return;
       busy(i18n.signSending || '');
       fetch('/sign-action', {
         method: 'POST',
@@ -1120,6 +1184,7 @@
 
     for (const btn of document.querySelectorAll('[data-act]')) {
       btn.addEventListener('click', () => {
+        if (!driving()) return;
         // Back is the way out of a page she did not mean to be on, so a
         // Back that quietly does nothing is the worst of the offline
         // failures: she presses, the screen does not move, and the portal

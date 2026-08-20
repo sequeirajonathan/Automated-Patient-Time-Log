@@ -2923,3 +2923,77 @@ class TestCheckingHHAeXchangePlusTasks:
         called = {n.func.id for n in ast.walk(tree)
                   if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
         assert not called & {"_tap_xy", "_press", "_swipe"}
+
+
+class TestSomeoneIsWatching:
+    """"Instead of an auth trigger we were stranded on the signin page so I
+    had to leave and click on the app for her to trigger an auth."
+
+    Auto sign-in is gated on somebody being on the portal, and rightly: an
+    unwatched phone loops sign-in against its own inactivity timer all night,
+    which is what the gate was built after.
+
+    But the count is LIVE SOCKETS, and a phone's browser drops its socket for
+    every ordinary reason — the screen locks, she switches to the camera, iOS
+    suspends the tab. Read strictly that is "nobody is watching", so the
+    app's fifteen-minute timer signed the session out mid-visit and the one
+    thing that exists to fix that refused to run.
+    """
+
+    def _write(self, tmp_path, payload, age=0.0):
+        import os
+
+        target = tmp_path / "viewers.json"
+        target.write_text(json.dumps(payload), encoding="utf-8")
+        if age:
+            when = time.time() - age
+            os.utime(target, (when, when))
+        return target
+
+    def test_somebody_on_a_socket_counts(self, tmp_path):
+        assert macros.someone_is_watching(
+            self._write(tmp_path, {"n": 1, "seen": time.time()}))
+
+    def test_nobody_ever_does_not(self, tmp_path):
+        assert not macros.someone_is_watching(
+            self._write(tmp_path, {"n": 0, "seen": 0}))
+
+    def test_a_browser_that_backgrounded_still_counts(self, tmp_path):
+        """The socket is gone; she is still standing in the kitchen."""
+        assert macros.someone_is_watching(
+            self._write(tmp_path, {"n": 0, "seen": time.time() - 120}))
+
+    def test_but_not_hours_later(self, tmp_path):
+        """Three in the morning, which is the case the gate exists for."""
+        assert not macros.someone_is_watching(
+            self._write(tmp_path, {"n": 0, "seen": time.time() - 6 * 3600}))
+
+    def test_the_window_outlasts_the_apps_own_timeout(self, tmp_path):
+        """HHAeXchange+ signs out after fifteen minutes idle. A window
+        shorter than that would close before the thing it is waiting for."""
+        assert macros.ATTENDED_WINDOW > 15 * 60
+
+    def test_a_stale_file_cannot_claim_a_live_socket(self, tmp_path):
+        """The mtime is the liveness half: a crashed UI must read as nobody
+        watching, not as somebody."""
+        assert not macros.someone_is_watching(
+            self._write(tmp_path, {"n": 3, "seen": 0}, age=600))
+
+    def test_a_stale_file_can_still_carry_its_stamp(self, tmp_path):
+        """The stamp carries its own age, so it does not need the mtime —
+        and a UI that died two minutes ago was watched two minutes ago."""
+        assert macros.someone_is_watching(
+            self._write(tmp_path, {"n": 3, "seen": time.time() - 120},
+                        age=600))
+
+    def test_a_stamp_from_the_future_is_not_trusted(self, tmp_path):
+        assert not macros.someone_is_watching(
+            self._write(tmp_path, {"n": 0, "seen": time.time() + 9999}))
+
+    def test_nonsense_is_refused_rather_than_guessed(self, tmp_path):
+        for payload in ({"n": "x"}, {"seen": "soon"}, {}, []):
+            assert not macros.someone_is_watching(
+                self._write(tmp_path, payload))
+
+    def test_a_missing_file_is_nobody(self, tmp_path):
+        assert not macros.someone_is_watching(tmp_path / "nope.json")

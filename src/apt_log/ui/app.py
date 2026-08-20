@@ -89,10 +89,32 @@ _viewers = 0
 
 
 def _publish_viewers() -> None:
+    """The socket count, and when anybody last held one.
+
+    The stamp is what survives a browser backgrounding. A phone drops its
+    socket whenever the screen locks or she switches app, and read as "nobody
+    is watching" that turned auto sign-in off at the exact moment a session
+    expired mid-visit. `macros.someone_is_watching` reads both.
+
+    It survives a restart of this process too, which the count cannot: a
+    deploy resets the counter to zero, and every deploy tonight took auto
+    sign-in offline until a browser happened to reconnect.
+    """
+    import time as _time
+
+    seen = 0.0
+    try:
+        seen = float(json.loads(VIEWERS_PATH.read_text(encoding="utf-8"))
+                     .get("seen") or 0)
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        seen = 0.0
+    if _viewers > 0:
+        seen = _time.time()
     try:
         VIEWERS_PATH.parent.mkdir(parents=True, exist_ok=True)
         tmp = VIEWERS_PATH.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"n": _viewers}), encoding="utf-8")
+        tmp.write_text(json.dumps({"n": _viewers, "seen": seen}),
+                       encoding="utf-8")
         tmp.replace(VIEWERS_PATH)
     except OSError as exc:
         log.warning("cannot publish viewer count (%s)", exc)
@@ -1114,6 +1136,13 @@ async def live(ws: WebSocket):
                 # Refreshes the mtime, which is the liveness half of the
                 # viewer signal the feed reads.
                 _publish_viewers()
+                # HOW MANY OF US ARE ON. Two people share this portal from two
+                # states, and every control on it drives one phone — so
+                # "somebody else is here" is a fact worth having before you
+                # reach for a button. The count is sockets, which is as close
+                # to "people looking" as anything on hand.
+                if _viewers != last.get("viewers"):
+                    payload["viewers"] = last["viewers"] = _viewers
                 s = await asyncio.to_thread(state_mod.collect)
                 mirror = _mirror_payload(s, t)
                 if mirror != last.get("mirror"):
