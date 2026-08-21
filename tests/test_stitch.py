@@ -140,3 +140,67 @@ class TestLocate:
         aim = {"rid": "row", "cls": "Button", "b": [0, 700, 200, 760]}
         fresh = [el("other", "Button", [0, 700, 200, 760])]
         assert stitch.locate(aim, fresh) is None
+
+
+class TestAPageThatDidNotScroll:
+    """WATCHED LIVE on inMyTeam's plan of care — a page that reports itself
+    unscrollable and is. Every one of its items came back TWICE, the second
+    copy offset by exactly the nominal swipe, and the two copies interleaved.
+    The reflow then paired checkboxes with the wrong task names across the
+    seam and dealt the title bar into the middle of the list.
+
+    Reported as "I selected a task, unselected it, and the UI broke".
+
+    The cause was that `_shift` dropped every zero delta — right for a
+    scrolling page whose pinned chrome would otherwise vote "nothing moved",
+    and wrong for a page where nothing DID move: the list emptied, it
+    answered None, and the caller reads None as "assume a full swipe".
+    """
+
+    def _page(self):
+        return {"elements": [el("btn", "Button", [10, 100, 200, 140], "Go"),
+                             el("", "View", [10, 200, 200, 240])],
+                "statics": [{"cls": "TextView", "b": [10, 300, 300, 320],
+                             "txt": "Ambulation Assist"},
+                            {"cls": "TextView", "b": [10, 400, 300, 420],
+                             "txt": "Meal Preparation"}]}
+
+    def test_anchors_that_agree_nothing_moved_say_zero_not_unknown(self):
+        page = self._page()
+        both = page["elements"] + page["statics"]
+        assert stitch._shift(both, both) == 0.0
+
+    def test_and_the_page_is_not_placed_twice(self):
+        page = self._page()
+        out = stitch.stitch([page, page], nominal_dy=528)
+        assert len(out["elements"]) == len(page["elements"])
+        assert len(out["statics"]) == len(page["statics"])
+
+    def test_every_item_keeps_its_own_place(self):
+        """The damage was not just duplication — the second copy landed a
+        swipe lower and interleaved, which is what scrambled the pairing."""
+        page = self._page()
+        out = stitch.stitch([page, page], nominal_dy=528)
+        for item in out["elements"] + out["statics"]:
+            assert item["vb"][1] == item["b"][1]
+
+    def test_a_capture_sharing_no_anchor_is_still_unknown(self):
+        """None has to keep meaning "cannot tell" — that is what the nominal
+        swipe fallback is for."""
+        first = {"elements": [el("a", "Button", [10, 100, 200, 140], "One")],
+                 "statics": []}
+        second = {"elements": [el("z", "Button", [10, 100, 200, 140], "Two")],
+                  "statics": []}
+        assert stitch._shift(first["elements"], second["elements"]) is None
+
+    def test_a_page_that_really_scrolled_is_unaffected(self):
+        first = self._page()
+        second = {"elements": [dict(e, b=[e["b"][0], e["b"][1] - 400,
+                                          e["b"][2], e["b"][3] - 400])
+                               for e in first["elements"]],
+                  "statics": [dict(s, b=[s["b"][0], s["b"][1] - 400,
+                                         s["b"][2], s["b"][3] - 400])
+                              for s in first["statics"]]}
+        both_prev = first["elements"] + first["statics"]
+        both_cur = second["elements"] + second["statics"]
+        assert stitch._shift(both_prev, both_cur) == 400
