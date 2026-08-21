@@ -3457,7 +3457,7 @@ def _evv_checks(driver, report, arg: str) -> None:
 
     It presses nothing consequential: a date search is reading.
     """
-    package, patient = _evv_parts(arg)
+    package, patient = _evv_parts(arg) if arg else _the_visit_in_hand()
     if package not in CHECK_LOG_APPS:
         raise RuntimeError("this app's work log is not walked")
     report("macro.step.launching")
@@ -3465,6 +3465,32 @@ def _evv_checks(driver, report, arg: str) -> None:
     report("macro.step.reading_the_log")
     seen = _todays_check_events(driver, report, patient)
     report("macro.step.finished" if seen else "macro.step.nothing_recorded")
+
+
+def _the_visit_in_hand() -> tuple[str, str]:
+    """The visit this button is about when nobody said — the one running, or
+    the one coming next.
+
+    WHAT MAKES IT A BUTTON RATHER THAN A ROUTE. Watching an armed entry means
+    watching ONE visit, the one whose minute is arriving, and asking the
+    person watching to name it is asking them to know which patient the
+    scheduler picked. The schedule already knows.
+    """
+    from datetime import datetime
+    from apt_log import schedule as schedule_mod
+
+    try:
+        plan = schedule_mod.load()
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError("there is no schedule to read") from exc
+    now = datetime.now(plan.zone)
+    visit = plan.current(now)
+    if visit is None:
+        upcoming = plan.upcoming(now, limit=1)
+        visit = upcoming[0] if upcoming else None
+    if visit is None:
+        raise RuntimeError("there is no visit to look up")
+    return visit.app, visit.patient
 
 
 def _evv_entry(driver, report, arg: str) -> None:
@@ -3684,8 +3710,8 @@ MACROS: dict[str, Macro] = {
 # they run themselves when a session expires; a button that duplicates what
 # already happens automatically is a button whose only use is pressing it at
 # the wrong moment.
-OPERATIONS = ("rescan", "read_page", "clear_screen", "restart_app",
-              "close_app", "phone_settings", "restart_phone")
+OPERATIONS = ("rescan", "read_page", "evv_checks", "clear_screen",
+              "restart_app", "close_app", "phone_settings", "restart_phone")
 
 # The ones that cannot be undone by pressing it again. The page asks first.
 #
