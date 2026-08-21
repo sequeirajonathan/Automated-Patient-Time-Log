@@ -1520,21 +1520,27 @@
          answer to that. Offered only on the app that can be asked; see
          macros.CHECK_LOG_APPS. #}
       <button id="btn-checks" hidden aria-label="{{ t('macro.evv_checks') }}">
-        {# A CLIPBOARD WITH A CLOCK ON IT: the record, and the day it covers.
-           Asked for by name, and drawn the one way a clipboard survives being
-           22 pixels wide — with the clock BREAKING ITS OUTLINE at the corner
-           rather than sitting inside it. The first attempt at this button was
-           a page with a tick in it and read as a plain box, because a closed
-           shape next to a 1.9 stroke eats whatever it contains; the same trap
-           takes a clipboard-with-a-list, whose rows mush into grey. Cutting
-           the silhouette is what keeps it legible, and it is what makes this
-           unmistakable beside the double tick, the pencil and the eye it sits
-           with — all four were rendered together at size to check. #}
+        {# A CLIPBOARD WITH WRITING ON IT AND A CLOCK: the record, what is on
+           it, and the day it covers.
+
+           TWO THINGS FIGHT AT 22 PIXELS and both had to be settled by
+           rendering rather than by looking at the source. A closed shape
+           next to a 1.9 stroke eats whatever it contains — which is why the
+           first version of this button, a page with a tick inside it, read
+           as a plain box. And two ruled lines plus a clock small enough to
+           fit between them crowd into grey.
+
+           So the lines stay, and the clock BREAKS THE OUTLINE at the corner
+           instead of squeezing inside it. Cutting the silhouette buys the
+           clock the room to be legible and gives the whole glyph a shape
+           nothing else in this toolbar has — checked by rendering it beside
+           the double tick, the pencil and the eye. #}
         <svg class="tool" viewBox="0 0 24 24" fill="none" stroke="currentColor"
              stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"
           ><rect x="8.5" y="2" width="7" height="4" rx="1.3"/
-          ><path d="M15.5 4H17a2 2 0 0 1 2 2v5"/
-          ><path d="M8.5 4H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h4"/
+          ><path d="M15.5 4H17a2 2 0 0 1 2 2v4"/
+          ><path d="M8.5 4H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h3.5"/
+          ><path d="M8.6 9.5h6.8"/><path d="M8.6 13h4.4"/
           ><circle cx="16.5" cy="16.5" r="5"/
           ><path d="M16.5 14v2.6l1.8 1.1"/></svg>
       </button>
