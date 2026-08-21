@@ -777,6 +777,20 @@ def _schedule_model(t) -> dict:
     }
 
 
+def _first_half(plan, block) -> str:
+    """When this split visit's check-in actually happens, in words.
+
+    "" when there is no earlier half to point at, which makes the sentence
+    read a little short rather than wrong.
+    """
+    says = _zone_says(plan.zone)
+    mine = [b for b in plan.blocks
+            if b.patient == block.patient and b.app == block.app
+            and b.of == block.of and b.days == block.days]
+    first = next((b for b in mine if b.part == 1), None)
+    return _clock(first.start, says) if first else ""
+
+
 def _arming_model(t) -> dict:
     """Every recurring block, with a switch each.
 
@@ -802,14 +816,20 @@ def _arming_model(t) -> dict:
         # this page could show: it would read as "the check-in is handled"
         # for a visit nobody is going to check in. HHAeXchange+'s control has
         # never been walked, so its rows say so on their face.
-        why = autoentry.refusal(block.app, "entry")
+        # The block, not just the app: a later half of a split visit has no
+        # check-in to make however walked its app is.
+        why = autoentry.refusal(block.app, "entry", block)
         claim = claims.get(key) or {}
         rows.append({
             "key": key,
             "armed": key in on,
             "fires": not why,
             "why": why,
-            "why_says": t("arm.why.%s" % why) if why else "",
+            # The refusal for a later half names WHERE the check-in actually
+            # is, because "not here" without "there" leaves somebody hunting
+            # for a switch that does exist, one row up.
+            "why_says": (t("arm.why.%s" % why, other=_first_half(plan, block))
+                         if why else ""),
             # Who made the presence claim, so the page shows an attested
             # switch as attested rather than as a setting.
             "who": str(claim.get("who") or "") if key in on else "",

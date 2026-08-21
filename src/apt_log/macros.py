@@ -4319,7 +4319,8 @@ class Runner:
             return False
         now = datetime.now().astimezone()
         for item in autoentry.preparing(plan, now):
-            if autoentry.refusal(item.visit.app, item.kind):
+            if autoentry.refusal(item.visit.app, item.kind,
+                                 item.visit.block):
                 continue
             if item.occurrence in self._prepared:
                 continue
@@ -4349,7 +4350,8 @@ class Runner:
         from apt_log import autoentry
 
         for item in autoentry.missed(plan, now):
-            if autoentry.refusal(item.visit.app, item.kind):
+            if autoentry.refusal(item.visit.app, item.kind,
+                                 item.visit.block):
                 continue
             autoentry.spend(item.occurrence, "missed",
                             {"app": item.visit.app, "kind": item.kind,

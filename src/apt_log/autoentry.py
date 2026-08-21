@@ -91,14 +91,31 @@ UNSUPPORTED_REASON = {"com.hhaexchange.uma": "control_not_walked"}
 FIREABLE_KINDS = ("entry",)
 
 
-def refusal(app: str, kind: str) -> str:
+def refusal(app: str, kind: str, block=None) -> str:
     """Why this cannot be fired, or "" if it can.
 
     One place, so the front end, the notifier and the runner all say the same
     thing about the same visit rather than three near-misses.
+
+    `block` is optional and answers a question the app alone cannot: where a
+    patient's evening is written as two consecutive entries, the check-in
+    belongs to the FIRST and only the first. Said by the owner about exactly
+    that patient — "we're only supposed to check in for caridad on her first
+    block not the second one".
+
+    The engine has always known this: `Visit.entry_at` is None on a later
+    half, so `due()` never raises an entry there and nothing could have
+    fired. What it did NOT do was say so — the arming page offered a switch
+    on the second half whose only honest setting was off, and refused it, if
+    at all, for an unrelated reason about the app. A switch that cannot do
+    what it says is worse than a missing one.
+
+    Checked BEFORE the app, because it is true of a fully walked app too.
     """
     if kind not in FIREABLE_KINDS:
         return "exit_is_hers"
+    if block is not None and getattr(block, "part", 1) > 1:
+        return "entry_is_the_first_half"
     if not supported(app):
         return UNSUPPORTED_REASON.get(app, "app_not_walked")
     return ""
@@ -106,7 +123,8 @@ def refusal(app: str, kind: str) -> str:
 
 def fireable(items) -> list:
     """The subset of `due()` this machine will actually press."""
-    return [d for d in items if not refusal(d.visit.app, d.kind)]
+    return [d for d in items
+            if not refusal(d.visit.app, d.kind, d.visit.block)]
 
 
 @dataclass(frozen=True)
