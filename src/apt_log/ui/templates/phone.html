@@ -1951,6 +1951,13 @@
 
 <script>
   window.APTLOG_APP = {
+    {# THE PHONE'S ZONE, NOT THE READER'S. The launcher clock is a copy of
+       the phone's own home screen, and the phone is at the patients'
+       building — so it must read the building's hour however far away the
+       person looking at it happens to be. Rendered in a browser it was
+       showing the READER's clock, which is how an owner in Central came to
+       be comparing a 5am Eastern arm against a 4am local one. #}
+    zone: {{ zone|tojson }},
     appTitle: {{ t('app.title')|tojson }},
     opening: {{ t('papp.opening')|tojson }},
     waiting: {{ t('papp.waiting_screen')|tojson }},

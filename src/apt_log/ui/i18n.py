@@ -90,9 +90,20 @@ class Translator:
         return value.strftime(self.t("format.datetime"))
 
     def time(self, value: datetime | None) -> str:
+        """A time, and the zone it is in whenever the value knows.
+
+        Every hour this project reasons about is the building's, which is
+        Eastern — but the people reading are not all in it, and an hour with
+        no zone on it is one the reader has to guess at. Read off the value
+        rather than written down, so it says EDT in August and EST in
+        January with nobody remembering to change it. A naive value cannot
+        answer and is left alone rather than labelled with a guess.
+        """
         if value is None:
             return self.t("common.none")
-        return value.strftime(self.t("format.time"))
+        said = value.strftime(self.t("format.time"))
+        mark = value.strftime("%Z") if value.tzinfo else ""
+        return f"{said} {mark}".strip()
 
     def date(self, value: datetime | None) -> str:
         if value is None:

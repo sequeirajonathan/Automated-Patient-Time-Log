@@ -325,6 +325,9 @@ def phone_app(request: Request):
             "languages": SUPPORTED,
             "apps": PHONE_APPS,
             "m": model,
+            # The schedule's zone, for the launcher clock — see phone.html.
+            # The building's, never the reader's.
+            "zone": _schedule_zone(),
             "plan": _schedule_model(t),
             "arming": _arming_model(t),
             "screen_doc": screen_doc or {},
@@ -670,9 +673,9 @@ def _a_visit(visit, now, t) -> dict:
         "mark": entry.get("mark", ""),
         "accent": entry.get("accent", "#666"),
         "agency": visit.agency,
-        "starts": visit.starts.strftime("%-I:%M %p").lower(),
-        "ends": visit.ends.strftime("%-I:%M %p").lower(),
-        "fires": visit.fires.strftime("%-I:%M %p").lower(),
+        "starts": _clock(visit.starts),
+        "ends": _clock(visit.ends),
+        "fires": _clock(visit.fires),
         "day": t("day.long.%s" % DAY_KEYS[visit.fires.weekday()]),
         "date": visit.fires.date().isoformat(),
         # The buffer is worth showing, not hiding: it is the one time on the
@@ -687,14 +690,58 @@ def _a_visit(visit, now, t) -> dict:
         # on the last, nothing at the seam. See schedule.Visit.
         "does_entry": visit.does_entry,
         "does_exit": visit.does_exit,
-        "entry_at": (visit.entry_at.strftime("%-I:%M %p").lower()
-                     if visit.entry_at else ""),
-        "exit_at": (visit.exit_at.strftime("%-I:%M %p").lower()
-                    if visit.exit_at else ""),
+        "entry_at": _clock(visit.entry_at) if visit.entry_at else "",
+        "exit_at": _clock(visit.exit_at) if visit.exit_at else "",
         # Seconds, for a client that wants to count down without re-reading
         # the clock's timezone. Negative once it has fired.
         "in_seconds": int((visit.fires - now).total_seconds()),
     }
+
+
+# EVERY TIME THIS PAGE SHOWS, WITH THE ZONE IT IS IN.
+#
+# The building is in Eastern and so is the schedule, so every hour this
+# project reasons about is Eastern — but the people reading the page are not
+# all in it. Reported by the owner from Central: "I'm getting confused with
+# my CDT local time, would like to avoid any confusion on my end." An hour
+# with no zone on it is an hour the reader has to guess at, and the guess is
+# wrong for anyone outside Florida.
+#
+# Taken from the datetime itself rather than written down, so it says EDT in
+# August and EST in January without anybody remembering to change it.
+def _clock(value, zone: str = "") -> str:
+    """`5:00 am EDT`. The zone is never omitted, however obvious it looks."""
+    said = value.strftime("%-I:%M %p").lower()
+    mark = value.strftime("%Z") if value.tzinfo else zone
+    return f"{said} {mark}".strip()
+
+
+def _zone_says(zone) -> str:
+    """What the schedule's zone calls itself today — EDT or EST.
+
+    For the times the schedule keeps as bare clock readings, which carry no
+    date and so cannot answer this for themselves.
+    """
+    from datetime import datetime as _dt
+
+    try:
+        return _dt.now(zone).strftime("%Z")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _schedule_zone() -> str:
+    """The zone the schedule keeps its hours in, by name, or "".
+
+    Handed to the page so a clock rendered in somebody's browser can show
+    the phone's hour rather than theirs. "" when there is no schedule to
+    ask, and the page falls back to the reader's own clock — an honest
+    wrong answer beats a blank face.
+    """
+    try:
+        return str(schedule_mod.load().zone)
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def _schedule_model(t) -> dict:
@@ -745,6 +792,7 @@ def _arming_model(t) -> dict:
     except schedule_mod.BadSchedule as exc:
         return {"ok": False, "error": str(exc), "blocks": [], "armed": 0}
     on = arming.armed()
+    says = _zone_says(plan.zone)
     claims = arming.attestations()
     rows = []
     for block in plan.blocks:
@@ -771,8 +819,10 @@ def _arming_model(t) -> dict:
             "accent": _app_entry(block.app).get("accent", "#666"),
             "agency": block.agency,
             "days": [t("day.%s" % DAY_KEYS[d]) for d in sorted(block.days)],
-            "start": block.start.strftime("%-I:%M %p").lower(),
-            "end": block.end.strftime("%-I:%M %p").lower(),
+            # Bare clock readings with no date on them, so the zone has to
+            # be supplied rather than read off the value — see `_zone_says`.
+            "start": _clock(block.start, says),
+            "end": _clock(block.end, says),
             "part": block.part,
             "of": block.of,
         })
