@@ -687,6 +687,136 @@ def label_keys(model: dict, t) -> dict:
     return model
 
 
+# ------------------------------------------------- Android's own permission
+# dialog
+#
+# WATCHED LIVE, AND IT RENDERED AS A MESS. The first automated check-in raised
+# "Allow Inmyteam to access this device's location?" and the general reflow
+# banded the whole dialog into ONE row: the question squeezed into a column
+# two characters wide ("A l.."), the Precise/Approximate radios reduced to two
+# bare chevrons and two unlabelled checkboxes, and the three stacked buttons
+# laid out side by side as though they were a segmented control.
+#
+# The banding is not wrong in general — it is guessing at an app's layout from
+# geometry, which is what it is for. But this screen never needs guessing at:
+# it is Android's own, its resource-ids are fixed, and every app on the phone
+# raises the identical dialog. So it is recognised and drawn as what it is.
+#
+# It matters more than an ordinary ugly screen. This is the dialog standing
+# between a scheduled check-in and the record it exists to write, and the
+# person answering it is being asked to make a permission decision from a
+# phone in another state.
+PERMISSION_DIALOG_ID = "grant_dialog"
+PERMISSION_MESSAGE_ID = "permission_message"
+PERMISSION_ACCURACY_ID = "permission_location_accuracy_radio_container"
+# Which button means what, so the page can emphasise the affirmative and mark
+# the refusal instead of showing three identical pills.
+PERMISSION_BUTTONS = (
+    ("permission_allow_foreground_only_button", "allow"),
+    ("permission_allow_button", "allow"),
+    ("permission_allow_always_button", "allow"),
+    ("permission_allow_one_time_button", "once"),
+    ("permission_deny_button", "deny"),
+    ("permission_deny_and_dont_ask_again_button", "deny"),
+)
+
+
+def _short_id(value: str) -> str:
+    return (value or "").rsplit("/", 1)[-1]
+
+
+def _permission_dialog(doc: dict) -> dict | None:
+    """The model for a permission prompt, or None if this is not one.
+
+    Reads the published elements and statics like every other screen, so the
+    aims are the ordinary verified ones and nothing here is a new capability.
+    """
+    elements = [e for e in doc.get("elements") or [] if e.get("b")]
+    statics = [s for s in doc.get("statics") or [] if s.get("b")]
+    ids = {_short_id(e.get("rid", "")) for e in elements}
+    ids |= {_short_id(s.get("rid", "")) for s in statics}
+    if PERMISSION_DIALOG_ID not in ids:
+        return None
+
+    def _caption(node):
+        """Its own words, or the ones drawn over it."""
+        word = (node.get("txt") or "").strip()
+        if word:
+            return word
+        for s in statics:
+            if s is node:
+                continue
+            text = (s.get("txt") or "").strip()
+            if text and _contains(node["b"], s["b"]):
+                return text
+        return ""
+
+    choices, actions = [], []
+    for element in elements:
+        rid = _short_id(element.get("rid", ""))
+        if element.get("checkable") or rid.endswith(("_radio_fine",
+                                                     "_radio_coarse")):
+            word = _caption(element)
+            if word:
+                choices.append({"txt": word,
+                                "on": bool(element.get("checked")),
+                                "aim": _aim(element)})
+            continue
+        for known, tone in PERMISSION_BUTTONS:
+            if rid == known:
+                actions.append({"txt": _caption(element) or known,
+                                "tone": tone, "aim": _aim(element)})
+                break
+    if not actions:
+        return None
+
+    # THE QUESTION IS WHATEVER TEXT IS LEFT OVER INSIDE THE DIALOG.
+    #
+    # Not matched on `permission_message`: the publisher does not carry that
+    # node's resource-id, so an id rule found nothing on the very screen this
+    # was written from — the question came back empty while sitting plainly
+    # in the statics. Every control above has already claimed its own caption
+    # from its own element, so any static text still inside the dialog and
+    # not inside one of those controls is the sentence being asked.
+    box = next((e["b"] for e in elements
+                if _short_id(e.get("rid", "")) == PERMISSION_DIALOG_ID), None)
+    spoken = {c["txt"] for c in choices} | {a["txt"] for a in actions}
+    said = []
+    for s in statics:
+        text = (s.get("txt") or "").strip()
+        if not text or text in spoken:
+            continue
+        if box is not None and not _contains(box, s["b"]):
+            continue
+        said.append(text)
+    return {"message": " ".join(said), "choices": choices,
+            "actions": actions, "box": box}
+
+
+def _without(rows: list, box) -> list:
+    """The rows with everything inside `box` taken out, and empties dropped.
+
+    Used to stop the reflow repeating a dialog the page has already drawn
+    properly. Anything OUTSIDE the box stays: a prompt can sit over a screen
+    that still has content of its own around it.
+    """
+    if box is None:
+        return rows
+    kept = []
+    for row in rows:
+        items = [it for it in (row.get("items") or [])
+                 if not _contains(box, it.get("b") or box)]
+        if not items and row.get("items"):
+            continue
+        kept.append(dict(row, items=items) if row.get("items") else row)
+    return kept
+
+
+def _aim(element: dict) -> dict:
+    return {"rid": element.get("rid", ""), "cls": element.get("cls", ""),
+            "b": element.get("aim_b") or element["b"]}
+
+
 def build(doc: dict) -> dict | None:
     """The semantic model: a nav bar (maybe) and a list of rows."""
     w, h = _effective_size(doc)
@@ -1420,8 +1550,20 @@ def build(doc: dict) -> dict | None:
     for band in bands:
         shape = _band_shape(band, h)
         rows.append({"items": band, **shape})
+    # Android's own permission prompt, drawn as itself rather than banded
+    # into a row of look-alike pills. None on every other screen.
+    permission = _permission_dialog(doc)
+    if permission is not None:
+        # AND THE ROWS MUST NOT SAY IT AGAIN. Caught by photographing the
+        # fix rather than reading the CSS: the new dialog rendered correctly
+        # and the old mangled band was still sitting underneath it, so the
+        # page offered the same three buttons twice — once properly and once
+        # as the garble this was written to remove. Two "Don't allow"s on a
+        # screen is worse than one badly drawn one.
+        rows = _without(rows, permission["box"])
     return {"id": doc.get("id", ""), "nav": nav, "rows": rows,
             "apptabs": apptabs,
+            "permission": permission,
             # The way out of a modal, when the screen is one. See DISMISS_IDS.
             "dismiss": dismiss,
             "notice": doc.get("notice", ""), "blocked": doc.get("blocked", ""),

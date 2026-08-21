@@ -86,6 +86,29 @@ SCENES = [
     # name, screen.json doc, JS run after load (the page's own classes — the
     # same ones its socket client sets — forced the way Cypress forces state).
     ("01-picker", visit_screen(), ""),
+    # Android's own location prompt, from the live capture of the first
+    # automated check-in. It used to band into one row: the question squeezed
+    # to two characters, the radios as bare checkboxes, the three stacked
+    # buttons side by side. Photographed so the fix is looked at, not assumed.
+    ("00-permission", fresh({
+        "app": "com.google.android.permissioncontroller", "screen": "unknown",
+        "activity": "grantpermissionsactivity",
+        "elements": [
+            el("grant_dialog", "LinearLayout", [101, 638, 619, 987]),
+            el("permission_location_accuracy_radio_fine", "RadioButton",
+               [264, 727, 349, 830], "Precise", checked=True),
+            el("permission_location_accuracy_radio_coarse", "RadioButton",
+               [371, 727, 456, 830], "Approximate"),
+            el("permission_allow_foreground_only_button", "Button",
+               [127, 847, 593, 884], "While using the app"),
+            el("permission_allow_one_time_button", "Button",
+               [127, 886, 593, 923], "Only this time"),
+            el("permission_deny_button", "Button",
+               [127, 925, 593, 962], "Don\u2019t allow"),
+        ],
+        "statics": [st([127, 693, 593, 711],
+                       "Allow Inmyteam to access this device\u2019s location?")],
+    }), "toScreen()"),
     ("02-visit-reflow", visit_screen(), "toScreen()"),
     ("03-signin-blocked", fresh({
         "app": "com.hhaexchange.caregiver", "screen": "login",

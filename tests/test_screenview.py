@@ -2184,3 +2184,125 @@ class TestAButtonWearsItsOwnCaption:
             {"b": [30, 1510, 60, 1550], "txt": ""}])
         assert all("" not in (b["txt"] or "")
                    for b in self._buttons(model))
+
+
+class TestAndroidsPermissionPrompt:
+    """WATCHED LIVE, AND IT RENDERED AS A MESS. The first automated check-in
+    raised "Allow ... to access this device's location?" and the general
+    reflow banded the whole dialog into ONE row: the question squeezed into a
+    column two characters wide, the accuracy radios reduced to bare
+    checkboxes, and the three STACKED buttons laid side by side as though
+    they were a segmented control.
+
+    Rebuilt here from the live capture (2026-08-21). This is the dialog
+    standing between a scheduled check-in and the record it exists to write.
+    """
+
+    def _doc(self, **over):
+        doc = {
+            "id": "p", "size": [720, 1536],
+            "elements": [
+                {"rid": "grant_dialog", "cls": "LinearLayout",
+                 "b": [101, 638, 619, 987]},
+                {"rid": "permission_location_accuracy_radio_fine",
+                 "cls": "RadioButton", "txt": "Precise", "checked": True,
+                 "checkable": True, "b": [264, 727, 349, 830]},
+                {"rid": "permission_location_accuracy_radio_coarse",
+                 "cls": "RadioButton", "txt": "Approximate", "checked": False,
+                 "checkable": True, "b": [371, 727, 456, 830]},
+                {"rid": "permission_allow_foreground_only_button",
+                 "cls": "Button", "txt": "While using the app",
+                 "b": [127, 847, 593, 884]},
+                {"rid": "permission_allow_one_time_button", "cls": "Button",
+                 "txt": "Only this time", "b": [127, 886, 593, 923]},
+                {"rid": "permission_deny_button", "cls": "Button",
+                 "txt": "Don’t allow", "b": [127, 925, 593, 962]},
+            ],
+            "statics": [
+                {"rid": "permission_icon", "txt": "", "b": [349, 664, 370, 685]},
+                # The publisher does not carry this node's resource-id — which
+                # is why the question is found by what is LEFT OVER inside the
+                # dialog, not by an id.
+                {"rid": None,
+                 "txt": "Allow Inmyteam to access this device’s location?",
+                 "b": [127, 693, 593, 711]},
+            ],
+        }
+        doc.update(over)
+        return doc
+
+    def _p(self, doc=None):
+        return screenview.build(doc or self._doc())["permission"]
+
+    def test_the_dialog_is_recognised(self):
+        assert self._p() is not None
+
+    def test_the_question_is_whole_and_not_two_characters(self):
+        assert self._p()["message"] == \
+            "Allow Inmyteam to access this device’s location?"
+
+    def test_the_question_survives_the_id_not_being_published(self):
+        """An id rule found nothing on the very screen this was written from:
+        the question came back empty while sitting plainly in the statics."""
+        doc = self._doc()
+        assert all(s.get("rid") != "permission_message"
+                   for s in doc["statics"])
+        assert self._p(doc)["message"].startswith("Allow ")
+
+    def test_the_accuracy_choice_is_named_not_a_bare_checkbox(self):
+        got = [(c["txt"], c["on"]) for c in self._p()["choices"]]
+        assert got == [("Precise", True), ("Approximate", False)]
+
+    def test_the_three_answers_are_all_there_and_told_apart(self):
+        got = [(a["txt"], a["tone"]) for a in self._p()["actions"]]
+        assert got == [("While using the app", "allow"),
+                       ("Only this time", "once"),
+                       ("Don’t allow", "deny")]
+
+    def test_the_buttons_carry_real_aims(self):
+        for action in self._p()["actions"]:
+            assert action["aim"]["rid"].startswith("permission_")
+            assert len(action["aim"]["b"]) == 4
+
+    def test_an_ordinary_screen_has_no_permission_block(self):
+        doc = self._doc(elements=[{"rid": "some_button", "cls": "Button",
+                                   "txt": "Go", "b": [0, 0, 10, 10]}],
+                        statics=[])
+        assert screenview.build(doc)["permission"] is None
+
+    def test_a_dialog_with_no_buttons_is_not_claimed(self):
+        """Half a dump is not a prompt, and rendering one with nothing to
+        press would strand her on a screen with no way forward."""
+        doc = self._doc()
+        doc["elements"] = [e for e in doc["elements"]
+                           if not e["rid"].startswith("permission_allow")
+                           and e["rid"] != "permission_deny_button"]
+        assert screenview.build(doc)["permission"] is None
+
+    def test_the_rows_do_not_say_it_all_over_again(self):
+        """CAUGHT BY PHOTOGRAPHING THE FIX, NOT BY READING THE CSS. The new
+        dialog rendered correctly and the old mangled band was still sitting
+        underneath it — the page offered the same three buttons twice, once
+        properly and once as the garble this was written to remove. Two
+        "Don't allow"s on a screen is worse than one badly drawn one."""
+        model = screenview.build(self._doc())
+        words = []
+        for row in model["rows"]:
+            for item in row.get("items") or []:
+                words.append((item.get("txt") or "").strip())
+                words.extend(l.strip() for l in (item.get("lines") or []))
+        assert "While using the app" not in words
+        assert "Don’t allow" not in words
+        assert "Precise" not in words
+
+    def test_content_outside_the_dialog_is_kept(self):
+        """A prompt can sit over a screen that still has content of its own
+        around it, and dropping every row would blank that."""
+        doc = self._doc()
+        doc["elements"] = doc["elements"] + [
+            {"rid": "elsewhere", "cls": "Button", "txt": "Underneath",
+             "b": [10, 100, 700, 160]}]
+        model = screenview.build(doc)
+        words = [(i.get("txt") or "") for r in model["rows"]
+                 for i in (r.get("items") or [])]
+        assert "Underneath" in words

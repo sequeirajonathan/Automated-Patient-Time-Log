@@ -6,13 +6,16 @@ That separation is deliberate: the thing being decided is whether to write an
 EVV record asserting a caregiver was at a patient's home, and a decision of
 that kind should be readable, and testable, without a phone in the room.
 
-WHY IT MAY ACT AT ALL. REQ-5's presence gate cannot do its job in this
-deployment — the Pi does not travel, so its network anchors attest to the
-caregiver's own house identically for every patient on the round. The presence
-claim comes from a person instead, in advance, and the act that makes it is
-arming (REQ-5.9). The owner's words: "If armed you can assume my sister is
-already taking care of the patient ... she just doesn't have the time to do the
-entry because she has to start right away. Arming is a commitment."
+WHY IT MAY ACT AT ALL. The controller and the phone live IN the building with
+the patients — the owner's correction, and it is the fact the whole design
+rests on: "the Pi lives at the building and so does the phone, there will never
+be an out of range GPS check". So REQ-5's anchors describe the right place, and
+the gate is corroboration rather than a thing to work around.
+
+What arming adds on top of that is the decision itself (REQ-5.9). The owner's
+words: "If armed you can assume my sister is already taking care of the patient
+... she just doesn't have the time to do the entry because she has to start
+right away. Arming is a commitment."
 
 So the problem this solves is not "she is not there yet". It is "she is there,
 with her hands full, and the entry has to land on the minute the agency expects
@@ -209,6 +212,28 @@ def supported(app: str) -> bool:
     return app in SUPPORTED
 
 
+def _days_to_look_at(schedule, now: datetime) -> tuple:
+    """Which calendar days could hold a visit that matters at `now`.
+
+    IN THE SCHEDULE'S OWN ZONE, NEVER THE MACHINE'S. Comparing two aware
+    instants is correct whatever clock the controller keeps — that part was
+    never at risk — but `now.date()` is not an instant, it is a calendar day,
+    and which day it names depends on the zone it is read in. A controller
+    running UTC would call 9pm Eastern "tomorrow" and look for a visit on the
+    wrong page of the calendar for four hours out of every day.
+
+    The Pi is on America/New_York today and NTP-synced, so this changes
+    nothing right now. It means a reimaged Pi that comes up UTC — the default
+    on a fresh Raspberry Pi OS — fires correctly anyway instead of failing
+    silently between 8pm and midnight.
+
+    Yesterday as well as today, because a visit due at 23:58 is still inside
+    its grace window at 00:01.
+    """
+    local = now.astimezone(schedule.zone)
+    return (local.date() - timedelta(days=1), local.date())
+
+
 def due(schedule, now: datetime, armed_keys=None,
         attestations=None) -> list[Due]:
     """Everything armed whose moment has arrived and has not been spent.
@@ -224,9 +249,7 @@ def due(schedule, now: datetime, armed_keys=None,
         return []
 
     out: list[Due] = []
-    # Yesterday as well as today: a visit due at 23:58 is still inside its
-    # grace window at 00:01, and `on()` for today would not contain it.
-    for day in (now.date() - timedelta(days=1), now.date()):
+    for day in _days_to_look_at(schedule, now):
         for visit in schedule.on(day):
             key = arming.key_for(visit.block)
             if key not in keys:
@@ -259,7 +282,7 @@ def missed(schedule, now: datetime, armed_keys=None) -> list[Due]:
     if not keys:
         return []
     out: list[Due] = []
-    for day in (now.date() - timedelta(days=1), now.date()):
+    for day in _days_to_look_at(schedule, now):
         for visit in schedule.on(day):
             key = arming.key_for(visit.block)
             if key not in keys:
@@ -300,7 +323,7 @@ def preparing(schedule, now: datetime, armed_keys=None) -> list[Due]:
     if not keys:
         return []
     out: list[Due] = []
-    for visit in schedule.on(now.date()):
+    for visit in schedule.on(now.astimezone(schedule.zone).date()):
         key = arming.key_for(visit.block)
         if key not in keys or visit.entry_at is None:
             continue

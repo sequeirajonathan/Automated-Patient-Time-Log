@@ -76,6 +76,11 @@ POLL_EVERY = 1.0
 # minute is work nobody asked for.
 FIRE_EVERY = 5.0
 
+# The lead-window walk NAVIGATES the phone, so it asks even less often than
+# the fire check does. It only ever runs once per visit anyway; this is the
+# floor on how often it bothers to look.
+PREPARE_EVERY = 20.0
+
 # ------------------------------------------------------------ auto sign-in
 # The app expires its session mid-use: the alert's only button lands on the
 # sign-in screen, which the portal (correctly) will not photograph and she
@@ -2939,6 +2944,100 @@ def _tell_somebody_about_the_fire(item, outcome: str) -> None:
         log.warning("could not alert about the fire (%s)", exc)
 
 
+# ------------------------------------------------------ the location prompt
+#
+# THE FIRST CHECK-IN LANDS ON ANDROID'S LOCATION DIALOG, NOT ON THE APP.
+#
+# Watched live on the first attempt: `Check in` opened
+# "Allow Inmyteam to access this device's location?" with Precise/Approximate
+# above and three buttons below. That is Android's own dialog, drawn over the
+# app by `com.google.android.permissioncontroller` — the visit never checked
+# in, and a fire that met this at 5am would have burned its slot on a prompt.
+#
+# TWO ANSWERS, AND THE FIRST ONE IS THE REAL FIX. The permission is granted
+# ahead of time, so the dialog does not appear at all; `pm grant` does exactly
+# what tapping the dialog does and needs no screen. The second answer is for
+# the day a factory reset or an app update revokes it anyway: the macro
+# recognises the dialog and answers it rather than timing out against a
+# control that is not there.
+PERMISSION_PKG = "com.google.android.permissioncontroller"
+
+# EVV is a location claim, so these apps genuinely need the fix — this is not
+# a permission being widened for convenience. Foreground and background both:
+# the owner asked for "Always", and a check-in fired by a timer is not always
+# a check-in with the app in front.
+LOCATION_PERMS = ("android.permission.ACCESS_FINE_LOCATION",
+                  "android.permission.ACCESS_COARSE_LOCATION",
+                  "android.permission.ACCESS_BACKGROUND_LOCATION")
+
+# What the dialog's buttons say. "While using the app" is what a foreground
+# check-in needs and is the only affirmative this will press: `Only this time`
+# would put the same dialog in front of tomorrow's fire, and `Don't allow`
+# would poison the app's own EVV.
+ALLOW_WORDS = ("While using the app", "Mientras se usa la app",
+               "Mientras uso la app", "Allow only while using the app")
+PRECISE_WORDS = ("Precise", "Precisa", "Precisión")
+
+
+def grant_location(package: str, serial: str | None = None) -> dict:
+    """Grant this app the location permissions, without any screen.
+
+    Returns what each one ended up as, so a caller can say what happened
+    rather than assuming. BACKGROUND MAY REFUSE and that is not a failure:
+    on Android 11+ `ACCESS_BACKGROUND_LOCATION` is not always grantable this
+    way, and foreground alone is enough for a check-in pressed while the app
+    is in front — which is what the fire does.
+    """
+    from apt_log import feed as feed_mod
+
+    out = {}
+    for perm in LOCATION_PERMS:
+        try:
+            done = feed_mod._adb(["shell", "pm", "grant", package, perm],
+                                 serial)
+            out[perm.rsplit(".", 1)[-1]] = (
+                "granted" if done.returncode == 0
+                else (done.stderr or b"").decode("utf-8", "replace").strip()
+                or "refused")
+        except (OSError, subprocess.SubprocessError) as exc:
+            out[perm.rsplit(".", 1)[-1]] = type(exc).__name__
+    log.info("location for %s: %s", package,
+             ", ".join(f"{k}={v}" for k, v in out.items()))
+    return out
+
+
+def _answer_the_permission_dialog(driver, report) -> bool:
+    """If Android's permission dialog is up, allow and carry on.
+
+    Returns whether it did anything. Only ever presses the
+    while-using-the-app affirmative — see ALLOW_WORDS for why the other two
+    are not options this may take on somebody's behalf.
+    """
+    if _front_package() != PERMISSION_PKG:
+        return False
+    report("macro.step.allowing_location")
+    # Precise, where the dialog offers the choice: an EVV record built on a
+    # coarse fix is a worse record, and this app is asking because it intends
+    # to attach the position to a visit.
+    precise = _words(driver, *PRECISE_WORDS)
+    if precise is not None:
+        try:
+            precise.click()
+            time.sleep(0.4)
+        except Exception:  # noqa: BLE001 — the choice is optional
+            log.debug("could not pick a precise fix", exc_info=True)
+    allow = _words(driver, *ALLOW_WORDS)
+    if allow is None:
+        raise RuntimeError("the location prompt has no allow button on it")
+    allow.click()
+    time.sleep(EVV_SETTLE)
+    if _front_package() == PERMISSION_PKG:
+        # A second page of the same dialog, or it did not take. Either way
+        # this is not a thing to keep tapping at.
+        raise RuntimeError("the location prompt did not go away")
+    return True
+
+
 def _evv_arg(app: str, patient: str) -> str:
     """One string carrying both halves, because a macro takes one argument.
 
@@ -3016,6 +3115,11 @@ def _evv_entry(driver, report, arg: str) -> None:
         # do.
         raise RuntimeError(f"this app's entry is not walked ({why})")
 
+    # BEFORE THE APP IS EVEN OPENED. A dialog answered here is a dialog that
+    # never interrupts the press, and this costs nothing when the permission
+    # is already held.
+    grant_location(package)
+
     report("macro.step.launching")
     _bring_up(driver, package)
 
@@ -3025,6 +3129,7 @@ def _evv_entry(driver, report, arg: str) -> None:
         raise RuntimeError("that visit is not on this screen")
     row.click()
     time.sleep(EVV_SETTLE)
+    _answer_the_permission_dialog(driver, report)
 
     tree = driver.page_source or ""
     if any(w.lower() in tree.lower() for w in NOT_TODAY_WORDS):
@@ -3038,6 +3143,10 @@ def _evv_entry(driver, report, arg: str) -> None:
         raise RuntimeError("the check-in control is not on this screen")
     button.click()
     time.sleep(EVV_SETTLE)
+    # AND AGAIN AFTER THE PRESS, because this is where it actually appeared:
+    # `Check in` is what asks for the fix, so the dialog lands between the
+    # press and the confirmation rather than before either.
+    _answer_the_permission_dialog(driver, report)
 
     # VERIFY, because "the tap was accepted" is not "the visit started". The
     # cost of believing a tap that did not take is a shift with no check-in
@@ -3478,6 +3587,13 @@ class Runner:
         # None, not 0.0, for the same reason as the auth cooldown: "never
         # looked" is a different fact from "looked at the epoch".
         self._fire_checked: float | None = None
+        # The same, for the lead-window walk, plus which occurrences have
+        # already been walked. In memory rather than on disk: a restart
+        # re-walking one visit is harmless (it opens a page), where a restart
+        # re-FIRING one is not, which is why that ledger is on disk and this
+        # set is not.
+        self._prep_checked: float | None = None
+        self._prepared: set = set()
         # Whether each app's last substantive screen was a foldable page
         # (a run of date headers): a CHANGE in this is a page transition
         # even when the activity name never changes (Compose keeps every
@@ -3587,6 +3703,7 @@ class Runner:
                     sign.do_action(action)
                 self.maybe_auto_auth()
                 self.maybe_fire()
+                self.maybe_prepare()
                 self.maybe_warm()
                 self.maybe_stitch()
             except Exception as exc:  # noqa: BLE001
@@ -3659,6 +3776,62 @@ class Runner:
                         {"error": status.error or ""})
         _tell_somebody_about_the_fire(item, outcome)
         return outcome == "done"
+
+    def maybe_prepare(self) -> bool:
+        """Get the app onto the patient's visit before the entry is due.
+
+        WITHOUT THIS THE FIRE IS A COLD START AGAINST THE CLOCK: launch, wait
+        for a splash, maybe sign in, find the patient, open the visit, press —
+        all inside a five-minute window, on an app that has been asleep since
+        yesterday. The lead window exists so none of that happens at 5am.
+
+        It runs ONCE per occurrence, not every tick, because it navigates the
+        phone and doing that on a loop would fight the caregiver for it. The
+        ledger records the walk under its own outcome, so a later fire can
+        still spend the same slot for real.
+
+        It presses nothing consequential: opening a visit's detail is reading.
+        """
+        from apt_log import arming, autoentry, schedule as schedule_mod
+
+        if read_status(self._status_path).state == "running":
+            return False
+        if not arming.armed():
+            return False
+        tick = time.monotonic()
+        if self._prep_checked is not None \
+                and tick - self._prep_checked < PREPARE_EVERY:
+            return False
+        self._prep_checked = tick
+        if someone_wants_the_phone(self._request_path, DEEPTAP_REQUEST_PATH,
+                                   (self._screen_path or SCREEN_PATH).parent
+                                   / "hierarchy-poke"):
+            return False            # her hands are on it; the fire still works
+        try:
+            plan = schedule_mod.load()
+        except Exception as exc:  # noqa: BLE001
+            log.debug("no schedule to prepare from (%s)", exc)
+            return False
+        now = datetime.now().astimezone()
+        for item in autoentry.preparing(plan, now):
+            if autoentry.refusal(item.visit.app, item.kind):
+                continue
+            if item.occurrence in self._prepared:
+                continue
+            self._prepared.add(item.occurrence)
+            log.info("getting %s ready ahead of an armed entry",
+                     item.visit.app)
+            rid = uuid.uuid4().hex[:12]
+            try:
+                self.execute("evv_prepare", rid,
+                             _evv_arg(item.visit.app, item.visit.patient))
+            except Exception as exc:  # noqa: BLE001 — a failed walk is not a
+                # failed fire. The entry still has its own attempt, from
+                # wherever the phone happens to be, and that attempt is the
+                # one that matters.
+                log.warning("could not get ready (%s)", type(exc).__name__)
+            return True
+        return False
 
     def _say_what_was_missed(self, plan, now) -> None:
         """An armed entry whose window closed with nothing recorded.
