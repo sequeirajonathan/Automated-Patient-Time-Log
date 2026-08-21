@@ -3313,6 +3313,42 @@ CHECK_LOG_APPS = ("com.inmyteam.inmyteam",)
 DRAWER_DESC = "Open navigation drawer"
 BACKS_TO_DRAWER = 5
 
+# Fragments every Jetpack app carries, which say nothing about where the
+# person is.
+PLUMBING_FRAGMENTS = ("ReportFragment", "NavHostFragment",
+                      "SupportRequestManagerFragment")
+_FRAGMENT = re.compile(r"#\d+: ([A-Za-z]\w*Fragment)\{")
+
+
+def _where_in_app(package: str) -> str:
+    """The app's current screen, by the name the app's own code gives it.
+
+    THE ANSWER TO A QUESTION THE ATLAS CANNOT ANSWER. `feed.screen_for` keys
+    on the activity, and inMyTeam has exactly one: MainActivity is the visits
+    hub, every bucket list, the visit detail and the work log alike. So the
+    atlas says "home" wherever it is standing, `_app_home` returns having
+    pressed nothing, and every walk through this app has had to infer its
+    position from whichever words happened to be on the glass.
+
+    `dumpsys activity` publishes the fragment back stack by class name, and
+    that name does change: the visits hub reports `VisitsFragment`, the work
+    log reports `MyWorksFragment`. Read-only, no gesture, nothing to get
+    wrong — and unlike a map of the app it cannot go stale, because it is the
+    app answering rather than us remembering.
+
+    "" when the phone will not say. Callers must treat that as "no idea",
+    never as "not there".
+    """
+    from apt_log import feed as feed_mod
+
+    try:
+        out = feed_mod._adb(["shell", "dumpsys", "activity", package]
+                            ).stdout.decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001
+        return ""
+    seen = [n for n in _FRAGMENT.findall(out) if n not in PLUMBING_FRAGMENTS]
+    return seen[0] if seen else ""
+
 
 def _the_drawer(driver):
     """inMyTeam's nav-drawer button, or None — and the only honest "is this
@@ -3342,23 +3378,15 @@ def _open_my_work(driver, report) -> bool:
     page — so this presses Back until the drawer appears, and never presses
     it again once the app is no longer in front.
     """
-    from apt_log import device as device_mod
-
     package = driver.current_package
-    drawer = _the_drawer(driver)
-    for _ in range(BACKS_TO_DRAWER):
-        if drawer is not None:
-            break
-        report("macro.step.navigating")
-        device_mod.send_ui_action("back")
-        time.sleep(BACK_SETTLE)
-        if _front_package() != package:
-            # Back popped the task stack and left the app. Undo it and stop:
-            # a second press from here would leave a second time.
-            _bring_up(driver, package)
-            drawer = _the_drawer(driver)
-            break
-        drawer = _the_drawer(driver)
+    drawer = _back_to_the_drawer(driver, report, package)
+    if drawer is None:
+        # LOST. Rather than press Back a sixth time into whatever is under
+        # the app, start it from cold — which is the one position this code
+        # can be certain of — and walk again from there.
+        report("macro.step.freshening")
+        _freshen(driver, report, package)
+        drawer = _back_to_the_drawer(driver, report, package)
     if drawer is None:
         return False
     drawer.click()
@@ -3368,7 +3396,35 @@ def _open_my_work(driver, report) -> bool:
         return False
     item.click()
     time.sleep(EVV_SETTLE)
+    # ASK THE APP WHERE IT LANDED rather than reading the glass. A Search
+    # button is on more than one of its screens; `MyWorksFragment` is on
+    # exactly one. Only when the phone will not say at all does this fall
+    # back to looking for the control.
+    where = _where_in_app(package)
+    if where:
+        return where.lower().startswith("mywork")
     return bool(_words(driver, *SEARCH_WORDS))
+
+
+def _back_to_the_drawer(driver, report, package: str):
+    """Press Back until the app's front page is showing, and hand back its
+    drawer button. None if it never got there."""
+    from apt_log import device as device_mod
+
+    drawer = _the_drawer(driver)
+    for _ in range(BACKS_TO_DRAWER):
+        if drawer is not None:
+            return drawer
+        report("macro.step.navigating")
+        device_mod.send_ui_action("back")
+        time.sleep(BACK_SETTLE)
+        if _front_package() != package:
+            # Back popped the task stack and left the app. Undo it and stop:
+            # a second press from here would leave a second time.
+            _bring_up(driver, package)
+            return _the_drawer(driver)
+        drawer = _the_drawer(driver)
+    return drawer
 
 
 def _todays_check_events(driver, report, patient: str) -> list[str]:
