@@ -1421,6 +1421,13 @@ async def live(ws: WebSocket):
                     # the control bar beside Back and Home. Empty on screens
                     # without one.
                     "apptabs": (model or {}).get("apptabs") or [],
+                    # Whether THIS app can be asked what it has recorded
+                    # today. Only inMyTeam publishes a readable work log, so
+                    # the button that opens it is offered on that app and
+                    # nowhere else rather than standing by everywhere and
+                    # refusing when pressed.
+                    "checks_app": (screen_doc.get("app") or "")
+                    in macros_mod.CHECK_LOG_APPS,
                 }
                 payload["screen_html"] = (
                     "" if model is None

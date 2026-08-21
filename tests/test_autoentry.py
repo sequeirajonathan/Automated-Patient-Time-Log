@@ -993,7 +993,8 @@ class TestNotEnteringAVisitSomebodyAlreadyEntered:
                             lambda d, *w: type("E", (), {
                                 "click": lambda self: clicked.append(w[0])})())
         today = macros.datetime.now().astimezone().strftime("%Y-%m-%d")
-        return type("D", (), {"page_source": f"<x>{today}</x>"})()
+        return type("D", (), {"page_source": f"<x>{today}</x>",
+                              "current_package": "com.inmyteam.inmyteam"})()
 
     def test_it_reads_the_days_events_for_the_patient(self, monkeypatch):
         from apt_log import macros
@@ -1031,7 +1032,10 @@ class TestNotEnteringAVisitSomebodyAlreadyEntered:
 
         driver = self._log(macros, monkeypatch, ["Check in 05:00 AM"])
         driver.page_source = "<x>1999-01-01</x>"
-        with pytest.raises(RuntimeError):
+        # The cold-start recovery is exercised in TestTheRangeHasToSayToday;
+        # here it is stubbed out so this asserts the refusal that follows it.
+        monkeypatch.setattr(macros, "_freshen", lambda d, r, p: True)
+        with pytest.raises(RuntimeError, match="not showing today"):
             macros._todays_check_events(driver, lambda _s: None, "Carmen Villalon")
 
     def test_the_checks_tab_is_opened_before_the_search_is_run(
@@ -1419,3 +1423,79 @@ class TestAskingTheAppWhereItIs:
 
     def _clicker(self):
         return type("E", (), {"click": lambda self: None})()
+
+
+class TestTheRangeHasToSayToday:
+    """"...and inputs today's date range by default."
+
+    It already does — the two fields are picker-backed and the app fills them
+    with today when the screen is fresh. What was missing was what happens
+    when they are NOT today: a range left over from another search answers a
+    different question in exactly the same words, and the answer decides
+    whether a live agency record gets touched.
+
+    Nothing is typed into a picker. A cold start is what puts the app's own
+    defaults back, so that is the recovery — once, and then a refusal.
+    """
+
+    def _driver(self, macros, monkeypatch, sources):
+        seen = iter(sources)
+        monkeypatch.setattr(macros.time, "sleep", lambda _s: None)
+        monkeypatch.setattr(macros, "_words", lambda d, *w: type(
+            "E", (), {"click": lambda self: None})())
+        from apt_log import feed as feed_mod
+        monkeypatch.setattr(feed_mod, "statics", lambda _x: [])
+        last = [sources[-1]]
+
+        def read(self):
+            try:
+                last[0] = next(seen)
+            except StopIteration:
+                pass
+            return last[0]
+
+        return type("D", (), {
+            "current_package": "com.inmyteam.inmyteam",
+            "page_source": property(read)})()
+
+    def test_a_stale_range_is_recovered_by_a_cold_start(self, monkeypatch):
+        from apt_log import macros
+
+        today = macros.datetime.now().astimezone().strftime("%Y-%m-%d")
+        driver = self._driver(macros, monkeypatch,
+                              ["<x>1999-01-01</x>", f"<x>{today}</x>",
+                               f"<x>{today}</x>"])
+        froze, opened = [], []
+        monkeypatch.setattr(macros, "_freshen",
+                            lambda d, r, p: froze.append(p) or True)
+        monkeypatch.setattr(macros, "_open_my_work",
+                            lambda d, r: opened.append(1) or True)
+        assert macros._todays_check_events(driver, lambda _s: None, "Ada") == []
+        assert froze == ["com.inmyteam.inmyteam"]
+        assert len(opened) == 2
+
+    def test_a_fresh_range_costs_no_restart(self, monkeypatch):
+        from apt_log import macros
+
+        today = macros.datetime.now().astimezone().strftime("%Y-%m-%d")
+        driver = self._driver(macros, monkeypatch,
+                              [f"<x>{today}</x>", f"<x>{today}</x>"])
+        froze = []
+        monkeypatch.setattr(macros, "_freshen",
+                            lambda d, r, p: froze.append(p) or True)
+        monkeypatch.setattr(macros, "_open_my_work", lambda d, r: True)
+        assert macros._todays_check_events(driver, lambda _s: None, "Ada") == []
+        assert froze == []
+
+    def test_and_still_wrong_after_the_restart_is_a_refusal(self, monkeypatch):
+        """Not a third attempt. A log that will not show today cannot answer
+        the question, and saying so is the only honest move left."""
+        import pytest
+        from apt_log import macros
+
+        driver = self._driver(macros, monkeypatch,
+                              ["<x>1999-01-01</x>", "<x>1999-01-01</x>"])
+        monkeypatch.setattr(macros, "_freshen", lambda d, r, p: True)
+        monkeypatch.setattr(macros, "_open_my_work", lambda d, r: True)
+        with pytest.raises(RuntimeError, match="not showing today"):
+            macros._todays_check_events(driver, lambda _s: None, "Ada")
