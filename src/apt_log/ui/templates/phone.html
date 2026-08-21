@@ -1520,17 +1520,23 @@
          answer to that. Offered only on the app that can be asked; see
          macros.CHECK_LOG_APPS. #}
       <button id="btn-checks" hidden aria-label="{{ t('macro.evv_checks') }}">
-        {# A CLOCK WINDING BACK, not a document. The first try was a page with
-           a tick inside it, and at this size the enclosing square swallowed
-           everything in it — reported as "this square icon is just not very
-           telling what this button does", which is exactly right: a 16-unit
-           box next to a 1.9 stroke reads as a box. Nothing here encloses
-           anything, so every line of it survives at twenty pixels, and what
-           it says — a time, going back — is what the screen behind it holds. #}
+        {# A CLIPBOARD WITH A CLOCK ON IT: the record, and the day it covers.
+           Asked for by name, and drawn the one way a clipboard survives being
+           22 pixels wide — with the clock BREAKING ITS OUTLINE at the corner
+           rather than sitting inside it. The first attempt at this button was
+           a page with a tick in it and read as a plain box, because a closed
+           shape next to a 1.9 stroke eats whatever it contains; the same trap
+           takes a clipboard-with-a-list, whose rows mush into grey. Cutting
+           the silhouette is what keeps it legible, and it is what makes this
+           unmistakable beside the double tick, the pencil and the eye it sits
+           with — all four were rendered together at size to check. #}
         <svg class="tool" viewBox="0 0 24 24" fill="none" stroke="currentColor"
              stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"
-          ><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/
-          ><path d="M12 7.5v5l3.5 2"/></svg>
+          ><rect x="8.5" y="2" width="7" height="4" rx="1.3"/
+          ><path d="M15.5 4H17a2 2 0 0 1 2 2v5"/
+          ><path d="M8.5 4H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h4"/
+          ><circle cx="16.5" cy="16.5" r="5"/
+          ><path d="M16.5 14v2.6l1.8 1.1"/></svg>
       </button>
       <button id="btn-sign" aria-label="{{ t('sign.button') }}">
         <svg class="tool" viewBox="0 0 24 24" fill="none" stroke="currentColor"
