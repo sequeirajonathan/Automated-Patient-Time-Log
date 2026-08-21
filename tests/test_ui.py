@@ -4078,3 +4078,50 @@ class TestTheAppsOwnTrail:
         feed.nav_state("com.inmyteam.inmyteam")
         feed.nav_state("com.inmyteam.inmyteam")
         assert len(calls) == 3
+
+
+class TestEveryIconShapeActuallyDraws:
+    """A `/` at the end of one line and its `>` at the start of the next does
+    NOT self-close the tag.
+
+    HTML only honours the self-closing flag when the slash is immediately
+    followed by the bracket. Split across a line break the slash is dropped,
+    the element stays open, and everything after it becomes its CHILD — and a
+    child of a `<path>` or a `<rect>` is not rendered at all.
+
+    It reached the owner's phone as a work-log button drawn as nothing but a
+    clipboard's clip: one rect, with six shapes nested inside it, invisible.
+    The same style had been quietly eating the last two strokes of the
+    plan-of-care icon for as long as it has existed.
+    """
+
+    def test_no_template_splits_a_self_closing_tag(self):
+        import re
+        from pathlib import Path
+
+        bad = {}
+        for f in sorted(Path("src/apt_log/ui").rglob("*.html")):
+            hits = re.findall(r'/\s*\n\s*>', f.read_text(encoding="utf-8"))
+            if hits:
+                bad[str(f)] = len(hits)
+        assert bad == {}
+
+    def test_the_icons_carry_the_shapes_they_are_drawn_from(self):
+        """Counted rather than eyeballed: the failure is silent, and it looks
+        exactly like an icon somebody drew badly."""
+        import re
+        from pathlib import Path
+
+        page = Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+
+        def shapes(button_id):
+            i = page.index(button_id)
+            svg = page[page.index("<svg", i):page.index("</svg>", i)]
+            return len(re.findall(r'<(?:path|rect|circle|line|polyline)\b', svg))
+
+        # Every shape has to be a sibling, so the count in the source is the
+        # count that draws.
+        assert shapes('id="btn-checks"') == 7
+        assert shapes('id="btn-tasks"') == 4
+        assert shapes('id="btn-sign"') == 2
