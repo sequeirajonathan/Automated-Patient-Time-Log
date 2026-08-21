@@ -49,8 +49,9 @@ de <H:MM AM> a <H:MM PM> y su estado es <STATUS>
 That single string gives the patient, the date, **the app's own scheduled window**, and
 the visit's state. Two consequences worth taking seriously:
 
-- **The app knows the times.** A config file is not the only source, and where the two
-  disagree the app is the one the agency will bill from. See "Reconciling times" below.
+- **The app knows what the AGENCY scheduled.** That is not the same thing as knowing
+  where the caregiver will be, and on this round the two differ. See "Reconciling times"
+  below before treating either as the last word.
 - **State is machine-readable**, so a macro can tell "not yet" from "already done"
   without inferring it from which buttons are drawn.
 
@@ -229,66 +230,63 @@ Back did nothing. Leaving an app is **Home's** job. The **app-home** control is 
 third move — back to the app's *own* first page, by pressing Back and looking until the
 atlas recognises a front page, bounded, and never out of the app.
 
-## Reconciling times
+## Reconciling times — and who is the authority
 
-The Mobile Caregiver+ walk turned up a discrepancy worth stating plainly, because it
-would have made the automation an hour late twice a week.
+An earlier draft of this document said that where an app publishes its own scheduled
+window, that window is the authority. **That was wrong, and it was corrected by the
+person who does the round.** It is written down here because the mistake is an easy one
+to make twice.
 
-For one patient the app's own schedule shows **two different windows in the same week** —
-one time Monday through Wednesday and a different, earlier one on Thursday and Friday.
-The written schedule this project was given has a single weekday time for that patient,
-and treats a reported Thursday/Friday difference for *another* patient as a display
-error that had since been corrected.
+Two different things are being called "the schedule", and only one of them is a fact
+about a caregiver's day:
 
-It is live in the app now, on a future visit that has not happened yet, so it is not a
-stale render.
+- **The app is authoritative about what the agency scheduled.** That is the record the
+  agency bills from and marks lateness against, and no amount of local config changes it.
+- **The caregiver is authoritative about where she actually is.** Her round is one
+  person driving between homes, and it is the thing the machine has to fit into.
 
-**Design consequence.** Where an app publishes its own scheduled window — Mobile
-Caregiver+ does in every row's `content-desc`, HHAeXchange+ prints it on the row — that
-is the authority, and a config file should be reconciled against it rather than trusted
-over it. The config's job is the part no app knows: the travel buffer between two
-different patients' homes, which exists nowhere but in the caregiver's day.
+They can disagree, and on this round they do. Two of the apps showed windows an hour
+earlier than the written schedule for two patients on the same two days — read live, on
+future visits, so not a stale render. Taking those at face value produced a Thursday and
+Friday in which two visits overlapped by fifty minutes, at two different homes, in two
+different apps.
 
-**Both apps were then read, and the written schedule was wrong about two people.** One
-patient's Thursday/Friday window is an hour earlier than the rest of her week in one
-app; another's is an hour earlier in the other app, and her Monday-to-Wednesday time was
-five minutes out on every day besides. The written schedule had treated the first of
-those as a display error that had since been corrected — a conclusion that rested on the
-second patient's times being uniform, which they are not.
+**The overlap was the tell.** An agency scheduling system that does not know about a
+caregiver's other agency cannot see the conflict it is creating; a person looking at
+their own week can see it immediately. The written round was right and the apps were
+carrying a scheduling error.
 
-The device's `/etc/aptlog/schedule.json` was corrected from what the two apps say. The
-travel buffer still falls out of the rule rather than being written in: on Saturday one
-visit ends at 8:00 and the next is scheduled for 8:00, so it fires at 8:05.
+So: `/etc/aptlog/schedule.json` records **the round as the caregiver works it**. Where an
+app disagrees, that is worth knowing and worth raising with the agency — it is not a
+reason to move her.
 
-**One conflict is left standing, because it is the agency's to resolve and not this
-project's.** On Thursday and Friday two visits overlap by fifty minutes across two
-different apps and two different homes. Both are printed by their own app. Nothing here
-can make a caregiver be in two places, and inventing a resolution would hide it.
+### What that costs, and it is not nothing
 
-### The buffer, checked against a real record
+Where the agency has a visit on the books at a time she is not there, the app will keep
+recording her as late. That is not hypothetical either: on the day this was walked, the
+patient whose agency window had moved an hour earlier was marked **`Completadas,
+Tarde`** — done, outside the window — for exactly this reason.
 
-The written schedule gave one evening patient a start five minutes past the hour. The
-app's own nominal time for that visit is **on** the hour — and the card for a visit
-already under way showed the EVV check-in recorded at **five past**.
+Nothing in this project can fix that, and nothing in it should try: an EVV record that
+quietly reported an on-time arrival at a time she was somewhere else would be worse than
+one that reports her late. It is a conversation with the agency about their own
+schedule.
 
-So the written times were the *fire* times with the travel gap already folded into them,
-and the rule computes the same answer from the nominal one: the preceding patient's
-visit ends on the hour, so five minutes are added. The engine now reproduces a real EVV
-record from first principles, which is the strongest evidence the rule is right that
-this project is going to get.
+### The travel buffer, checked against a real record
 
-Two consequences follow, and both are corrections to the written schedule:
+The written round gives one evening patient a start five minutes past the hour, and the
+app's nominal for that visit is on the hour. The card for a visit already under way
+showed the EVV check-in recorded at **five past** — so the stored time and the real
+behaviour agree, and the rule reproduces it.
 
-- **Where a patient's block is recorded as two entries, the second gets no buffer.** It
-  begins where the first ended, at the same address. The written schedule had five
-  minutes on it; the app has none, and there is nobody to drive past.
-- **On a day when nothing precedes that visit, there is no buffer either.** The written
-  schedule's own verification table assumed the earlier patient was there every weekday;
-  its schedule table says that patient has no Friday visit. The two contradict each
-  other, the engine follows the schedule table, and Friday therefore fires on the hour.
-  Worth a human deciding which of those two is true.
+Run over the whole week as written, exactly one buffer is computed: a morning visit that
+begins the minute the previous patient's ends. Every other gap is already in the round.
+That is the rule behaving as intended — "no gap at all", not "always five minutes".
 
----
+A contradiction in the original written schedule was also settled by the same
+conversation: one evening patient has no Friday visit, so nothing precedes the visit
+after her, and Friday needs no buffer. The verification table that implied otherwise was
+loose; the schedule table was right.
 
 ## The question in front of arm-and-fire
 
