@@ -3178,3 +3178,37 @@ class TestTheRevealDoesNotSpinByItself:
         assert "innerHTML = ''" in body or "innerHTML=''" in body
         assert ".innerHTML = v." not in body
         assert "textContent" in body
+
+
+class TestTheRevealActuallyClips:
+    """Found in a screenshot, not by a test — which is the honest way round
+    for a layout bug, and the reason this one exists now.
+
+    The window is a <span> inside a button. Spans are inline, and `height`
+    and `overflow` do nothing whatever on an inline box: the strip did not
+    clip, so the reveal rendered as a plain list of every name in the queue.
+    That is the opposite of the feature — it gives the answer away and takes
+    six lines to do it.
+    """
+
+    def _css(self) -> str:
+        return Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+
+    def test_the_window_is_a_block_so_its_height_means_something(self):
+        css = self._css()
+        rule = css[css.index("  .slot {"):css.index("  .slot li")]
+        assert "display:block" in rule
+        assert "overflow:hidden" in rule
+        assert "height:26px" in rule
+
+    def test_one_name_shows_at_a_time(self):
+        """The window and the rows are the same height. If they ever drift
+        the strip shows two half names, which reads as a rendering fault
+        rather than as a reveal."""
+        import re
+
+        css = self._css()
+        window = re.search(r"\.slot \{[^}]*height:(\d+)px", css).group(1)
+        row = re.search(r"\.slot li \{[^}]*height:(\d+)px", css).group(1)
+        assert window == row
