@@ -1236,8 +1236,7 @@ class TestTheWorkLogIsOnePress:
     def test_the_visit_in_hand_is_the_running_one(self, monkeypatch):
         from apt_log import macros
 
-        running = type("V", (), {"app": "com.inmyteam.inmyteam",
-                                 "patient": "Carmen"})()
+        running = self._v("com.inmyteam.inmyteam", "Carmen")
         plan = type("P", (), {"zone": None,
                               "current": lambda self, now: running,
                               "upcoming": lambda self, now, limit: []})()
@@ -1248,13 +1247,47 @@ class TestTheWorkLogIsOnePress:
     def test_and_the_next_one_when_none_is_running(self, monkeypatch):
         from apt_log import macros
 
-        nxt = type("V", (), {"app": "com.tellus.evv.v2",
-                             "patient": "Bea"})()
+        nxt = self._v("com.inmyteam.inmyteam", "Bea")
         plan = type("P", (), {"zone": None,
                               "current": lambda self, now: None,
                               "upcoming": lambda self, now, limit: [nxt]})()
         self._with_plan(macros, monkeypatch, plan)
-        assert macros._the_visit_in_hand() == ("com.tellus.evv.v2", "Bea")
+        assert macros._the_visit_in_hand() == ("com.inmyteam.inmyteam", "Bea")
+
+    def test_it_looks_past_visits_whose_record_it_cannot_read(
+            self, monkeypatch):
+        """LIVE, AT ELEVEN IN THE MORNING, the very next visit was on
+        HHAeXchange+ — whose work log is not walked — so taking "next"
+        literally made the button refuse for most of the day, in words that
+        sound like a fault. The screen it lands on names the patient and the
+        date, so which record is on show is never in doubt."""
+        from apt_log import macros
+
+        soon = [self._v("com.hhaexchange.uma", "Nieves"),
+                self._v("com.tellus.evv.v2", "Bea"),
+                self._v("com.inmyteam.inmyteam", "Carmen")]
+        plan = type("P", (), {"zone": None,
+                              "current": lambda self, now: None,
+                              "upcoming": lambda self, now, limit: soon})()
+        self._with_plan(macros, monkeypatch, plan)
+        assert macros._the_visit_in_hand() == ("com.inmyteam.inmyteam",
+                                               "Carmen")
+
+    def test_but_still_names_the_real_situation_when_none_can_be_read(
+            self, monkeypatch):
+        """A day with nothing on a walked app must not come back pretending
+        otherwise — the refusal names the app, which is the useful answer."""
+        from apt_log import macros
+
+        soon = [self._v("com.hhaexchange.uma", "Nieves")]
+        plan = type("P", (), {"zone": None,
+                              "current": lambda self, now: None,
+                              "upcoming": lambda self, now, limit: soon})()
+        self._with_plan(macros, monkeypatch, plan)
+        assert macros._the_visit_in_hand() == ("com.hhaexchange.uma", "Nieves")
+
+    def _v(self, app, patient):
+        return type("V", (), {"app": app, "patient": patient})()
 
     def test_an_empty_schedule_says_so_rather_than_guessing(self, monkeypatch):
         import pytest

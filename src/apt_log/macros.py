@@ -3467,14 +3467,26 @@ def _evv_checks(driver, report, arg: str) -> None:
     report("macro.step.finished" if seen else "macro.step.nothing_recorded")
 
 
+# How far down the day to look for a visit this button can actually answer
+# for. Long enough to cross the visits on apps whose logs are not walked,
+# short enough that the answer is still about today rather than next week.
+VISITS_TO_LOOK_DOWN = 8
+
+
 def _the_visit_in_hand() -> tuple[str, str]:
     """The visit this button is about when nobody said — the one running, or
-    the one coming next.
+    the soonest one whose record can actually be read.
 
     WHAT MAKES IT A BUTTON RATHER THAN A ROUTE. Watching an armed entry means
     watching ONE visit, the one whose minute is arriving, and asking the
     person watching to name it is asking them to know which patient the
     scheduler picked. The schedule already knows.
+
+    IT SKIPS PAST WHAT IT CANNOT ANSWER FOR. Only inMyTeam has a walked work
+    log, and the very next visit on the clock is often on another app — so
+    taking "next" literally made the button refuse for most of the day, in
+    words that sound like a fault. The screen it lands on names the patient
+    and the date, so which record is on show is never in doubt.
     """
     from datetime import datetime
     from apt_log import schedule as schedule_mod
@@ -3484,12 +3496,12 @@ def _the_visit_in_hand() -> tuple[str, str]:
     except Exception as exc:  # noqa: BLE001
         raise RuntimeError("there is no schedule to read") from exc
     now = datetime.now(plan.zone)
-    visit = plan.current(now)
-    if visit is None:
-        upcoming = plan.upcoming(now, limit=1)
-        visit = upcoming[0] if upcoming else None
-    if visit is None:
+    running = plan.current(now)
+    ahead = ([running] if running else []) + list(
+        plan.upcoming(now, limit=VISITS_TO_LOOK_DOWN))
+    if not ahead:
         raise RuntimeError("there is no visit to look up")
+    visit = next((v for v in ahead if v.app in CHECK_LOG_APPS), ahead[0])
     return visit.app, visit.patient
 
 
