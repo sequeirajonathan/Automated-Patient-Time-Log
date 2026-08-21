@@ -3233,7 +3233,12 @@ class TestTheScheduleApi:
                                     "sat", "sun"]})
         with patch("apt_log.schedule.load", return_value=plan):
             doc = client.get("/api/schedule").json()
-        assert doc["week"][0]["starts"] == "6:00 am"
+        # AND IT SAYS WHICH ZONE. Rendering the right hour is only half of
+        # it: an hour with no zone on it is one the reader has to guess at,
+        # and the guess is wrong for everyone outside Florida. Reported from
+        # Central — "I'm getting confused with my CDT local time".
+        assert doc["week"][0]["starts"].startswith("6:00 am")
+        assert doc["week"][0]["starts"].split()[-1] in ("EDT", "EST")
 
     def test_a_bad_schedule_is_reported_rather_than_thrown(self, client):
         from apt_log import schedule as sched
@@ -4125,3 +4130,92 @@ class TestEveryIconShapeActuallyDraws:
         assert shapes('id="btn-checks"') == 7
         assert shapes('id="btn-tasks"') == 4
         assert shapes('id="btn-sign"') == 2
+
+
+class TestEveryHourSaysWhichZoneItIsIn:
+    """Reported from Central: "I'm getting confused with my CDT local time,
+    would like to avoid any confusion on my end."
+
+    Every hour this project reasons about is the building's, and the building
+    is in Eastern. The people reading the page are not all in it. An hour
+    with no zone on it is one the reader has to guess at, and outside Florida
+    the guess is wrong — a 5am arm read as 4am local is the same page saying
+    two different things to two people.
+
+    The zone is taken from the value rather than written down, so it says EDT
+    in August and EST in January with nobody remembering to change it.
+    """
+
+    def _plan(self, **over):
+        from apt_log import schedule as sched
+
+        visit = {"patient": "Ada", "app": "com.inmyteam.inmyteam",
+                 "start": "05:00", "end": "06:00",
+                 "days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]}
+        visit.update(over)
+        return sched.parse({"zone": "America/New_York", "visits": [visit]})
+
+    def test_a_visit_time_carries_its_zone(self):
+        from apt_log.ui.app import _clock
+
+        plan = self._plan()
+        visit = plan.upcoming(datetime.now(plan.zone), limit=1)[0]
+        said = _clock(visit.starts)
+        assert said.startswith("5:00 am")
+        assert said.split()[-1] in ("EDT", "EST")
+
+    def test_the_zone_comes_off_the_value_not_off_a_constant(self):
+        """August and January are different words for the same schedule."""
+        from datetime import datetime as dt
+        from zoneinfo import ZoneInfo
+        from apt_log.ui.app import _clock
+
+        east = ZoneInfo("America/New_York")
+        assert _clock(dt(2026, 8, 21, 5, 0, tzinfo=east)) == "5:00 am EDT"
+        assert _clock(dt(2026, 1, 21, 5, 0, tzinfo=east)) == "5:00 am EST"
+
+    def test_a_bare_clock_reading_is_told_its_zone(self):
+        """The arming rows keep hours with no date on them, so they cannot
+        answer this for themselves and must be handed the answer."""
+        from datetime import time as _time
+        from apt_log.ui.app import _clock
+
+        assert _clock(_time(5, 0), "EDT") == "5:00 am EDT"
+
+    def test_and_is_never_labelled_with_a_guess(self):
+        """A value that does not know its zone and was not told one is left
+        alone. A wrong zone is worse than none: it is believed."""
+        from datetime import time as _time
+        from apt_log.ui.app import _clock
+
+        assert _clock(_time(5, 0)) == "5:00 am"
+
+    def test_the_translator_labels_what_it_can(self):
+        from datetime import datetime as dt
+        from zoneinfo import ZoneInfo
+        from apt_log.ui.i18n import Translator
+
+        t = Translator("en")
+        said = t.time(dt(2026, 8, 21, 17, 30, tzinfo=ZoneInfo("America/New_York")))
+        assert said.endswith("EDT")
+        # Naive, so unknowable, so unlabelled rather than mislabelled.
+        assert t.time(dt(2026, 8, 21, 17, 30)) == "05:30 PM"
+
+    def test_the_page_hands_the_launcher_clock_the_buildings_zone(self,
+                                                                  client):
+        """THE CLOCK WAS THE READER'S. It mirrors a phone standing in
+        Florida, and rendered in a browser it showed whatever zone the person
+        looking happened to be in — which is how a 5am Eastern arm came to be
+        compared against a 4am local one."""
+        with patch("apt_log.schedule.load", return_value=self._plan()):
+            page = client.get("/app", headers={"Accept-Language": "en"}).text
+        assert '"America/New_York"' in page
+
+    def test_every_visit_time_the_api_publishes_says_its_zone(self, client):
+        with patch("apt_log.schedule.load", return_value=self._plan()):
+            doc = client.get("/api/schedule").json()
+        rows = [r for r in doc["week"] if r]
+        assert rows
+        for row in rows:
+            for field in ("starts", "ends", "fires"):
+                assert row[field].split()[-1] in ("EDT", "EST"), (field, row)

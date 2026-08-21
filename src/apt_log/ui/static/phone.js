@@ -1561,8 +1561,19 @@
     const clock = document.getElementById('clock');
     if (clock) {
       const tick = () => {
-        clock.textContent = new Date().toLocaleTimeString([], {
-          hour: 'numeric', minute: '2-digit' });
+        // The building's hour, with the zone said out loud — this clock
+        // mirrors a phone standing in Florida, and the person reading it
+        // may not be. Falls back to the reader's own clock only if the
+        // zone will not resolve, which is better than an empty face.
+        const opts = { hour: 'numeric', minute: '2-digit' };
+        const zone = (window.APTLOG_APP || {}).zone;
+        if (zone) { opts.timeZone = zone; opts.timeZoneName = 'short'; }
+        try {
+          clock.textContent = new Date().toLocaleTimeString([], opts);
+        } catch (e) {
+          clock.textContent = new Date().toLocaleTimeString([], {
+            hour: 'numeric', minute: '2-digit' });
+        }
       };
       tick();
       setInterval(tick, 15000);
