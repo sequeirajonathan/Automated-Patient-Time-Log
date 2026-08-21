@@ -3150,6 +3150,11 @@ def _find_visit_row(driver, report, package: str, patient: str):
     row = _row_for(driver, patient)
     if row is not None:
         return row
+    return _row_from_the_list(driver, report, package, patient)
+
+
+def _row_from_the_list(driver, report, package: str, patient: str):
+    """The patient's row, reached by walking to the app's own list."""
     report("macro.step.to_the_list")
     _app_home(driver, report)
     time.sleep(EVV_SETTLE)
@@ -3164,6 +3169,48 @@ def _find_visit_row(driver, report, package: str, patient: str):
         time.sleep(EVV_SETTLE)
         break
     return _row_for(driver, patient)
+
+
+def _says_not_today(driver) -> bool:
+    """Whether the open visit is one the app says is not today's."""
+    page = (driver.page_source or "").lower()
+    return any(w in page for w in NOT_TODAY_WORDS)
+
+
+def _open_todays_visit(driver, report, package: str, patient: str) -> None:
+    """Open the patient's visit FOR TODAY, or refuse.
+
+    THE NAME ON A VISIT DETAIL IS NOT A LIST ROW, and this is the trap that
+    caught the first live test of the walk. inMyTeam restores the screen it
+    was last on, so switching to it reopened a visit from the previous day —
+    and the patient's name is printed on that page, so the row finder matched
+    it there and reported success without ever reaching a list. It had opened
+    the wrong occurrence, on the wrong day, and called it found.
+
+    Nothing would have been written: the check-in step refuses on the app's
+    own "not scheduled for today". But a walk that lands on the wrong day and
+    says it succeeded is a walk that cannot be trusted to have landed on the
+    right one either, so the day is now checked HERE, once, for both callers.
+
+    A visit that is not today's sends it back to the list to look properly.
+    """
+    row = _find_visit_row(driver, report, package, patient)
+    if row is None:
+        raise RuntimeError("that visit is not on this screen")
+    row.click()
+    time.sleep(EVV_SETTLE)
+    _answer_the_permission_dialog(driver, report)
+    if not _says_not_today(driver):
+        return
+    # Wrong day. Go to the list properly and take the row from there.
+    row = _row_from_the_list(driver, report, package, patient)
+    if row is None:
+        raise RuntimeError("that visit is not on this screen")
+    row.click()
+    time.sleep(EVV_SETTLE)
+    _answer_the_permission_dialog(driver, report)
+    if _says_not_today(driver):
+        raise RuntimeError("the app says this visit is not today's")
 
 
 def _row_for(driver, patient: str):
@@ -3211,18 +3258,10 @@ def _evv_entry(driver, report, arg: str) -> None:
     _bring_up(driver, package)
 
     report("macro.step.finding_patient")
-    row = _find_visit_row(driver, report, package, patient)
-    if row is None:
-        raise RuntimeError("that visit is not on this screen")
-    row.click()
-    time.sleep(EVV_SETTLE)
-    _answer_the_permission_dialog(driver, report)
-
-    tree = driver.page_source or ""
-    if any(w.lower() in tree.lower() for w in NOT_TODAY_WORDS):
-        # inMyTeam gates the action to the scheduled day and says so. This is
-        # the app being right, not the walk being wrong.
-        raise RuntimeError("the app says this visit is not today's")
+    # Opens TODAY's visit or refuses — see `_open_todays_visit`. inMyTeam
+    # gates the action to the scheduled day and says so, and the app being
+    # right about that is not the walk being wrong.
+    _open_todays_visit(driver, report, package, patient)
 
     report("macro.step.checking_in")
     button = _words(driver, *EVV_ENTRY_WORDS[package])
@@ -3273,11 +3312,10 @@ def _evv_prepare(driver, report, arg: str) -> None:
     report("macro.step.launching")
     _bring_up(driver, package)
     report("macro.step.finding_patient")
-    row = _find_visit_row(driver, report, package, patient)
-    if row is None:
-        raise RuntimeError("that visit is not on this screen")
-    row.click()
-    time.sleep(EVV_SETTLE)
+    # The same day-checked opener the fire uses. A walk that gets ready on
+    # the WRONG day is worse than one that fails: it reports success and
+    # leaves the fire fifteen minutes later to discover the truth.
+    _open_todays_visit(driver, report, package, patient)
     report("macro.step.ready")
 
 
