@@ -951,6 +951,7 @@ class TestTheAppFetchesTodayBeforeAnythingIsPressed:
             with patch.object(macros, "_freshen", return_value=freshened), \
                  patch.object(macros, "_bring_up") as up, \
                  patch.object(macros, "grant_location"), \
+                 patch.object(macros, "_already_entered", return_value=""), \
                  patch.object(macros, "_open_todays_visit"), \
                  patch.object(macros, "_words", return_value=None):
                 try:
@@ -1120,3 +1121,81 @@ class TestNotEnteringAVisitSomebodyAlreadyEntered:
 
         assert "evv_checks" in macros.MACROS
         assert macros.MACROS["evv_checks"].takes_arg
+
+
+class TestGettingToTheWorkLogFromWhereverTheAppIsStanding:
+    """THE FIRST LIVE RUN FAILED HERE, from a visit detail, reporting the work
+    log unreachable when it was three Backs away.
+
+    `_app_home` asks the atlas whether it is home yet, and inMyTeam's atlas
+    names ONE activity — MainActivity is the visits hub, every bucket list and
+    the visit detail alike. So "home" was true wherever it stood, the walk
+    pressed nothing, and the drawer it then looked for was not there: an inner
+    page draws Back in that corner, not the drawer.
+    """
+
+    def _phone(self, macros, monkeypatch, drawer_after: int):
+        """A phone whose drawer appears after `drawer_after` Back presses."""
+        state = {"backs": 0, "package": "com.inmyteam.inmyteam"}
+        from apt_log import device as device_mod
+
+        def back(_action):
+            state["backs"] += 1
+        monkeypatch.setattr(device_mod, "send_ui_action", back)
+        monkeypatch.setattr(macros.time, "sleep", lambda _s: None)
+        monkeypatch.setattr(macros, "_front_package", lambda: state["package"])
+        monkeypatch.setattr(
+            macros, "_the_drawer",
+            lambda d: (type("Drawer", (), {"click": lambda self: None})()
+                       if state["backs"] >= drawer_after else None))
+        driver = type("D", (), {"current_package": state["package"]})()
+        return state, driver
+
+    def test_it_presses_back_until_the_drawer_is_there(self, monkeypatch):
+        from apt_log import macros
+
+        state, driver = self._phone(macros, monkeypatch, drawer_after=3)
+        clicked = []
+        monkeypatch.setattr(macros, "_words",
+                            lambda d, *w: type("E", (), {
+                                "click": lambda self: clicked.append(w[0])})())
+        assert macros._open_my_work(driver, lambda _s: None) is True
+        assert state["backs"] == 3
+
+    def test_a_front_page_needs_no_presses_at_all(self, monkeypatch):
+        from apt_log import macros
+
+        state, driver = self._phone(macros, monkeypatch, drawer_after=0)
+        monkeypatch.setattr(macros, "_words",
+                            lambda d, *w: type("E", (), {
+                                "click": lambda self: None})())
+        assert macros._open_my_work(driver, lambda _s: None) is True
+        assert state["backs"] == 0
+
+    def test_it_gives_up_rather_than_pressing_back_for_ever(self, monkeypatch):
+        """A drawer that never appears is a screen this walk does not know,
+        and the caller must hear that rather than a clear day."""
+        from apt_log import macros
+
+        state, driver = self._phone(macros, monkeypatch, drawer_after=99)
+        assert macros._open_my_work(driver, lambda _s: None) is False
+        assert state["backs"] == macros.BACKS_TO_DRAWER
+
+    def test_and_stops_the_moment_back_leaves_the_app(self, monkeypatch):
+        """Back from the app's root pops the task stack into whatever was
+        under it. A second press from there would leave a second time."""
+        from apt_log import macros
+
+        state, driver = self._phone(macros, monkeypatch, drawer_after=99)
+        from apt_log import device as device_mod
+
+        def back(_action):
+            state["backs"] += 1
+            state["package"] = "com.android.launcher3"
+        monkeypatch.setattr(device_mod, "send_ui_action", back)
+        brought = []
+        monkeypatch.setattr(macros, "_bring_up",
+                            lambda d, p: brought.append(p))
+        assert macros._open_my_work(driver, lambda _s: None) is False
+        assert state["backs"] == 1
+        assert brought == ["com.inmyteam.inmyteam"]

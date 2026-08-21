@@ -3310,20 +3310,55 @@ CHECK_IN_WORDS_SEEN = ("check in", "entrada")
 CHECK_LOG_APPS = ("com.inmyteam.inmyteam",)
 
 
+DRAWER_DESC = "Open navigation drawer"
+BACKS_TO_DRAWER = 5
+
+
+def _the_drawer(driver):
+    """inMyTeam's nav-drawer button, or None — and the only honest "is this
+    the app's front page" test it has.
+
+    `_app_home` asks the atlas, and this app's atlas names ONE activity:
+    MainActivity is the visits hub, every bucket list and the visit detail
+    alike, so "home" is true wherever it is standing and the walk returns
+    having pressed nothing. The corner control is what actually differs —
+    the hub draws this drawer, an inner page draws Back in the same place.
+    The first live run of the work-log walk failed on exactly that, from a
+    visit detail, reporting the log unreachable when it was three Backs away.
+    """
+    try:
+        found = [e for e in driver.find_elements(
+            "xpath", f'//*[@content-desc="{DRAWER_DESC}"]')
+            if e.is_displayed()]
+    except Exception:  # noqa: BLE001
+        return None
+    return found[0] if found else None
+
+
 def _open_my_work(driver, report) -> bool:
     """The `My Work` screen, reached from wherever the app is standing.
 
-    Its route is the nav drawer, and the drawer only opens from a page that
-    has one — an inner page shows Back in the same corner. So this walks the
-    app home first and takes the drawer from there.
+    Its route is the nav drawer, and the drawer is only on the app's front
+    page — so this presses Back until the drawer appears, and never presses
+    it again once the app is no longer in front.
     """
-    _app_home(driver, report)
-    drawer = None
-    try:
-        drawer = driver.find_element(
-            "xpath", '//*[@content-desc="Open navigation drawer"]')
-    except Exception:  # noqa: BLE001
-        drawer = None
+    from apt_log import device as device_mod
+
+    package = driver.current_package
+    drawer = _the_drawer(driver)
+    for _ in range(BACKS_TO_DRAWER):
+        if drawer is not None:
+            break
+        report("macro.step.navigating")
+        device_mod.send_ui_action("back")
+        time.sleep(BACK_SETTLE)
+        if _front_package() != package:
+            # Back popped the task stack and left the app. Undo it and stop:
+            # a second press from here would leave a second time.
+            _bring_up(driver, package)
+            drawer = _the_drawer(driver)
+            break
+        drawer = _the_drawer(driver)
     if drawer is None:
         return False
     drawer.click()
