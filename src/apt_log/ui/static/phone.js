@@ -343,12 +343,39 @@
   // When the last Back was sent: a launcher arriving right after one means
   // Back exited the app, which is never what leaving-by-Back should do.
   let backSentAt = 0;
+
+  // Walking a breadcrumb: how long one Back press is given to land, and how
+  // many spare presses beyond the pops it claims. The slack exists because a
+  // press can be swallowed by a screen's own state instead of popping — seen
+  // live on inMyTeam's work log, where two presses only undid a tab switch.
+  // Small on purpose: overshooting a trail lands outside the app.
+  const CRUMB_WAIT = 2500;
+  const CRUMB_SLACK = 2;
+  let screenWaiters = [];
+
+  // Resolves the next time a screen actually arrives, or false on timeout.
+  function nextScreen(ms) {
+    return new Promise((resolve) => {
+      let done = false;
+      const settle = (v) => { if (!done) { done = true; resolve(v); } };
+      screenWaiters.push(() => settle(true));
+      setTimeout(() => settle(false), ms);
+    });
+  }
+
   // The app a launch is waiting on. While set, the overlay is a single solid
   // state: sketch updates do not clear it, macro "done" does not clear it —
   // only the target app actually being in front (or failure, or the ceiling).
   let pendingApp = '';
 
   function applyScreen(meta, html) {
+    // Anyone waiting for the screen to move — see nextScreen — hears first,
+    // before any of the rendering below can throw.
+    if (screenWaiters.length) {
+      const waiting = screenWaiters;
+      screenWaiters = [];
+      for (const w of waiting) { try { w(); } catch (e) { /* ignore */ } }
+    }
     // Belt to the server's braces: identical markup must never re-swap the
     // DOM — a swap costs a repaint she can see and the scroll position she
     // had. The server already de-duplicates; this holds if it ever slips.
@@ -1588,6 +1615,40 @@
         if (btn.dataset.act !== 'wake') tapping(true);
       });
     }
+
+    // BREADCRUMBS, walked rather than counted.
+    //
+    // A step says how many fragment POPS separate it from here, and pops are
+    // not presses: watched live, two Back presses on inMyTeam's work log were
+    // swallowed undoing its tab selection and popped nothing, while the
+    // screen's own Back arrow popped cleanly. Firing N presses blindly would
+    // have overshot straight out of the app.
+    //
+    // So this sends one Back and waits for the next screen to arrive before
+    // deciding whether to send another — and stops early the moment the trail
+    // says we are there, or the server refuses the press because the app is
+    // on its own first page. Bounded either way.
+    document.addEventListener('click', async (ev) => {
+      const crumb = ev.target.closest && ev.target.closest('.a-crumb[data-back]');
+      if (!crumb) return;
+      let want = parseInt(crumb.dataset.back || '0', 10);
+      if (!(want > 0)) return;
+      if (!socket || socket.readyState !== 1) {
+        toast(i18n.explainOffline || '');
+        return;
+      }
+      const label = crumb.textContent.trim();
+      tapping(true);
+      for (let press = 0; press < want + CRUMB_SLACK; press++) {
+        const here = document.querySelector('.a-crumb.here');
+        if (here && here.textContent.trim() === label) break;
+        backSentAt = Date.now();
+        socket.send(JSON.stringify({ type: 'device', action: 'back' }));
+        const moved = await nextScreen(CRUMB_WAIT);
+        if (!moved) break;
+      }
+      tapping(false);
+    });
 
     // iOS large-title convention: the header's hairline appears only once
     // content has scrolled beneath it.

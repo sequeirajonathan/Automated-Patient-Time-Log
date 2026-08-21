@@ -1596,6 +1596,26 @@ async def _do_text(msg: dict) -> dict:
     return {"type": "text_result", "ok": True}
 
 
+def _back_would_leave() -> bool:
+    """Whether a Back press right now would take the phone out of the app.
+
+    Only ever True on an app that ANSWERS. A package with no fragment stack
+    to read — anything not built on Jetpack navigation, which is two of the
+    three care apps — returns nothing from `nav_state`, and nothing must mean
+    "press it and see", exactly as before, never "refuse".
+    """
+    from apt_log import feed as feed_mod
+
+    try:
+        focus = feed_mod.current_focus() or ""
+        package = focus.split("/")[0]
+        if package not in feed_mod.CARE_APPS:
+            return False
+        return bool(feed_mod.nav_state(package).get("rooted"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 async def _do_device(msg: dict) -> dict:
     """Back, Home, Recents, Wake — over the socket rather than a form post.
 
@@ -1609,6 +1629,16 @@ async def _do_device(msg: dict) -> dict:
     action = msg.get("action")
     if not isinstance(action, str) or not action:
         return {"type": "device_result", "ok": False}
+    if action == "back" and await asyncio.to_thread(_back_would_leave):
+        # NOT PRESSED, rather than pressed and undone. Back from an app's
+        # first page pops Android's task stack into whatever was beneath —
+        # the launcher, or another care app — and the portal's answer until
+        # now was to notice afterwards and put her back, which works and
+        # flickers a foreign screen at her on the way. The app publishes its
+        # own fragment back stack; an empty one says this press would leave
+        # before it is sent. Leaving an app is Home's job.
+        log.info("back refused: the app is on its own first page")
+        return {"type": "device_result", "ok": False, "rooted": True}
     try:
         # adb round trip. On the event loop it would stall every viewer's
         # frames, the same reason a tap does not run there.

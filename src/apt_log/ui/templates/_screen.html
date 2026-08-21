@@ -35,6 +35,33 @@
   </div>
   {% endif %}
 
+  {% if m.crumbs %}
+  {# THE APP'S OWN TRAIL THROUGH ITSELF, from the fragment back stack it
+     publishes — see feed.nav_state. Not a guess and not a map we maintain:
+     the app names the screen it is on and the ones it left to get there.
+
+     Each step but the last is pressable, and pressing walks back to it one
+     Back at a time, checking after each. `data-back` is POPS, NOT PRESSES:
+     watched live, two presses on the work log were swallowed undoing its
+     tab selection and popped nothing, while the screen's own Back arrow
+     popped cleanly. A count fired blindly would have overshot out of the
+     app; walking and checking cannot.
+
+     The last step is where she is, so it is text rather than a button —
+     nothing should offer to take her where she already stands. #}
+  <nav class="a-crumbs" aria-label="{{ t('screen.trail') }}">
+    {% for c in m.crumbs %}
+    {% if not loop.first %}<span class="a-crumb-sep" aria-hidden="true">›</span>{% endif %}
+    {% if c.here %}
+    <span class="a-crumb here" aria-current="page">{{ c.says }}</span>
+    {% else %}
+    <button type="button" class="a-crumb" data-back="{{ c.back }}"
+      >{{ c.says }}</button>
+    {% endif %}
+    {% endfor %}
+  </nav>
+  {% endif %}
+
   {% if m.notice %}
   <div class="a-alert" role="alert">{{ m.notice }}</div>
   {% endif %}

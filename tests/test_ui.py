@@ -3913,3 +3913,168 @@ class TestTheHomeScreenNeverSkipsAVisit:
         second = re.search(r'data-package="([^"]*)"', after).group(1)
         assert first and second
         assert first != second
+
+
+class TestTheAppsOwnTrail:
+    """Asked for: "leverage the fragments in our back button so we don't
+    escape apps", and "display the fragments as linked list breadcrumbs".
+
+    `dumpsys activity` publishes the fragment back stack, which gives three
+    things the atlas cannot: the screen's own name, the trail behind it, and
+    — from an empty stack — the fact that the next Back press would leave the
+    app, known BEFORE it is sent rather than after it has happened.
+    """
+
+    def _doc(self, trail, says, depth):
+        return {"id": "f1", "size": [720, 1600], "app": "com.inmyteam.inmyteam",
+                "nav": {"at": trail[-1], "at_says": says[-1], "trail": trail,
+                        "says": says, "depth": depth, "rooted": depth == 0},
+                "elements": [], "statics": []}
+
+    def test_a_trail_of_one_is_not_a_trail(self):
+        from apt_log.ui import screenview
+
+        assert screenview._crumbs(
+            self._doc(["VisitsFragment"], ["Visits"], 0)) == []
+
+    def test_each_step_says_how_many_pops_away_it_is(self):
+        from apt_log.ui import screenview
+
+        crumbs = screenview._crumbs(self._doc(
+            ["VisitsFragment", "MyWorksFragment"], ["Visits", "My Works"], 1))
+        assert [c["back"] for c in crumbs] == [1, 0]
+        assert [c["says"] for c in crumbs] == ["Visits", "My Works"]
+
+    def test_the_last_step_is_where_she_is(self):
+        """Nothing should offer to take her where she already stands."""
+        from apt_log.ui import screenview
+
+        crumbs = screenview._crumbs(self._doc(
+            ["VisitsFragment", "MyWorksFragment"], ["Visits", "My Works"], 1))
+        assert [c["here"] for c in crumbs] == [False, True]
+
+    def test_an_app_that_publishes_nothing_shows_no_trail(self):
+        """Two of the three care apps are not built this way, and a missing
+        trail must render as nothing rather than as "you are nowhere"."""
+        from apt_log.ui import screenview
+
+        assert screenview._crumbs({"id": "f1"}) == []
+
+    def test_the_class_name_is_spaced_not_renamed(self):
+        """Inventing a friendlier word is how a breadcrumb starts lying."""
+        from apt_log import feed
+
+        assert feed._pretty_fragment("MyWorksFragment") == "My Works"
+        assert feed._pretty_fragment("PlanOfCareFragment") == "Plan Of Care"
+
+    def test_the_reader_names_the_screen_and_counts_the_pops(self,
+                                                             monkeypatch):
+        from apt_log import feed
+
+        dump = """
+          Added Fragments:
+            #0: MyWorksFragment{66b57e2 (8fd) id=0x7f0a01ba}
+          Back Stack:
+            #0: BackStackEntry{ecd42a9 #9 ddf}
+              Operations:
+                Op #0: UNSET_PRIMARY_NAV VisitsFragment{d1b64d7 (70e)}
+                Op #1: REMOVE VisitsFragment{d1b64d7 (70e)}
+                Op #2: ADD MyWorksFragment{66b57e2 (8fd)}
+        """
+        monkeypatch.setattr(feed, "_adb", lambda *a, **k: type(
+            "R", (), {"stdout": dump.encode()})())
+        got = feed.nav_state("com.inmyteam.inmyteam")
+        assert got["at"] == "MyWorksFragment"
+        assert got["trail"] == ["VisitsFragment", "MyWorksFragment"]
+        assert got["depth"] == 1
+        assert got["rooted"] is False
+
+    def test_an_empty_back_stack_is_the_escape_guard(self, monkeypatch):
+        """Checked live: the visits hub reports VisitsFragment with zero
+        entries, and Back from there pops the activity out of the app."""
+        from apt_log import feed
+
+        dump = "Added Fragments:\n  #0: VisitsFragment{d1b64d7 (70e)}\n"
+        monkeypatch.setattr(feed, "_adb", lambda *a, **k: type(
+            "R", (), {"stdout": dump.encode()})())
+        got = feed.nav_state("com.inmyteam.inmyteam")
+        assert got["depth"] == 0
+        assert got["rooted"] is True
+
+    def test_a_phone_that_will_not_say_answers_nothing(self, monkeypatch):
+        from apt_log import feed
+
+        def boom(*a, **k):
+            raise OSError("no adb")
+        monkeypatch.setattr(feed, "_adb", boom)
+        assert feed.nav_state("com.inmyteam.inmyteam") == {}
+
+    def test_back_is_refused_only_when_the_app_says_it_would_leave(
+            self, monkeypatch):
+        from apt_log.ui.app import _back_would_leave
+        from apt_log import feed
+
+        monkeypatch.setattr(feed, "current_focus",
+                            lambda: "com.inmyteam.inmyteam/.MainActivity")
+        monkeypatch.setattr(feed, "nav_state", lambda p: {"rooted": True})
+        assert _back_would_leave() is True
+        monkeypatch.setattr(feed, "nav_state", lambda p: {"rooted": False})
+        assert _back_would_leave() is False
+
+    def test_an_app_that_does_not_answer_is_pressed_as_before(self,
+                                                              monkeypatch):
+        """Two of the three care apps publish no fragment stack. "No idea"
+        must mean "press it and see", never "refuse" — the alternative is a
+        Back button that silently stops working on those apps."""
+        from apt_log.ui.app import _back_would_leave
+        from apt_log import feed
+
+        monkeypatch.setattr(feed, "current_focus",
+                            lambda: "com.hhaexchange.uma/.HomeActivity")
+        monkeypatch.setattr(feed, "nav_state", lambda p: {})
+        assert _back_would_leave() is False
+
+    def test_and_a_phone_outside_the_care_apps_is_never_refused(self,
+                                                                monkeypatch):
+        from apt_log.ui.app import _back_would_leave
+        from apt_log import feed
+
+        monkeypatch.setattr(feed, "current_focus",
+                            lambda: "com.android.launcher3/.Launcher")
+        monkeypatch.setattr(feed, "nav_state",
+                            lambda p: {"rooted": True})
+        assert _back_would_leave() is False
+
+    def test_the_reading_is_tied_to_the_tree_not_to_the_frame(self,
+                                                              monkeypatch):
+        """MEASURED AT 100ms A CALL on the Pi. The document is published every
+        second and the tree behind it is read about half as often, so asking
+        per frame would spend a tenth of a core on a question whose answer
+        cannot have changed."""
+        from apt_log import feed
+
+        calls = []
+        dump = "Added Fragments:\n  #0: VisitsFragment{d1b}\n"
+        monkeypatch.setattr(feed, "_adb", lambda *a, **k: (
+            calls.append(1) or type("R", (), {"stdout": dump.encode()})()))
+        feed._nav_seen = ()
+        for _ in range(4):
+            feed.nav_state("com.inmyteam.inmyteam", stamp=1234.5)
+        assert len(calls) == 1
+        feed.nav_state("com.inmyteam.inmyteam", stamp=1240.0)
+        assert len(calls) == 2
+
+    def test_but_the_back_guard_always_looks_afresh(self, monkeypatch):
+        """It is deciding whether to send a press right now, and a cached
+        answer from two seconds ago is a press sent on stale information."""
+        from apt_log import feed
+
+        calls = []
+        dump = "Added Fragments:\n  #0: VisitsFragment{d1b}\n"
+        monkeypatch.setattr(feed, "_adb", lambda *a, **k: (
+            calls.append(1) or type("R", (), {"stdout": dump.encode()})()))
+        feed._nav_seen = ()
+        feed.nav_state("com.inmyteam.inmyteam", stamp=1234.5)
+        feed.nav_state("com.inmyteam.inmyteam")
+        feed.nav_state("com.inmyteam.inmyteam")
+        assert len(calls) == 3

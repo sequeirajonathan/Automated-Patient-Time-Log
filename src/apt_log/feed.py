@@ -382,6 +382,107 @@ def _adb(args: list[str], serial: str | None = None, timeout: float = 15.0):
     return subprocess.run(cmd, capture_output=True, timeout=timeout)
 
 
+# WHERE THE APP THINKS IT IS, IN ITS OWN WORDS.
+#
+# Asked directly: "does adb expose views on the app?" It does, and what it
+# exposes is better than the map we were considering building. `dumpsys
+# activity` publishes the FragmentManager, and inside it three things this
+# project has never had:
+#
+#   * the fragment on screen now, by class name — `VisitsFragment` on the
+#     visits hub, `MyWorksFragment` on the work log. The ATLAS CANNOT SAY
+#     THIS: it keys on the activity, and inMyTeam has exactly one for all of
+#     them, so `screen_for` answers "home" wherever it stands.
+#   * the back stack, one entry per fragment pushed. EMPTY MEANS THE NEXT
+#     BACK LEAVES THE APP, which is the fact every Back press in this project
+#     has had to discover by pressing and looking at what happened.
+#   * each entry's operations, which name the fragment removed and the one
+#     added — a directed edge, so the entries in order are the trail walked
+#     to get here.
+#
+# It cannot go stale the way a hand-drawn map would: it is the app answering,
+# not us remembering, so an app update changes the answer rather than quietly
+# invalidating it.
+#
+# WHAT IT IS NOT is a count of Back presses. Watched live: two presses on the
+# work log were swallowed undoing its tab selection and popped nothing, while
+# the screen's own Back arrow popped cleanly. Depth counts POPS REMAINING;
+# presses have to be made one at a time and checked.
+_FRAGMENT_ON_SCREEN = re.compile(r"#\d+: ([A-Za-z]\w*Fragment)\{")
+_BACK_ENTRY = re.compile(r"#\d+: BackStackEntry\{")
+_BACK_OP = re.compile(r"Op #\d+: (ADD|REMOVE) ([A-Za-z]\w*Fragment)\{")
+
+# Carried by every Jetpack screen; says nothing about where anybody is.
+PLUMBING_FRAGMENTS = ("ReportFragment", "NavHostFragment",
+                      "SupportRequestManagerFragment")
+
+
+def _pretty_fragment(name: str) -> str:
+    """`MyWorksFragment` as "My Works" — the app's own word for the screen,
+    spaced so a person can read it. Never translated: it is a class name, and
+    inventing a friendlier one is how a breadcrumb starts lying."""
+    stem = name[:-len("Fragment")] if name.endswith("Fragment") else name
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", stem).strip()
+
+
+_nav_seen: tuple = ()
+
+
+def nav_state(package: str, serial: str | None = None,
+              stamp: float | None = None) -> dict:
+    """Where the app is, how it got there, and whether Back would leave.
+
+    `{"at": "MyWorksFragment", "trail": [...], "depth": 1, "rooted": False}`
+    — and `{}` when the phone will not say, which callers must read as "no
+    idea" rather than as any particular answer.
+
+    `stamp` ties the answer to the hierarchy read it belongs with. MEASURED
+    ON THE PI AT 100ms A CALL, and the document is published every second
+    while the tree behind it is read about half as often — so without this
+    the page would spend a tenth of a core asking a question whose answer
+    cannot have changed. Pass no stamp to force a fresh look, which is what
+    the Back guard wants: it is deciding whether to send a press right now.
+    """
+    global _nav_seen
+
+    if not package:
+        return {}
+    if stamp is not None and _nav_seen[:2] == (package, stamp):
+        return _nav_seen[2]
+    try:
+        out = _adb(["shell", "dumpsys", "activity", package], serial
+                   ).stdout.decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001
+        return {}
+    here = [n for n in _FRAGMENT_ON_SCREEN.findall(out)
+            if n not in PLUMBING_FRAGMENTS]
+    if not here:
+        return {}
+    depth = len(_BACK_ENTRY.findall(out))
+    # Each entry removes the fragment it left and adds the one it opened, so
+    # the removals in order are the trail behind, and where we stand is last.
+    trail, seen = [], set()
+    for kind, name in _BACK_OP.findall(out):
+        if kind == "REMOVE" and name not in seen:
+            seen.add(name)
+            trail.append(name)
+    if here[0] not in trail:
+        trail.append(here[0])
+    state = {
+        "at": here[0],
+        "at_says": _pretty_fragment(here[0]),
+        "trail": trail,
+        "says": [_pretty_fragment(n) for n in trail],
+        "depth": depth,
+        # THE ESCAPE GUARD. Nothing left to pop means the next Back press
+        # pops the activity itself and lands in whatever was underneath.
+        "rooted": depth == 0,
+    }
+    if stamp is not None:
+        _nav_seen = (package, stamp, state)
+    return state
+
+
 def window_state(serial: str | None = None) -> tuple[str, bool, str]:
     """(focused window `package/activity`, display awake, wedged package).
 
@@ -1249,6 +1350,11 @@ def write_screen(target: Path, frame: dict, screen: str, reason: str,
         # flight recorder with this attached, which is exactly the datum a
         # future ACTIVITY_SCREENS row is made of.
         "activity": activity_of(focus),
+        # Where the app says it is, how it got there, and whether Back would
+        # leave — see `nav_state`. Empty for an app that does not answer, and
+        # every reader must take that as "no idea" rather than as a verdict.
+        "nav": nav_state((focus or "").split("/")[0],
+                         stamp=hierarchy_at),
         # When the hierarchy behind this document was last actually read from
         # the device. The document is written every second regardless; this is
         # the number that stops a kept sketch passing as a current one.
