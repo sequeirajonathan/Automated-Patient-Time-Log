@@ -321,6 +321,7 @@
   "sched.until": "hasta las {time}",
   "sched.upcoming": "Próxima visita",
   "sched.view_full": "Ver horario completo",
+  "screen.trail": "Dónde está dentro de la aplicación",
   "sign.ambiguous": "El controlador no pudo distinguir qué parte de esta pantalla es el recuadro de firma, así que no dibujó nada.",
   "sign.appclear": "Borrar firma",
   "sign.appsave": "Salvar firma",

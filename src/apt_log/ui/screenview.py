@@ -1668,6 +1668,13 @@ def build(doc: dict) -> dict | None:
         rows = _without(rows, permission["box"])
     return {"id": doc.get("id", ""), "nav": nav, "rows": rows,
             "apptabs": apptabs,
+            # THE TRAIL THE APP SAYS IT WALKED — see `feed.nav_state`. Named
+            # apart from `nav` above, which is the app's own top bar: this is
+            # the fragment stack underneath it, and the two disagree often
+            # enough that sharing a word would be a bug waiting to happen.
+            # Empty for any app that does not publish one, and an empty trail
+            # renders as nothing at all rather than as "you are nowhere".
+            "crumbs": _crumbs(doc),
             "permission": permission,
             # A modal the app raised, drawn as an alert above the page it is
             # blocking rather than scattered through it — or dropped.
@@ -1680,6 +1687,31 @@ def build(doc: dict) -> dict | None:
             # Whether the rows above are the WHOLE page (a stitched walk)
             # or just the viewport — the footnote reads opposite ways.
             "full": bool(doc.get("full"))}
+
+
+def _crumbs(doc: dict) -> list[dict]:
+    """The app's own trail through itself, as a row of steps.
+
+    Each step carries `back`: how many pops separate it from where the phone
+    is standing. Zero is here. THAT NUMBER IS POPS, NOT PRESSES, and the
+    difference is not pedantry — watched live, two Back presses on the work
+    log were swallowed undoing its tab selection and popped nothing, while
+    the screen's own Back arrow popped cleanly. So a step is something to
+    walk towards, checking after each press, never a count to fire blindly.
+    """
+    nav = doc.get("nav") or {}
+    trail = nav.get("trail") or []
+    says = nav.get("says") or []
+    if len(trail) < 2:
+        # One step is not a trail, it is just where you are. The nav bar
+        # already says that, and a breadcrumb of length one is furniture.
+        return []
+    last = len(trail) - 1
+    return [{"at": name,
+             "says": says[i] if i < len(says) else name,
+             "back": last - i,
+             "here": i == last}
+            for i, name in enumerate(trail)]
 
 
 def _fold_tab_captions(band: list[dict]) -> list[dict]:

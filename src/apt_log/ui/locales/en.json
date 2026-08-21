@@ -321,6 +321,7 @@
   "sched.until": "until {time}",
   "sched.upcoming": "Next visit",
   "sched.view_full": "View full schedule",
+  "screen.trail": "Where you are in the app",
   "sign.ambiguous": "The controller could not tell which part of this screen is the signature box, so it drew nothing.",
   "sign.appclear": "Clear signature",
   "sign.appsave": "Save signature",
