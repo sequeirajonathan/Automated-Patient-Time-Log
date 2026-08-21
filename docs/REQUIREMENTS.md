@@ -241,6 +241,51 @@ at the building. It cannot establish that the caregiver is. That limit is inhere
 is why the handwritten log stays authoritative (§1.1) — no amount of signal strength
 changes it.
 
+**5.9 — Attested presence, and why this deployment needs it.**
+
+REQ-5 was written for a controller that lives *at* the care location: the gateway MAC and
+the wifi BSSID anchor the phone to that building because the controller never leaves it.
+
+**This deployment is not that.** The phone is tethered to a Pi at the caregiver's own
+home, and the caregiver travels to several addresses. Every network anchor the gate can
+read attests to the *house the Pi is in*, identically, for every patient on the round. The
+gate is not weak here — it is measuring the wrong building, and it would return the same
+strong PASS whether she was at a patient's home or asleep. A gate that cannot fail is not
+a gate.
+
+So in this deployment the presence claim comes from a **person**, in advance, and the act
+that makes it is **arming**. The owner's words, and they are the requirement:
+
+> "If armed you can assume my sister is already taking care of the patient. The issue
+> wasn't made clear — she's already there at that time, she just doesn't have the time to
+> do the entry because she has to start right away. So that requirement had it wrong in
+> the case that she wasn't present. She is. Arming is a commitment."
+
+That reframes the problem this scheduler solves. It was never "she is not there yet"; it
+is "she is there, with her hands full, and the entry has to happen at the minute the
+agency expects rather than whenever she next gets a free moment."
+
+**What this costs, stated plainly, because it is a real cost.** The record the machine
+writes is only as true as the arming decision behind it. A block left armed through a week
+she does not work would fire anyway; the machine has no way to know. That is the trade,
+and it is the account holder's to make.
+
+**What follows from it, and these are binding.**
+
+- **Arming is an attestation, not a preference.** It is stamped into the audit entry as
+  the presence source — who armed it and when — so a later reader can see the claim came
+  from a person and not from a sensor. A record whose presence was attested must never be
+  indistinguishable from one whose presence was observed.
+- **It is per block and it is explicit.** Nothing arms itself, nothing stays armed by
+  inference, and the shipped state is everything off (see `arming.py`).
+- **The network anchors are still read and still recorded**, as corroboration and as the
+  honest note that they describe the Pi's building. They no longer gate, and 5.2's
+  passing condition does not apply to an attested fire.
+- **5.5 still holds for everything else.** A fire that cannot complete — the app is not
+  signed in, the visit is not on the app's own schedule, the control is not drawn — fails
+  closed and alerts. Attested presence answers *where she is*; it does not answer whether
+  the app is in a state where the entry can honestly be made.
+
 ### REQ-6 — Scheduler
 - Load a shift schedule (patient, scheduled time, slot) from a local config file.
 - Fire each check-off at its scheduled time, tz-aware; store UTC, display local; handle DST.

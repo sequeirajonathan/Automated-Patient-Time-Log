@@ -362,27 +362,68 @@ conversation: one evening patient has no Friday visit, so nothing precedes the v
 after her, and Friday needs no buffer. The verification table that implied otherwise was
 loose; the schedule table was right.
 
-## The question in front of arm-and-fire
+## The question in front of arm-and-fire, and its answer
 
 Everything above is navigation, and navigation is safe: the portal already drives these
-apps and no macro commits a visit.
+apps and reading a screen commits nothing.
 
 Pressing `Comenzar Visita` is different in kind. It writes a record asserting that a
-caregiver was at a patient's home at a moment in time, and this project has already
-taken a position on that in two places:
+caregiver was at a patient's home at a moment in time. The phone this controller drives
+is tethered by USB to a Pi that does not move, and the caregiver does — so REQ-5's
+network anchors attest to *the house the Pi is in*, identically, for every patient on the
+round. That gate would return the same strong PASS whichever address she was at, and a
+gate that cannot fail is not a gate.
 
-- **REQ-0** — must not write to a production EVV system while the presence gate is
-  running on stub signals or while the transport mode is `dev`.
-- **REQ-5** — refuse to act when presence cannot be verified, rather than assume.
-- **§1 of REQUIREMENTS.md** — the automation produces a draft for an operator to confirm.
-  It is not to be built or described as a system of record.
+**The account holder settled it**, and the resolution is now REQ-5.9:
 
-The phone this controller drives is tethered by USB to a Pi that does not move. The
-caregiver does. So a timer that presses this button attests to a presence the machine did
-not observe, and it would do so from a fixed location for visits at several different
-addresses.
+> "If armed you can assume my sister is already taking care of the patient. The issue
+> wasn't made clear — she's already there at that time, she just doesn't have the time to
+> do the entry because she has to start right away. So that requirement had it wrong in
+> the case that she wasn't present. She is. Arming is a commitment."
 
-That is a decision for the person who owns the account and the liability, not something
-to settle in a commit. Until it is settled, the scheduler's useful and uncontroversial
-half is the one already built: knowing what is next, arming the app, and getting the
-check-in screen in front of a human at the right minute.
+So the problem was never "she is not there yet". It is "she is there, with her hands
+full, and the entry has to land on the minute the agency expects." The presence claim
+comes from a person, in advance, and **arming is the act that makes it** — recorded with
+who threw the switch and when, and stamped into the fire's ledger entry as `attested` so
+it can never be read as something a machine observed.
+
+### What fires today, and what does not
+
+| App | Entry | Why |
+|---|---|---|
+| Mobile Caregiver+ | **fires** | `Comenzar Visita` walked, with a machine-readable confirmation afterwards |
+| inMyTeam | **fires** | `Check in` walked; the lead-window walk gets the control drawn (below) |
+| HHAeXchange+ | **refuses** | its control has only ever been seen on a visit already under way |
+
+The refusal is by name (`autoentry.UNSUPPORTED_REASON`) and the arming page dims those
+rows and says why on their face — a switch that cannot fire must never look like one that
+can.
+
+**No check-OUT fires on any app.** Mobile Caregiver+ was only ever seen in its
+not-started and completed states, so the control that ends a running visit is unobserved;
+inMyTeam's is `Note & Check out`, which opens the note and the signature flow — a screen
+where the caregiver signs, and not one a timer should be pressing on her behalf.
+
+### inMyTeam and the day it gates on
+
+inMyTeam draws `Check in` only on the scheduled day; the evening before shows "This visit
+is not scheduled for today" and no control at all. That looked like a reason inMyTeam
+could not be armed the night before.
+
+It is not, because **arming is not the walk.** Arming is a standing decision about a
+recurring block, made whenever she likes. The walk belongs on the day, inside the lead
+window, and that is what `autoentry.preparing` and the `evv_prepare` macro do: open the
+app, find the patient, open the visit, stop. By the time the entry is due the app is
+open, signed in and on the patient's own detail, so the fire is one press rather than a
+cold start, a login and a search against the clock.
+
+That helps every app. It is the only thing that makes inMyTeam work at all.
+
+### The three refusals that remain
+
+- **Late is not caught up.** Past a five-minute grace the fire is dropped and announced,
+  because the record would claim an arrival minute that has already passed.
+- **Nothing fires twice.** The occurrence is spent *before* the phone is touched, so a
+  crash mid-press cannot leave the slot open for the next tick.
+- **A fire that cannot complete fails closed** (REQ-5.5) and alerts, carrying no patient,
+  visit or time — those notices land on a lock screen and a public relay.

@@ -306,7 +306,13 @@ class TestOperations:
         assert set(macros.CONFIRM) == {
             "restart_phone", "update_app", "update_hhax_uma",
             "update_mobile_caregiver", "update_inmyteam",
-            "inmyteam_resend_code"}
+            "inmyteam_resend_code",
+            # Writes an EVV record asserting a caregiver was at a patient's
+            # home. From the portal it looks like every other button on the
+            # page and it is not one of them. The SCHEDULER does not come
+            # through this prompt — its confirmation is the arming switch,
+            # thrown in advance and recorded with a name (REQ-5.9).
+            "evv_entry"}
         assert [name for name in macros.OPERATIONS
                 if name in macros.CONFIRM] == ["restart_phone"]
 

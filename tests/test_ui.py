@@ -3434,11 +3434,39 @@ class TestTheArmingPage:
         arm = page[page.index('id="armview"'):]
         assert 'aria-pressed="true"' not in arm
 
-    def test_the_page_says_that_nothing_fires_yet(self, client):
-        """A page of switches implies something happens when they are on,
-        and today nothing does."""
+    def test_the_page_says_what_a_switch_actually_does(self, client):
+        """IT USED TO SAY NOTHING FIRES YET, and that has stopped being true.
+        A page still carrying that sentence over switches that now write EVV
+        records would be the most dangerous thing on the portal."""
         page = self._page(client, self._plan(self._one("Ada")))
-        assert Translator("en").t("arm.note") in page
+        t = Translator("en")
+        assert t.t("arm.note") in page
+        assert "not fire" not in t.t("arm.note").lower()
+        assert "nothing" not in t.t("arm.note").lower()
+
+    def test_and_says_that_arming_is_a_claim_about_where_she_is(self, client):
+        """REQ-5.9. Arming is an attestation of presence, not a preference,
+        and a page that presents it as a setting gets a switch thrown for the
+        wrong reason."""
+        page = self._page(client, self._plan(self._one("Ada")))
+        assert Translator("en").t("arm.means") in page
+
+    def test_a_switch_that_cannot_fire_says_so_on_its_face(self, client):
+        """HHAeXchange+'s check-in control has never been walked. Reading
+        "armed" over a visit nobody is going to check in is worse than
+        reading nothing at all."""
+        page = self._page(client, self._plan(
+            self._one("Ada", app="com.hhaexchange.uma")))
+        arm = page[page.index('id="armview"'):]
+        assert "inert" in arm
+        assert Translator("en").t("arm.why.control_not_walked") in arm
+
+    def test_a_switch_that_can_fire_carries_no_warning(self, client):
+        page = self._page(client, self._plan(
+            self._one("Ada", app="com.tellus.evv.v2")))
+        arm = page[page.index('id="armview"'):]
+        assert "inert" not in arm
+        assert Translator("en").t("arm.why.control_not_walked") not in arm
 
     def test_the_switch_is_identified_by_a_key_not_by_a_name(self, client):
         """What gets POSTed, stored and logged is a hash. The patient's name
