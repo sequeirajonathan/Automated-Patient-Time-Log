@@ -430,3 +430,85 @@ class TestTheWalkedFlowsCarryNoPatient:
         for needed in ("visits_event", "Comenzar Visita", "Cancelar Visita",
                        "content-desc", "com.tellus.evv.v2"):
             assert needed in doc
+
+
+class TestEnteringAndLeavingASplitVisit:
+    """The agency's rule, in the owner's words: "when there is two you only
+    enter on the earliest one of the halves and then you only check out on
+    the later one."
+
+    So a pair of hourly entries is ONE stretch of care as far as EVV is
+    concerned. Getting it wrong is not cosmetic — a check-out at the seam
+    puts two short visits on the record where the agency expects one, and a
+    check-in on the second half is a check-in for a visit she never left.
+    """
+
+    def _pair(self, day=MONDAY):
+        return built(visit("Ada", "20:05", "21:05", days=["mon"], part=1, of=2),
+                     visit("Ada", "21:05", "22:05", days=["mon"], part=2,
+                           of=2)).on(day)
+
+    def test_the_first_half_enters_and_does_not_leave(self):
+        first, _ = self._pair()
+        assert first.does_entry is True
+        assert first.does_exit is False
+        assert first.entry_at == at(2026, 6, 15, 20, 5)
+        assert first.exit_at is None
+
+    def test_the_second_half_leaves_and_does_not_enter(self):
+        _, second = self._pair()
+        assert second.does_entry is False
+        assert second.does_exit is True
+        assert second.entry_at is None
+        assert second.exit_at == at(2026, 6, 15, 22, 5)
+
+    def test_nothing_happens_at_the_seam(self):
+        """Where the first ends and the second begins. That minute is the
+        whole point of the rule."""
+        first, second = self._pair()
+        seam = at(2026, 6, 15, 21, 5)
+        assert first.exit_at != seam
+        assert second.entry_at != seam
+
+    def test_a_single_block_does_both(self):
+        one = built(visit("Ada", "20:05", "22:05", days=["mon"])).on(MONDAY)[0]
+        assert one.does_entry and one.does_exit
+        assert one.entry_at == at(2026, 6, 15, 20, 5)
+        assert one.exit_at == at(2026, 6, 15, 22, 5)
+
+    def test_a_split_and_a_single_bracket_the_same_hours(self):
+        """The reason the rule reads as one visit: both shapes enter at the
+        same minute and leave at the same minute."""
+        pair = self._pair()
+        one = built(visit("Ada", "20:05", "22:05", days=["mon"])).on(MONDAY)[0]
+        assert pair[0].entry_at == one.entry_at
+        assert pair[1].exit_at == one.exit_at
+
+    def test_entering_follows_the_travel_gap(self):
+        """Arriving is the half the buffer is about."""
+        day = built(visit("Zoe", "19:05", "20:05", days=["mon"]),
+                    visit("Ada", "20:05", "21:05", days=["mon"], part=1, of=2),
+                    visit("Ada", "21:05", "22:05", days=["mon"], part=2,
+                          of=2)).on(MONDAY)
+        ada = [v for v in day if v.patient == "Ada"]
+        assert ada[0].entry_at == at(2026, 6, 15, 20, 10)
+
+    def test_but_leaving_does_not(self):
+        """There is no equivalent of a drive at the other end, and adding one
+        would record her staying five minutes past what was scheduled."""
+        day = built(visit("Zoe", "19:05", "20:05", days=["mon"]),
+                    visit("Ada", "20:05", "22:05", days=["mon"])).on(MONDAY)
+        ada = [v for v in day if v.patient == "Ada"][0]
+        assert ada.buffered is True
+        assert ada.exit_at == at(2026, 6, 15, 22, 5)
+
+    def test_a_middle_third_would_do_neither(self):
+        """Not a shape this round has, but the rule generalises rather than
+        assuming exactly two."""
+        day = built(visit("Ada", "18:00", "19:00", days=["mon"], part=1, of=3),
+                    visit("Ada", "19:00", "20:00", days=["mon"], part=2, of=3),
+                    visit("Ada", "20:00", "21:00", days=["mon"], part=3,
+                          of=3)).on(MONDAY)
+        middle = day[1]
+        assert middle.does_entry is False and middle.does_exit is False
+        assert middle.entry_at is None and middle.exit_at is None

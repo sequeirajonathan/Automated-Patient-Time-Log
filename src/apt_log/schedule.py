@@ -162,6 +162,53 @@ class Visit:
         return (self.ends.astimezone(timezone.utc)
                 - self.starts.astimezone(timezone.utc))
 
+    # ------------------------------------------------- entering and leaving
+    #
+    # THE AGENCY'S RULE FOR A SPLIT VISIT, in the owner's words: "when there
+    # is two you only enter on the earliest one of the halves and then you
+    # only check out on the later one."
+    #
+    # So a pair of hourly entries is ONE stretch of care as far as EVV is
+    # concerned — she arrives at the start of the first and leaves at the end
+    # of the last, and nothing is recorded at the seam between them. Which is
+    # the same shape as a single block: enter at the beginning, leave at the
+    # end. The split exists for the agency's billing, not for the door.
+    #
+    # Getting this wrong is not cosmetic. Checking out at the seam and back
+    # in again would put two short visits on the record where the agency
+    # expects one, and a check-in on the second half is a check-in for a
+    # visit she never left.
+
+    @property
+    def does_entry(self) -> bool:
+        """Whether the check-in happens on this block."""
+        return self.block.part == 1
+
+    @property
+    def does_exit(self) -> bool:
+        """Whether the check-out happens on this block."""
+        return self.block.part == self.block.of
+
+    @property
+    def entry_at(self) -> datetime | None:
+        """When to check in, or None if this block does not.
+
+        The FIRE time, not the nominal start: arriving is the half the travel
+        gap is about.
+        """
+        return self.fires if self.does_entry else None
+
+    @property
+    def exit_at(self) -> datetime | None:
+        """When to check out, or None if this block does not.
+
+        The nominal end, with no buffer on it. A gap before a visit is time
+        spent driving to it; there is no equivalent at the other end, and
+        adding one would record her as staying five minutes longer than the
+        agency scheduled.
+        """
+        return self.ends if self.does_exit else None
+
     def running(self, now: datetime) -> bool:
         """Whether this visit is happening at `now`.
 

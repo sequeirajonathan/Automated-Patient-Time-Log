@@ -3478,3 +3478,162 @@ class TestTheHomeScreenUsesItsHeight:
         for name in classes:
             assert ".%s {" % name in page or ".%s{" % name in page, \
                 f"{name} has no rule of its own"
+
+
+class TestTheWeekIsMadeOfWaysIntoApps:
+    """Asked for: the app's badge on every row, and pressing the row opens
+    that patient's app — with its agency, for the one app that carries more
+    than one."""
+
+    def _plan(self, *visits):
+        from apt_log import schedule as sched
+
+        return sched.parse({"zone": "America/New_York",
+                            "visits": list(visits)})
+
+    def _one(self, patient, app="com.hhaexchange.uma", start="06:00",
+             end="09:00", **extra):
+        return {"patient": patient, "app": app, "start": start, "end": end,
+                "days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+                **extra}
+
+    def _week(self, client, plan):
+        with patch("apt_log.schedule.load", return_value=plan):
+            page = client.get("/app", headers={"Accept-Language": "en"}).text
+        return page[page.index('id="scheduleview"'):page.index('id="armview"')]
+
+    def test_every_row_carries_its_apps_badge(self, client):
+        week = self._week(client, self._plan(
+            self._one("Ada", "com.hhaexchange.uma"),
+            self._one("Bea", "com.tellus.evv.v2", "10:00", "12:00")))
+        assert "HX+" in week and "MC" in week
+
+    def test_every_row_is_a_way_into_its_app(self, client):
+        week = self._week(client, self._plan(self._one("Ada")))
+        assert 'data-macro="hhax_uma_login"' in week
+
+    def test_a_row_carries_the_agency_it_belongs_to(self, client):
+        week = self._week(client, self._plan(
+            self._one("Ada", agency="Some Agency")))
+        assert 'data-agency="Some Agency"' in week
+
+    def test_pressing_a_multi_agency_row_switches_agency_rather_than_signing_in(
+            self):
+        """One macro, not two. The agency walk activates the app itself, so
+        running the sign-in as well would race a provider switch against a
+        sign-in ceremony on the same phone."""
+        js = strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+        body = js[js.index("function openVisitsApp"):js.index("function wireSchedule")]
+        assert "name: 'uma_agency_for', arg: agency" in body
+        assert body.index("return;") < body.index("launch(target)")
+
+    def test_a_single_agency_app_just_launches(self):
+        js = strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+        body = js[js.index("function openVisitsApp"):js.index("function wireSchedule")]
+        assert "launch(target)" in body
+
+    def test_the_week_listens_once_rather_than_forty_times(self):
+        """Forty rows, one listener."""
+        js = strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+        assert "querySelector('#scheduleview .body')" in js
+
+
+class TestASplitVisitReadsAsEnterAndLeave:
+    """The agency's rule on the page: enter on the first half, leave on the
+    last, nothing at the seam."""
+
+    def _plan(self, *visits):
+        from apt_log import schedule as sched
+
+        return sched.parse({"zone": "America/New_York",
+                            "visits": list(visits)})
+
+    def _week(self, client, plan):
+        with patch("apt_log.schedule.load", return_value=plan):
+            page = client.get("/app", headers={"Accept-Language": "en"}).text
+        return page[page.index('id="scheduleview"'):page.index('id="armview"')]
+
+    def _pair(self):
+        base = {"app": "com.hhaexchange.uma", "days": ["mon"],
+                "patient": "Ada"}
+        return self._plan({**base, "start": "20:05", "end": "21:05",
+                           "part": 1, "of": 2},
+                          {**base, "start": "21:05", "end": "22:05",
+                           "part": 2, "of": 2})
+
+    def test_the_halves_are_labelled_differently(self, client):
+        week = self._week(client, self._pair())
+        assert Translator("en").t("sched.check_in") in week
+        assert Translator("en").t("sched.check_out") in week
+
+    def test_the_check_out_shows_the_hour_it_happens(self, client):
+        """Which is the END of the later half, not its start — the one time
+        on the page that is not the row's own fire time."""
+        week = self._week(client, self._pair())
+        assert "10:05 pm" in week
+
+    def test_a_single_block_says_neither(self, client):
+        week = self._week(client, self._plan(
+            {"patient": "Ada", "app": "com.hhaexchange.uma", "days": ["mon"],
+             "start": "20:05", "end": "22:05"}))
+        assert Translator("en").t("sched.check_in") not in week
+
+    def test_the_api_carries_the_two_moments(self, client):
+        with patch("apt_log.schedule.load", return_value=self._pair()):
+            doc = client.get("/api/schedule",
+                             headers={"Accept-Language": "en"}).json()
+        halves = [v for v in doc["week"] if v["of"] == 2]
+        assert [h["does_entry"] for h in halves] == [True, False]
+        assert [h["does_exit"] for h in halves] == [False, True]
+        assert halves[0]["exit_at"] == "" and halves[1]["entry_at"] == ""
+
+
+class TestTheDaysAreTranslated:
+    """`strftime("%A")` answers in the C locale, which is English — and a
+    Spanish page reading "Thursday" is the kind of miss that survives for
+    months because everything around it is translated."""
+
+    def _plan(self):
+        from apt_log import schedule as sched
+
+        return sched.parse({"zone": "America/New_York", "visits": [
+            {"patient": "Ada", "app": "com.hhaexchange.uma",
+             "start": "06:00", "end": "09:00",
+             "days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]}]})
+
+    def test_the_week_speaks_spanish_on_a_spanish_page(self, client):
+        # The rendered week only. The page's own stylesheet has English prose
+        # in its comments, which is not what anybody reads off the screen —
+        # a guard that cannot tell content from commentary forbids explaining
+        # the thing it exists to protect, and this project has been round
+        # that loop three times already.
+        with patch("apt_log.schedule.load", return_value=self._plan()):
+            page = client.get("/app", headers={"Accept-Language": "es"}).text
+        week = page[page.index('id="scheduleview"'):page.index('id="armview"')]
+        assert "Thursday" not in week and "Monday" not in week
+        assert any(d in week for d in ("Lunes", "Jueves", "Domingo"))
+
+    def test_and_english_on_an_english_one(self, client):
+        with patch("apt_log.schedule.load", return_value=self._plan()):
+            page = client.get("/app", headers={"Accept-Language": "en"}).text
+        week = page[page.index('id="scheduleview"'):page.index('id="armview"')]
+        assert any(d in week for d in ("Monday", "Thursday", "Sunday"))
+
+    def test_the_arming_page_too(self, client):
+        with patch("apt_log.schedule.load", return_value=self._plan()):
+            page = client.get("/app", headers={"Accept-Language": "es"}).text
+        arm = page[page.index('id="armview"'):]
+        assert "Mon" not in arm and "Wed" not in arm
+
+    def test_the_api_follows_the_readers_language(self, client):
+        """It repaints the card an hour later; the day must not switch
+        language when it does."""
+        with patch("apt_log.schedule.load", return_value=self._plan()):
+            doc = client.get("/api/schedule",
+                             headers={"Accept-Language": "es"}).json()
+        assert doc["week"][0]["day"] in ("Lunes", "Martes", "Miércoles",
+                                         "Jueves", "Viernes", "Sábado",
+                                         "Domingo")

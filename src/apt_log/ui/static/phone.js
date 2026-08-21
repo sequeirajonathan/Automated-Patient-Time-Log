@@ -1119,6 +1119,7 @@
     card.dataset.macro = v.macro || '';
     card.dataset.open = v.open || '';
     card.dataset.name = v.app || '';
+    card.dataset.agency = v.agency || '';
   }
 
   // The card under it: the one visit after the one above, and nothing else.
@@ -1156,6 +1157,7 @@
     card.dataset.macro = v.macro || '';
     card.dataset.open = v.open || '';
     card.dataset.name = v.app || '';
+    card.dataset.agency = v.agency || '';
   }
 
   function refreshSchedule() {
@@ -1172,9 +1174,36 @@
   // wherever she pressed. A visit whose app is not one of the tiles (a
   // schedule naming a package that is not installed) carries no macro, and
   // `launch` already refuses those.
+  // The one app with more than one agency on the account. A visit row knows
+  // which of them its patient belongs to, so pressing the row can answer that
+  // question instead of asking it.
+  const MULTI_AGENCY = 'com.hhaexchange.uma';
+
   function openVisitsApp(el) {
     const target = el.closest('[data-macro]');
-    if (target) launch(target);
+    if (!target) return;
+    const agency = target.dataset.agency || '';
+    if (target.dataset.package === MULTI_AGENCY && agency) {
+      // The agency walk subsumes opening the app — it activates it first —
+      // so this is one macro, not two. Running `launch` as well would race
+      // the sign-in ceremony against a provider switch on the same phone.
+      awaitingMacro = true;
+      pendingApp = target.dataset.package;
+      view('screen');
+      busy((i18n.opening || '').replace('{app}', target.dataset.name || ''),
+           60000);
+      fetch('/macro', {
+        method: 'POST',
+        body: new URLSearchParams({ name: 'uma_agency_for', arg: agency }),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        redirect: 'follow'
+      }).catch(() => {
+        awaitingMacro = false; pendingApp = ''; unbusy();
+        toast(i18n.failed || '');
+      });
+      return;
+    }
+    launch(target);
   }
 
   function wireSchedule() {
@@ -1182,8 +1211,12 @@
     if (after) after.addEventListener('click', () => openVisitsApp(after));
     const card = document.getElementById('upnext');
     if (card && card.dataset.macro) {
-      card.addEventListener('click', () => launch(card));
+      card.addEventListener('click', () => openVisitsApp(card));
     }
+    // The week. One listener on the list rather than one per row, because the
+    // rows are server-rendered and there can be forty of them.
+    const week = document.querySelector('#scheduleview .body');
+    if (week) week.addEventListener('click', (ev) => openVisitsApp(ev.target));
     const open = document.getElementById('btn-schedule');
     if (open) open.addEventListener('click', () => view('schedule'));
     // Back to Home, in the same place and with the same chevron the screen

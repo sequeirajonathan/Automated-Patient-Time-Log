@@ -189,12 +189,86 @@ precedes submission, and the status vocabulary for a missed or late visit.
 
 ## inMyTeam — `com.inmyteam.inmyteam`
 
-Not yet walked for check-in. Sign-in is the mapped part (phone number, then a texted
-code — `sms.py`, `macros._inmyteam_login`). One patient is currently tracked on it.
+Walked 2026-08-20, signed in already (`open_inmyteam`; the sign-in ends in a text
+message, so the open-only macro is the right one for a walk).
 
-Still to observe: everything downstream of sign-in.
+**This app is in English on this device** while the other two are in Spanish. Any word
+matching here has to allow for both anyway, but the default is not the same.
 
----
+### One activity again
+
+`com.inmyteam.inmyteam.view.activities.MainActivity` is the visits home, every bucket
+list, and the visit detail. Its atlas entry (`feed.ACTIVITY_SCREENS`) now names it
+`home`, which it had never had.
+
+### The visits home
+
+Four buckets, each with its own counts — **Today**, **Tomorrow**, **Next**, **Past** —
+plus `Filter by Agencies…` (an EditText), the nav drawer, and `notification_history`.
+The bottom bar is `assigned` (My patients), `open`, `chat_log_fragment`, `myTripsFragment`.
+
+### A bucket list
+
+Titled "Today Visits" / "Tomorrow Visits", with a **Refresh** control beside the title,
+and one card per visit carrying the agency, `HH:MM AM | HH:MM AM`, the patient, the
+address and the weekday and date. The card is the only clickable thing on the row.
+
+### The visit detail
+
+Tabs **Visits** / **Plan of care**, "More Patient info +", then the patient, the date as
+`YYYY-M-D`, `HH:MM AM | HH:MM AM PCA (1 H)`, and the address. Below that, the state:
+
+```
+No check in and check out data has been recorded
+```
+
+**And then it depends on the day.** This is the finding that matters:
+
+| Visit is… | What the detail shows |
+|---|---|
+| today | `Check in` and `Note & Check out` |
+| not today | `This visit is not scheduled for today`, and neither control |
+
+**inMyTeam gates the action to the scheduled day.** A macro cannot arm this app by
+walking to the check-in control the night before — the control is not drawn until the
+day arrives.
+
+Both captions are **non-clickable `TextView`s inside a clickable `View`**, the same shape
+as the other two apps:
+
+```
+"Check in"            TextView [199,1522][247,1537]   →  clickable View [172,1510][274,1549]
+"Note & \nCheck out"  TextView [467,1515][528,1543]   →  clickable View [446,1508][548,1550]
+```
+
+Note the newline inside the second caption (`Note &` then `Check out`). Match on a
+substring, never on the whole string.
+
+Three small square Buttons sit stacked at the left margin of the detail; on a future
+visit two are `enabled="false"`. They look like a timeline of the visit's steps.
+**Deliberately not pressed** — identifying them by pressing one on a live agency app for
+a real patient is not a thing to do to find out.
+
+### Switching agencies in HHAeXchange+
+
+Walked because the round crosses between two providers twice a day. Four taps, and only
+two of them name themselves:
+
+```
+Menú (bottom bar, by its words — no id)
+  → Agencias                        menu_screen_connections
+    → Cambiar proveedor activo      agency_configuration_screen_change_connection_button
+      → the provider picker         OnboardingActivity
+```
+
+The Agencias page also **marks which provider is active** ("Activa"), which is what lets
+`_uma_agency_for` skip the whole walk when the wanted one is already in use — switching
+to where you already are costs a full schedule reload, the slowest thing this app does.
+
+`macros.uma_agency` opens the picker and stops. `macros.uma_agency_for` takes the agency
+name from the visit row that was pressed and chooses it. The argument is matched against
+the rows the app is drawing, so it cannot name a control that is not on screen; an agency
+that is not on the account fails rather than pressing the other one.
 
 ## App lifecycle — what switching actually does
 
