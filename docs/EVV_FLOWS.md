@@ -195,6 +195,32 @@ message, so the open-only macro is the right one for a walk).
 **This app is in English on this device** while the other two are in Spanish. Any word
 matching here has to allow for both anyway, but the default is not the same.
 
+### Whose account this is, and why it matters
+
+The drawer's header and **My Profile** both show the signed-in identity as a bare
+phone number — the one in `INMYTEAM_PHONE` — with **no name set**. That number is
+the controller's own account, not the caregiver's.
+
+This is not cosmetic. Checked live on 2026-08-21: the caregiver checked a patient in
+that morning from her own phone, under her own inMyTeam login. On this device the
+same patient's visit still read *"No check in and check out data has been recorded"*
+after a Refresh **and** after a force-stop and cold relaunch, and **Past Visits was
+empty** — "Sorry, there is no information" — because this account has never completed
+a visit. The server was right both times. They are two different caregiver records.
+
+Two consequences, and the second is the serious one:
+
+* **Nothing the caregiver does on her own phone will ever appear here.** Refreshing,
+  re-authenticating and reinstalling all leave the account unchanged, so none of them
+  can make her work visible on this device. Do not spend an OTP looking for it.
+* **An entry fired from this device is recorded against this account.** A visit
+  automated here and a visit worked there are logged as two different people. Until
+  the controller signs in as the caregiver's own identity, arm-and-fire on this app
+  writes to the wrong timesheet.
+
+That is what "point inMyTeam's account number at a phone the controller drives" means,
+and it is a prerequisite for firing this app in earnest — not a tidy-up.
+
 ### One activity again
 
 `com.inmyteam.inmyteam.view.activities.MainActivity` is the visits home, every bucket
@@ -295,6 +321,27 @@ credential screen before it types anything:
 So switching to an app that is already signed in costs an activate and a look, not a
 sign-in. Pressing the tile of the app **already in front** does not even do that — the
 front end treats it as a view switch.
+
+**An app kept open is an app kept on the day it was opened.** The other side of "switching
+apps does not close anything": a process that has been in front since yesterday is still
+in front today, holding the list it fetched then. `_bring_up` returns the moment the right
+package is in front and does not ask which day that front is showing, so the walk can
+arrive at a correctly-named screen — right title, right layout — and every check after it,
+the day check included, reads stale data.
+
+Pressing the app's own **Refresh** does not settle this. It re-renders what the app
+already holds; on inMyTeam it was pressed twice against a record that was genuinely
+absent and changed nothing either time. A **force-stop and cold relaunch** is the only
+lever here that an app cannot ignore, and it is what `_freshen` does:
+
+- The **lead window always starts from cold** (`max_age=0`). Getting ready fifteen
+  minutes early is what that window is for, so the restart is free there.
+- The **fire starts from cold only if nothing else has** (`max_age=FRESH_FOR`). When the
+  lead window ran, the fire pays nothing; when it failed — or the entry is fired by hand
+  from the portal — this is what stops the press landing on yesterday's list.
+
+`FRESH_FOR` is process-local on purpose. A Runner that restarted between getting ready
+and firing has no business claiming a fetch it did not watch, and pays for another.
 
 **Back stays inside the app.** Back from an app's root pops Android's task stack into
 whatever was under it — the launcher, or another care app — which is how pressing Back

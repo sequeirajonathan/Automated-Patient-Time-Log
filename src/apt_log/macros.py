@@ -3121,6 +3121,65 @@ def _bring_up(driver, package: str) -> None:
     time.sleep(EVV_SETTLE)
 
 
+# HOW LONG A COLD START COUNTS AS FRESH.
+#
+# Long enough that a lead window at 04:45 spares the 05:00 fire a second
+# restart, short enough that an app process alive since yesterday never
+# qualifies. The number is a ceiling on how stale the list may be at the
+# moment the entry is pressed, and forty-five minutes is the lead window
+# plus room for it to have run late.
+FRESH_FOR = 45 * 60.0
+
+# When each package last came up from cold, by this process's clock. Process
+# local on purpose: the Runner is one long-lived process, so the lead window
+# and the fire share it, and a Runner that restarted in between has no
+# business claiming a fetch it did not watch.
+_freshened: dict[str, float] = {}
+
+
+def _freshen(driver, report, package: str, max_age: float = 0.0) -> bool:
+    """Make the app fetch today from its server, and say whether it had to.
+
+    `_bring_up` returns the moment the right package is in front, and an app
+    that has been in front since yesterday is still in front today. It keeps
+    the list it fetched then — Android had no reason to kill it and the app
+    had no reason to ask again — so the walk can arrive at a correctly-named
+    screen showing the wrong day's visits, and every check after it is a
+    check against stale data.
+
+    A force-stop is the only lever this code has that an app cannot ignore.
+    Pressing the app's own Refresh is the polite version and it is not
+    enough: it re-renders whatever the app already holds, and on inMyTeam it
+    was pressed twice against a visit whose record was genuinely absent and
+    changed nothing either time. Killing the process removes the question.
+
+    Relaunched through the launcher intent rather than the driver, for the
+    reason `_restart_app` gives: after a force-stop the driver's handle on
+    the app is stale, and asking it to activate the app it has just lost is
+    how a recovery hangs.
+
+    `max_age` of zero means always. Anything else means "only if the last
+    cold start is older than this", which is what lets the fire skip the
+    cost when the lead window has already paid it.
+    """
+    from apt_log import feed as feed_mod
+
+    if max_age and (time.time() - _freshened.get(package, 0.0)) < max_age:
+        return False
+    report("macro.step.freshening")
+    _force_stop(package)
+    _forget_stitched(package)
+    time.sleep(1.5)
+    wake_display()
+    feed_mod._adb(["shell", "monkey", "-p", package,
+                   "-c", "android.intent.category.LAUNCHER", "1"])
+    if not wait_for(lambda: _front_package() == package, timeout=25.0):
+        raise RuntimeError("the app did not come back")
+    time.sleep(EVV_SETTLE)
+    _freshened[package] = time.time()
+    return True
+
+
 # Where today's visits actually live, per app.
 #
 # Mobile Caregiver+ lands on its week list, so the row is on the screen the
@@ -3255,7 +3314,12 @@ def _evv_entry(driver, report, arg: str) -> None:
     grant_location(package)
 
     report("macro.step.launching")
-    _bring_up(driver, package)
+    # Cold-start only if nothing already has. When the lead window ran, this
+    # costs nothing and the app is fifteen minutes fresh; when it did not —
+    # it failed, or the entry was fired by hand from the portal — this is
+    # what stops the press landing on yesterday's list.
+    if not _freshen(driver, report, package, max_age=FRESH_FOR):
+        _bring_up(driver, package)
 
     report("macro.step.finding_patient")
     # Opens TODAY's visit or refuses — see `_open_todays_visit`. inMyTeam
@@ -3310,7 +3374,11 @@ def _evv_prepare(driver, report, arg: str) -> None:
     """
     package, patient = _evv_parts(arg)
     report("macro.step.launching")
-    _bring_up(driver, package)
+    # FROM COLD, ALWAYS. This is the one moment in the day when a restart is
+    # free — the lead window exists precisely to spend fifteen minutes on
+    # getting ready — and it is the only way to be sure the list the fire
+    # presses against was fetched today rather than yesterday.
+    _freshen(driver, report, package)
     report("macro.step.finding_patient")
     # The same day-checked opener the fire uses. A walk that gets ready on
     # the WRONG day is worse than one that fails: it reports success and
