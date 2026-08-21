@@ -167,6 +167,7 @@
   "macro.step.restarting": "Restarting the phone…",
   "macro.step.signing_in": "Signing in…",
   "macro.step.starting": "Starting…",
+  "macro.step.to_the_list": "Going to today's visits…",
   "macro.step.update_required": "This app is asking to be updated. Use the update button on the app page — it cannot be signed into until then.",
   "macro.step.updating": "Asking the Play Store to update…",
   "macro.sure.inmyteam_resend_code": "Ask inMyTeam for a new code? It closes the app, signs in again and sends a new text. The code you already have stops working.",

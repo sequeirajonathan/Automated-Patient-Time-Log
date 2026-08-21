@@ -762,3 +762,79 @@ class TestArmingDoesNotClaimThePast:
         claims = {key: {"who": "x", "at": "not a date"}}
         assert [d.kind for d in
                 autoentry.missed(s, late, attestations=claims)] == ["entry"]
+
+
+class TestGettingToTheVisitBeforePressingAnything:
+    """THE FIRST ARMED FIRE FAILED ON THIS, and the reason is worth keeping.
+
+    Android keeps app state, and `_bring_up` returns the moment the right
+    package is in front — it does not care which of its screens that is. So
+    the fire looked for the patient's row on the plan-of-care sheet the app
+    had been sitting on since the night before, found nothing, and failed
+    with "that visit is not on this screen". The lead-window walk failed the
+    same way fifteen minutes earlier, which should have been the warning.
+    """
+
+    def test_the_two_walked_apps_know_where_their_visits_live(self):
+        from apt_log import macros
+
+        # Mobile Caregiver+ lands on its week list, so the row is already
+        # there and no bucket needs opening.
+        assert macros.EVV_TODAY_WORDS["com.tellus.evv.v2"] == ()
+        # inMyTeam lands on buckets; today's rows are one tap further in.
+        assert "Today" in macros.EVV_TODAY_WORDS["com.inmyteam.inmyteam"]
+
+    def test_the_row_is_taken_where_it_stands_when_it_is_there(self):
+        """No navigation when she is already on the list — the fire has a
+        five-minute window and every Back press spends some of it."""
+        from unittest.mock import patch
+        from apt_log import macros
+
+        with patch.object(macros, "_row_for", return_value="THE ROW") as look, \
+             patch.object(macros, "_app_home") as home:
+            got = macros._find_visit_row(object(), lambda _s: None,
+                                         "com.inmyteam.inmyteam", "Ada")
+        assert got == "THE ROW"
+        assert home.call_count == 0
+        assert look.call_count == 1
+
+    def test_otherwise_it_walks_home_and_looks_again(self):
+        from unittest.mock import patch
+        from apt_log import macros
+
+        found = [None, "THE ROW"]
+        with patch.object(macros, "_row_for", side_effect=found), \
+             patch.object(macros, "_app_home") as home, \
+             patch.object(macros.time, "sleep"):
+            got = macros._find_visit_row(object(), lambda _s: None,
+                                         "com.tellus.evv.v2", "Ada")
+        assert got == "THE ROW"
+        assert home.call_count == 1
+
+    def test_and_opens_todays_bucket_when_home_is_not_enough(self):
+        """inMyTeam's home is a page of counts, not of visits."""
+        from unittest.mock import MagicMock, patch
+        from apt_log import macros
+
+        bucket = MagicMock()
+        with patch.object(macros, "_row_for",
+                          side_effect=[None, None, "THE ROW"]), \
+             patch.object(macros, "_app_home"), \
+             patch.object(macros, "_words", return_value=bucket), \
+             patch.object(macros.time, "sleep"):
+            got = macros._find_visit_row(object(), lambda _s: None,
+                                         "com.inmyteam.inmyteam", "Ada")
+        assert got == "THE ROW"
+        assert bucket.click.called
+
+    def test_a_visit_that_is_genuinely_absent_still_refuses(self):
+        """Walking further must not turn "not there" into a guess."""
+        from unittest.mock import patch
+        from apt_log import macros
+
+        with patch.object(macros, "_row_for", return_value=None), \
+             patch.object(macros, "_app_home"), \
+             patch.object(macros, "_words", return_value=None), \
+             patch.object(macros.time, "sleep"):
+            assert macros._find_visit_row(object(), lambda _s: None,
+                                          "com.inmyteam.inmyteam", "Ada") is None
