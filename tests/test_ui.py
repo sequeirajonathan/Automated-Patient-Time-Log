@@ -1935,7 +1935,36 @@ class TestTheSignaturePadIsSelfContained:
                    {"cls": "TextView", "b": [489, 1522, 520, 1537],
                     "txt": "Clear"}]}
         got = _sheet_actions(doc, screenview.build(doc))
-        assert [a["txt"] for a in got] == ["Done", "Clear"]
+        # ERASE FIRST, AFFIRMATIVE LAST — the pad's order, not the app's.
+        # inMyTeam draws Done on the LEFT and Clear on the right; HHAeXchange+
+        # draws Borrar on the left and Enviar on the right. Showing each app's
+        # own order put the affirmative on a different side depending on which
+        # app was behind the pad, and the wrong press here wipes a signature.
+        assert [a["txt"] for a in got] == ["Clear", "Done"]
+
+    def test_the_pair_reads_the_same_whichever_app_is_behind_it(self):
+        """The property, stated once: whatever the app calls its buttons and
+        whatever order it draws them in, the pad erases on the left and
+        affirms on the right."""
+        from apt_log.ui.app import _pad_order
+
+        for given in (["Done", "Clear"], ["Clear", "Done"],
+                      ["Enviar", "Borrar"], ["Borrar", "Enviar"]):
+            got = [a["txt"] for a in
+                   _pad_order([{"txt": w, "aim": {}} for w in given])]
+            assert got[0].lower() in ("clear", "borrar"), given
+            assert got[-1].lower() in ("done", "enviar"), given
+
+    def test_a_word_it_does_not_know_is_not_reordered_away(self):
+        """Guessing at an unrecognised caption is how a pad ends up
+        emphasising the wrong button."""
+        from apt_log.ui.app import _pad_order
+
+        given = [{"txt": "Anular", "aim": {}}, {"txt": "Revisar", "aim": {}},
+                 {"txt": "Done", "aim": {}}]
+        got = [a["txt"] for a in _pad_order(given)]
+        assert got[0] == "Anular"          # a known erase word leads
+        assert got.index("Revisar") < got.index("Done")
 
     def test_the_legacy_row_can_actually_hide(self):
         """`.padrow { display:flex }` beats the UA's `[hidden]`, so the

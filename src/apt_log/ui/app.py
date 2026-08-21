@@ -958,11 +958,35 @@ def _sheet_actions(doc: dict, model: dict | None) -> list[dict]:
     for row in model.get("rows") or ():
         if not row.get("actions"):
             continue
-        return [{"txt": (it.get("txt")
-                         or (it.get("lines") or [""])[0] or ""),
-                 "aim": it["aim"]}
-                for it in row["items"] if it.get("aim")]
+        return _pad_order([{"txt": (it.get("txt")
+                                    or (it.get("lines") or [""])[0] or ""),
+                            "aim": it["aim"]}
+                           for it in row["items"] if it.get("aim")])
     return []
+
+
+# THE PAD READS THE SAME WHICHEVER APP IS BEHIND IT.
+#
+# The two apps put their buttons in opposite orders — HHAeXchange+ draws
+# Borrar then Enviar, inMyTeam draws Done then Clear — and the pad was
+# showing each app's own order, so the affirmative sat on the right for one
+# and on the left for the other. Muscle memory built on one becomes a wrong
+# press on the other, and the wrong press here wipes a signature.
+#
+# `_canvas_actions` has always ordered its pair deliberately (clear first,
+# submit last). This is the same rule applied to the apps whose buttons carry
+# no ids, so the pair is uniform everywhere rather than uniform in one place.
+_ERASE_WORDS = ("borrar", "clear", "limpiar", "erase", "anular")
+
+
+def _pad_order(actions: list[dict]) -> list[dict]:
+    """Destructive first, affirmative last. Anything unrecognised keeps its
+    place in the middle rather than being guessed at."""
+    def rank(action: dict) -> int:
+        word = (action.get("txt") or "").strip().lower()
+        return 0 if word in _ERASE_WORDS else 1
+
+    return sorted(actions, key=rank)
 
 
 def _legacy_pad(package: str) -> bool:

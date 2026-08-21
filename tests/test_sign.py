@@ -154,6 +154,10 @@ class TestExecute:
         def stub(_d, paths, bounds=None, serial=None):
             performed.extend(paths)
             measured.append(bounds)
+            # `_perform` answers with the canvas readings either side of the
+            # replay, so the log can say whether the ink landed rather than
+            # leaving it to be guessed at from a screenshot afterwards.
+            return (0, 900)
 
         with patch.object(sign, "_perform", side_effect=stub), \
              patch("apt_log.resident.run", side_effect=lambda w: w(driver)):
@@ -474,7 +478,9 @@ class TestRotatedPaths:
         driver.page_source = SIDEWAYS_CANVAS + SIDEWAYS_LABELS
         built = {}
         real = sign.build_paths
-        with patch.object(sign, "_perform"), \
+        # `_perform` answers (ink before, ink after) so the log can say
+        # whether the ink landed; a bare mock unpacks to nothing.
+        with patch.object(sign, "_perform", return_value=(0, 900)), \
              patch.object(sign, "build_paths",
                           side_effect=lambda *a, **kw: built.update(kw) or
                           real(*a, **kw)), \
@@ -490,7 +496,7 @@ class TestRotatedPaths:
         driver.page_source = CANVAS + CHROME
         built = {}
         real = sign.build_paths
-        with patch.object(sign, "_perform"), \
+        with patch.object(sign, "_perform", return_value=(0, 900)), \
              patch.object(sign, "build_paths",
                           side_effect=lambda *a, **kw: built.update(kw) or
                           real(*a, **kw)), \
@@ -1032,7 +1038,13 @@ class TestAStrokeThatDidNotLandIsDrawnAgain:
     BOUNDS = [13, 998, 707, 1469]
 
     def _replay(self, ink_readings):
-        """ink_readings: what the canvas measures, in call order."""
+        """ink_readings: what the canvas measures, in call order.
+
+        A FINAL reading is taken after the last stroke — see INK_PAINT — so
+        every list here carries one more entry than there are strokes. That
+        last look is what makes "done" honest rather than announced over a
+        canvas the ink has not reached.
+        """
         driver = MagicMock()
         drawn = []
         readings = list(ink_readings)
@@ -1047,24 +1059,24 @@ class TestAStrokeThatDidNotLandIsDrawnAgain:
     def test_a_stroke_that_landed_is_drawn_once(self):
         # start=0, after s1=500, after s2=900 — one reading per stroke, the
         # answer for one being the baseline for the next.
-        drawn = self._replay([0, 500, 900])
+        drawn = self._replay([0, 500, 900, 900])
         assert drawn == [[(1, 1)], [(2, 2)]]
 
     def test_a_stroke_that_left_no_ink_is_drawn_again(self):
         """The reported failure, exactly: stroke one lands, stroke two does
         not."""
         # start=0, after s1=500, after s2=500 (nothing gained), retry -> 900.
-        drawn = self._replay([0, 500, 500, 900])
+        drawn = self._replay([0, 500, 500, 900, 900])
         assert drawn == [[(1, 1)], [(2, 2)], [(2, 2)]]
 
     def test_only_the_missing_stroke_is_redrawn(self):
         """Never the whole signature, and the canvas is never cleared — so a
         retry cannot double a stroke that landed."""
-        drawn = self._replay([0, 500, 500, 900])
+        drawn = self._replay([0, 500, 500, 900, 900])
         assert drawn.count([(1, 1)]) == 1
 
     def test_it_gives_up_rather_than_hammering(self):
-        drawn = self._replay([0, 0, 0, 0, 0, 0, 0, 0])
+        drawn = self._replay([0] * 12)
         # Two strokes, each drawn once and retried at most STROKE_RETRIES
         # times: a canvas that never takes ink costs a bounded number of
         # attempts, not an endless one.
@@ -1073,7 +1085,7 @@ class TestAStrokeThatDidNotLandIsDrawnAgain:
     def test_a_screenshot_that_fails_is_not_read_as_no_ink(self):
         """None is not zero. A failing screencap must never make a working
         replay redraw everything."""
-        drawn = self._replay([None, None])
+        drawn = self._replay([None, None, None])
         assert drawn == [[(1, 1)], [(2, 2)]]
 
     def test_without_bounds_it_behaves_exactly_as_before(self):
