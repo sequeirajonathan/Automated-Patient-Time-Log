@@ -1340,3 +1340,69 @@ class TestThePerStrokeRecord:
     def test_an_unreadable_canvas_records_nothing_rather_than_zero(self):
         """None is not zero — the distinction the whole retry rule rests on."""
         assert self._tally([None, None, None]) == ""
+
+
+class TestTheWalkerKeepsOffAReplay:
+    """ON A SIGNATURE CANVAS A SWIPE IS INK.
+
+    The page walker asks whether a MACRO is running, and a replay is not a
+    macro — it writes its own status file — so a walk could begin in the
+    middle of one and scroll straight down the canvas. This file already
+    records the symptom from the first field test: "the scroll gesture drew a
+    straight line down the canvas she was about to sign". The owner described
+    it again, unprompted: "too straight of a line, like something I didn't
+    draw at all".
+
+    It is also why the failure only ever happened while he was WATCHING. The
+    walk needs a viewer, so every signature he watched was eligible to be
+    walked over, and every replay requested from a script with nobody
+    watching landed whole. Four experiments could not reproduce it because
+    none of them was watched.
+    """
+
+    def test_a_queued_replay_counts(self, tmp_path):
+        req = tmp_path / "sign-request.json"
+        req.write_text("{}", encoding="utf-8")
+        assert sign.in_flight(tmp_path / "none.json", req) is True
+
+    def test_a_running_replay_counts(self, tmp_path):
+        path = tmp_path / "s.json"
+        sign.write_status(sign.Status(id="x", state="running"), path)
+        assert sign.in_flight(path, tmp_path / "none.json") is True
+
+    def test_the_tail_after_it_finishes_counts(self, tmp_path):
+        """`perform()` returns before the phone has finished painting, so
+        "not running any more" is not yet "safe to touch"."""
+        path = tmp_path / "s.json"
+        sign.write_status(sign.Status(id="x", state="done"), path)
+        assert sign.in_flight(path, tmp_path / "none.json") is True
+
+    def test_an_old_replay_does_not_count_for_ever(self, tmp_path):
+        from datetime import datetime, timedelta
+
+        path = tmp_path / "s.json"
+        long_ago = (datetime.now()
+                    - timedelta(seconds=sign.IN_FLIGHT_TAIL + 30)).isoformat()
+        sign.write_status(sign.Status(id="x", state="done", at=long_ago), path)
+        assert sign.in_flight(path, tmp_path / "none.json") is False
+
+    def test_a_machine_that_never_replayed_is_not_held_off_for_ever(self,
+                                                                   tmp_path):
+        """`read_status` answers a DEFAULT Status when no file exists, and
+        its `at` defaults to NOW — so a machine that has never replayed a
+        signature looked like one that had just finished, and the walker
+        would have been blocked permanently."""
+        assert sign.in_flight(tmp_path / "none.json",
+                              tmp_path / "gone.json") is False
+
+    def test_the_walker_and_the_warm_sweep_both_ask(self):
+        """The guard is worth nothing if nobody reads it, and BOTH of these
+        scroll the phone."""
+        from pathlib import Path
+
+        source = (Path(__file__).resolve().parents[1]
+                  / "src/apt_log/macros.py").read_text(encoding="utf-8")
+        for name in ("def maybe_stitch", "def maybe_warm"):
+            body = source[source.index(name):]
+            body = body[:body.index("\n    def ", 10)]
+            assert "sign_mod.in_flight()" in body, name

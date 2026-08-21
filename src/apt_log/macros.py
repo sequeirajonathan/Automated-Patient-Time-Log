@@ -3885,6 +3885,12 @@ class Runner:
         app = self._warm_app
         if not app:
             return False
+        # The warm sweep scrolls too, so it is held off a replay for exactly
+        # the same reason the walk is — see `maybe_stitch`.
+        from apt_log import sign as sign_mod
+
+        if sign_mod.in_flight():
+            return False
         if not someone_is_watching(self._viewers_path):
             return False
         if read_status(self._status_path).state == "running":
@@ -3933,6 +3939,26 @@ class Runner:
         if not someone_is_watching(self._viewers_path):
             return False
         if read_status(self._status_path).state == "running":
+            return False
+        # A REPLAY IS NOT A MACRO, AND THE GUARD ABOVE CANNOT SEE ONE.
+        #
+        # The check above reads the macro status; a signature replay writes
+        # its own file, so a walk could begin in the middle of one and scroll
+        # straight down the canvas. This file's own comment records the
+        # symptom from the first field test — "the scroll gesture drew a
+        # straight line down the canvas she was about to sign" — and the
+        # owner has now described the same thing again: "too straight of a
+        # line, like something I didn't draw at all".
+        #
+        # It is also the reason the failure only ever happened while he was
+        # watching. The walk needs a viewer (the line above), so every
+        # signature the owner watched was eligible to be walked over, and
+        # every replay requested from a script with nobody watching landed
+        # whole. Four experiments could not reproduce it because none of them
+        # was watched.
+        from apt_log import sign as sign_mod
+
+        if sign_mod.in_flight():
             return False
         target = self._screen_path or SCREEN_PATH
         try:

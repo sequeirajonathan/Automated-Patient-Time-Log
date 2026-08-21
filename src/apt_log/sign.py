@@ -207,6 +207,51 @@ def read_status(path: Path | None = None) -> Status:
         return Status()
 
 
+# How long after a replay finishes the phone is still the replay's. The ink
+# is painted asynchronously — see INK_PAINT — and a swipe landing in that
+# window draws across a signature that has only just arrived.
+IN_FLIGHT_TAIL = 3.0
+
+
+def in_flight(status_path: Path | None = None,
+              request_path: Path | None = None) -> bool:
+    """Whether a signature replay is queued, running, or just finished.
+
+    ON A SIGNATURE CANVAS A SWIPE IS INK, and nothing else that touches this
+    phone could tell a replay was happening. The walker asks whether a MACRO
+    is running, and a replay is not a macro — it writes its own status file —
+    so a page walk could begin mid-signature and scroll straight down the
+    canvas. The walk only runs when somebody is watching, which is exactly
+    why every replay the owner watched lost a stroke and every one requested
+    from a script, unwatched, landed whole.
+
+    The tail matters as much as the running state: `perform()` returns before
+    the phone has finished painting, so "not running any more" is not yet
+    "safe to touch".
+    """
+    if (request_path or REQUEST_PATH).exists():
+        return True
+    status = read_status(status_path)
+    if status.state == "running":
+        return True
+    # THE TAIL ONLY MEANS ANYTHING FOR A REPLAY THAT ACTUALLY HAPPENED.
+    #
+    # `read_status` answers a DEFAULT Status when no file exists, and its
+    # `at` defaults to now — so a machine that has never replayed a signature
+    # looked like one that finished a moment ago, and the walker was held off
+    # for ever. Caught by the existing walk tests going red the instant this
+    # was wired in, which is what they are for.
+    if status.state not in ("done", "failed") or not status.at:
+        return False
+    try:
+        ended = datetime.fromisoformat(status.at)
+    except ValueError:
+        return False
+    if ended.tzinfo is not None:
+        ended = ended.astimezone().replace(tzinfo=None)
+    return (datetime.now() - ended).total_seconds() < IN_FLIGHT_TAIL
+
+
 # -------------------------------------------------------------------- finder
 def find_canvas(xml: str, dump: bool = True) -> tuple[list[int] | None, str]:
     """The signature canvas on this screen, or why there is none.
