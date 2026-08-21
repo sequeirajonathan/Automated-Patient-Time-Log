@@ -195,31 +195,60 @@ message, so the open-only macro is the right one for a walk).
 **This app is in English on this device** while the other two are in Spanish. Any word
 matching here has to allow for both anyway, but the default is not the same.
 
-### Whose account this is, and why it matters
+### The visit detail lies about its own record, and the list card is the truth
 
-The drawer's header and **My Profile** both show the signed-in identity as a bare
-phone number — the one in `INMYTEAM_PHONE` — with **no name set**. That number is
-the controller's own account, not the caregiver's.
+**Read this before trusting anything this app says about whether a visit happened.**
 
-This is not cosmetic. Checked live on 2026-08-21: the caregiver checked a patient in
-that morning from her own phone, under her own inMyTeam login. On this device the
-same patient's visit still read *"No check in and check out data has been recorded"*
-after a Refresh **and** after a force-stop and cold relaunch, and **Past Visits was
-empty** — "Sorry, there is no information" — because this account has never completed
-a visit. The server was right both times. They are two different caregiver records.
+The **Visit Detail** page carries a line that reads *"No check in and check out data
+has been recorded"* — and it does not stop saying that when a record exists. Checked
+live on 2026-08-21, on a visit the caregiver had checked in **and** out that morning:
 
-Two consequences, and the second is the serious one:
+* The detail said no data was recorded, and drew **both `Check in` and
+  `Note & Check out` as live controls**.
+* It went on saying it after the app's own **Refresh**, and again after a
+  **force-stop and cold relaunch** — so it is not a stale render this end can clear.
+* The **list card for the same visit** carried **two check marks**, bottom-right.
 
-* **Nothing the caregiver does on her own phone will ever appear here.** Refreshing,
-  re-authenticating and reinstalling all leave the account unchanged, so none of them
-  can make her work visible on this device. Do not spend an OTP looking for it.
-* **An entry fired from this device is recorded against this account.** A visit
-  automated here and a visit worked there are logged as two different people. Until
-  the controller signs in as the caregiver's own identity, arm-and-fire on this app
-  writes to the wrong timesheet.
+The card is the one that is right. The control that settles it: **tomorrow's card for
+the same patient — a visit that has not happened — has the note icon and no check
+marks at all.** The marks appear only where a record exists, and the pair is
+check-in and check-out.
 
-That is what "point inMyTeam's account number at a phone the controller drives" means,
-and it is a prerequisite for firing this app in earnest — not a tidy-up.
+`Past Visits` is no help either. It stays empty — *"Sorry, there is no information"* —
+for a visit worked this morning, because that bucket means *past days*, not
+*completed visits*. Today's visit lives in Today until the day rolls over.
+
+Two things follow, and the second is the one with teeth:
+
+* **Do not conclude "nothing was recorded" from the detail page**, and do not go
+  hunting for an account mismatch on the strength of it. This document previously
+  drew exactly that conclusion from exactly that line, and it was wrong: the signed-in
+  identity is a bare number with no name set (`INMYTEAM_PHONE`, shown in the drawer
+  header and My Profile), the caregiver works the same account from her own phone, and
+  her check-in was on this device the whole time — under two marks nothing could read.
+* **A fire could double-enter.** `_evv_entry` looks for the `Check in` control and
+  presses it, and this app draws that control on a visit already checked in. Nothing
+  in the walk currently reads the marks, because nothing *can* — see below. Until
+  something does, arming this app means accepting that a visit the caregiver has
+  already entered by hand can be entered again fifteen minutes later.
+
+### The check marks are pixels, not nodes
+
+The visits list is a `ComposeView`, and its card publishes five children: the agency
+avatar and four `TextView`s (agency, `HH:MM AM | HH:MM AM`, patient, address). The two
+check marks and the note icon at the card's right edge are **not in the accessibility
+tree at all** — no node, no resource-id, no content-desc, nothing at their bounds.
+Confirmed against the raw tree, not just the reflow.
+
+This is not the case `screenview.IMAGE_MARKS` handles. That one works because the
+**legacy** HHAeXchange list draws its ticks as real `ImageView`s under `imgstarttime`
+and `imgendtime`, which is exactly what makes them nameable. inMyTeam gives a reader
+nothing to hold, so the portal cannot show the caregiver whether a visit is done, and
+the walk cannot check before it presses.
+
+Anything that changes this has to come off the screenshot, which runs straight into
+the decision recorded in "Remove pixel dependencies before the new device arrives".
+It is a real trade, not an oversight.
 
 ### One activity again
 
