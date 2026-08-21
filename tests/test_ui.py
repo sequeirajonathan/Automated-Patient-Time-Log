@@ -3071,13 +3071,13 @@ class TestTheNextVisitOnTheHomeScreen:
             self._one("Bea", "06:00", "09:00")))
         assert Translator("en").t("sched.buffered") in page
 
-    def test_the_reveal_is_hidden_when_there_is_nothing_after_the_next_one(
+    def test_the_drum_is_hidden_when_there_is_nothing_after_the_next_one(
             self, client):
-        """One visit in the whole week: there is no queue to cycle, and a
-        control that reveals nothing should not be on the page."""
+        """One visit in the whole week: there is no queue to turn through, and
+        a wheel with nothing on it should not be on the page."""
         page = self._rendered(client, self._plan(
             self._one("Ada", days=["mon"])))
-        head = page[page.index('id="reveal"'):page.index('id="reveal"') + 200]
+        head = page[page.index('id="wheel"'):page.index('id="wheel"') + 200]
         assert "hidden" in head
 
     def test_the_full_week_is_grouped_by_day(self, client):
@@ -3150,65 +3150,182 @@ class TestTheScheduleApi:
         assert r.json()["error"] == "nope"
 
 
-class TestTheRevealDoesNotSpinByItself:
-    """A thing that moves on its own on a page somebody is trying to read is
-    an annoyance the second time and furniture by the tenth."""
 
-    def _js(self):
+
+class TestTheDrum:
+    """What comes after the next visit, one at a time, on a wheel that turns
+    by itself as the round advances.
+
+    The flat list this replaced was the wrong shape twice over: it printed
+    every name at once, which is a table with extra steps, and it clipped
+    nothing, because the window was a <span> inside a <button>.
+    """
+
+    def _js(self) -> str:
         return strip_js_comments(
             Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
-
-    def test_the_spin_is_bound_to_a_press(self):
-        js = self._js()
-        assert "reveal.addEventListener('click', spin)" in js
-
-    def test_nothing_puts_the_reveal_on_a_timer(self):
-        js = self._js()
-        for line in js.splitlines():
-            if "setInterval" in line or "setTimeout" in line:
-                assert "spin" not in line
-
-    def test_a_patients_name_is_never_written_as_markup(self):
-        """It is somebody else's words and this page has no business
-        interpreting them."""
-        js = self._js()
-        start = js.index("function paintUpNext")
-        end = js.index("function refreshSchedule")
-        body = js[start:end]
-        assert "innerHTML = ''" in body or "innerHTML=''" in body
-        assert ".innerHTML = v." not in body
-        assert "textContent" in body
-
-
-class TestTheRevealActuallyClips:
-    """Found in a screenshot, not by a test — which is the honest way round
-    for a layout bug, and the reason this one exists now.
-
-    The window is a <span> inside a button. Spans are inline, and `height`
-    and `overflow` do nothing whatever on an inline box: the strip did not
-    clip, so the reveal rendered as a plain list of every name in the queue.
-    That is the opposite of the feature — it gives the answer away and takes
-    six lines to do it.
-    """
 
     def _css(self) -> str:
         return Path("src/apt_log/ui/templates/phone.html").read_text(
             encoding="utf-8")
 
-    def test_the_window_is_a_block_so_its_height_means_something(self):
-        css = self._css()
-        rule = css[css.index("  .slot {"):css.index("  .slot li")]
-        assert "display:block" in rule
-        assert "overflow:hidden" in rule
-        assert "height:26px" in rule
+    def test_it_turns_on_its_own(self):
+        """Asked for in those words — it spins as time goes by. The earlier
+        version deliberately did not, and that was the wrong call for a page
+        somebody glances at rather than reads."""
+        js = self._js()
+        assert "setInterval(spin, DWELL)" in js
 
-    def test_one_name_shows_at_a_time(self):
-        """The window and the rows are the same height. If they ever drift
-        the strip shows two half names, which reads as a rendering fault
-        rather than as a reveal."""
-        import re
+    def test_a_single_face_does_not_turn(self):
+        """One thing on the wheel is a flat panel. Rotating it would be
+        movement with nothing to reveal."""
+        js = self._js()
+        assert "children.length > 1" in js
 
+    def test_the_geometry_is_computed_not_written_down(self):
+        """A hard-coded radius is a pixel dependency, and this project has
+        already been round that loop with the landscape check — a new phone
+        with a different screen would tip the drum on its side."""
+        js = self._js()
+        assert "Math.tan(Math.PI / n)" in js
+        assert "offsetHeight" in js
+
+    def test_it_is_clipped_with_clip_path_and_not_overflow(self):
+        """WebKit does not reliably clip preserve-3d children with
+        overflow:hidden. inset() it does. Same class of bug as the <span>,
+        and worth the less familiar property."""
         css = self._css()
-        window = re.search(r"\.slot \{[^}]*height:(\d+)px", css).group(1)
-        row = re.search(r"\.slot li \{[^}]*height:(\d+)px", css).group(1)
-        assert window == row
+        rule = css[css.index("  .wheel {"):css.index("  .wheel .cap")]
+        assert "clip-path: inset(" in rule
+        assert "preserve-3d" in css
+
+    def test_somebody_who_asked_not_to_be_moved_is_not_moved(self):
+        css = self._css()
+        block = css[css.index("@media (prefers-reduced-motion: reduce) {\n    .wheel__inner"):]
+        assert "transition:none" in block[:220]
+
+    def test_a_patients_name_goes_in_as_text_never_as_markup(self):
+        js = self._js()
+        body = js[js.index("function paintWheel"):js.index("function refreshSchedule")]
+        assert "who.textContent = v.patient" in body
+        assert "innerHTML" not in body
+
+
+class TestAVisitIsAWayIntoItsApp:
+    """Asked for: pressing the current or upcoming patient should send you to
+    the app they belong in. Reusing `launch` rather than re-implementing it is
+    what makes the already-in-front shortcut and the sign-in ceremony behave
+    the same wherever she pressed."""
+
+    def _plan(self, *visits):
+        from apt_log import schedule as sched
+
+        return sched.parse({"zone": "America/New_York",
+                            "visits": list(visits)})
+
+    def _one(self, patient, app, start="06:00", end="09:00"):
+        return {"patient": patient, "app": app, "start": start, "end": end,
+                "days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]}
+
+    def _page(self, client, plan):
+        with patch("apt_log.schedule.load", return_value=plan):
+            return client.get("/app", headers={"Accept-Language": "en"}).text
+
+    def test_the_card_carries_the_app_it_belongs_to(self, client):
+        page = self._page(client, self._plan(
+            self._one("Ada", "com.hhaexchange.uma")))
+        card = page[page.index('id="upnext"') - 200:page.index('id="upnext"') + 300]
+        assert 'data-package="com.hhaexchange.uma"' in card
+        assert 'data-macro="hhax_uma_login"' in card
+
+    def test_each_face_of_the_drum_carries_its_own(self, client):
+        """Different patients are on different apps, so the drum cannot
+        borrow the card's."""
+        page = self._page(client, self._plan(
+            self._one("Ada", "com.hhaexchange.uma"),
+            self._one("Bea", "com.tellus.evv.v2", "10:00", "12:00")))
+        wheel = page[page.index('id="wheel"'):page.index('id="btn-schedule"')]
+        assert 'data-package="com.tellus.evv.v2"' in wheel
+        assert 'data-macro="mobile_caregiver_pin"' in wheel
+
+    def test_the_press_goes_through_the_same_launch_the_tiles_use(self):
+        js = strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+        body = js[js.index("function openVisitsApp"):js.index("function wireSchedule")]
+        assert "launch(target)" in body
+
+    def test_a_visit_on_an_app_with_no_tile_carries_no_macro(self, client):
+        """A schedule can name a package that is not one of the three. The
+        card still renders — it is information — and there is nothing to
+        press."""
+        page = self._page(client, self._plan(
+            self._one("Ada", "com.example.notinstalled")))
+        card = page[page.index('id="upnext"') - 200:page.index('id="upnext"') + 300]
+        assert 'data-macro=""' in card
+
+
+class TestTheAppsFitOnOneRow:
+    def test_three_across(self, client):
+        """Two columns left a hole where a fourth app used to be and pushed
+        everything below it down a whole tile."""
+        page = client.get("/app").text
+        css = page[page.index("  .springboard {"):page.index("  .tile {")]
+        assert "repeat(3, 1fr)" in css
+
+
+class TestBackStaysInsideTheApp:
+    """Reported plainly: "navigating back or forward on the Exchange+ app is
+    very unpredictable, the back button even takes me to the previous app I
+    was on, which is not ok".
+
+    The first version of the guard only noticed Back landing on the LAUNCHER,
+    which is one of the two ways Android leaves an app and not the common
+    one. Back from an app's root pops the task stack, and what is under it is
+    whatever she was in before.
+    """
+
+    def _js(self) -> str:
+        return strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+
+    def test_the_test_is_whether_the_app_changed(self):
+        js = self._js()
+        assert "currentPackage !== wasPackage" in js
+
+    def test_and_not_merely_whether_this_is_the_launcher(self):
+        """The old condition. If it comes back, so does the bug."""
+        js = self._js()
+        assert "if (onLauncher && wasScreen" not in js
+
+    def test_drifting_into_another_care_app_does_not_eject_her(self):
+        """Only the launcher sends her to the picker. Landing in a second
+        care app is the phone doing something she did not ask for, and the
+        answer is to put her back rather than to throw her out."""
+        js = self._js()
+        assert "} else if (onLauncher && body.dataset.view === 'screen') {" in js
+
+    def test_leaving_on_purpose_still_works(self):
+        """Home is how you leave. It is wired separately and does not go
+        through the bounce at all."""
+        js = self._js()
+        assert "getElementById('btn-home')" in js
+
+
+class TestTheWayBackToAnAppsOwnFirstPage:
+    def test_the_control_is_on_the_phone_view(self, client):
+        page = client.get("/app").text
+        assert 'id="btn-apphome"' in page
+
+    def test_it_runs_the_macro_that_navigates(self):
+        js = strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+        block = js[js.index("getElementById('btn-apphome')"):]
+        assert "name: 'app_home'" in block[:600]
+
+    def test_it_is_refused_while_watching_rather_than_driving(self):
+        """Every control that touches the phone is, and this one moves the
+        app somebody else may be reading."""
+        js = strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+        block = js[js.index("getElementById('btn-apphome')"):]
+        assert "if (!driving()) return;" in block[:300]

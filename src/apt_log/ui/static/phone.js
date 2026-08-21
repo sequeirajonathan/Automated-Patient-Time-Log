@@ -480,13 +480,27 @@
     // live. The flip only means something when nothing is in flight.
     const macroQuiet = !awaitingMacro && !pendingApp
       && Date.now() - macroEndedAt > 8000;
-    if (onLauncher && wasScreen && wasScreen !== 'launcher' && macroQuiet) {
-      // A launcher right after a Back means Back exited the app — mid-flow,
-      // reported as "a bug for sure as an experience". Android kept the
-      // app's state, so bounce it straight back: to her, that Back simply
-      // did nothing, which beats being teleported to the picker. Any other
-      // arrival (the Home button, the phone's own drift) means she left
-      // the app, and leaving means the picker.
+    // BACK MUST NOT CHANGE WHICH APP SHE IS IN.
+    //
+    // The first version of this only noticed Back landing on the LAUNCHER,
+    // which is one of the two ways Android leaves an app and not the common
+    // one. Back from an app's root pops the task stack, and what is under it
+    // is whatever she was in before — so pressing Back in Exchange+ put her
+    // in Mobile Caregiver+, silently, with the header renaming itself.
+    // Reported as "the back button even takes me to the previous app I was
+    // on, which is not ok".
+    //
+    // So the test is "did the front app change", not "is this the launcher".
+    // Leaving an app is Home's job and the picker's; Back's job is to move
+    // WITHIN one, and where the app has nowhere further back to go the
+    // honest outcome is that Back did nothing.
+    const leftTheApp = wasPackage && currentPackage !== wasPackage
+      && (onLauncher || appOpen[currentPackage] !== undefined);
+    if (leftTheApp && wasScreen && wasScreen !== 'launcher' && macroQuiet) {
+      // Android kept the app's state, so bounce it straight back: to her,
+      // that Back simply did nothing, which beats being teleported. Any
+      // other arrival (the Home button, the phone's own drift) means she
+      // left on purpose, and leaving means the picker.
       const bounce = Date.now() - backSentAt < 3500 && appOpen[wasPackage];
       if (bounce && body.dataset.view === 'screen') {
         pendingApp = wasPackage;
@@ -498,7 +512,10 @@
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           redirect: 'follow'
         }).catch(() => { pendingApp = ''; unbusy(); });
-      } else if (body.dataset.view === 'screen') {
+      } else if (onLauncher && body.dataset.view === 'screen') {
+        // Only the launcher sends her to the picker. Drifting into ANOTHER
+        // care app is the phone doing something she did not ask for, and the
+        // right answer is to put her back, not to eject her.
         view('launcher');
       }
     }
@@ -1058,20 +1075,71 @@
   //   page sits open on a kitchen counter. It re-reads rather than reloads —
   //   a reload would take her out of whatever else she was doing.
   const SCHEDULE_EVERY = 60000;
-  let slotAt = 0;
+  // How long one face of the drum holds before the wheel turns. Long enough
+  // to read a name, a day and a time without hurrying; short enough that a
+  // glance at the page while the kettle boils sees more than one.
+  const DWELL = 5200;
+  let wheelAt = 0;
+  let wheelTimer = 0;
+
+  // The cylinder's geometry, computed rather than written down. N faces evenly
+  // spaced round a drum whose front face is the panel's own height h sit at
+  // radius (h/2) / tan(π/N) — hard-coding that would be a pixel dependency,
+  // and this project has already been round that loop once with the landscape
+  // check.
+  function layOutWheel() {
+    const inner = document.getElementById('wheelinner');
+    if (!inner) return 0;
+    const faces = inner.children;
+    const n = faces.length;
+    if (!n) return 0;
+    const h = inner.offsetHeight || 76;
+    const step = 360 / n;
+    // One face is a flat panel, not a cylinder: no rotation, no depth, and
+    // nothing to dim behind it.
+    const radius = n < 2 ? 0
+      : (h / 2) / Math.tan(Math.PI / n);
+    for (let i = 0; i < n; i++) {
+      faces[i].style.transform =
+        'rotateX(' + (i * step) + 'deg) translateZ(' + radius + 'px)';
+    }
+    return step;
+  }
+
+  function turnWheelTo(i) {
+    const inner = document.getElementById('wheelinner');
+    if (!inner || !inner.children.length) return;
+    const n = inner.children.length;
+    const step = 360 / n;
+    wheelAt = ((i % n) + n) % n;
+    // Kept counting upward rather than reset to zero on wrap: snapping the
+    // transform back would spin the drum the whole way round backwards in
+    // front of her, once per lap, for no reason.
+    inner.style.transform = 'rotateX(' + (-i * step) + 'deg)';
+    for (let k = 0; k < n; k++) {
+      inner.children[k].dataset.front = k === wheelAt ? '1' : '0';
+    }
+  }
+
+  let wheelTurn = 0;
 
   function spin() {
-    const list = document.getElementById('slotlist');
-    if (!list) return;
-    const rows = list.children.length;
-    // Row 0 is the invitation ("Tap to see"), so the names start at 1 and
-    // pressing again walks on to the next one rather than re-landing on the
-    // same name — which is what a reveal that only ever showed one answer
-    // would do, and it would read as broken.
-    if (rows < 2) return;
-    slotAt = slotAt >= rows - 1 ? 1 : slotAt + 1;
-    const step = list.children[0].offsetHeight || 26;
-    list.style.transform = 'translateY(-' + (slotAt * step) + 'px)';
+    const inner = document.getElementById('wheelinner');
+    if (!inner || inner.children.length < 2) return;
+    wheelTurn += 1;
+    turnWheelTo(wheelTurn);
+  }
+
+  function startWheel() {
+    const wheel = document.getElementById('wheel');
+    if (!wheel || wheel.hidden) return;
+    layOutWheel();
+    wheelTurn = 0;
+    turnWheelTo(0);
+    clearInterval(wheelTimer);
+    if (document.getElementById('wheelinner').children.length > 1) {
+      wheelTimer = setInterval(spin, DWELL);
+    }
   }
 
   function paintUpNext(plan) {
@@ -1111,24 +1179,96 @@
       where.textContent = v.day + ' · ' + v.app
         + (v.agency ? ' · ' + v.agency : '');
     }
+    // The app moves with the visit. Forgetting this is how a card that says
+    // "Marina · Mobile Caregiver+" ends up opening Exchange+ because that is
+    // who was on it an hour ago.
+    card.dataset.package = v.package || '';
+    card.dataset.macro = v.macro || '';
+    card.dataset.open = v.open || '';
+    card.dataset.name = v.app || '';
+  }
+
+  // The drum, rebuilt when the queue behind it has moved on. Compared by what
+  // is actually on the faces rather than rebuilt every minute: tearing the
+  // wheel down and standing it up again mid-turn is a visible stutter every
+  // sixty seconds, for a queue that changes a few times a day.
+  function paintWheel(plan) {
+    const wheel = document.getElementById('wheel');
+    const inner = document.getElementById('wheelinner');
+    if (!wheel || !inner || !plan || !plan.ok) return;
+    const queue = plan.queue || [];
+    const now = Array.prototype.map.call(inner.children,
+      (f) => f.dataset.package + '|' + (f.querySelector('.who') || {}).textContent);
+    const next = queue.map((v) => v.package + '|' + v.patient);
+    if (now.length === next.length && now.every((x, i) => x === next[i])) return;
+
+    inner.textContent = '';
+    for (let i = 0; i < queue.length; i++) {
+      const v = queue[i];
+      const face = document.createElement('button');
+      face.className = 'face';
+      face.type = 'button';
+      face.dataset.i = String(i);
+      face.dataset.front = i === 0 ? '1' : '0';
+      face.dataset.package = v.package || '';
+      face.dataset.macro = v.macro || '';
+      face.dataset.open = v.open || '';
+      face.dataset.name = v.app || '';
+      const who = document.createElement('span');
+      who.className = 'who';
+      // textContent throughout: a patient's name is somebody else's words and
+      // this page has no business interpreting them as markup.
+      who.textContent = v.patient;
+      const sub = document.createElement('span');
+      sub.className = 'sub';
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.style.background = v.accent || '#666';
+      chip.textContent = v.mark || '';
+      sub.appendChild(chip);
+      sub.appendChild(document.createTextNode(
+        v.day + ' · ' + v.fires + ' – ' + v.ends));
+      face.appendChild(who);
+      face.appendChild(sub);
+      inner.appendChild(face);
+    }
+    wheel.hidden = queue.length === 0;
+    startWheel();
   }
 
   function refreshSchedule() {
     fetch('/api/schedule', { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
-      .then((plan) => { if (plan) paintUpNext(plan); })
+      .then((plan) => { if (plan) { paintUpNext(plan); paintWheel(plan); } })
       .catch(() => { /* the card keeps the last answer it had */ });
   }
 
+  // A visit is a way INTO the app that holds it. The card and every face of
+  // the drum carry a tile's three attributes, so this hands the element
+  // straight to `launch` — the same path the springboard uses, which means
+  // the already-in-front shortcut and the sign-in ceremony behave identically
+  // wherever she pressed. A visit whose app is not one of the tiles (a
+  // schedule naming a package that is not installed) carries no macro, and
+  // `launch` already refuses those.
+  function openVisitsApp(el) {
+    const target = el.closest('[data-macro]');
+    if (target) launch(target);
+  }
+
   function wireSchedule() {
-    const reveal = document.getElementById('reveal');
-    if (reveal) reveal.addEventListener('click', spin);
+    const wheel = document.getElementById('wheel');
+    if (wheel) wheel.addEventListener('click', (ev) => openVisitsApp(ev.target));
+    const card = document.getElementById('upnext');
+    if (card && card.dataset.macro) {
+      card.addEventListener('click', () => launch(card));
+    }
     const open = document.getElementById('btn-schedule');
     if (open) open.addEventListener('click', () => view('schedule'));
     // Back to Home, in the same place and with the same chevron the screen
     // view puts its way back — one habit rather than two.
     const back = document.getElementById('btn-sched-home');
     if (back) back.addEventListener('click', () => view('launcher'));
+    startWheel();
     setInterval(refreshSchedule, SCHEDULE_EVERY);
   }
 
@@ -1265,6 +1405,22 @@
       fetch('/macro', {
         method: 'POST',
         body: new URLSearchParams({ name: 'check_tasks' }),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        redirect: 'follow'
+      }).catch(() => { awaitingMacro = false; unbusy(); toast(i18n.failed || ''); });
+    });
+    // Back to the app's own first page. A different move from the picker
+    // button beside it, and the answer to "if I click on the wrong patient
+    // then what, I'm stuck?" — the session is alive, the app is just three
+    // screens deep, and reopening it would spend a sign-in for nothing.
+    const appHome = document.getElementById('btn-apphome');
+    if (appHome) appHome.addEventListener('click', () => {
+      if (!driving()) return;
+      awaitingMacro = true;
+      busy(i18n.goingHome || '', 40000);
+      fetch('/macro', {
+        method: 'POST',
+        body: new URLSearchParams({ name: 'app_home' }),
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         redirect: 'follow'
       }).catch(() => { awaitingMacro = false; unbusy(); toast(i18n.failed || ''); });
