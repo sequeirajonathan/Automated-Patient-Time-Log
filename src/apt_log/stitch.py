@@ -57,8 +57,28 @@ def _shift(prev: list[dict], cur: list[dict]) -> float | None:
     # Strictly positive: fixed chrome — a tab bar, a pinned header — shares
     # identity across captures at delta zero, and letting it vote would
     # report a page that never scrolls.
-    deltas = [d for d in deltas if d > 0]
-    return median(deltas) if deltas else None
+    moved = [d for d in deltas if d > 0]
+    if moved:
+        return median(moved)
+    # NO MOVEMENT IS AN ANSWER, AND IT IS NOT THE SAME AS NO IDEA.
+    #
+    # Dropping the zeroes above is right for a scrolling page, and wrong for
+    # a page that did not scroll: there every delta is zero, the list empties,
+    # and this used to answer None — which the caller reads as "assume a full
+    # swipe" and places the whole page again, one swipe further down.
+    #
+    # Watched live on inMyTeam's plan of care, a page that reports itself
+    # unscrollable and is: every one of its items came back twice, the second
+    # copy offset by exactly the nominal swipe, and the two copies interleaved
+    # into each other. The reflow then paired checkboxes with the wrong task
+    # names across the seam and dealt the title bar into the middle of the
+    # list. Reported as "I selected a task, unselected it, and the UI broke".
+    #
+    # So anchors that AGREE the page stayed put now say so. Only a capture
+    # sharing no unique anchor at all is genuinely unknown.
+    if deltas:
+        return 0.0
+    return None
 
 
 # How close two same-identity items must be, on the virtual page, to count
