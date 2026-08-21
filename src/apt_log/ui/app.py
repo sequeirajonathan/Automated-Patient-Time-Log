@@ -325,8 +325,8 @@ def phone_app(request: Request):
             "languages": SUPPORTED,
             "apps": PHONE_APPS,
             "m": model,
-            "plan": _schedule_model(),
-            "arming": _arming_model(),
+            "plan": _schedule_model(t),
+            "arming": _arming_model(t),
             "screen_doc": screen_doc or {},
             "pending": queue.current(),
             "KIND_SIGNATURE": KIND_SIGNATURE,
@@ -637,7 +637,14 @@ def _app_label(package: str) -> str:
     return _app_entry(package).get("name") or package
 
 
-def _a_visit(visit, now) -> dict:
+# Monday-first, matching `date.weekday()` and `schedule.DAYS`. Keys rather
+# than words: `strftime("%A")` answers in the C locale, which is English, and
+# a Spanish page reading "Thursday" is the kind of miss that survives for
+# months because the rest of the sentence around it is translated.
+DAY_KEYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+
+def _a_visit(visit, now, t) -> dict:
     """One visit as the front end needs it.
 
     Times are pre-formatted HERE rather than in the browser, and that is
@@ -666,7 +673,7 @@ def _a_visit(visit, now) -> dict:
         "starts": visit.starts.strftime("%-I:%M %p").lower(),
         "ends": visit.ends.strftime("%-I:%M %p").lower(),
         "fires": visit.fires.strftime("%-I:%M %p").lower(),
-        "day": visit.fires.strftime("%A"),
+        "day": t("day.long.%s" % DAY_KEYS[visit.fires.weekday()]),
         "date": visit.fires.date().isoformat(),
         # The buffer is worth showing, not hiding: it is the one time on the
         # page that is NOT what the app says, and a caregiver who spots the
@@ -676,13 +683,21 @@ def _a_visit(visit, now) -> dict:
         "part": visit.block.part,
         "of": visit.block.of,
         "running": visit.running(now),
+        # The agency's rule for a split visit: enter on the first half, leave
+        # on the last, nothing at the seam. See schedule.Visit.
+        "does_entry": visit.does_entry,
+        "does_exit": visit.does_exit,
+        "entry_at": (visit.entry_at.strftime("%-I:%M %p").lower()
+                     if visit.entry_at else ""),
+        "exit_at": (visit.exit_at.strftime("%-I:%M %p").lower()
+                    if visit.exit_at else ""),
         # Seconds, for a client that wants to count down without re-reading
         # the clock's timezone. Negative once it has fired.
         "in_seconds": int((visit.fires - now).total_seconds()),
     }
 
 
-def _schedule_model() -> dict:
+def _schedule_model(t) -> dict:
     """What the home screen shows, and what /api/schedule answers with.
 
     A schedule that will not parse is reported rather than swallowed. The
@@ -706,16 +721,16 @@ def _schedule_model() -> dict:
         "ok": True,
         "error": "",
         "configured": bool(len(plan)),
-        "current": _a_visit(current, now) if current else None,
-        "next": _a_visit(upcoming[0], now) if upcoming else None,
+        "current": _a_visit(current, now, t) if current else None,
+        "next": _a_visit(upcoming[0], now, t) if upcoming else None,
         # Everything after the next one — what the reveal cycles through and
         # what a caller counting ahead reads.
-        "queue": [_a_visit(v, now) for v in upcoming[1:]],
-        "week": [_a_visit(v, now) for v in week],
+        "queue": [_a_visit(v, now, t) for v in upcoming[1:]],
+        "week": [_a_visit(v, now, t) for v in week],
     }
 
 
-def _arming_model() -> dict:
+def _arming_model(t) -> dict:
     """Every recurring block, with a switch each.
 
     One row per BLOCK, not per occurrence: "arm this patient's Monday
@@ -741,7 +756,7 @@ def _arming_model() -> dict:
             "mark": _app_entry(block.app).get("mark", ""),
             "accent": _app_entry(block.app).get("accent", "#666"),
             "agency": block.agency,
-            "days": [DAY_NAMES[d] for d in sorted(block.days)],
+            "days": [t("day.%s" % DAY_KEYS[d]) for d in sorted(block.days)],
             "start": block.start.strftime("%-I:%M %p").lower(),
             "end": block.end.strftime("%-I:%M %p").lower(),
             "part": block.part,
@@ -750,10 +765,6 @@ def _arming_model() -> dict:
     rows.sort(key=lambda r: (r["patient"], r["start"], r["part"]))
     return {"ok": True, "error": "", "blocks": rows,
             "armed": sum(1 for r in rows if r["armed"])}
-
-
-# Monday-first, matching `date.weekday()` and `schedule.DAYS`.
-DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 
 @app.post("/schedule/arm")
@@ -774,7 +785,7 @@ def schedule_arm(request: Request, key: str = Form(...),
 
 
 @app.get("/api/schedule")
-def api_schedule():
+def api_schedule(request: Request):
     """The round, refreshed without a reload.
 
     The home screen is server-rendered, which is right for the first paint
@@ -783,7 +794,7 @@ def api_schedule():
     than reloading, because a reload would take her out of whatever else she
     was doing on the page.
     """
-    return JSONResponse(_schedule_model())
+    return JSONResponse(_schedule_model(_translator(request)))
 
 
 def _read_json(path, fallback):
@@ -1710,18 +1721,24 @@ def device_action(request: Request, action: str = Form(...)):
 
 
 @app.post("/macro")
-def start_macro(request: Request, name: str = Form(...)):
+def start_macro(request: Request, name: str = Form(...),
+                arg: str = Form("")):
     """Ask the feed process to run a named sequence.
 
     A name from a list, never steps. The list lives in apt_log.macros and the
     page is handed it; a route that accepted a sequence from a browser would be
     arbitrary remote scripting with a friendlier label, and "the portal cannot
     do anything she did not ask for" would become "the client is well-behaved".
+
+    `arg` does not widen that. It reaches only macros that declared they take
+    one — `macros.request` drops it for every other — and the single macro
+    that does uses it to choose between provider rows the app is already
+    drawing. It cannot name a control that is not on screen.
     """
     from apt_log import macros
 
     try:
-        macros.request(name)
+        macros.request(name, arg=arg)
     except KeyError:
         log.warning("unknown macro requested: %r", name)
         return RedirectResponse(url=_back_to(request) + "?macro=unknown",

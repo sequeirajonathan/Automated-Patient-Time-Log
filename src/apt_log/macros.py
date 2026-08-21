@@ -265,6 +265,16 @@ class Macro:
     name: str
     label_key: str          # i18n key; the UI never sees English from here
     run: object             # callable(driver, report) -> None
+    # Whether this macro is handed the request's `arg` as a third parameter.
+    # Opt-in and declared here rather than sniffed from the callable, so that
+    # "this macro takes something from the page" is a fact you can read off
+    # the registry instead of one you have to go and check.
+    #
+    # An arg is NOT a widening of what the page may ask for: the name is
+    # still from the allow-list, and the only macro that takes one uses it to
+    # pick between rows the app itself is displaying. It cannot name a
+    # control that is not on screen.
+    takes_arg: bool = False
 
 
 @dataclass
@@ -2418,6 +2428,177 @@ def _app_home(driver, report) -> None:
     report("macro.step.finished")
 
 
+# ------------------------------------------------------- switching agencies
+# HHAeXchange+ carries more than one agency on one account, and the round
+# crosses between them twice a day. Walked live, and the path is four taps
+# deep with nothing on the way that names itself usefully:
+#
+#   Menú (bottom bar)  →  Agencias (menu_screen_connections)
+#     →  Cambiar proveedor activo (agency_configuration_screen_change_...)
+#       →  the provider picker (OnboardingActivity)
+#
+# Two of those have resource ids, which is what makes this worth automating at
+# all: the bottom bar's Menú does not, so it is found by its words.
+UMA_MENU_WORDS = ("Menú", "Menu")
+UMA_AGENCIES_ID = "menu_screen_connections"
+UMA_CHANGE_ID = "agency_configuration_screen_change_connection_button"
+
+# The word beside whichever provider is currently in use. Read off the live
+# screen — the Agencias page marks the active one, which is how this can skip
+# the whole walk when she is already where she wants to be.
+UMA_ACTIVE_WORDS = ("Activa", "Active")
+
+
+def _uma_agency(driver, report) -> None:
+    """Open HHAeXchange+'s provider picker.
+
+    Stops AT the picker rather than choosing: which agency is wanted is a
+    fact about the visit she pressed, and `uma_agency_for` below is the
+    version that knows one. This one is the plain "let me switch" control.
+    """
+    _walk_to_agency_picker(driver, report)
+    report("macro.step.finished")
+
+
+def _uma_agency_for(driver, report, agency: str) -> None:
+    """Open HHAeXchange+ on a NAMED provider.
+
+    What a visit row presses. The row knows which agency its patient belongs
+    to — the schedule on the device says so — and pressing "Caridad" and then
+    being asked which agency she is with is a question the page could have
+    answered itself.
+
+    THE ARGUMENT CANNOT NAME A CONTROL THAT IS NOT ON SCREEN. It is matched
+    against the provider rows the app itself is drawing, by the same
+    smallest-clickable-containing-the-words rule the sign-in walk uses. An
+    agency that is not on the account finds nothing and this fails, which is
+    the right outcome: better a macro that says it could not than one that
+    presses the other provider.
+
+    It also does nothing at all when that provider is already the active one.
+    Switching to where you are costs a reload of the whole schedule, which is
+    the slowest thing this app does.
+    """
+    from apt_log import feed as feed_mod
+
+    wanted = (agency or "").strip()
+    if not wanted:
+        raise RuntimeError("no agency was named")
+
+    if _already_on(driver, wanted):
+        report("macro.step.finished")
+        return
+
+    _walk_to_agency_picker(driver, report)
+
+    report("macro.step.navigating")
+    # The picker lists providers by their full registered name, which is
+    # longer and punctuated differently from what a schedule file calls them
+    # ("Fatima Home Care" against "Fatima Home Care, Inc. (Fatima Home Care,
+    # Inc.)"). The first couple of words are what they have in common.
+    row = _words(driver, wanted, *wanted.split()[:2])
+    if row is None:
+        raise RuntimeError(f"{wanted} is not one of the providers on screen")
+    row.click()
+    # Deliberately NOT waited on. Choosing a provider starts a reload that
+    # takes the better part of a minute and the activity swaps in five
+    # seconds — a wait long enough to be honest here would outlast the
+    # caller, and the portal's own spinner is what she is looking at.
+    report("macro.step.finished")
+
+
+def _already_on(driver, agency: str) -> bool:
+    """Whether that provider is the active one, read off the Agencias page.
+
+    Only answerable when that page happens to be in front — everywhere else
+    this returns False and the walk runs, which costs a few taps and is the
+    safe way round.
+    """
+    first = (agency.split() or [""])[0]
+    for word in UMA_ACTIVE_WORDS:
+        try:
+            found = driver.find_elements(
+                "xpath",
+                f'//*[contains(@text,"{first}") or contains(@content-desc,"{first}")]'
+                f'/following::*[contains(@text,"{word}")][1]')
+        except Exception:  # noqa: BLE001
+            continue
+        if found:
+            return True
+    return False
+
+
+def _walk_to_agency_picker(driver, report) -> None:
+    from apt_log import feed as feed_mod
+
+    if _front_package() != "com.hhaexchange.uma":
+        driver.activate_app("com.hhaexchange.uma")
+        if not wait_for(lambda: _front_package() == "com.hhaexchange.uma",
+                        timeout=15.0):
+            raise RuntimeError("HHAeXchange+ did not come to the front")
+
+    report("macro.step.navigating")
+    # Already there? The picker IS this app's other front page, and walking a
+    # four-tap route to arrive where we started would be four chances to end
+    # up somewhere else.
+    if feed_mod.screen_for(feed_mod.current_focus() or "", _tree()) == "agency":
+        return
+
+    def press(finder, what):
+        target = finder()
+        if target is None:
+            raise RuntimeError(f"could not find {what}")
+        target.click()
+
+    press(lambda: _words(driver, *UMA_MENU_WORDS), "the menu")
+    time.sleep(BACK_SETTLE)
+    press(lambda: _by_id(driver, UMA_AGENCIES_ID), "Agencias")
+    time.sleep(BACK_SETTLE)
+    press(lambda: _by_id(driver, UMA_CHANGE_ID), "the change-provider button")
+    if not wait_for(
+            lambda: feed_mod.screen_for(feed_mod.current_focus() or "",
+                                        _tree()) == "agency",
+            timeout=20.0):
+        raise RuntimeError("the provider picker did not open")
+
+
+def _by_id(driver, resource_id: str):
+    try:
+        found = [e for e in driver.find_elements(
+            "xpath", f'//*[@resource-id="{resource_id}"'
+                     f' or contains(@resource-id,":id/{resource_id}")]')
+            if e.is_displayed()]
+    except Exception:  # noqa: BLE001
+        return None
+    return found[0] if found else None
+
+
+def _words(driver, *words):
+    """The smallest clickable containing any of these words.
+
+    The same rule `by_words` uses inside the sign-in walk and for the Play
+    Store's Update button, and for the same reason: these apps hang captions
+    on non-clickable children, and the screen's own root contains every word
+    on it. Smallest is what makes it the control rather than the page.
+    """
+    best = None
+    for word in words:
+        try:
+            hits = [e for e in driver.find_elements(
+                "xpath",
+                f'//*[@clickable="true"][contains(@text,"{word}")'
+                f' or contains(@content-desc,"{word}")'
+                f' or .//*[contains(@text,"{word}")'
+                f' or contains(@content-desc,"{word}")]]')
+                if e.is_displayed()]
+        except Exception:  # noqa: BLE001
+            continue
+        for hit in hits:
+            if best is None or _area(hit) < _area(best):
+                best = hit
+    return best
+
+
 def _tree() -> str:
     """The published hierarchy, read from disk rather than from the phone.
 
@@ -2740,6 +2921,9 @@ MACROS: dict[str, Macro] = {
         Macro("restart_app", "macro.restart_app", _restart_app),
         Macro("rescan", "macro.rescan", _rescan),
         Macro("app_home", "macro.app_home", _app_home),
+        Macro("uma_agency", "macro.uma_agency", _uma_agency),
+        Macro("uma_agency_for", "macro.uma_agency", _uma_agency_for,
+              takes_arg=True),
         Macro("clear_screen", "macro.clear_screen", _clear_screen),
         Macro("check_tasks", "macro.check_tasks", _check_tasks),
         Macro("phone_settings", "macro.phone_settings", _phone_settings),
@@ -2935,15 +3119,28 @@ def wants_to_sign_in(doc: dict | None) -> bool:
 
 
 # -------------------------------------------------------------------- request
-def request(name: str, path: Path | None = None) -> str:
-    """Ask for a macro by name. Returns the request id."""
+# How much of an argument is ever carried. Long enough for the longest
+# provider name on the account and short enough that nothing interesting fits.
+ARG_MAX = 120
+
+
+def request(name: str, path: Path | None = None, arg: str = "") -> str:
+    """Ask for a macro by name. Returns the request id.
+
+    `arg` is passed only to macros that declared `takes_arg`, and is dropped
+    for every other one — so adding an argument to a request cannot change
+    what a macro that never wanted one does.
+    """
     if name not in MACROS:
         raise KeyError(name)
+    if not MACROS[name].takes_arg:
+        arg = ""
     target = path or REQUEST_PATH
     rid = uuid.uuid4().hex[:12]
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"id": rid, "name": name, "at": time.time()}),
+    tmp.write_text(json.dumps({"id": rid, "name": name, "at": time.time(),
+                               "arg": str(arg)[:ARG_MAX]}),
                    encoding="utf-8")
     os.replace(tmp, target)
     log.info("macro requested: %s (%s)", name, rid)
@@ -3142,7 +3339,8 @@ class Runner:
                     self.execute_deep_tap(deep)
                 pending = take_request(self._request_path)
                 if pending is not None:
-                    self.execute(pending["name"], pending["id"])
+                    self.execute(pending["name"], pending["id"],
+                                 pending.get("arg", ""))
                 signature = sign.take_request()
                 if signature is not None:
                     sign.execute(signature)
@@ -3438,7 +3636,7 @@ class Runner:
         self.execute(macro_name, f"auto-{uuid.uuid4().hex[:8]}")
         return True
 
-    def execute(self, name: str, rid: str) -> Status:
+    def execute(self, name: str, rid: str, arg: str = "") -> Status:
         from apt_log import resident
         from apt_log.ui import mirror as mirror_mod
 
@@ -3456,7 +3654,10 @@ class Runner:
             mirror_mod.publish(screen="unknown", step="working")
 
         try:
-            resident.run(lambda driver: macro.run(driver, report))
+            if macro.takes_arg:
+                resident.run(lambda driver: macro.run(driver, report, arg))
+            else:
+                resident.run(lambda driver: macro.run(driver, report))
         except Exception as exc:  # noqa: BLE001
             log.warning("macro %s failed: %s", name, exc)
             status.state = "failed"

@@ -261,8 +261,18 @@
              letter-spacing:.06em; text-transform:uppercase;
              color:var(--muted); }
   .dayhead.today { color:var(--accent, #2b6cf6); }
-  .slotrow { display:flex; gap:12px; padding:10px 0;
+  /* A button, because the whole row opens the visit's app. Its own chrome is
+     stood down explicitly — the third time in this file that a <button> left
+     alone painted the user agent's control background over a dark card. */
+  .slotrow { display:flex; gap:12px; padding:12px 0; width:100%;
+             align-items:flex-start; text-align:left;
+             background:none; border:none; color:inherit; font:inherit;
              border-top:1px solid var(--hair, rgba(128,128,128,.22)); }
+  .slotrow:active { background:var(--hair, rgba(128,128,128,.12)); }
+  .slotrow .grow { flex:1; min-width:0; }
+  .slotrow .chip { display:inline-block; font-size:10px; font-weight:700;
+                   border-radius:5px; padding:1px 6px; margin-right:7px;
+                   vertical-align:1px; color:#fff; }
   .slotrow .time { flex:0 0 92px; font-variant-numeric:tabular-nums;
                    font-size:14px; font-weight:600; }
   .slotrow .who { font-size:15px; font-weight:600; }
@@ -1300,7 +1310,8 @@
     <button class="upnext" id="upnext" type="button"
             data-running="{{ '1' if v.running else '0' }}"
             data-package="{{ v.package }}" data-macro="{{ v.macro }}"
-            data-open="{{ v.open }}" data-name="{{ v.app }}">
+            data-open="{{ v.open }}" data-name="{{ v.app }}"
+            data-agency="{{ v.agency }}">
       <div class="cap">
         {%- if v.running %}<span class="live"></span>{{ t('sched.now') }}
         {%- else %}{{ t('sched.upcoming') }}{% endif -%}
@@ -1327,7 +1338,8 @@
             data-package="{{ nxt.package if nxt }}"
             data-macro="{{ nxt.macro if nxt }}"
             data-open="{{ nxt.open if nxt }}"
-            data-name="{{ nxt.app if nxt }}">
+            data-name="{{ nxt.app if nxt }}"
+            data-agency="{{ nxt.agency if nxt }}">
       <span class="cap">{{ t('sched.after_that') }}</span>
       <span class="who">{{ nxt.patient if nxt }}</span>
       <span class="sub">
@@ -1681,17 +1693,29 @@
         {% set ns.day = v.date %}
         <div class="dayhead{{ ' today' if loop.first }}">{{ v.day }}</div>
       {% endif %}
-      <div class="slotrow" data-running="{{ '1' if v.running else '0' }}">
+      {# The whole row opens the visit's app — and for the one app with more
+         than one agency on the account, the agency it belongs to as well. #}
+      <button class="slotrow" type="button"
+              data-running="{{ '1' if v.running else '0' }}"
+              data-package="{{ v.package }}" data-macro="{{ v.macro }}"
+              data-open="{{ v.open }}" data-name="{{ v.app }}"
+              data-agency="{{ v.agency }}">
         <div class="time">{{ v.fires }}</div>
-        <div>
+        <div class="grow">
           <div class="who">{{ v.patient }}
             {%- if v.buffered %} <span class="buffered">+5</span>{% endif -%}
-            {%- if v.of > 1 %} <span class="buffered">{{ v.part }}/{{ v.of }}</span>{% endif -%}
           </div>
-          <div class="meta">{{ t('sched.until', time=v.ends) }} ·
-            {{ v.app }}{% if v.agency %} · {{ v.agency }}{% endif %}</div>
+          <div class="meta">
+            <span class="chip" style="background:{{ v.accent }}">{{ v.mark }}</span
+            >{% if v.does_entry and v.does_exit -%}
+              {{ t('sched.until', time=v.ends) }}
+            {%- elif v.does_entry -%}
+              {{ t('sched.check_in') }}
+            {%- else -%}
+              {{ t('sched.check_out') }} {{ v.exit_at }}
+            {%- endif %}{% if v.agency %} · {{ v.agency }}{% endif %}</div>
         </div>
-      </div>
+      </button>
     {% endfor %}
     {% endif %}
   </div>
