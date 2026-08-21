@@ -71,6 +71,42 @@ class TestTheTravelBuffer:
         assert day[1].fires == at(2026, 6, 15, 6, 5)
         assert day[1].buffered is True
 
+    def test_a_visit_in_a_different_app_is_not_a_drive(self):
+        """CORRECTED AGAINST THE WRITTEN CARDS: "the 5-minute travel buffer
+        applies only to back-to-back visits within the same app. Cross-app
+        transitions can be scheduled at the exact same clock time with no
+        buffer."
+
+        Weekday mornings are the case — one patient's visit ends at six and
+        another's begins at six, and the check-out and the check-in happen in
+        two different systems, so there is nothing to wait for. Both are
+        entered at six, exactly as the cards say. The buffer had been adding
+        five minutes to a visit that has to go in on the hour.
+        """
+        day = built(visit("Ada", "05:00", "06:00", app="app.one"),
+                    visit("Bea", "06:00", "09:00", app="app.two")).on(MONDAY)
+        bea = next(v for v in day if v.patient == "Bea")
+        assert bea.fires == at(2026, 6, 15, 6)
+        assert bea.buffered is False
+
+    def test_but_the_same_app_still_is(self):
+        """The rule narrowed; it did not go away. Two visits in one app back
+        to back are still a drive between two homes."""
+        day = built(visit("Ada", "05:00", "06:00", app="app.one"),
+                    visit("Bea", "06:00", "09:00", app="app.one")).on(MONDAY)
+        bea = next(v for v in day if v.patient == "Bea")
+        assert bea.fires == at(2026, 6, 15, 6, 5)
+        assert bea.buffered is True
+
+    def test_and_one_app_agreeing_does_not_excuse_another(self):
+        """Three visits ending at the same minute, one of them in this app.
+        The drive is real whatever else happens to end then."""
+        day = built(visit("Ada", "05:00", "06:00", app="app.two"),
+                    visit("Cyd", "05:30", "06:00", app="app.one"),
+                    visit("Bea", "06:00", "09:00", app="app.one")).on(MONDAY)
+        bea = next(v for v in day if v.patient == "Bea")
+        assert bea.fires == at(2026, 6, 15, 6, 5)
+
     def test_the_buffer_moves_the_start_and_not_the_end(self):
         """The agency's visit is still three hours long. Only the machine's
         moment of acting moved."""
