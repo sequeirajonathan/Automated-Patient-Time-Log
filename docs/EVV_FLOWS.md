@@ -195,42 +195,54 @@ message, so the open-only macro is the right one for a walk).
 **This app is in English on this device** while the other two are in Spanish. Any word
 matching here has to allow for both anyway, but the default is not the same.
 
-### The visit detail lies about its own record, and the list card is the truth
+### Which screen actually knows whether a visit happened
 
-**Read this before trusting anything this app says about whether a visit happened.**
+**Read this before trusting anything this app says about whether a visit happened.
+Three of its screens answer that question and only one of them is right.**
 
-The **Visit Detail** page carries a line that reads *"No check in and check out data
-has been recorded"* — and it does not stop saying that when a record exists. Checked
-live on 2026-08-21, on a visit the caregiver had checked in **and** out that morning:
+`My Work` → **Checks** is the record. Everything else is a partial view of it.
 
-* The detail said no data was recorded, and drew **both `Check in` and
-  `Note & Check out` as live controls**.
-* It went on saying it after the app's own **Refresh**, and again after a
-  **force-stop and cold relaunch** — so it is not a stale render this end can clear.
-* The **list card for the same visit** carried **two check marks**, bottom-right.
+Established live on 2026-08-21, on one visit that ended up carrying four events —
+the caregiver's real `Check in 05:00 AM` and `Check out 06:00 AM` from her own phone,
+and two accidental check-ins made from this device at `09:54` and `10:00`:
 
-The card is the one that is right. The control that settles it: **tomorrow's card for
-the same patient — a visit that has not happened — has the note icon and no check
-marks at all.** The marks appear only where a record exists, and the pair is
-check-in and check-out.
+| Screen | What it showed | What it is |
+| --- | --- | --- |
+| `My Work` → **Checks**, dated to the day | all four events, as plain `TextView` text | **the server's record** |
+| Visit Detail, "Your activity on this patient" | only the two made **on this device** | a **per-device** log |
+| Visit Detail, before this device had any | *"No check in and check out data has been recorded"* | the same per-device log, empty |
+| The list card | two check marks | the server, but drawn as pixels |
+| `My Work` → **Visits**, same day, same range | nothing at all | unexplained; do not rely on it |
+| `Past Visits` | *"Sorry, there is no information"* | *past days*, not *completed visits* |
 
-`Past Visits` is no help either. It stays empty — *"Sorry, there is no information"* —
-for a visit worked this morning, because that bucket means *past days*, not
-*completed visits*. Today's visit lives in Today until the day rolls over.
+**The Visit Detail's activity list is device-local, and that is the trap.** It is not
+a stale render: it still omitted the caregiver's two events after the app's own
+Refresh and after a **force-stop and cold relaunch**, at the same moment `My Work` →
+Checks listed all four. A device that has never checked this patient in will say
+nothing was ever recorded, however much was.
 
 Two things follow, and the second is the one with teeth:
 
-* **Do not conclude "nothing was recorded" from the detail page**, and do not go
-  hunting for an account mismatch on the strength of it. This document previously
-  drew exactly that conclusion from exactly that line, and it was wrong: the signed-in
-  identity is a bare number with no name set (`INMYTEAM_PHONE`, shown in the drawer
-  header and My Profile), the caregiver works the same account from her own phone, and
-  her check-in was on this device the whole time — under two marks nothing could read.
-* **A fire could double-enter.** `_evv_entry` looks for the `Check in` control and
-  presses it, and this app draws that control on a visit already checked in. Nothing
-  in the walk currently reads the marks, because nothing *can* — see below. Until
-  something does, arming this app means accepting that a visit the caregiver has
-  already entered by hand can be entered again fifteen minutes later.
+* **Never conclude "nothing was recorded" from the Visit Detail**, and never go hunting
+  for an account mismatch on the strength of it. This document previously drew exactly
+  that conclusion from exactly that line and it was wrong. The signed-in identity is a
+  bare number with no name set (`INMYTEAM_PHONE`, in the drawer header and My Profile),
+  the caregiver works **the same account** from her own phone, and her check-in was
+  reachable from this device the whole time — one screen further in.
+* **A fire can double-enter, and has.** `_evv_entry` looks for the `Check in` control
+  and presses it, and this app draws that control on a visit already checked in *and
+  checked out*, accepts the press, and answers `Success`. That is how one 05:00–06:00
+  visit came to hold two extra check-ins four hours after it ended.
+
+The guard is available and it is text: walk to `My Work`, set both date fields to the
+day, press `SEARCH`, open **Checks**, and read the lines under the patient. They are
+ordinary `TextView`s reading `Check in HH:MM AM` / `Check out HH:MM AM` — no pixels
+involved. A visit whose patient already carries a `Check in` for the day must not be
+fired.
+
+**What to tell the caregiver:** her history is under `My Work` → **Checks**, not
+`My Work` → Visits and not `Past Visits`. Both of those read empty for work she has
+genuinely done, which is why she reports having no record of her own day.
 
 ### The check marks are pixels, not nodes
 
@@ -243,8 +255,11 @@ Confirmed against the raw tree, not just the reflow.
 This is not the case `screenview.IMAGE_MARKS` handles. That one works because the
 **legacy** HHAeXchange list draws its ticks as real `ImageView`s under `imgstarttime`
 and `imgendtime`, which is exactly what makes them nameable. inMyTeam gives a reader
-nothing to hold, so the portal cannot show the caregiver whether a visit is done, and
-the walk cannot check before it presses.
+nothing to hold, so the portal cannot show the caregiver whether a visit is done from
+this screen.
+
+That is a rendering gap, not a blocker: the same fact is written in words one screen
+away, under `My Work` → Checks. Read it there rather than reaching for the pixels.
 
 Anything that changes this has to come off the screenshot, which runs straight into
 the decision recorded in "Remove pixel dependencies before the new device arrives".
