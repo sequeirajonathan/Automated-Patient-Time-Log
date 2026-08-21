@@ -962,3 +962,161 @@ class TestTheAppFetchesTodayBeforeAnythingIsPressed:
                     # happened, which is what this is watching.
                     pass
             assert up.call_count == expect_bring_up
+
+
+class TestNotEnteringAVisitSomebodyAlreadyEntered:
+    """THIS HAPPENED. On 2026-08-21 a 05:00-06:00 visit the caregiver had
+    checked in and out from her own handset collected two more check-ins from
+    the controller's phone, at 09:54 and 10:00, four hours after it ended.
+
+    Nothing stopped it because the screen the walk reads is the wrong one.
+    The Visit Detail's "Your activity on this patient" is a PER-DEVICE log —
+    it survived a force-stop and cold relaunch still omitting her two events,
+    at the same moment `My Work` -> Checks listed all four — so a phone that
+    has never checked a patient in shows an empty record and a live `Check
+    in`, and this app accepts the press and answers "Success".
+    """
+
+    def _log(self, macros, monkeypatch, lines, patient="Carmen Villalon"):
+        """The Checks tab, answered without a phone."""
+        rows = [{"txt": "HOME CARE ON CALL, LLC", "b": [0, 300, 700, 318]},
+                {"txt": patient, "b": [0, 330, 700, 346]}]
+        rows += [{"txt": w, "b": [0, 392 + i * 18, 700, 408 + i * 18]}
+                 for i, w in enumerate(lines)]
+        from apt_log import feed as feed_mod
+        monkeypatch.setattr(feed_mod, "statics", lambda _x: list(rows))
+        monkeypatch.setattr(macros, "_open_my_work", lambda d, r: True)
+        monkeypatch.setattr(macros.time, "sleep", lambda _s: None)
+        clicked = []
+        monkeypatch.setattr(macros, "_words",
+                            lambda d, *w: type("E", (), {
+                                "click": lambda self: clicked.append(w[0])})())
+        today = macros.datetime.now().astimezone().strftime("%Y-%m-%d")
+        return type("D", (), {"page_source": f"<x>{today}</x>"})()
+
+    def test_it_reads_the_days_events_for_the_patient(self, monkeypatch):
+        from apt_log import macros
+
+        driver = self._log(macros, monkeypatch,
+                           ["Check in 05:00 AM", "Check out 06:00 AM"])
+        got = macros._todays_check_events(driver, lambda _s: None,
+                                          "Carmen Villalon")
+        assert got == ["Check in 05:00 AM", "Check out 06:00 AM"]
+
+    def test_a_clear_day_reads_as_clear(self, monkeypatch):
+        from apt_log import macros
+
+        driver = self._log(macros, monkeypatch, [], patient="Someone Else")
+        assert macros._todays_check_events(driver, lambda _s: None,
+                                           "Carmen Villalon") == []
+
+    def test_a_log_it_cannot_reach_is_an_error_not_an_empty_day(
+            self, monkeypatch):
+        """"I could not look" and "there is nothing there" are the same shape
+        and opposite meanings, and a live agency record turns on which."""
+        import pytest
+        from apt_log import macros
+
+        driver = self._log(macros, monkeypatch, ["Check in 05:00 AM"])
+        monkeypatch.setattr(macros, "_open_my_work", lambda d, r: False)
+        with pytest.raises(RuntimeError):
+            macros._todays_check_events(driver, lambda _s: None, "Carmen Villalon")
+
+    def test_a_log_showing_another_day_is_an_error_too(self, monkeypatch):
+        """A range left over from another search answers a different question
+        in exactly the same words."""
+        import pytest
+        from apt_log import macros
+
+        driver = self._log(macros, monkeypatch, ["Check in 05:00 AM"])
+        driver.page_source = "<x>1999-01-01</x>"
+        with pytest.raises(RuntimeError):
+            macros._todays_check_events(driver, lambda _s: None, "Carmen Villalon")
+
+    def test_the_checks_tab_is_opened_before_the_search_is_run(
+            self, monkeypatch):
+        """THE ORDER MATTERS AND IT IS NOT THE OBVIOUS ONE. The Visits tab
+        returns nothing for a day whose Checks tab has four events, so a
+        search run on the tab that opens comes back empty and looks exactly
+        like a day with no work on it."""
+        from apt_log import macros
+
+        order = []
+        driver = self._log(macros, monkeypatch, ["Check in 05:00 AM"])
+        monkeypatch.setattr(macros, "_words",
+                            lambda d, *w: type("E", (), {
+                                "click": lambda self: order.append(w[0])})())
+        macros._todays_check_events(driver, lambda _s: None, "Carmen Villalon")
+        assert order.index(macros.CHECKS_TAB_WORDS[0]) \
+            < order.index(macros.SEARCH_WORDS[0])
+
+    def test_an_existing_check_in_is_named(self, monkeypatch):
+        from apt_log import macros
+
+        driver = self._log(macros, monkeypatch,
+                           ["Check in 05:00 AM", "Check out 06:00 AM"])
+        assert macros._already_entered(driver, lambda _s: None,
+                                       "com.inmyteam.inmyteam",
+                                       "Carmen Villalon") == "Check in 05:00 AM"
+
+    def test_an_app_whose_log_is_not_walked_is_not_thereby_cleared(
+            self, monkeypatch):
+        """It answers "" because it has no way to know — which is why the
+        caller gets a string and not a bool. Only the apps named in
+        CHECK_LOG_APPS can give evidence either way."""
+        from apt_log import macros
+
+        assert "com.inmyteam.inmyteam" in macros.CHECK_LOG_APPS
+        assert "com.hhaexchange.uma" not in macros.CHECK_LOG_APPS
+        looked = []
+        monkeypatch.setattr(macros, "_todays_check_events",
+                            lambda *a: looked.append(1) or [])
+        assert macros._already_entered(object(), lambda _s: None,
+                                       "com.hhaexchange.uma", "Ada") == ""
+        assert looked == []
+
+    def test_the_fire_refuses_a_visit_that_is_already_checked_in(self):
+        """And refuses BEFORE the visit is opened, because the visit's own
+        page is the one that lies."""
+        from unittest.mock import patch
+        import pytest
+        from apt_log import macros
+
+        with patch.object(macros, "_freshen", return_value=True), \
+             patch.object(macros, "grant_location"), \
+             patch.object(macros, "_already_entered",
+                          return_value="Check in 05:00 AM"), \
+             patch.object(macros, "_open_todays_visit") as opened, \
+             patch.object(macros, "_words") as pressed:
+            with pytest.raises(RuntimeError, match="already checked in"):
+                macros._evv_entry(object(), lambda _s: None,
+                                  macros._evv_arg("com.inmyteam.inmyteam",
+                                                  "Ada"))
+        assert opened.call_count == 0
+        assert pressed.call_count == 0
+
+    def test_and_goes_ahead_on_a_clear_day(self):
+        from unittest.mock import patch
+        from apt_log import macros
+
+        with patch.object(macros, "_freshen", return_value=True), \
+             patch.object(macros, "grant_location"), \
+             patch.object(macros, "_already_entered", return_value=""), \
+             patch.object(macros, "_open_todays_visit") as opened, \
+             patch.object(macros, "_words", return_value=None):
+            try:
+                macros._evv_entry(object(), lambda _s: None,
+                                  macros._evv_arg("com.inmyteam.inmyteam",
+                                                  "Ada"))
+            except RuntimeError:
+                pass        # no control on the stubbed screen; it got there
+        assert opened.call_count == 1
+
+    def test_the_screen_is_reachable_as_a_macro_of_its_own(self):
+        """Four presses deep behind a drawer, a tab that is not the one that
+        opens, and a Search that must come after the tab. Reaching it by hand
+        while an entry is being watched is not a reasonable ask."""
+        from apt_log import macros
+
+        assert "evv_checks" in macros.MACROS
+        assert macros.MACROS["evv_checks"].takes_arg
