@@ -838,3 +838,127 @@ class TestGettingToTheVisitBeforePressingAnything:
              patch.object(macros.time, "sleep"):
             assert macros._find_visit_row(object(), lambda _s: None,
                                           "com.inmyteam.inmyteam", "Ada") is None
+
+
+class TestTheAppFetchesTodayBeforeAnythingIsPressed:
+    """A SECOND WAY THE WALK COULD ARRIVE AT THE WRONG DAY, and this one no
+    amount of navigation fixes.
+
+    `_bring_up` returns the moment the right package is in front, and an app
+    that has been in front since yesterday is still in front today, holding
+    the list it fetched then. So the walk can reach a correctly-named screen
+    and every check after it — the day check included — reads stale data.
+
+    A force-stop is the only lever that an app cannot ignore. Pressing the
+    app's own Refresh only re-renders what it already holds.
+    """
+
+    def _stub(self, macros, front, monkeypatch):
+        """Everything a cold start touches, replaced by something watchable."""
+        calls = {"stopped": [], "launched": []}
+        monkeypatch.setattr(macros, "_force_stop",
+                            lambda p: calls["stopped"].append(p))
+        monkeypatch.setattr(macros, "_forget_stitched", lambda p: None)
+        monkeypatch.setattr(macros, "wake_display", lambda: None)
+        monkeypatch.setattr(macros, "_front_package", lambda: front)
+        monkeypatch.setattr(macros.time, "sleep", lambda _s: None)
+        monkeypatch.setattr(macros, "wait_for",
+                            lambda check, timeout=0.0: check())
+        from apt_log import feed as feed_mod
+        monkeypatch.setattr(feed_mod, "_adb",
+                            lambda argv: calls["launched"].append(argv))
+        macros._freshened.clear()
+        return calls
+
+    def test_it_kills_the_app_and_brings_it_back(self, monkeypatch):
+        from apt_log import macros
+
+        pkg = "com.inmyteam.inmyteam"
+        calls = self._stub(macros, pkg, monkeypatch)
+        assert macros._freshen(object(), lambda _s: None, pkg) is True
+        assert calls["stopped"] == [pkg]
+        # Through the launcher intent, never the driver: after a force-stop
+        # the driver's handle on the app is stale.
+        assert any(pkg in argv for argv in calls["launched"])
+
+    def test_an_app_that_does_not_come_back_is_a_failure(self, monkeypatch):
+        import pytest
+        from apt_log import macros
+
+        pkg = "com.inmyteam.inmyteam"
+        self._stub(macros, "com.android.launcher", monkeypatch)
+        with pytest.raises(RuntimeError):
+            macros._freshen(object(), lambda _s: None, pkg)
+
+    def test_a_recent_cold_start_is_not_repeated(self, monkeypatch):
+        """What lets the fire skip the cost the lead window already paid."""
+        from apt_log import macros
+
+        pkg = "com.inmyteam.inmyteam"
+        calls = self._stub(macros, pkg, monkeypatch)
+        macros._freshen(object(), lambda _s: None, pkg)
+        again = macros._freshen(object(), lambda _s: None, pkg,
+                                max_age=macros.FRESH_FOR)
+        assert again is False
+        assert calls["stopped"] == [pkg]
+
+    def test_but_a_stale_one_is(self, monkeypatch):
+        """An app last fetched yesterday is exactly the case this exists for."""
+        import time as real_time
+        from apt_log import macros
+
+        pkg = "com.inmyteam.inmyteam"
+        calls = self._stub(macros, pkg, monkeypatch)
+        macros._freshened[pkg] = real_time.time() - macros.FRESH_FOR - 1
+        assert macros._freshen(object(), lambda _s: None, pkg,
+                               max_age=macros.FRESH_FOR) is True
+        assert calls["stopped"] == [pkg]
+
+    def test_the_ceiling_covers_the_lead_window_with_room_to_spare(self):
+        """FRESH_FOR has to outlast the gap between getting ready and firing,
+        or the fire pays for a restart it does not need — at the one moment
+        in the day when twenty seconds are worth something."""
+        from apt_log import macros
+
+        assert macros.FRESH_FOR > 15 * 60
+
+    def test_the_lead_window_always_starts_from_cold(self, monkeypatch):
+        """Fifteen minutes of slack is what the lead window is FOR."""
+        from unittest.mock import patch
+        from apt_log import macros
+
+        seen = {}
+
+        def spy(driver, report, package, max_age=0.0):
+            seen["max_age"] = max_age
+            return True
+
+        with patch.object(macros, "_freshen", spy), \
+             patch.object(macros, "_open_todays_visit"):
+            macros._evv_prepare(object(), lambda _s: None,
+                                macros._evv_arg("com.inmyteam.inmyteam", "Ada"))
+        assert seen["max_age"] == 0.0
+
+    def test_the_fire_starts_from_cold_only_when_nothing_else_has(
+            self, monkeypatch):
+        """The lead window failing is the case that made this matter: a fire
+        whose app has not been touched since yesterday must not press
+        against yesterday's list."""
+        from unittest.mock import patch
+        from apt_log import macros
+
+        for freshened, expect_bring_up in ((True, 0), (False, 1)):
+            with patch.object(macros, "_freshen", return_value=freshened), \
+                 patch.object(macros, "_bring_up") as up, \
+                 patch.object(macros, "grant_location"), \
+                 patch.object(macros, "_open_todays_visit"), \
+                 patch.object(macros, "_words", return_value=None):
+                try:
+                    macros._evv_entry(
+                        object(), lambda _s: None,
+                        macros._evv_arg("com.inmyteam.inmyteam", "Ada"))
+                except RuntimeError:
+                    # No control on the stubbed screen; the launch already
+                    # happened, which is what this is watching.
+                    pass
+            assert up.call_count == expect_bring_up
