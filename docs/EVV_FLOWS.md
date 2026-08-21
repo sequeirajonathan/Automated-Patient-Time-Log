@@ -113,18 +113,61 @@ Not yet measured across a cold start. The arm lead stays at the default until it
 
 ## HHAeXchange+ (Exchange+) — `com.hhaexchange.uma`
 
-Not yet walked for check-in. What is already known from earlier work in this repo:
+Walked 2026-08-20 as far as the schedule. The check-in control itself is still
+unobserved — see the end of this section.
 
-- Multi-agency. The agency picker is mapped (`screens/agency.py`, and `feed.py` treats
-  the picker as its own screen rather than as "startup").
-- After an agency is chosen the app must be **left loading until today's schedule
-  expands** before anything can be read.
-- The schedule's visit cards fold their details behind an accordion, and `macros.py`
-  already opens them (`EXPAND_APPS`).
-- The check-in control is reported as **`registro de entrada`**.
+### The two screens before any patient
 
-Still to observe: the navigation path to a named patient, whether a GPS confirmation
-step precedes submission, the status vocabulary, and load time from cold.
+`OnboardingActivity` holds the **agency picker**: "Seleccionar un proveedor" and one row
+per agency on the account. `feed.screen_for` already calls this `agency` rather than
+`startup`, from the words on the page — the activity cannot tell the two apart.
+
+Choosing one moves to `HomeActivity`, and this is where the app's reputation for being
+slow comes from. Measured: the **activity** swaps within five seconds and the schedule
+is not on it. The list arrives later. Nothing should read this screen — or decide the
+app is broken — until the visit rows are actually present.
+
+### The schedule
+
+`HomeActivity`, `screen_for` → `home`. Several days at once, each under a date heading,
+each visit a collapsed accordion ("Contraído"). Known controls:
+
+```
+schedule_screen_visit_search              find a patient by name
+schedule_screen_create_unscheduled_visit  "Iniciar visita no programada"
+help_button
+```
+
+A bottom bar carries **Programación** / **Pacientes** / **Menú**.
+
+Each visit row prints the patient and the app's own scheduled window, so — as with
+Mobile Caregiver+ — the times can be read rather than assumed, and a patient can be
+found by name rather than by position. `macros.EXPAND_APPS` already opens the
+accordions.
+
+### Back leaves the app, and that is not a metaphor
+
+Walked live: **Back from the schedule landed in the Play Store**, because that was the
+app used before it. This is the reported complaint reproduced exactly — "the back button
+even takes me to the previous app I was on" — and it is Android popping the task stack,
+not the app misbehaving.
+
+### The Custom Tab counts as the app
+
+HHAeXchange+ signs in through a **Chrome Custom Tab**, so during that form the
+foreground package is `com.android.chrome` while the app is, to anyone holding the
+phone, still the app. Resuming the app can land straight back on a pending tab.
+
+`macros.WEB_FLOW_HOST` records this, and `_app_home` treats Chrome as inside the app for
+this package. Found the hard way: without it the walk read Chrome as "you have left",
+activated the app — which resumed onto the same tab — and reported success from inside
+a browser.
+
+### Still to observe
+
+The navigation path from a visit row to the check-in control, the **`registro de
+entrada`** button itself, whether a GPS confirmation precedes submission, and the status
+vocabulary the rows use.
 
 ---
 
@@ -186,10 +229,26 @@ It is live in the app now, on a future visit that has not happened yet, so it is
 stale render.
 
 **Design consequence.** Where an app publishes its own scheduled window — Mobile
-Caregiver+ does, in every row's `content-desc` — that is the authority, and a config
-file should be reconciled against it rather than trusted over it. The config's job is
-the part no app knows: the travel buffer between two different patients' homes, which
-exists nowhere but in the caregiver's day.
+Caregiver+ does in every row's `content-desc`, HHAeXchange+ prints it on the row — that
+is the authority, and a config file should be reconciled against it rather than trusted
+over it. The config's job is the part no app knows: the travel buffer between two
+different patients' homes, which exists nowhere but in the caregiver's day.
+
+**Both apps were then read, and the written schedule was wrong about two people.** One
+patient's Thursday/Friday window is an hour earlier than the rest of her week in one
+app; another's is an hour earlier in the other app, and her Monday-to-Wednesday time was
+five minutes out on every day besides. The written schedule had treated the first of
+those as a display error that had since been corrected — a conclusion that rested on the
+second patient's times being uniform, which they are not.
+
+The device's `/etc/aptlog/schedule.json` was corrected from what the two apps say. The
+travel buffer still falls out of the rule rather than being written in: on Saturday one
+visit ends at 8:00 and the next is scheduled for 8:00, so it fires at 8:05.
+
+**One conflict is left standing, because it is the agency's to resolve and not this
+project's.** On Thursday and Friday two visits overlap by fifty minutes across two
+different apps and two different homes. Both are printed by their own app. Nothing here
+can make a caregiver be in two places, and inventing a resolution would hide it.
 
 ---
 
