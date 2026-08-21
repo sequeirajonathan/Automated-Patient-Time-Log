@@ -2908,6 +2908,18 @@ EVV_STARTED_WORDS = {
 # app telling us the visit is not actionable.
 NOT_TODAY_WORDS = ("not scheduled for today", "no está programada para hoy")
 
+# WHAT THE APP SAYS WHEN THE MINUTE IS WRONG, and it is worth knowing that
+# asking costs something: watched live, a check-in pressed outside the visit's
+# window put "Failed  Check in 11:55 PM" on the patient's own record and
+# raised "Warning! / Invalid time". So a premature press is not a harmless
+# no-op — it writes a failure onto somebody's chart.
+#
+# The guards above are what stop that happening from a timer: the visit is
+# only reached inside its own window, and the not-today check runs before
+# anything is pressed. This pair is the backstop, so a refusal is REPORTED as
+# a refusal rather than timing out as "the screen did not confirm".
+INVALID_TIME_WORDS = ("invalid time", "hora inválida", "hora invalida")
+
 EVV_SETTLE = 1.2
 
 
@@ -3147,6 +3159,13 @@ def _evv_entry(driver, report, arg: str) -> None:
     # `Check in` is what asks for the fix, so the dialog lands between the
     # press and the confirmation rather than before either.
     _answer_the_permission_dialog(driver, report)
+
+    # The app's own refusal, named. Read before the confirmation wait so it
+    # comes back as "the app refused the time" instead of twelve seconds of
+    # silence and "the screen did not confirm the check-in".
+    after = driver.page_source or ""
+    if any(w in after.lower() for w in INVALID_TIME_WORDS):
+        raise RuntimeError("the app refused the time")
 
     # VERIFY, because "the tap was accepted" is not "the visit started". The
     # cost of believing a tap that did not take is a shift with no check-in

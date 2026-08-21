@@ -2306,3 +2306,116 @@ class TestAndroidsPermissionPrompt:
         words = [(i.get("txt") or "") for r in model["rows"]
                  for i in (r.get("items") or [])]
         assert "Underneath" in words
+
+
+class TestAModalTheAppRaised:
+    """inMyTeam answers a check-in outside the visit's window with a small
+    centred box — "Warning! / Invalid time / Accept" — and the portal drew a
+    page with almost nothing on it: not the warning, not the patient, not the
+    time, not the address, and not the "Failed  Check in 11:55 PM" the app had
+    just written.
+
+    A dialog is its own WINDOW and the dump lists it BEFORE the activity
+    behind it. The overlay rule reads document order as z-order — right for a
+    surface an app slides over its own page, wrong for two windows — so the
+    activity looked like a curtain that had arrived over the dialog and
+    everything "beneath" it was thrown away. The dialog was on top all along.
+
+    Rebuilt from the live capture, 2026-08-21.
+    """
+
+    def _doc(self):
+        return doc(
+            size=[720, 1600],
+            elements=[
+                el("", "View", [275, 839, 446, 874]),           # Accept
+                el("", "ImageButton", [5, 64, 42, 106], "Navigate up"),
+                el("", "View", [0, 106, 720, 1561]),            # the activity
+                el("", "Button", [16, 296, 48, 328]),
+            ],
+            statics=[
+                st([320, 755, 400, 778], "Warning!"),
+                st([331, 781, 389, 794], "Invalid time"),
+                st([339, 849, 382, 864], "Accept"),
+                st([52, 76, 119, 94], "Visit Detail"),
+                st([19, 261, 454, 277], "Ada Farthingale"),
+                st([52, 296, 167, 328], "05:00 AM | 06:00 AM PCA (1 H)"),
+                st([39, 440, 71, 454], "Failed"),
+                st([100, 440, 196, 456], "Check in 11:55 PM"),
+            ])
+
+    def _model(self):
+        return screenview.build(self._doc())
+
+    def _words(self, m):
+        out = []
+        for row in m["rows"]:
+            for item in row.get("items") or []:
+                out.append((item.get("txt") or "").strip())
+                out.extend(l.strip() for l in (item.get("lines") or []))
+        return out
+
+    def test_the_alert_is_recognised(self):
+        a = self._model()["alert"]
+        assert a is not None
+        assert a["title"] == "Warning!"
+        assert a["lines"] == ["Invalid time"]
+        assert a["action"]["txt"] == "Accept"
+
+    def test_the_page_underneath_comes_back(self):
+        """THE HALF THAT MATTERED. All of this was being dropped."""
+        words = self._words(self._model())
+        for expected in ("Ada Farthingale", "05:00 AM | 06:00 AM PCA (1 H)",
+                         "Failed", "Check in 11:55 PM"):
+            assert expected in words, expected
+
+    def test_the_alert_is_not_also_scattered_through_the_page(self):
+        words = self._words(self._model())
+        assert "Warning!" not in words
+        assert "Invalid time" not in words
+        assert "Accept" not in words
+
+    def test_the_action_carries_a_real_aim(self):
+        aim = self._model()["alert"]["action"]["aim"]
+        assert aim["b"] == [275, 839, 446, 874]
+
+    def test_an_ordinary_page_raises_no_alert(self):
+        m = screenview.build(doc(
+            elements=[el("go", "Button", [10, 600, 700, 660], "Entrar")],
+            statics=[st([10, 300, 700, 340], "Bienvenida")]))
+        assert m["alert"] is None
+
+    def test_a_lone_ok_button_with_no_message_is_not_an_alert(self):
+        """Without the message above it this would claim any small OK-ish
+        button on an ordinary form."""
+        m = screenview.build(doc(
+            elements=[el("", "View", [275, 839, 446, 874])],
+            statics=[st([339, 849, 382, 864], "Accept")]))
+        assert m["alert"] is None
+
+
+class TestTheAppsOwnBackNeverRidesInTheList:
+    """Suppressing it in the title bar was only ever half the rule. It is a
+    duplicate of the pill's Back whether or not a nav bar was recognised, and
+    on a page where none was it fell into the LIST — a full-width row reading
+    "Navigate up", three inches from a Back that does the same thing."""
+
+    def test_it_is_gone_from_a_page_with_no_nav_bar(self):
+        m = screenview.build(doc(
+            size=[720, 1600],
+            elements=[el("", "ImageButton", [5, 700, 42, 742], "Navigate up"),
+                      el("go", "Button", [10, 900, 700, 960], "Entrar")],
+            statics=[]))
+        words = [(i.get("txt") or "") for r in m["rows"]
+                 for i in (r.get("items") or [])]
+        assert "Navigate up" not in words
+        assert "Entrar" in words
+
+    def test_and_still_gone_when_a_nav_bar_is_recognised(self):
+        m = screenview.build(doc(
+            elements=[el("", "ImageButton", [5, 64, 42, 106], "Navigate up")],
+            statics=[st([52, 76, 119, 94], "Visit Detail")]))
+        assert m["nav"]["back"] is None
+        words = [(i.get("txt") or "") for r in m["rows"]
+                 for i in (r.get("items") or [])]
+        assert "Navigate up" not in words

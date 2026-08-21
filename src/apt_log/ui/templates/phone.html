@@ -867,6 +867,21 @@
                        font-weight:600; color:var(--muted); text-align:right;
                        max-width:38%; }
 
+  /* A MODAL THE APP RAISED. Amber rather than the card's own grey: this is
+     the app refusing something, and it is the only thing on the page that
+     can be acted on until it is dismissed. */
+  .a-modal { background:var(--card); border-radius:18px; padding:16px;
+             margin:4px 4px 12px; box-shadow:var(--shadow-card);
+             border-left:4px solid #d68a00; }
+  .a-modal-t { margin:0; font-size:16px; font-weight:700; color:var(--fg); }
+  .a-modal-l { margin:6px 0 0; font-size:14px; line-height:1.4;
+               color:var(--muted); }
+  .a-modal-go { margin-top:14px; width:100%; border:none; border-radius:13px;
+                padding:13px; font-size:15px; font-weight:600; cursor:pointer;
+                background:var(--tint); color:#fff;
+                transition:transform .15s var(--spring); }
+  .a-modal-go:active { transform:scale(.97); }
+
   /* ANDROID'S PERMISSION PROMPT. Every button here gets a rule of its own:
      an unstyled <button> paints the user-agent's control chrome, which this
      page has been bitten by three times. */
