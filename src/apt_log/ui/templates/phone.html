@@ -1360,6 +1360,16 @@
         <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor"
              stroke-width="2.4"><path d="M15 5 L8 12 L15 19"/></svg>
         {{ t('papp.apps') }}</button>
+      {# The way back to the app's OWN first page, which is a different move
+         from the way back to the picker beside it. Reported as the thing that
+         made a wrong tap feel like a dead end — reopening the app worked and
+         cost a sign-in nobody needed, because the session had been alive the
+         whole time and the app was simply three screens deep. #}
+      <button id="btn-apphome" aria-label="{{ t('papp.app_home') }}">
+        <svg class="tool" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"
+          ><path d="M4 11.5 12 4.5l8 7"/><path d="M6 10.5V19h12v-8.5"/></svg>
+      </button>
       <span class="spacer"></span>
       {# Only on a plan of care with something still unticked. A control that
          is always there and usually does nothing is a control pressed at the
@@ -1717,6 +1727,7 @@
     resending: {{ t('papp.resending')|tojson }},
     updating: {{ t('papp.updating')|tojson }},
     checkingTasks: {{ t('macro.step.checking')|tojson }},
+    goingHome: {{ t('papp.app_home')|tojson }},
     coachOn:   {{ t('papp.coach_on')|tojson }},
     coachOff:  {{ t('papp.coach_off')|tojson }},
     coachHeld: {{ t('papp.coach_held')|tojson }},

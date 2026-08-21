@@ -2319,6 +2319,92 @@ def _restart_app(driver, report) -> None:
         raise RuntimeError("the app did not come back")
 
 
+# An app's own front page, by the atlas's names for it. Three rather than one
+# because the apps disagree about what "the beginning" is: Mobile Caregiver+
+# opens on its week of visits, HHAeXchange+ on a home screen or — with more
+# than one agency on the account — on the picker, and a picker IS the
+# beginning for an account that has to choose before it can do anything.
+HOME_SCREENS = ("home", "today", "agency")
+
+# How many times to press Back looking for one. Bounded because an app that
+# never reports a page this recognises would otherwise be walked backwards out
+# of itself, which is the exact fault this exists to fix.
+BACKS_TO_HOME = 6
+
+# How long a Back takes to land. Short: this is one keyevent and a redraw, and
+# the loop below does up to six of them while somebody waits.
+BACK_SETTLE = 0.9
+
+
+def _app_home(driver, report) -> None:
+    """Back to the app's own front page, without leaving the app.
+
+    Reported as the thing that made a wrong tap feel like a dead end: "if I
+    click on the wrong patient then what, I'm stuck? I need to open the app
+    again?" Reopening works and costs a sign-in nobody needed — the session
+    was alive the whole time, the app was simply three screens deep.
+
+    Presses Back and looks, rather than knowing a route per app. The atlas
+    already names each app's pages, and asking "am I home yet" after each
+    press is both simpler than a per-app map and honest about apps whose
+    pages nobody has walked: inMyTeam has no atlas entries at all, and this
+    still gets it to wherever Back stops being able to go.
+
+    THE ONE THING IT WILL NOT DO IS LEAVE. Back from an app's root pops the
+    task stack and lands in whatever was under it — the launcher, or another
+    care app. If that happens the app is brought straight back and the walk
+    stops: being at the app's second screen is a worse answer than being at
+    its first, and both are far better than being somewhere else entirely.
+    """
+    from apt_log import device as device_mod
+    from apt_log import feed as feed_mod
+
+    package = _front_package()
+    if package not in feed_mod.CARE_APPS:
+        raise RuntimeError("the phone is not showing one of the care apps")
+
+    report("macro.step.checking")
+    for _ in range(BACKS_TO_HOME):
+        focus = feed_mod.current_focus() or ""
+        if focus.split("/")[0] != package:
+            # Back took us out. Undo it, and stop rather than press again —
+            # a second press from here would leave a second time.
+            driver.activate_app(package)
+            wait_for(lambda: _front_package() == package, timeout=10.0)
+            break
+        if feed_mod.screen_for(focus, _tree()) in HOME_SCREENS:
+            break
+        report("macro.step.navigating")
+        device_mod.send_ui_action("back")
+        time.sleep(BACK_SETTLE)
+    else:
+        # Ran out of presses without recognising a front page. Activating is
+        # the last honest move: it returns the app's own task to the front
+        # without restarting it, so nothing is lost and no session is spent.
+        driver.activate_app(package)
+
+    _forget_stitched(package)
+    report("macro.step.finished")
+
+
+def _tree() -> str:
+    """The published hierarchy, read from disk rather than from the phone.
+
+    The feed writes one every time it reads one. Asking the device directly
+    from here would either spawn a second `uiautomator dump` — which wedged
+    the instrumentation hard enough to need a restart, twice — or open a
+    second Appium session, and UiAutomator2 allows exactly one.
+    """
+    from apt_log import feed as feed_mod
+    from apt_log.ui import state as state_mod
+
+    try:
+        return (state_mod.STATE_DIR / feed_mod.HIERARCHY_NAME).read_text(
+            encoding="utf-8")
+    except OSError:
+        return ""
+
+
 def _rescan(driver, report) -> None:
     """Throw away what the portal thinks this page looks like, and read it
     again.
@@ -2622,6 +2708,7 @@ MACROS: dict[str, Macro] = {
         Macro("close_app", "macro.close_app", _close_app),
         Macro("restart_app", "macro.restart_app", _restart_app),
         Macro("rescan", "macro.rescan", _rescan),
+        Macro("app_home", "macro.app_home", _app_home),
         Macro("clear_screen", "macro.clear_screen", _clear_screen),
         Macro("check_tasks", "macro.check_tasks", _check_tasks),
         Macro("phone_settings", "macro.phone_settings", _phone_settings),

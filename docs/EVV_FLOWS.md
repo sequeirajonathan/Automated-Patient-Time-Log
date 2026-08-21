@@ -137,6 +137,40 @@ Still to observe: everything downstream of sign-in.
 
 ---
 
+## App lifecycle — what switching actually does
+
+Three questions were asked directly, and the answers are already true of the code
+rather than things that had to be built. Written down because they are not obvious
+from the outside, and "what if it closes the app" is a reasonable fear to have.
+
+**Switching apps does not close anything.** A tile calls `driver.activate_app`, which
+brings an existing task to the front with its state intact — the same thing tapping an
+icon on the phone does. Nothing is force-stopped. The only two things that force-stop
+are the **Close** and **Restart** buttons, which exist for a wedged app and say so.
+
+**A live session is not signed in again.** Every sign-in macro checks for an actual
+credential screen before it types anything:
+
+- HHAeXchange+ looks for its auth activity, its sign-in form (which lives in a Chrome
+  Custom Tab, so the *package* changes rather than the activity), and its own expiry
+  dialog — and refuses to conclude "signed in" from an empty accessibility tree, which
+  is what a freshly woken Compose UI serves for several seconds.
+- Mobile Caregiver+ distinguishes its passcode keypad from its server-session expiry,
+  because the passcode cannot answer the second one.
+- inMyTeam stops if the app is past the walk.
+
+So switching to an app that is already signed in costs an activate and a look, not a
+sign-in. Pressing the tile of the app **already in front** does not even do that — the
+front end treats it as a view switch.
+
+**Back stays inside the app.** Back from an app's root pops Android's task stack into
+whatever was under it — the launcher, or another care app — which is how pressing Back
+in Exchange+ landed in Mobile Caregiver+. The portal now treats "the front app changed"
+as the signal (not "this is the launcher"), and puts her straight back: to her, that
+Back did nothing. Leaving an app is **Home's** job. The **app-home** control is the
+third move — back to the app's *own* first page, by pressing Back and looking until the
+atlas recognises a front page, bounded, and never out of the app.
+
 ## Reconciling times
 
 The Mobile Caregiver+ walk turned up a discrepancy worth stating plainly, because it

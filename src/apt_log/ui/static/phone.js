@@ -480,13 +480,27 @@
     // live. The flip only means something when nothing is in flight.
     const macroQuiet = !awaitingMacro && !pendingApp
       && Date.now() - macroEndedAt > 8000;
-    if (onLauncher && wasScreen && wasScreen !== 'launcher' && macroQuiet) {
-      // A launcher right after a Back means Back exited the app — mid-flow,
-      // reported as "a bug for sure as an experience". Android kept the
-      // app's state, so bounce it straight back: to her, that Back simply
-      // did nothing, which beats being teleported to the picker. Any other
-      // arrival (the Home button, the phone's own drift) means she left
-      // the app, and leaving means the picker.
+    // BACK MUST NOT CHANGE WHICH APP SHE IS IN.
+    //
+    // The first version of this only noticed Back landing on the LAUNCHER,
+    // which is one of the two ways Android leaves an app and not the common
+    // one. Back from an app's root pops the task stack, and what is under it
+    // is whatever she was in before — so pressing Back in Exchange+ put her
+    // in Mobile Caregiver+, silently, with the header renaming itself.
+    // Reported as "the back button even takes me to the previous app I was
+    // on, which is not ok".
+    //
+    // So the test is "did the front app change", not "is this the launcher".
+    // Leaving an app is Home's job and the picker's; Back's job is to move
+    // WITHIN one, and where the app has nowhere further back to go the
+    // honest outcome is that Back did nothing.
+    const leftTheApp = wasPackage && currentPackage !== wasPackage
+      && (onLauncher || appOpen[currentPackage] !== undefined);
+    if (leftTheApp && wasScreen && wasScreen !== 'launcher' && macroQuiet) {
+      // Android kept the app's state, so bounce it straight back: to her,
+      // that Back simply did nothing, which beats being teleported. Any
+      // other arrival (the Home button, the phone's own drift) means she
+      // left on purpose, and leaving means the picker.
       const bounce = Date.now() - backSentAt < 3500 && appOpen[wasPackage];
       if (bounce && body.dataset.view === 'screen') {
         pendingApp = wasPackage;
@@ -498,7 +512,10 @@
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           redirect: 'follow'
         }).catch(() => { pendingApp = ''; unbusy(); });
-      } else if (body.dataset.view === 'screen') {
+      } else if (onLauncher && body.dataset.view === 'screen') {
+        // Only the launcher sends her to the picker. Drifting into ANOTHER
+        // care app is the phone doing something she did not ask for, and the
+        // right answer is to put her back, not to eject her.
         view('launcher');
       }
     }
@@ -1388,6 +1405,22 @@
       fetch('/macro', {
         method: 'POST',
         body: new URLSearchParams({ name: 'check_tasks' }),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        redirect: 'follow'
+      }).catch(() => { awaitingMacro = false; unbusy(); toast(i18n.failed || ''); });
+    });
+    // Back to the app's own first page. A different move from the picker
+    // button beside it, and the answer to "if I click on the wrong patient
+    // then what, I'm stuck?" — the session is alive, the app is just three
+    // screens deep, and reopening it would spend a sign-in for nothing.
+    const appHome = document.getElementById('btn-apphome');
+    if (appHome) appHome.addEventListener('click', () => {
+      if (!driving()) return;
+      awaitingMacro = true;
+      busy(i18n.goingHome || '', 40000);
+      fetch('/macro', {
+        method: 'POST',
+        body: new URLSearchParams({ name: 'app_home' }),
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         redirect: 'follow'
       }).catch(() => { awaitingMacro = false; unbusy(); toast(i18n.failed || ''); });

@@ -3271,3 +3271,61 @@ class TestTheAppsFitOnOneRow:
         page = client.get("/app").text
         css = page[page.index("  .springboard {"):page.index("  .tile {")]
         assert "repeat(3, 1fr)" in css
+
+
+class TestBackStaysInsideTheApp:
+    """Reported plainly: "navigating back or forward on the Exchange+ app is
+    very unpredictable, the back button even takes me to the previous app I
+    was on, which is not ok".
+
+    The first version of the guard only noticed Back landing on the LAUNCHER,
+    which is one of the two ways Android leaves an app and not the common
+    one. Back from an app's root pops the task stack, and what is under it is
+    whatever she was in before.
+    """
+
+    def _js(self) -> str:
+        return strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+
+    def test_the_test_is_whether_the_app_changed(self):
+        js = self._js()
+        assert "currentPackage !== wasPackage" in js
+
+    def test_and_not_merely_whether_this_is_the_launcher(self):
+        """The old condition. If it comes back, so does the bug."""
+        js = self._js()
+        assert "if (onLauncher && wasScreen" not in js
+
+    def test_drifting_into_another_care_app_does_not_eject_her(self):
+        """Only the launcher sends her to the picker. Landing in a second
+        care app is the phone doing something she did not ask for, and the
+        answer is to put her back rather than to throw her out."""
+        js = self._js()
+        assert "} else if (onLauncher && body.dataset.view === 'screen') {" in js
+
+    def test_leaving_on_purpose_still_works(self):
+        """Home is how you leave. It is wired separately and does not go
+        through the bounce at all."""
+        js = self._js()
+        assert "getElementById('btn-home')" in js
+
+
+class TestTheWayBackToAnAppsOwnFirstPage:
+    def test_the_control_is_on_the_phone_view(self, client):
+        page = client.get("/app").text
+        assert 'id="btn-apphome"' in page
+
+    def test_it_runs_the_macro_that_navigates(self):
+        js = strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+        block = js[js.index("getElementById('btn-apphome')"):]
+        assert "name: 'app_home'" in block[:600]
+
+    def test_it_is_refused_while_watching_rather_than_driving(self):
+        """Every control that touches the phone is, and this one moves the
+        app somebody else may be reading."""
+        js = strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+        block = js[js.index("getElementById('btn-apphome')"):]
+        assert "if (!driving()) return;" in block[:300]

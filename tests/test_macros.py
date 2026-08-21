@@ -4035,3 +4035,117 @@ class TestTheSameNoticeIsNotSentTwice:
         bad = tmp_path / "told.json"
         bad.write_text("{ not json", encoding="utf-8")
         assert macros._told_recently(bad) is False
+
+
+class TestBackToTheAppsOwnFirstPage:
+    """Reported as the thing that made a wrong tap feel like a dead end: "if
+    I click on the wrong patient then what, I'm stuck? I need to open the app
+    again?"
+
+    Reopening works and costs a sign-in nobody needed — the session was alive
+    the whole time and the app was simply three screens deep.
+    """
+
+    def _driver(self):
+        from unittest.mock import MagicMock
+
+        return MagicMock()
+
+    def _run(self, screens, packages=None, pkg="com.tellus.evv.v2"):
+        """Drive the walk over a scripted sequence of screens."""
+        from unittest.mock import patch as patch_mod
+
+        seen = {"backs": 0, "activated": 0}
+        pages = list(screens)
+        focus = list(packages or [pkg] * len(screens))
+        driver = self._driver()
+        driver.activate_app.side_effect = (
+            lambda _p: seen.__setitem__("activated", seen["activated"] + 1))
+
+        def a_back(action, serial=None):
+            seen["backs"] += 1
+
+        with patch_mod.object(macros, "_front_package", return_value=pkg), \
+                patch_mod("apt_log.feed.current_focus",
+                          side_effect=lambda *a, **k:
+                              (focus.pop(0) if focus else pkg) + "/x"), \
+                patch_mod("apt_log.feed.screen_for",
+                          side_effect=lambda *a, **k:
+                              pages.pop(0) if pages else "home"), \
+                patch_mod("apt_log.device.send_ui_action", a_back), \
+                patch_mod.object(macros, "_tree", lambda: ""), \
+                patch_mod.object(macros, "_forget_stitched", lambda _a: None), \
+                patch_mod("apt_log.macros.time.sleep"):
+            macros._app_home(driver, lambda _s: None)
+        return seen
+
+    def test_already_home_presses_nothing(self):
+        """The commonest case, and the one a version that always pressed
+        Back would get wrong by walking out of the app."""
+        assert self._run(["home"])["backs"] == 0
+
+    def test_it_walks_back_until_it_recognises_the_front_page(self):
+        assert self._run(["visit", "visit", "home"])["backs"] == 2
+
+    def test_a_picker_counts_as_the_beginning(self):
+        """For an account with more than one agency, choosing IS the first
+        thing the app asks."""
+        assert self._run(["visit", "agency"])["backs"] == 1
+
+    def test_it_gives_up_rather_than_pressing_for_ever(self):
+        """An app whose pages nobody has mapped answers "unknown" to every
+        question. Without a ceiling this walks it backwards out of itself,
+        which is the exact fault it exists to fix."""
+        seen = self._run(["unknown"] * 12)
+        assert seen["backs"] == macros.BACKS_TO_HOME
+        # ...and then puts the app back in front rather than leaving her
+        # wherever the last press landed.
+        assert seen["activated"] == 1
+
+    def test_leaving_the_app_undoes_itself_and_stops(self):
+        """Back from an app's root pops the task stack into whatever was
+        under it. One press out is a mistake; two is a pattern."""
+        seen = self._run(["visit", "visit"],
+                         packages=["com.tellus.evv.v2", "com.other.app"])
+        assert seen["activated"] == 1
+        assert seen["backs"] == 1
+
+    def test_it_refuses_outside_the_care_apps(self):
+        from unittest.mock import patch as patch_mod
+
+        with patch_mod.object(macros, "_front_package",
+                              return_value="com.android.settings"):
+            with pytest.raises(RuntimeError, match="care apps"):
+                macros._app_home(self._driver(), lambda _s: None)
+
+    def test_it_never_force_stops_anything(self):
+        """The whole point. Closing and reopening is what she was doing by
+        hand, and it spends a sign-in the live session did not need."""
+        import inspect
+
+        source = inspect.getsource(macros._app_home)
+        assert "_force_stop" not in source
+        assert "activate_app" in source
+
+    def test_it_reads_the_tree_from_disk_and_not_from_the_phone(self):
+        """A second `uiautomator dump` wedged the instrumentation twice, and
+        a second Appium session is not possible at all."""
+        import inspect
+
+        source = inspect.getsource(macros._tree)
+        assert "read_text" in source
+        # The code, not the prose. This project has been bitten three times by
+        # a guard that could not tell the two apart and so forbade describing
+        # the bug it existed to prevent — and the comment above `_tree` names
+        # `uiautomator dump` precisely because that is what must not happen.
+        code = "\n".join(line for line in source.splitlines()
+                         if not line.strip().startswith("#"))
+        code = code[:code.index('"""')] + code[code.rindex('"""') + 3:]
+        assert "uiautomator" not in code
+        assert "subprocess" not in code
+
+    def test_it_is_registered_and_needs_no_confirmation(self):
+        """It navigates. Nothing it does can be wrong enough to want a
+        second press in front of it."""
+        assert "app_home" in macros.MACROS
+        assert "app_home" not in macros.CONFIRM
