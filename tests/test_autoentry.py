@@ -1155,6 +1155,7 @@ class TestGettingToTheWorkLogFromWhereverTheAppIsStanding:
         from apt_log import macros
 
         state, driver = self._phone(macros, monkeypatch, drawer_after=3)
+        monkeypatch.setattr(macros, "_where_in_app", lambda p: "MyWorksFragment")
         clicked = []
         monkeypatch.setattr(macros, "_words",
                             lambda d, *w: type("E", (), {
@@ -1166,6 +1167,7 @@ class TestGettingToTheWorkLogFromWhereverTheAppIsStanding:
         from apt_log import macros
 
         state, driver = self._phone(macros, monkeypatch, drawer_after=0)
+        monkeypatch.setattr(macros, "_where_in_app", lambda p: "MyWorksFragment")
         monkeypatch.setattr(macros, "_words",
                             lambda d, *w: type("E", (), {
                                 "click": lambda self: None})())
@@ -1178,7 +1180,8 @@ class TestGettingToTheWorkLogFromWhereverTheAppIsStanding:
         from apt_log import macros
 
         state, driver = self._phone(macros, monkeypatch, drawer_after=99)
-        assert macros._open_my_work(driver, lambda _s: None) is False
+        assert macros._back_to_the_drawer(
+            driver, lambda _s: None, "com.inmyteam.inmyteam") is None
         assert state["backs"] == macros.BACKS_TO_DRAWER
 
     def test_and_stops_the_moment_back_leaves_the_app(self, monkeypatch):
@@ -1196,7 +1199,8 @@ class TestGettingToTheWorkLogFromWhereverTheAppIsStanding:
         brought = []
         monkeypatch.setattr(macros, "_bring_up",
                             lambda d, p: brought.append(p))
-        assert macros._open_my_work(driver, lambda _s: None) is False
+        assert macros._back_to_the_drawer(
+            driver, lambda _s: None, "com.inmyteam.inmyteam") is None
         assert state["backs"] == 1
         assert brought == ["com.inmyteam.inmyteam"]
 
@@ -1303,3 +1307,115 @@ class TestTheWorkLogIsOnePress:
     def _with_plan(self, macros, monkeypatch, plan):
         from apt_log import schedule as schedule_mod
         monkeypatch.setattr(schedule_mod, "load", lambda: plan)
+
+
+class TestAskingTheAppWhereItIs:
+    """"Does adb expose views on the app?" — asked while weighing a cold start
+    against mapping every page into a graph of neighbours.
+
+    It does, and it is better than a graph. `dumpsys activity` publishes the
+    fragment back stack by class name, and unlike a map we maintain it cannot
+    go stale: it is the app answering rather than us remembering. The visits
+    hub says `VisitsFragment`, the work log says `MyWorksFragment` — checked
+    live on the phone.
+
+    It does NOT give a way to jump. inMyTeam declares no schemes at all, only
+    MAIN/VIEW with LAUNCHER on its single activity, and everything inside is
+    fragments, which are not addressable from outside. So the walk stays a
+    walk — it just stops being a blind one.
+    """
+
+    DUMP = """
+      Added Fragments:
+        #0: ReportFragment{37fd427 #0 androidx.lifecycle.report_fragment_tag}
+        #0: NavHostFragment{f702d04 (cd9c85d5) id=0x7f0a01ba}
+        #0: MyWorksFragment{52db513 (70e31d4c) id=0x7f0a01ba}
+    """
+
+    def _adb(self, macros, monkeypatch, text):
+        from apt_log import feed as feed_mod
+        monkeypatch.setattr(
+            feed_mod, "_adb",
+            lambda *a, **k: type("R", (), {
+                "stdout": text.encode()})())
+
+    def test_it_names_the_screen_the_app_is_on(self, monkeypatch):
+        from apt_log import macros
+
+        self._adb(macros, monkeypatch, self.DUMP)
+        assert macros._where_in_app("com.inmyteam.inmyteam") == \
+            "MyWorksFragment"
+
+    def test_the_plumbing_every_app_carries_is_not_a_screen(self,
+                                                            monkeypatch):
+        """ReportFragment and NavHostFragment are on every Jetpack screen and
+        say nothing about where anybody is."""
+        from apt_log import macros
+
+        self._adb(macros, monkeypatch,
+                  "#0: ReportFragment{a}\n#0: NavHostFragment{b}\n")
+        assert macros._where_in_app("com.inmyteam.inmyteam") == ""
+
+    def test_a_phone_that_will_not_say_answers_nothing(self, monkeypatch):
+        """And "" must read as "no idea", never as "not there"."""
+        from apt_log import macros
+        from apt_log import feed as feed_mod
+
+        def boom(*a, **k):
+            raise OSError("adb is not there")
+        monkeypatch.setattr(feed_mod, "_adb", boom)
+        assert macros._where_in_app("com.inmyteam.inmyteam") == ""
+
+    def test_the_walk_confirms_where_it_landed(self, monkeypatch):
+        """A Search button is on more than one of this app's screens;
+        MyWorksFragment is on exactly one."""
+        from apt_log import macros
+
+        monkeypatch.setattr(macros, "_back_to_the_drawer",
+                            lambda d, r, p: self._clicker())
+        monkeypatch.setattr(macros, "_words", lambda d, *w: self._clicker())
+        monkeypatch.setattr(macros.time, "sleep", lambda _s: None)
+        driver = type("D", (), {"current_package": "com.inmyteam.inmyteam"})()
+
+        monkeypatch.setattr(macros, "_where_in_app", lambda p: "MyWorksFragment")
+        assert macros._open_my_work(driver, lambda _s: None) is True
+
+        monkeypatch.setattr(macros, "_where_in_app", lambda p: "VisitsFragment")
+        assert macros._open_my_work(driver, lambda _s: None) is False
+
+    def test_a_lost_walk_starts_the_app_from_cold_and_tries_once_more(
+            self, monkeypatch):
+        """Asked for outright: "or simply just do a quick restart to default
+        towards the front of the page." A cold start is the one position this
+        code can be certain of."""
+        from apt_log import macros
+
+        tries = {"n": 0}
+        froze = []
+
+        def drawer(d, r, p):
+            tries["n"] += 1
+            return self._clicker() if tries["n"] > 1 else None
+
+        monkeypatch.setattr(macros, "_back_to_the_drawer", drawer)
+        monkeypatch.setattr(macros, "_freshen",
+                            lambda d, r, p: froze.append(p) or True)
+        monkeypatch.setattr(macros, "_words", lambda d, *w: self._clicker())
+        monkeypatch.setattr(macros, "_where_in_app", lambda p: "MyWorksFragment")
+        monkeypatch.setattr(macros.time, "sleep", lambda _s: None)
+        driver = type("D", (), {"current_package": "com.inmyteam.inmyteam"})()
+        assert macros._open_my_work(driver, lambda _s: None) is True
+        assert froze == ["com.inmyteam.inmyteam"]
+        assert tries["n"] == 2
+
+    def test_and_gives_up_if_the_cold_start_does_not_help(self, monkeypatch):
+        from apt_log import macros
+
+        monkeypatch.setattr(macros, "_back_to_the_drawer", lambda d, r, p: None)
+        monkeypatch.setattr(macros, "_freshen", lambda d, r, p: True)
+        monkeypatch.setattr(macros.time, "sleep", lambda _s: None)
+        driver = type("D", (), {"current_package": "com.inmyteam.inmyteam"})()
+        assert macros._open_my_work(driver, lambda _s: None) is False
+
+    def _clicker(self):
+        return type("E", (), {"click": lambda self: None})()
