@@ -581,6 +581,13 @@
       if (badge) badge.textContent = left > 0 ? String(left) : '';
     }
 
+    // The day's record, offered on the one app that publishes a readable
+    // one. Hidden elsewhere rather than shown and refusing: a button that
+    // sometimes says "this app's work log is not walked" teaches nothing
+    // except not to press it.
+    const checksBtn = document.getElementById('btn-checks');
+    if (checksBtn) checksBtn.hidden = !meta.checks_app || onLauncher;
+
     // The large title names what is actually in front: the screen's own
     // nav-bar title, else the app the *phone* is showing — never the last
     // tile pressed, which is how the launcher got rendered under a header
@@ -1456,6 +1463,23 @@
         redirect: 'follow'
       }).catch(() => { awaitingMacro = false; unbusy(); toast(i18n.failed || ''); });
     });
+    // The work log, in one press. It names the patient itself — the visit
+    // running now, or the soonest one whose record can be read — because
+    // asking the person watching an armed entry to name which patient the
+    // scheduler picked is asking the wrong person.
+    const checksRun = document.getElementById('btn-checks');
+    if (checksRun) checksRun.addEventListener('click', () => {
+      if (!driving()) return;
+      awaitingMacro = true;
+      busy(i18n.readingLog || '', 90000);
+      fetch('/macro', {
+        method: 'POST',
+        body: new URLSearchParams({ name: 'evv_checks' }),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        redirect: 'follow'
+      }).catch(() => { awaitingMacro = false; unbusy(); toast(i18n.failed || ''); });
+    });
+
     // Back to the app's own first page. A different move from the picker
     // button beside it, and the answer to "if I click on the wrong patient
     // then what, I'm stuck?" — the session is alive, the app is just three

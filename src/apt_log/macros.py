@@ -3440,15 +3440,27 @@ def _todays_check_events(driver, report, patient: str) -> list[str]:
     """
     from apt_log import feed as feed_mod
 
+    package = driver.current_package
     if not _open_my_work(driver, report):
         raise RuntimeError("the work log is not reachable from here")
 
-    # The date fields default to today, so nothing is typed. Read them rather
-    # than trust them: a range left over from another search would answer a
-    # different question in the same words.
+    # THE RANGE HAS TO SAY TODAY, and it is read rather than trusted: a range
+    # left over from another search answers a different question in exactly
+    # the same words, and the answer decides whether a live agency record
+    # gets touched.
+    #
+    # Nothing is typed into those two fields. They are picker-backed, and the
+    # value this walk wants is the one the app puts there itself — so when
+    # the range is wrong the fix is to start the app from cold, which is what
+    # restores its defaults, and walk in again. Once. Still wrong after that
+    # is a refusal, not a third attempt.
     today = datetime.now().astimezone().strftime("%Y-%m-%d")
-    source = driver.page_source or ""
-    if today not in source:
+    if today not in (driver.page_source or ""):
+        report("macro.step.freshening")
+        _freshen(driver, report, package)
+        if not _open_my_work(driver, report):
+            raise RuntimeError("the work log is not reachable from here")
+    if today not in (driver.page_source or ""):
         raise RuntimeError("the work log is not showing today")
 
     # Checks BEFORE Search. The Visits tab returns nothing for a day whose
