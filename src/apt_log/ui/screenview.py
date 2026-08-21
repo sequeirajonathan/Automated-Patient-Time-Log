@@ -817,6 +817,81 @@ def _aim(element: dict) -> dict:
             "b": element.get("aim_b") or element["b"]}
 
 
+# --------------------------------------------------------------- app alerts
+#
+# A MODAL THE APP PUT UP, AND THE REASON THE PAGE UNDER IT VANISHED.
+#
+# inMyTeam answers a check-in outside the visit's window with a small centred
+# box — "Warning! / Invalid time / Accept" — and the portal rendered a page
+# with almost nothing on it: a "Navigate up" button, a title, and three empty
+# squares. Not the warning, not the patient, not the time, not the address,
+# not the "Failed  Check in 11:55 PM" the app had just written.
+#
+# The cause is that a dialog is its own WINDOW, and the dump lists it BEFORE
+# the activity behind it. The overlay rule reads document order as z-order —
+# right for a surface an app slides over its own page, wrong for two windows —
+# so the activity looked like a full-screen curtain that had arrived over the
+# dialog, and everything "beneath" it was thrown away. The dialog was on top
+# the whole time.
+#
+# Lifting the alert out before that pass fixes both halves at once: the alert
+# is drawn as an alert, and with nothing left for the "curtain" to be covering
+# the page beneath renders normally.
+ALERT_ACTION_WORDS = (
+    "accept", "aceptar", "ok", "okay", "entendido", "got it", "close",
+    "cerrar", "dismiss", "descartar", "continue", "continuar", "aceptar",
+)
+# A dialog's button is small and its message sits right above it. Both are
+# required: without the message this would claim any small OK-ish button on
+# an ordinary form.
+ALERT_ACTION_MAX_AREA = 0.06        # of the screen
+ALERT_MESSAGE_REACH = 220           # px above the button the message may sit
+ALERT_COLUMN = 0.42                 # how far off the button's centre it may sit
+
+
+def _app_alert(doc: dict, w: int, h: int) -> dict | None:
+    """A modal the app raised, or None.
+
+    Returns the message lines, the button, and the box the whole thing
+    occupies — the caller uses that box to take the alert out of the page.
+    """
+    elements = [e for e in doc.get("elements") or [] if e.get("b")]
+    statics = [s for s in doc.get("statics") or [] if s.get("b")
+               and (s.get("txt") or "").strip()]
+    if not (w and h):
+        return None
+
+    for element in elements:
+        box = element["b"]
+        area = (box[2] - box[0]) * (box[3] - box[1])
+        if area > w * h * ALERT_ACTION_MAX_AREA or area <= 0:
+            continue
+        caption = next((s for s in statics if _contains(box, s["b"])), None)
+        if caption is None:
+            continue
+        if (caption.get("txt") or "").strip().lower() not in ALERT_ACTION_WORDS:
+            continue
+        # The message: text ABOVE the button, in the button's own column.
+        middle = (box[0] + box[2]) / 2
+        said = [s for s in statics
+                if s is not caption
+                and 0 <= box[1] - s["b"][3] <= ALERT_MESSAGE_REACH
+                and abs((s["b"][0] + s["b"][2]) / 2 - middle) <= w * ALERT_COLUMN]
+        if not said:
+            continue
+        said.sort(key=lambda s: s["b"][1])
+        lines = [(s.get("txt") or "").strip() for s in said]
+        whole = [min([box[0]] + [s["b"][0] for s in said]),
+                 min([box[1]] + [s["b"][1] for s in said]),
+                 max([box[2]] + [s["b"][2] for s in said]),
+                 max([box[3]] + [s["b"][3] for s in said])]
+        return {"title": lines[0], "lines": lines[1:],
+                "action": {"txt": (caption.get("txt") or "").strip(),
+                           "aim": _aim(element)},
+                "box": whole}
+    return None
+
+
 def build(doc: dict) -> dict | None:
     """The semantic model: a nav bar (maybe) and a list of rows."""
     w, h = _effective_size(doc)
@@ -833,6 +908,18 @@ def build(doc: dict) -> dict | None:
     statics = [dict(s, b=s.get("vb") or s["b"], dev_b=s["b"])
                for s in doc.get("statics") or [] if s.get("b")
                and not _is_annotation(s.get("txt", ""), s["b"], w)]
+
+    # A MODAL THE APP RAISED, LIFTED OUT BEFORE ANYTHING ELSE LOOKS AT THE
+    # PAGE. See `_app_alert`: a dialog is its own window and the dump lists it
+    # BEFORE the activity behind it, so leaving it in makes the activity look
+    # like a curtain that arrived over it — and the overlay pass below throws
+    # away the dialog AND the page. Taking it out first is what stops that.
+    alert = _app_alert(doc, w, h)
+    if alert is not None:
+        elements = [e for e in elements
+                    if not _contains(alert["box"], e["b"])]
+        statics = [s for s in statics
+                   if not _contains(alert["box"], s["b"])]
 
     # ------------------------------------------------------------- overlays
     # An app can slide a full-screen surface OVER the page without removing
@@ -1546,6 +1633,24 @@ def build(doc: dict) -> dict | None:
             }
             bands = bands[1:]
 
+    # THE APP'S OWN BACK, WHEREVER IT LANDED.
+    #
+    # Suppressing it in the title bar was only ever half the rule: it is a
+    # duplicate of the pill's Back whether or not a nav bar was recognised,
+    # and on a page where none was it fell into the LIST — a full-width row
+    # reading "Navigate up", three inches from a Back that does the same
+    # thing. Reported on inMyTeam's visit detail, and the reason a nav bar is
+    # not recognised there is worth knowing: that page arrives STITCHED, so
+    # the bar's page coordinate is wherever the scroll was (y592 on the
+    # capture this was written from) and the "is it at the top" test says no.
+    #
+    # Fixing the stitched title bar properly is a separate job — this is the
+    # part that matters to somebody using it, and it holds on every page.
+    for band in bands:
+        band[:] = [n for n in band
+                   if not (n.get("aim") and _is_up_affordance(n))]
+    bands = [band for band in bands if band]
+
     rows = []
     for band in bands:
         shape = _band_shape(band, h)
@@ -1564,6 +1669,9 @@ def build(doc: dict) -> dict | None:
     return {"id": doc.get("id", ""), "nav": nav, "rows": rows,
             "apptabs": apptabs,
             "permission": permission,
+            # A modal the app raised, drawn as an alert above the page it is
+            # blocking rather than scattered through it — or dropped.
+            "alert": alert,
             # The way out of a modal, when the screen is one. See DISMISS_IDS.
             "dismiss": dismiss,
             "notice": doc.get("notice", ""), "blocked": doc.get("blocked", ""),

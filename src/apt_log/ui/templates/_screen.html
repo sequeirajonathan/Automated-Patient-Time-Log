@@ -39,6 +39,24 @@
   <div class="a-alert" role="alert">{{ m.notice }}</div>
   {% endif %}
 
+  {% if m.alert %}
+  {# A MODAL THE APP RAISED — the thing standing in front of everything else,
+     so it is drawn first and drawn as itself. inMyTeam answers a check-in
+     outside the visit window with "Warning! / Invalid time / Accept", and
+     the portal used to show a page with almost nothing on it: the warning
+     went, and so did the patient, the time, the address and the check-in
+     the app had just recorded as failed. See `_app_alert`. #}
+  <div class="a-modal" role="alertdialog">
+    <p class="a-modal-t">{{ m.alert.title }}</p>
+    {% for line in m.alert.lines %}
+    <p class="a-modal-l">{{ line }}</p>
+    {% endfor %}
+    <button type="button" class="a-modal-go"
+            data-aim='{{ m.alert.action.aim | tojson }}'
+      >{{ m.alert.action.txt }}</button>
+  </div>
+  {% endif %}
+
   {% if m.permission %}
   {# ANDROID'S OWN PERMISSION PROMPT, DRAWN AS A PROMPT.
      The general reflow banded this into one row — the question squeezed to
