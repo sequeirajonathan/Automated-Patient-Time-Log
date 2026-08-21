@@ -163,11 +163,26 @@ this package. Found the hard way: without it the walk read Chrome as "you have l
 activated the app — which resumed onto the same tab — and reported success from inside
 a browser.
 
+### An expanded card, and what a recorded check-in looks like
+
+A card that is open ("Expandido" rather than "Contraído") on a visit already under way
+shows:
+
+```
+Registros de entrada de EVV 8:05 p. m.     the check-in, with the time it was taken
+La visita está en curso                    the state, in words
+Detalles del paciente                      schedule_screen_patient_details
+Continuar visitando                        schedule_screen_continue_shift
+```
+
+So this app, like Mobile Caregiver+, reports the **actual** recorded time after the
+fact — which is what makes "did the check-in work" answerable rather than inferred.
+
 ### Still to observe
 
-The navigation path from a visit row to the check-in control, the **`registro de
-entrada`** button itself, whether a GPS confirmation precedes submission, and the status
-vocabulary the rows use.
+The control on a card for a visit that has **not** started — today's was already under
+way, and a live visit is not something to experiment on. Also whether a GPS confirmation
+precedes submission, and the status vocabulary for a missed or late visit.
 
 ---
 
@@ -249,6 +264,29 @@ visit ends at 8:00 and the next is scheduled for 8:00, so it fires at 8:05.
 project's.** On Thursday and Friday two visits overlap by fifty minutes across two
 different apps and two different homes. Both are printed by their own app. Nothing here
 can make a caregiver be in two places, and inventing a resolution would hide it.
+
+### The buffer, checked against a real record
+
+The written schedule gave one evening patient a start five minutes past the hour. The
+app's own nominal time for that visit is **on** the hour — and the card for a visit
+already under way showed the EVV check-in recorded at **five past**.
+
+So the written times were the *fire* times with the travel gap already folded into them,
+and the rule computes the same answer from the nominal one: the preceding patient's
+visit ends on the hour, so five minutes are added. The engine now reproduces a real EVV
+record from first principles, which is the strongest evidence the rule is right that
+this project is going to get.
+
+Two consequences follow, and both are corrections to the written schedule:
+
+- **Where a patient's block is recorded as two entries, the second gets no buffer.** It
+  begins where the first ended, at the same address. The written schedule had five
+  minutes on it; the app has none, and there is nobody to drive past.
+- **On a day when nothing precedes that visit, there is no buffer either.** The written
+  schedule's own verification table assumed the earlier patient was there every weekday;
+  its schedule table says that patient has no Friday visit. The two contradict each
+  other, the engine follows the schedule table, and Friday therefore fires on the hour.
+  Worth a human deciding which of those two is true.
 
 ---
 
