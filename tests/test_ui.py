@@ -4219,3 +4219,59 @@ class TestEveryHourSaysWhichZoneItIsIn:
         for row in rows:
             for field in ("starts", "ends", "fires"):
                 assert row[field].split()[-1] in ("EDT", "EST"), (field, row)
+
+
+class TestASecondHalfDoesNotLookLikeACheckIn:
+    """Reported while watching the evening: "why is caridad at 9pm showing up
+    as next, we're only supposed to check in for caridad on her first block
+    not the second one."
+
+    Both halves are real visits she works, so both belong on the page. What
+    was missing was any way to tell them apart: the 9:05 card was identical
+    to the 8:05 one, so the half that gets no check-in read as the next thing
+    to be checked in.
+    """
+
+    def _split(self):
+        from apt_log import schedule as sched
+
+        common = {"patient": "Ada", "app": "com.inmyteam.inmyteam",
+                  "days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]}
+        return sched.parse({"zone": "America/New_York", "visits": [
+            dict(common, start="20:05", end="21:05", part=1, of=2),
+            dict(common, start="21:05", end="22:05", part=2, of=2)]})
+
+    def test_the_api_says_which_half_gets_the_entry(self, client):
+        with patch("apt_log.schedule.load", return_value=self._split()):
+            doc = client.get("/api/schedule").json()
+        halves = {r["part"]: r for r in doc["week"] if r["patient"] == "Ada"}
+        assert halves[1]["does_entry"] is True
+        assert halves[2]["does_entry"] is False
+
+    def test_the_arming_row_refuses_the_second_half_by_name(self, client):
+        from apt_log.ui.app import _arming_model
+        from apt_log.ui.i18n import Translator
+
+        with patch("apt_log.schedule.load", return_value=self._split()):
+            model = _arming_model(Translator("en"))
+        rows = {r["part"]: r for r in model["blocks"]}
+        assert rows[1]["why"] == ""
+        assert rows[1]["fires"] is True
+        assert rows[2]["why"] == "entry_is_the_first_half"
+        assert rows[2]["fires"] is False
+
+    def test_and_says_where_the_check_in_actually_is(self, client):
+        """"Not here" without "there" leaves somebody hunting for a switch
+        that does exist, one row up."""
+        from apt_log.ui.app import _arming_model
+        from apt_log.ui.i18n import Translator
+
+        with patch("apt_log.schedule.load", return_value=self._split()):
+            model = _arming_model(Translator("en"))
+        second = next(r for r in model["blocks"] if r["part"] == 2)
+        assert "8:05 pm" in second["why_says"]
+
+    def test_the_card_marks_a_visit_that_gets_no_check_in(self, client):
+        with patch("apt_log.schedule.load", return_value=self._split()):
+            page = client.get("/app", headers={"Accept-Language": "en"}).text
+        assert "noentry" in page

@@ -1499,3 +1499,80 @@ class TestTheRangeHasToSayToday:
         monkeypatch.setattr(macros, "_open_my_work", lambda d, r: True)
         with pytest.raises(RuntimeError, match="not showing today"):
             macros._todays_check_events(driver, lambda _s: None, "Ada")
+
+
+class TestTheCheckInBelongsToTheFirstHalf:
+    """"We're only supposed to check in for caridad on her first block not
+    the second one."
+
+    Where a patient's evening is written as two consecutive entries, the
+    agency's rule is: enter on the first, leave on the last, nothing at the
+    seam. The engine has always known it — `Visit.entry_at` is None on a
+    later half, so `due()` never raises an entry there and nothing could ever
+    have fired.
+
+    WHAT IT DID NOT DO WAS SAY SO. The arming page offered a switch on the
+    second half whose only honest setting was off, and refused it — if at all
+    — for an unrelated reason about the app. A switch that cannot do what it
+    says is worse than a missing one, and this one sat next to a real switch
+    for the same patient on the same evening.
+    """
+
+    def _block(self, part=1, of=2, app="com.inmyteam.inmyteam"):
+        return type("B", (), {"part": part, "of": of, "app": app})()
+
+    def test_the_second_half_is_refused_by_name(self):
+        from apt_log import autoentry
+
+        assert autoentry.refusal("com.inmyteam.inmyteam", "entry",
+                                 self._block(part=2)) == \
+            "entry_is_the_first_half"
+
+    def test_the_first_half_is_not(self):
+        from apt_log import autoentry
+
+        assert autoentry.refusal("com.inmyteam.inmyteam", "entry",
+                                 self._block(part=1)) == ""
+
+    def test_a_walked_app_does_not_excuse_it(self):
+        """It is a fact about the visit, not about the software, so it is
+        checked BEFORE the app is."""
+        from apt_log import autoentry
+
+        assert "com.inmyteam.inmyteam" in autoentry.SUPPORTED
+        assert autoentry.refusal("com.inmyteam.inmyteam", "entry",
+                                 self._block(part=2)) != ""
+
+    def test_and_an_unsplit_visit_is_untouched(self):
+        from apt_log import autoentry
+
+        assert autoentry.refusal("com.inmyteam.inmyteam", "entry",
+                                 self._block(part=1, of=1)) == ""
+
+    def test_the_engine_never_offered_an_entry_there_anyway(self):
+        """Belt and braces, and worth stating: the refusal is about what the
+        page SAYS. Nothing could have fired regardless."""
+        from datetime import date
+        from apt_log import schedule as sched
+
+        plan = sched.parse({"zone": "America/New_York", "visits": [
+            {"patient": "Ada", "app": "com.inmyteam.inmyteam",
+             "days": ["mon"], "start": "20:05", "end": "21:05",
+             "part": 1, "of": 2},
+            {"patient": "Ada", "app": "com.inmyteam.inmyteam",
+             "days": ["mon"], "start": "21:05", "end": "22:05",
+             "part": 2, "of": 2}]})
+        first, second = plan.on(date(2026, 6, 15))
+        assert first.entry_at is not None and first.exit_at is None
+        assert second.entry_at is None and second.exit_at is not None
+
+    def test_fireable_drops_a_later_half_it_is_handed(self):
+        from apt_log import autoentry
+
+        def due(part):
+            visit = type("V", (), {"app": "com.inmyteam.inmyteam",
+                                   "block": self._block(part=part)})()
+            return type("D", (), {"visit": visit, "kind": "entry"})()
+
+        kept = autoentry.fireable([due(1), due(2)])
+        assert [d.visit.block.part for d in kept] == [1]

@@ -467,6 +467,12 @@
      top band because that is where a breadcrumb belongs and because it must
      never be mistaken for one of the app's own controls: these are the
      portal's, and pressing one walks Back towards that screen. */
+  /* A visit the automation will NOT check in — the later half of a split
+     evening, whose check-in belongs to the first. Marked rather than left to
+     look identical to the half that does get entered. */
+  .noentry { font-size:.72rem; padding:1px 6px; border-radius:6px;
+             background:var(--tint-soft); color:var(--muted);
+             white-space:nowrap; }
   .a-crumbs { display:flex; flex-wrap:wrap; align-items:center; gap:2px;
               padding:6px 14px 2px; font-size:.78rem; line-height:1.3; }
   .a-crumb { border:none; background:none; padding:3px 6px; border-radius:7px;
@@ -1418,6 +1424,12 @@
         {{ v.fires }} – {{ v.ends }}
         {%- if v.buffered %} <span class="buffered">{{ t('sched.buffered') }}</span>{% endif -%}
         {%- if v.of > 1 %} <span class="buffered">{{ t('sched.part', part=v.part, of=v.of) }}</span>{% endif -%}
+        {#- AND WHETHER ANYTHING WILL BE ENTERED HERE. A later half of a
+            split visit is a real visit she works, so it belongs on the card
+            — but the check-in belongs to the first half, and without saying
+            so the two halves look identical and the second reads as the next
+            thing to be checked in. Reported as exactly that confusion. -#}
+        {%- if not v.does_entry %} <span class="noentry">{{ t('sched.no_entry') }}</span>{% endif -%}
       </div>
       <div class="where">
         {{ v.day }} · {{ v.app }}{% if v.agency %} · {{ v.agency }}{% endif %}</div>
@@ -1450,7 +1462,9 @@
       <span class="sub">
         <span class="chip" style="background:{{ nxt.accent if nxt else '#666' }}"
           >{{ nxt.mark if nxt }}</span
-        >{{ nxt.day if nxt }} · {{ nxt.fires if nxt }} – {{ nxt.ends if nxt }}</span>
+        >{{ nxt.day if nxt }} · {{ nxt.fires if nxt }} – {{ nxt.ends if nxt }}</span
+        >{% if nxt and not nxt.does_entry %} <span class="noentry"
+          >{{ t('sched.no_entry') }}</span>{% endif %}
     </button>
 
     <button class="fullbtn" id="btn-schedule" type="button">
