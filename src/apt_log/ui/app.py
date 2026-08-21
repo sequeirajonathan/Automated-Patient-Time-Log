@@ -625,11 +625,15 @@ def api_state():
 # Which app a visit belongs to, in the words she uses for it. The schedule file
 # names packages, because that is what the machine will have to open; a tile
 # says "Exchange+".
-def _app_label(package: str) -> str:
+def _app_entry(package: str) -> dict:
     for entry in PHONE_APPS:
         if entry.get("package") == package:
-            return entry.get("name") or package
-    return package
+            return entry
+    return {}
+
+
+def _app_label(package: str) -> str:
+    return _app_entry(package).get("name") or package
 
 
 def _a_visit(visit, now) -> dict:
@@ -642,9 +646,21 @@ def _a_visit(visit, now) -> dict:
     zone the person holding it is standing in. The times a caregiver's round
     runs on are the agency's, wherever she reads them.
     """
+    # The app the visit belongs to, carried whole. A visit on the home screen
+    # is a way INTO the app that holds it — she reads "Lucresia at 6:05" and
+    # the next thing she wants is Exchange+, not a second tap on a tile she has
+    # to match up by memory. That needs the same three attributes a launcher
+    # tile carries, so the existing launch path can be reused rather than
+    # re-implemented beside it.
+    entry = _app_entry(visit.app)
     return {
         "patient": visit.patient,
         "app": _app_label(visit.app),
+        "package": visit.app,
+        "macro": entry.get("macro", ""),
+        "open": entry.get("open", ""),
+        "mark": entry.get("mark", ""),
+        "accent": entry.get("accent", "#666"),
         "agency": visit.agency,
         "starts": visit.starts.strftime("%-I:%M %p").lower(),
         "ends": visit.ends.strftime("%-I:%M %p").lower(),

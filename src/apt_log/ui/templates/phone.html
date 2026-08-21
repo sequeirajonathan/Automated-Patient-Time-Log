@@ -99,14 +99,19 @@
                    display:block; text-align:center; }
   #launcher .date { text-align:center; color:rgba(255,255,255,.72);
                     font-size:14px; font-weight:500; margin-top:2px; }
-  .springboard { display:grid; grid-template-columns:repeat(2, 1fr);
-                 gap:28px 12px; margin-top:46px; justify-items:center; }
+  /* ONE ROW. Three apps in a two-column grid left a hole where a fourth used
+     to be and pushed everything below it down a whole tile — the page read as
+     cramped because the launcher was spending a third of the screen on three
+     icons and a gap. One row across gives the schedule the space it needs. */
+  .springboard { display:grid; grid-template-columns:repeat(3, 1fr);
+                 gap:10px; margin-top:28px; justify-items:center;
+                 align-items:start; }
   .tile { border:none; background:none; padding:0; cursor:pointer;
           display:flex; flex-direction:column; align-items:center; gap:9px;
           color:#fff; width:100%;
           transition: transform .22s var(--spring); }
   .tile:active { transform:scale(.88); transition-duration:.06s; }
-  .tile .mark { width:66px; height:66px; border-radius:16px;
+  .tile .mark { width:58px; height:58px; border-radius:15px;
                 display:flex; align-items:center; justify-content:center;
                 font-weight:700; font-size:20px; color:#fff; position:relative;
                 overflow:hidden;
@@ -115,8 +120,13 @@
   .tile .mark::after { content:""; position:absolute; inset:0;
       background:linear-gradient(160deg, rgba(255,255,255,.28), transparent 42%,
                  rgba(0,0,0,.18)); }
-  .tile .name { font-size:12px; font-weight:500; letter-spacing:.01em;
-                color:rgba(255,255,255,.95); text-align:center; }
+  /* Two lines' worth of room whether or not the name needs two. On one row
+     "Mobile Caregiver+" wraps and the others do not, so a box that shrinks to
+     its content leaves that tile's icon sitting higher than its neighbours —
+     which reads as a rendering fault rather than as a longer word. */
+  .tile .name { font-size:11.5px; font-weight:500; letter-spacing:.01em;
+                color:rgba(255,255,255,.95); text-align:center;
+                line-height:1.25; min-height:2.5em; }
   #launcher footer { margin-top:auto; text-align:center;
                      display:flex; flex-direction:column; align-items:center;
                      gap:12px; }
@@ -183,35 +193,73 @@
               border:1px solid rgba(255,255,255,.2); border-radius:999px;
               padding:1px 7px; margin-left:6px; white-space:nowrap; }
 
-  /* ------------------------------------------------------------ the reveal
-     A slot-machine strip: the names sit in a column and the column slides so
-     one of them lands in the window. Deliberately NOT automatic — it spins
-     when she presses it, once, and stops on the answer. A thing that spins
-     by itself on a page somebody is trying to read is an annoyance the second
-     time and furniture by the tenth. */
-  .reveal { margin-top:10px; border-radius:16px; width:100%; color:inherit;
-            font:inherit; padding:10px 14px; text-align:left;
-            background:rgba(255,255,255,.05);
-            border:1px dashed rgba(255,255,255,.2); display:block; }
-  .reveal .cap { font-size:11px; letter-spacing:.09em; text-transform:uppercase;
-                 color:rgba(255,255,255,.5); }
-  /* display:block, and it is not decoration. The window is a <span> inside a
-     button — inline by default, and `height` and `overflow` do nothing at all
-     on an inline box. Without this the strip does not clip and the reveal
-     renders as a plain list of every name in the queue, which is the opposite
-     of the thing: it gives away the answer and takes six lines to do it.
-     Caught in a screenshot, not by a test, which is the honest way round for
-     a layout bug. */
-  .slot { display:block; height:26px; overflow:hidden; position:relative;
-          margin-top:2px; }
-  .reveal .cap { display:block; }
-  .slot ul { list-style:none; margin:0; padding:0;
-             transition: transform 1.15s cubic-bezier(.16,.9,.3,1); }
-  .slot li { height:26px; line-height:26px; font-size:16px; font-weight:600;
-             white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  /* Somebody who has asked not to be moved gets the answer without the
-     theatre — the reveal is decoration and the name is the content. */
-  @media (prefers-reduced-motion: reduce) { .slot ul { transition:none; } }
+  /* --------------------------------------------------------------- the drum
+     What comes after the next visit, one at a time, on a wheel that turns by
+     itself as the round advances.
+
+     A FLAT LIST WAS THE FIRST ATTEMPT AND IT WAS THE WRONG SHAPE TWICE OVER.
+     It printed every name at once — which is not a reveal, it is a table with
+     extra steps — and it clipped nothing, because the window was a <span>
+     inside a <button>: inline boxes ignore `height` and `overflow`, and a
+     button's own layout is special enough that fixing the display alone did
+     not hold on the device. So the window is a plain element now and the
+     press target is around it, not around the clip.
+
+     The geometry is a real cylinder rather than a strip that slides. Faces sit
+     at rotateX(i · step) translateZ(radius); turning the drum to -i · step
+     brings face i to the front, and the ones either side fall away at an angle
+     the way a fruit-machine reel does. `radius` is computed from the panel's
+     own height in the client — (h/2) / tan(π/N) — because a hard-coded one is
+     a pixel dependency, and this project has already been round that loop with
+     the landscape check.
+
+     CLIPPED WITH clip-path, NOT overflow. WebKit does not reliably clip
+     preserve-3d children with `overflow:hidden`; `inset()` it does. This is
+     the same class of bug as the <span>, found the same way, and worth the
+     less familiar property. */
+  .wheel { margin-top:12px; height:86px; position:relative;
+           perspective:760px; clip-path: inset(0 round 18px);
+           border-radius:18px; background:rgba(255,255,255,.045);
+           border:1px solid rgba(255,255,255,.10); }
+  .wheel .cap { position:absolute; top:8px; left:16px; z-index:3;
+                font-size:10px; letter-spacing:.10em; text-transform:uppercase;
+                color:rgba(255,255,255,.45); pointer-events:none; }
+  .wheel__inner { position:absolute; inset:0; transform-style:preserve-3d;
+                  transition: transform .85s cubic-bezier(.2,.85,.25,1); }
+  /* A face is a <button>, so its background, border and font all have to be
+     stood down explicitly — left alone, the user agent paints its own light
+     control chrome and the drum reads as a strip of brushed metal with the
+     text embossed into it. Seen in a screenshot; the earlier flat list never
+     showed it because the button was the whole panel rather than each face. */
+  .face { position:absolute; inset:0; display:flex; flex-direction:column;
+          justify-content:center; padding:26px 16px 10px; text-align:left;
+          background:none; border:none; color:inherit; font:inherit;
+          width:100%; backface-visibility:hidden; }
+  /* Everything but the face in front is dimmed, so the reel reads as one
+     answer with others behind it rather than as several competing ones. */
+  .face { opacity:.25; transition: opacity .5s ease; }
+  .face[data-front="1"] { opacity:1; }
+  .face .who { font-size:16px; font-weight:600; line-height:1.15;
+               white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .face .sub { font-size:12px; color:rgba(255,255,255,.66); margin-top:2px;
+               white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .face .chip { display:inline-block; font-size:10px; font-weight:700;
+                border-radius:5px; padding:1px 5px; margin-right:6px;
+                vertical-align:1px; color:#fff; }
+  /* The top and bottom of the drum fade, which is what sells it as a curved
+     surface rather than a box with something sliding inside it. */
+  .wheel::before, .wheel::after { content:""; position:absolute; left:0;
+      right:0; height:20px; z-index:2; pointer-events:none; }
+  .wheel::before { top:0;
+      background:linear-gradient(rgba(11,15,29,.85), transparent); }
+  .wheel::after { bottom:0;
+      background:linear-gradient(transparent, rgba(11,15,29,.85)); }
+  /* Asked not to be moved: the wheel stops turning and simply shows the face
+     it is on. The content is the answer; the rotation is decoration. */
+  @media (prefers-reduced-motion: reduce) {
+    .wheel__inner { transition:none; }
+    .face { transition:none; }
+  }
 
   .fullbtn { margin-top:12px; width:100%; border-radius:14px; padding:11px;
              font-size:15px; font-weight:600; color:#fff;
@@ -1227,7 +1275,15 @@
     </div>
     {% elif plan.current or plan.next %}
     {% set v = plan.current or plan.next %}
-    <div class="upnext" id="upnext" data-running="{{ '1' if v.running else '0' }}">
+    {# A button, and carrying a tile's three attributes, because the next thing
+       she wants after reading "Lucresia at 6:05" is Exchange+ — not a second
+       tap on a tile she has to match up by memory. `launch` is reused rather
+       than re-implemented, so the already-in-front shortcut and the sign-in
+       ceremony behave identically here and on the springboard. #}
+    <button class="upnext" id="upnext" type="button"
+            data-running="{{ '1' if v.running else '0' }}"
+            data-package="{{ v.package }}" data-macro="{{ v.macro }}"
+            data-open="{{ v.open }}" data-name="{{ v.app }}">
       <div class="cap">
         {%- if v.running %}<span class="live"></span>{{ t('sched.now') }}
         {%- else %}{{ t('sched.upcoming') }}{% endif -%}
@@ -1240,7 +1296,7 @@
       </div>
       <div class="where">
         {{ v.day }} · {{ v.app }}{% if v.agency %} · {{ v.agency }}{% endif %}</div>
-    </div>
+    </button>
     {% else %}
     <div class="upnext" id="upnext" data-state="empty">
       <div class="cap">{{ t('sched.upcoming') }}</div>
@@ -1248,16 +1304,25 @@
     </div>
     {% endif %}
 
-    {# The reveal. A button, because it does something when pressed and
-       nothing until then. #}
-    <button class="reveal" id="reveal" type="button"
-            aria-live="polite" {{ 'hidden' if not plan.queue }}>
+    {# The drum. One visit at a time, turning by itself as the round runs on.
+       Each face is a way into its own app, same as the card above. #}
+    <div class="wheel" id="wheel" aria-live="polite"
+         {{ 'hidden' if not plan.queue }}>
       <span class="cap">{{ t('sched.after_that') }}</span>
-      <span class="slot"><ul id="slotlist">
-        <li>{{ t('sched.tap_to_see') }}</li>
-        {% for v in plan.queue %}<li>{{ v.patient }}</li>{% endfor %}
-      </ul></span>
-    </button>
+      <div class="wheel__inner" id="wheelinner">
+        {% for v in plan.queue %}
+        <button class="face" type="button" data-i="{{ loop.index0 }}"
+                data-front="{{ '1' if loop.first else '0' }}"
+                data-package="{{ v.package }}" data-macro="{{ v.macro }}"
+                data-open="{{ v.open }}" data-name="{{ v.app }}">
+          <span class="who">{{ v.patient }}</span>
+          <span class="sub">
+            <span class="chip" style="background:{{ v.accent }}">{{ v.mark }}</span
+            >{{ v.day }} · {{ v.fires }} – {{ v.ends }}</span>
+        </button>
+        {% endfor %}
+      </div>
+    </div>
 
     <button class="fullbtn" id="btn-schedule" type="button">
       {{ t('sched.view_full') }}</button>
