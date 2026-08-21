@@ -167,6 +167,7 @@
   "macro.step.restarting": "Reiniciando el teléfono…",
   "macro.step.signing_in": "Iniciando sesión…",
   "macro.step.starting": "Comenzando…",
+  "macro.step.to_the_list": "Yendo a las visitas de hoy…",
   "macro.step.update_required": "Esta aplicación pide actualizarse. Usa el botón de actualizar en la página de la aplicación: hasta entonces no se puede iniciar sesión.",
   "macro.step.updating": "Pidiendo la actualización a Play Store…",
   "macro.sure.inmyteam_resend_code": "¿Pedir un código nuevo a inMyTeam? Cierra la aplicación, vuelve a iniciar sesión y envía un mensaje nuevo. El código que ya tienes deja de funcionar.",

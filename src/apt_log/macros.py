@@ -2991,6 +2991,26 @@ ALLOW_WORDS = ("While using the app", "Mientras se usa la app",
 PRECISE_WORDS = ("Precise", "Precisa", "Precisión")
 
 
+def _declared_permissions(package: str, serial: str | None = None) -> set:
+    """What this package asks for in its manifest, or an empty set.
+
+    Empty means the read failed, and an empty set must not be read as "it
+    wants nothing" — the caller treats it as "no idea, try them all", which
+    is the behaviour this replaced.
+    """
+    from apt_log import feed as feed_mod
+
+    try:
+        out = feed_mod._adb(["shell", "dumpsys", "package", package], serial,
+                            timeout=20.0)
+        if out.returncode != 0:
+            return set()
+        text = out.stdout.decode("utf-8", "replace")
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    return set(re.findall(r"android\.permission\.[A-Z_]+", text))
+
+
 def grant_location(package: str, serial: str | None = None) -> dict:
     """Grant this app the location permissions, without any screen.
 
@@ -3002,8 +3022,18 @@ def grant_location(package: str, serial: str | None = None) -> dict:
     """
     from apt_log import feed as feed_mod
 
+    # ONLY WHAT THE APP ACTUALLY ASKS FOR. Granting a permission a package
+    # never declared throws a SecurityException the length of a stack trace,
+    # and the first armed fire put one in the log for
+    # ACCESS_BACKGROUND_LOCATION — which inMyTeam does not request. Harmless,
+    # and it buried the line that mattered. What the package declares is a
+    # cheap thing to read first.
+    wanted = _declared_permissions(package, serial)
     out = {}
     for perm in LOCATION_PERMS:
+        if wanted and perm not in wanted:
+            out[perm.rsplit(".", 1)[-1]] = "not requested by the app"
+            continue
         try:
             done = feed_mod._adb(["shell", "pm", "grant", package, perm],
                                  serial)
@@ -3091,6 +3121,51 @@ def _bring_up(driver, package: str) -> None:
     time.sleep(EVV_SETTLE)
 
 
+# Where today's visits actually live, per app.
+#
+# Mobile Caregiver+ lands on its week list, so the row is on the screen the
+# app opens to. inMyTeam lands on a page of BUCKETS — Today, Tomorrow, Next,
+# Past, each a count — and the rows are one tap further in.
+EVV_TODAY_WORDS = {
+    "com.inmyteam.inmyteam": ("Today", "Hoy"),
+    "com.tellus.evv.v2": (),
+}
+
+
+def _find_visit_row(driver, report, package: str, patient: str):
+    """The patient's row, walking to the list if we are not already on it.
+
+    THE APP IS WHEREVER IT WAS LAST LEFT. Android keeps app state, and
+    `_bring_up` returns the moment the right package is in front — it does
+    not care which of its screens that is. So the first armed fire looked for
+    Carmen's row on the plan-of-care sheet the app had been sitting on since
+    the night before, found nothing, and failed with "that visit is not on
+    this screen". Both the lead-window walk and the fire itself, for the same
+    reason.
+
+    Three tries, cheapest first: where we are (she may already be on the
+    list), then the app's own home, then the bucket that holds today. Nothing
+    here presses anything consequential — every step is navigation.
+    """
+    row = _row_for(driver, patient)
+    if row is not None:
+        return row
+    report("macro.step.to_the_list")
+    _app_home(driver, report)
+    time.sleep(EVV_SETTLE)
+    row = _row_for(driver, patient)
+    if row is not None:
+        return row
+    for word in EVV_TODAY_WORDS.get(package, ()):
+        bucket = _words(driver, word)
+        if bucket is None:
+            continue
+        bucket.click()
+        time.sleep(EVV_SETTLE)
+        break
+    return _row_for(driver, patient)
+
+
 def _row_for(driver, patient: str):
     """The visit row for this patient, as the smallest clickable holding it.
 
@@ -3136,7 +3211,7 @@ def _evv_entry(driver, report, arg: str) -> None:
     _bring_up(driver, package)
 
     report("macro.step.finding_patient")
-    row = _row_for(driver, patient)
+    row = _find_visit_row(driver, report, package, patient)
     if row is None:
         raise RuntimeError("that visit is not on this screen")
     row.click()
@@ -3198,7 +3273,7 @@ def _evv_prepare(driver, report, arg: str) -> None:
     report("macro.step.launching")
     _bring_up(driver, package)
     report("macro.step.finding_patient")
-    row = _row_for(driver, patient)
+    row = _find_visit_row(driver, report, package, patient)
     if row is None:
         raise RuntimeError("that visit is not on this screen")
     row.click()
