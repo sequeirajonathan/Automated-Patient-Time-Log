@@ -349,7 +349,17 @@ ACTIVITY_SCREENS = {
         "pinactivity": "login",
         "dashboardactivity": "home",
     },
-    "com.inmyteam.inmyteam": {},
+    # One entry, and it earns its place twice over. The console called this
+    # app's main screen "unknown" for as long as it has been installed — the
+    # same complaint Mobile Caregiver+'s dashboard had — and `_app_home` needs
+    # a name for a front page or it walks an app backwards out of itself
+    # looking for one it can never recognise.
+    #
+    # Read off the live device: com.inmyteam.inmyteam.view.activities
+    # .MainActivity is what the app sits on once it is signed in.
+    "com.inmyteam.inmyteam": {
+        "mainactivity": "home",
+    },
 }
 
 

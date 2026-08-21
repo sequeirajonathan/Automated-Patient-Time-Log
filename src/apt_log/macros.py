@@ -2335,6 +2335,20 @@ BACKS_TO_HOME = 6
 # the loop below does up to six of them while somebody waits.
 BACK_SETTLE = 0.9
 
+# APPS WHOSE OWN FLOW LEAVES THEIR PACKAGE.
+#
+# HHAeXchange+ signs in through a Chrome Custom Tab, so for the length of that
+# form the foreground package is Chrome and the app is still, in every sense
+# that matters to a person holding the phone, the app. `_hhax_uma_login`
+# already knows this — it checks for the web form by package for exactly this
+# reason.
+#
+# Found the hard way: without this the walk read Chrome as "you have left",
+# activated the app, which resumed onto the same pending tab, and reported
+# success from inside a browser. Back inside a Custom Tab closes it and
+# returns to the app, which is what the walk wants anyway.
+WEB_FLOW_HOST = {"com.hhaexchange.uma": "com.android.chrome"}
+
 
 def _app_home(driver, report) -> None:
     """Back to the app's own front page, without leaving the app.
@@ -2366,13 +2380,15 @@ def _app_home(driver, report) -> None:
     report("macro.step.checking")
     for _ in range(BACKS_TO_HOME):
         focus = feed_mod.current_focus() or ""
-        if focus.split("/")[0] != package:
+        front = focus.split("/")[0]
+        if front != package and front != WEB_FLOW_HOST.get(package):
             # Back took us out. Undo it, and stop rather than press again —
             # a second press from here would leave a second time.
             driver.activate_app(package)
             wait_for(lambda: _front_package() == package, timeout=10.0)
             break
-        if feed_mod.screen_for(focus, _tree()) in HOME_SCREENS:
+        if front == package and feed_mod.screen_for(focus,
+                                                    _tree()) in HOME_SCREENS:
             break
         report("macro.step.navigating")
         device_mod.send_ui_action("back")
@@ -2384,6 +2400,21 @@ def _app_home(driver, report) -> None:
         driver.activate_app(package)
 
     _forget_stitched(package)
+
+    # AND THEN CHECK, rather than reporting done because the loop ended.
+    #
+    # The first version said "finished" from wherever it stopped, and the
+    # live run caught it out immediately: HHAeXchange+ was resumed onto its
+    # pending sign-in tab, the walk read Chrome as "left the app", activated
+    # the app — which reopened the same tab — and reported success with the
+    # phone sitting in a browser.
+    #
+    # Ending up somewhere else is the one outcome this macro exists to
+    # prevent, so it is the one outcome it must not call success.
+    if _front_package() != package:
+        raise RuntimeError(
+            "the app would not come back to the front; it may be asking to "
+            "sign in")
     report("macro.step.finished")
 
 

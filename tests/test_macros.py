@@ -4144,6 +4144,53 @@ class TestBackToTheAppsOwnFirstPage:
         assert "uiautomator" not in code
         assert "subprocess" not in code
 
+    def test_a_custom_tab_is_not_leaving_the_app(self):
+        """HHAeXchange+ signs in through a Chrome Custom Tab, so for the
+        length of that form the foreground package is Chrome and the app is
+        still the app. Caught live: without this the walk read Chrome as "you
+        have left", activated the app — which resumed onto the same pending
+        tab — and reported success from inside a browser."""
+        # Only one screen is read: while Chrome is in front the walk does
+        # not ask the atlas what page it is on, because the atlas has nothing
+        # to say about a browser.
+        seen = self._run(["home"],
+                         packages=["com.android.chrome",
+                                   "com.hhaexchange.uma"],
+                         pkg="com.hhaexchange.uma")
+        # Backed OUT of the tab rather than activating around it.
+        assert seen["backs"] == 1
+        assert seen["activated"] == 0
+
+    def test_and_a_different_app_still_is(self):
+        """The allowance is one host for one app, not a general licence."""
+        seen = self._run(["home"],
+                         packages=["com.android.chrome",
+                                   "com.tellus.evv.v2"],
+                         pkg="com.tellus.evv.v2")
+        assert seen["activated"] == 1
+        assert seen["backs"] == 0
+
+    def test_ending_up_somewhere_else_is_not_success(self):
+        """The one outcome this macro exists to prevent is the one it must
+        not call finished. The first version said so from wherever it
+        stopped, and the live run caught it out on the first try."""
+        from unittest.mock import patch as patch_mod
+
+        driver = self._driver()
+        # The opening check sees the app; the closing one sees a browser,
+        # which is exactly the shape of the live failure.
+        fronts = iter(["com.hhaexchange.uma"] + ["com.android.chrome"] * 9)
+        with patch_mod.object(macros, "_front_package",
+                              side_effect=lambda: next(fronts)), \
+                patch_mod("apt_log.feed.current_focus",
+                          return_value="com.hhaexchange.uma/x"), \
+                patch_mod("apt_log.feed.screen_for", return_value="home"), \
+                patch_mod.object(macros, "_tree", lambda: ""), \
+                patch_mod.object(macros, "_forget_stitched", lambda _a: None), \
+                patch_mod("apt_log.macros.time.sleep"):
+            with pytest.raises(RuntimeError, match="come back to the front"):
+                macros._app_home(driver, lambda _s: None)
+
     def test_it_is_registered_and_needs_no_confirmation(self):
         """It navigates. Nothing it does can be wrong enough to want a
         second press in front of it."""
