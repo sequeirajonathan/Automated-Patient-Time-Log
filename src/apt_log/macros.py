@@ -3284,6 +3284,154 @@ def _row_for(driver, patient: str):
     return _words(driver, patient)
 
 
+# THE ONE SCREEN IN inMyTeam THAT KNOWS WHETHER A VISIT HAPPENED.
+#
+# Three of its screens answer that question and only this one is right. The
+# Visit Detail's "Your activity on this patient" is a PER-DEVICE log: on
+# 2026-08-21 it went on reading "No check in and check out data has been
+# recorded" through the app's own Refresh and through a force-stop and cold
+# relaunch, on a visit the caregiver had checked in and out from her own
+# handset that morning — while `My Work` -> Checks, same app, same account,
+# same minute, listed all four events for the day. A device that has never
+# checked a patient in reports that nothing was ever recorded, however much
+# was. The list card knows too, but draws it as two Compose check marks with
+# no node, no id and no content-desc: pixels, unreadable.
+#
+# These lines are ordinary TextViews. That is the whole reason this walk
+# exists rather than a screenshot classifier.
+MY_WORK_WORDS = ("My Work", "Mi trabajo")
+CHECKS_TAB_WORDS = ("Checks", "Registros")
+SEARCH_WORDS = ("SEARCH", "Search", "BUSCAR", "Buscar")
+CHECK_EVENT_WORDS = ("check in", "check out", "entrada", "salida")
+CHECK_IN_WORDS_SEEN = ("check in", "entrada")
+
+# Which apps can be asked this question at all. Empty for the rest, and an
+# app that cannot be asked is NOT thereby cleared — see `_already_entered`.
+CHECK_LOG_APPS = ("com.inmyteam.inmyteam",)
+
+
+def _open_my_work(driver, report) -> bool:
+    """The `My Work` screen, reached from wherever the app is standing.
+
+    Its route is the nav drawer, and the drawer only opens from a page that
+    has one — an inner page shows Back in the same corner. So this walks the
+    app home first and takes the drawer from there.
+    """
+    _app_home(driver, report)
+    drawer = None
+    try:
+        drawer = driver.find_element(
+            "xpath", '//*[@content-desc="Open navigation drawer"]')
+    except Exception:  # noqa: BLE001
+        drawer = None
+    if drawer is None:
+        return False
+    drawer.click()
+    time.sleep(EVV_SETTLE)
+    item = _words(driver, *MY_WORK_WORDS)
+    if item is None:
+        return False
+    item.click()
+    time.sleep(EVV_SETTLE)
+    return bool(_words(driver, *SEARCH_WORDS))
+
+
+def _todays_check_events(driver, report, patient: str) -> list[str]:
+    """Every check event this account holds for `patient` today, in words.
+
+    Returns the lines as the app writes them — "Check in 05:00 AM" — or an
+    empty list when the day is genuinely clear.
+
+    RAISES rather than returning empty when it cannot get a straight answer.
+    "I could not look" and "there is nothing there" are the same shape and
+    opposite meanings, and the caller is about to decide whether to touch a
+    live agency record on the strength of it.
+    """
+    from apt_log import feed as feed_mod
+
+    if not _open_my_work(driver, report):
+        raise RuntimeError("the work log is not reachable from here")
+
+    # The date fields default to today, so nothing is typed. Read them rather
+    # than trust them: a range left over from another search would answer a
+    # different question in the same words.
+    today = datetime.now().astimezone().strftime("%Y-%m-%d")
+    source = driver.page_source or ""
+    if today not in source:
+        raise RuntimeError("the work log is not showing today")
+
+    # Checks BEFORE Search. The Visits tab returns nothing for a day whose
+    # Checks tab has four events, so a search run on the wrong tab comes back
+    # empty and looks exactly like a clear day.
+    tab = _words(driver, *CHECKS_TAB_WORDS)
+    if tab is None:
+        raise RuntimeError("the work log has no checks tab")
+    tab.click()
+    time.sleep(EVV_SETTLE)
+    go = _words(driver, *SEARCH_WORDS)
+    if go is None:
+        raise RuntimeError("the work log has no search")
+    go.click()
+    time.sleep(EVV_SETTLE * 2)
+
+    rows = feed_mod.statics(driver.page_source or "")
+    rows.sort(key=lambda s: (s["b"][1], s["b"][0]))
+    words = [(s.get("txt") or "").strip() for s in rows]
+    if not any(patient.lower() in w.lower() for w in words):
+        return []
+    # Everything under the patient's own line, up to the next patient. One
+    # search can list several.
+    start = next(i for i, w in enumerate(words)
+                 if patient.lower() in w.lower())
+    out = []
+    for w in words[start + 1:]:
+        low = w.lower()
+        if any(v in low for v in CHECK_EVENT_WORDS):
+            out.append(w)
+        elif out:
+            break
+    return out
+
+
+def _already_entered(driver, report, package: str, patient: str) -> str:
+    """The check-in this patient already has for today, or "".
+
+    An app whose log has not been walked answers "" — it has no way to know
+    and says so by saying nothing. That is deliberate and it is the reason
+    this returns a string rather than a bool: the caller must not read
+    "no evidence of an entry" as "no entry", and the only app that can
+    currently give evidence either way is named in `CHECK_LOG_APPS`.
+    """
+    if package not in CHECK_LOG_APPS:
+        return ""
+    report("macro.step.reading_the_log")
+    seen = _todays_check_events(driver, report, patient)
+    return next((w for w in seen
+                 if any(v in w.lower() for v in CHECK_IN_WORDS_SEEN)), "")
+
+
+def _evv_checks(driver, report, arg: str) -> None:
+    """Show the day's check-in and check-out record for one patient.
+
+    THE SCREEN NOBODY COULD FIND. Its route is four presses deep behind a nav
+    drawer, a tab that is not the one that opens, and a Search that must be
+    pressed after the tab rather than before — and getting any of that wrong
+    returns an empty list that looks exactly like a day with no work on it.
+    Reaching it by hand, reliably, while an entry is being watched, is not a
+    reasonable thing to ask of anybody.
+
+    It presses nothing consequential: a date search is reading.
+    """
+    package, patient = _evv_parts(arg)
+    if package not in CHECK_LOG_APPS:
+        raise RuntimeError("this app's work log is not walked")
+    report("macro.step.launching")
+    _bring_up(driver, package)
+    report("macro.step.reading_the_log")
+    seen = _todays_check_events(driver, report, patient)
+    report("macro.step.finished" if seen else "macro.step.nothing_recorded")
+
+
 def _evv_entry(driver, report, arg: str) -> None:
     """Press the app's own check-in for one patient, and verify it landed.
 
@@ -3320,6 +3468,20 @@ def _evv_entry(driver, report, arg: str) -> None:
     # what stops the press landing on yesterday's list.
     if not _freshen(driver, report, package, max_age=FRESH_FOR):
         _bring_up(driver, package)
+
+    # BEFORE THE VISIT IS EVEN OPENED, because the visit's own page is the
+    # one that lies. It reports this DEVICE's history, so a phone that has
+    # never checked this patient in shows an empty record and a live
+    # `Check in` for a visit the caregiver finished hours ago — and this app
+    # accepts that press and answers "Success". One 05:00-06:00 visit
+    # collected two extra check-ins that way, four hours after it ended.
+    #
+    # A refusal here spends the slot, which is correct: the entry exists, it
+    # simply was not made by us, and REQ-5.5 forbids trying again later into
+    # a record that would claim a later arrival than the truth.
+    already = _already_entered(driver, report, package, patient)
+    if already:
+        raise RuntimeError(f"this visit is already checked in ({already})")
 
     report("macro.step.finding_patient")
     # Opens TODAY's visit or refuses — see `_open_todays_visit`. inMyTeam
@@ -3457,6 +3619,8 @@ MACROS: dict[str, Macro] = {
         # scheduler does not go through that prompt — its confirmation is the
         # arming switch, thrown in advance and recorded with a name.
         Macro("evv_entry", "macro.evv_entry", _evv_entry, takes_arg=True),
+        Macro("evv_checks", "macro.evv_checks", _evv_checks,
+              takes_arg=True),
         Macro("evv_prepare", "macro.evv_prepare", _evv_prepare,
               takes_arg=True),
         Macro("clear_screen", "macro.clear_screen", _clear_screen),
