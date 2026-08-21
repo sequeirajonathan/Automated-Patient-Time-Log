@@ -1223,6 +1223,19 @@
   .signpreview-wrap #signpreview { width:44%; margin:0; flex:none; }
 
   /* The one action of step one, and it looks like it. */
+  /* The hint that only appears once the ink has landed, pointing at the
+     step that actually finishes. */
+  .signhint { margin:10px 0 0; font-size:13px; line-height:1.4;
+              color:var(--muted); text-align:center; }
+  .signhint[hidden] { display:none; }
+  /* Once the signature is on the phone, the pad's own button stops being the
+     thing to press — it only redraws — so it stands down and step two takes
+     the emphasis. The whole failure was a button that looked like the finish
+     and was not. */
+  #signsheet.drawn .signsend { background:transparent; color:var(--muted);
+                               border:1px solid var(--hair, rgba(128,128,128,.4)); }
+  #signsheet.drawn .approw { outline:2px solid #2e9c63; outline-offset:6px;
+                             border-radius:14px; }
   .signsend { width:100%; margin-top:14px; border:none; border-radius:14px;
               background:var(--tint); color:#fff; font-size:16.5px;
               font-weight:650; min-height:52px; cursor:pointer;
@@ -1234,10 +1247,19 @@
      app's own — they name the app's buttons — and this is what makes them
      unmistakably not hers. */
   .padrow.onphone button { position:relative; padding-left:34px; }
+  /* The mark that says "this one presses the PHONE, not the portal". It was
+     a bare 11x18 rounded rectangle, which is not a phone — it is an empty
+     box, and it was reported as one: "those two icons next to Borrar and
+     Enviar are broken, they don't show anything".
+     The screen line and the home bar are what make it read as a handset at
+     this size. Drawn rather than a glyph so no font has to have it. */
   .padrow.onphone button::before { content:""; position:absolute;
-              left:13px; top:50%; margin-top:-9px; width:11px; height:18px;
+              left:13px; top:50%; margin-top:-10px; width:13px; height:20px;
               border:1.6px solid currentColor; border-radius:3px;
-              opacity:.55; }
+              opacity:.75; }
+  .padrow.onphone button::after { content:""; position:absolute;
+              left:16px; top:50%; margin-top:5px; width:7px; height:1.6px;
+              border-radius:1px; background:currentColor; opacity:.75; }
   #sign-appbtns button { min-height:46px; }
   .approw-label { flex:0 1 auto; font-size:13px; }
   .padrow button { flex:1; padding:12px; border-radius:13px;
@@ -1635,7 +1657,18 @@
     <span class="preview-label">{{ t('sign.preview') }}</span>
     <canvas id="signpreview" width="10" height="10"></canvas>
   </div>
+  {# IT DRAWS. IT DOES NOT SUBMIT — and the old wording, "Enviar al
+     teléfono", read as a submit to the one person using it: the log shows six
+     replays in seven minutes and not one press of the app's own button. She
+     drew, pressed what looked like Send, watched the signature be redrawn,
+     and did it again.
+
+     "Draw it on the phone" names what happens. The word "send" is gone from
+     this button entirely, because the app's own button two rows down says
+     Enviar and there cannot be two of those. #}
   <button type="button" id="sign-send" class="signsend">{{ t('sign.send') }}</button>
+  {# Only after the ink has landed. Says the one thing that was missing. #}
+  <p class="signhint" id="sign-hint" hidden>{{ t('sign.now_press') }}</p>
 
   <div class="approw" id="sign-approw" hidden>
     <div class="signstep">
@@ -1800,6 +1833,8 @@
     sent:    {{ t('phone.sent')|tojson }},
     devfail: {{ t('phone.failed')|tojson }},
     signSending: {{ t('sign.state.running')|tojson }},
+    signSend:      {{ t('sign.send')|tojson }},
+    signSendAgain: {{ t('sign.send_again')|tojson }},
     signEmpty:   {{ t('signature.empty')|tojson }},
     signLockLapsed: {{ t('sign.lock_lapsed')|tojson }},
     live:    {{ t('papp.live')|tojson }},

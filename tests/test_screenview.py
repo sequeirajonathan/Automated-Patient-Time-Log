@@ -2122,3 +2122,65 @@ class TestWhichTickIsWhich:
         for name in ("en.json", "es.json"):
             words = json_mod.loads((base / name).read_text(encoding="utf-8"))
             assert words.get("papp.mark.entry") and words.get("papp.mark.exit")
+
+
+class TestAButtonWearsItsOwnCaption:
+    """Reported as "those two icons next to Borrar and Enviar are broken,
+    they don't show anything". They were not icons: they were the app's
+    buttons, which carry no text of their own, rendered blank beside the
+    loose labels that should have been written on them.
+
+    All three care apps draw controls this way.
+    """
+
+    def _screen(self, extra_static=None):
+        return screenview.build(doc(
+            elements=[
+                el("signature_screen_clear_button", "Button",
+                   [20, 1500, 340, 1560]),
+                el("signature_screen_submit_button", "Button",
+                   [380, 1500, 700, 1560]),
+            ],
+            statics=[st([120, 1515, 240, 1545], "Borrar"),
+                     st([480, 1515, 600, 1545], "Enviar")]
+                    + (extra_static or [])))
+
+    def _buttons(self, model):
+        out = []
+        for row in model.get("rows") or ():
+            for item in row.get("items") or ():
+                if item.get("kind") == "button":
+                    out.append(item)
+        return out
+
+    def test_the_caption_lands_on_the_button(self):
+        words = [b["txt"] for b in self._buttons(self._screen())]
+        assert "Borrar" in words and "Enviar" in words
+
+    def test_neither_button_is_blank(self):
+        assert all(b["txt"] for b in self._buttons(self._screen()))
+
+    def test_the_word_is_not_also_left_lying_beside_it(self):
+        """Otherwise the screen reads "Borrar Borrar"."""
+        model = self._screen()
+        loose = [s for row in (model.get("rows") or ())
+                 for s in (row.get("items") or ())
+                 if s.get("kind") != "button" and s.get("txt") in ("Borrar",
+                                                                   "Enviar")]
+        assert not loose
+
+    def test_a_word_that_merely_overlaps_is_not_claimed(self):
+        """Strict containment. A label that is only near a button belongs to
+        whatever it is actually inside — guessing there is how "Enviar" ends
+        up written on the Clear button."""
+        model = self._screen(extra_static=[
+            st([300, 1490, 420, 1580], "Straddling")])
+        assert "Straddling" not in [b["txt"] for b in self._buttons(model)]
+
+    def test_an_icon_glyph_is_never_adopted_as_a_caption(self):
+        """A private-use codepoint is a drawn icon, not a word — writing one
+        on a button gives it a tofu box for a label."""
+        model = self._screen(extra_static=[
+            {"b": [30, 1510, 60, 1550], "txt": ""}])
+        assert all("" not in (b["txt"] or "")
+                   for b in self._buttons(model))
