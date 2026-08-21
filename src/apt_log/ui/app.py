@@ -738,19 +738,33 @@ def _arming_model(t) -> dict:
     lists the same block once per day it falls on and would ask the same
     question five times.
     """
-    from apt_log import arming
+    from apt_log import arming, autoentry
 
     try:
         plan = schedule_mod.load()
     except schedule_mod.BadSchedule as exc:
         return {"ok": False, "error": str(exc), "blocks": [], "armed": 0}
     on = arming.armed()
+    claims = arming.attestations()
     rows = []
     for block in plan.blocks:
         key = arming.key_for(block)
+        # WHETHER ARMING THIS ONE WOULD ACTUALLY DO ANYTHING. A switch that
+        # looks identical to a working one and cannot fire is the worst thing
+        # this page could show: it would read as "the check-in is handled"
+        # for a visit nobody is going to check in. HHAeXchange+'s control has
+        # never been walked, so its rows say so on their face.
+        why = autoentry.refusal(block.app, "entry")
+        claim = claims.get(key) or {}
         rows.append({
             "key": key,
             "armed": key in on,
+            "fires": not why,
+            "why": why,
+            "why_says": t("arm.why.%s" % why) if why else "",
+            # Who made the presence claim, so the page shows an attested
+            # switch as attested rather than as a setting.
+            "who": str(claim.get("who") or "") if key in on else "",
             "patient": block.patient,
             "app": _app_label(block.app),
             "mark": _app_entry(block.app).get("mark", ""),
@@ -764,7 +778,11 @@ def _arming_model(t) -> dict:
         })
     rows.sort(key=lambda r: (r["patient"], r["start"], r["part"]))
     return {"ok": True, "error": "", "blocks": rows,
-            "armed": sum(1 for r in rows if r["armed"])}
+            "armed": sum(1 for r in rows if r["armed"]),
+            # Armed AND able to act. The two numbers differ exactly when
+            # somebody has armed a visit whose app cannot be pressed, and
+            # that difference is the thing worth showing.
+            "firing": sum(1 for r in rows if r["armed"] and r["fires"])}
 
 
 @app.post("/schedule/arm")
@@ -777,9 +795,20 @@ def schedule_arm(request: Request, key: str = Form(...),
     asked for — a switch that looks thrown and is not is worse than one that
     refuses.
     """
-    from apt_log import arming
+    from apt_log import arming, prefs as prefs_mod
 
-    now = arming.set_armed(key[:64], on == "1")
+    # WHO IS MAKING THE PRESENCE CLAIM (REQ-5.9). Arming is an attestation,
+    # not a preference: it says the caregiver will be at that patient's home,
+    # and the machine writes an EVV record on the strength of it. So the
+    # device's own name is recorded beside the switch and travels into the
+    # audit entry. Unnamed devices attest as "unknown" rather than not at all
+    # — a missing name must never quietly mean "not armed".
+    who = ""
+    try:
+        who = prefs_mod.device(_device_id(request)).get("name") or ""
+    except Exception:  # noqa: BLE001 — an unnamed device still arms
+        log.debug("could not name the device arming this", exc_info=True)
+    now = arming.set_armed(key[:64], on == "1", who=who)
     return JSONResponse({"key": key[:64], "armed": now,
                          "total": len(arming.armed())})
 

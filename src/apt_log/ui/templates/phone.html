@@ -295,11 +295,15 @@
                                         pointer-events:none; }
   #armview .body { overflow-y:auto; -webkit-overflow-scrolling:touch;
                    padding:0 16px calc(24px + env(safe-area-inset-bottom)); }
-  /* Said once, at the top, and not dressed up. A page of switches implies
-     something happens when they are on, and today nothing does. */
+  /* Said once, at the top, and not dressed up. */
   .armnote { margin:12px 0 4px; padding:12px 14px; border-radius:14px;
              background:var(--hair, rgba(128,128,128,.14));
              font-size:13px; line-height:1.45; color:var(--muted); }
+  /* WHAT THROWING A SWITCH MEANS carries more weight than the note above it:
+     these now write EVV records, and the sentence saying so must not read as
+     the same grey aside as everything else on the page. */
+  .armnote.strong { color:var(--fg); font-weight:600;
+                    background:rgba(46,156,99,.13); }
   .armrow { display:flex; align-items:center; gap:12px; padding:12px 0;
             border-top:1px solid var(--hair, rgba(128,128,128,.22)); }
   .armrow .grow { flex:1; min-width:0; }
@@ -313,6 +317,10 @@
      to say invisible: the "1/2" telling somebody WHICH half of a split visit
      a switch controls was the one thing on the row that could not be read. */
   .armrow .buffered { color:var(--muted); border-color:var(--hair, #ccc); }
+  /* A row whose app cannot be pressed. Dimmed rather than hidden — the visit
+     is real and belongs on the page; what is missing is the machine's half. */
+  .armrow.inert .who, .armrow.inert .meta { opacity:.55; }
+  .armrow .meta.warn { color:#b26a00; opacity:1; }
   /* A switch, not a checkbox: this is the one control on the page whose
      state has to be readable from across a kitchen. */
   .sw { flex:0 0 auto; width:52px; height:31px; border-radius:999px;
@@ -1775,13 +1783,19 @@
   </header>
   <div class="body">
     <p class="armnote">{{ t('arm.note') }}</p>
+    {# WHAT THROWING ONE OF THESE MEANS, said before the switches rather than
+       after. Arming is an attestation of presence (REQ-5.9): it says she will
+       be at that patient's home, and the machine writes an EVV record on the
+       strength of it. A page that presents that as a preference is a page
+       that gets a switch thrown for the wrong reason. #}
+    <p class="armnote strong">{{ t('arm.means') }}</p>
     {% if not arming.ok %}
     <p class="emptyday">{{ t('sched.unreadable') }} — {{ arming.error }}</p>
     {% elif not arming.blocks %}
     <p class="emptyday">{{ t('sched.none_configured') }}</p>
     {% else %}
     {% for b in arming.blocks %}
-    <div class="armrow">
+    <div class="armrow{% if not b.fires %} inert{% endif %}">
       <div class="grow">
         <div class="who">{{ b.patient }}
           {%- if b.of > 1 %} <span class="buffered">{{ b.part }}/{{ b.of }}</span>{% endif -%}
@@ -1791,6 +1805,15 @@
           >{{ b.days|join(' ') }} · {{ b.start }} – {{ b.end }}
           {%- if b.agency %} · {{ b.agency }}{% endif -%}
         </div>
+        {# A SWITCH THAT CANNOT FIRE MUST NOT LOOK LIKE ONE THAT CAN. Reading
+           "armed" over a visit nobody is going to check in is worse than
+           reading nothing at all, so the row says which it is on its face. #}
+        {% if not b.fires %}
+        <div class="meta warn">{{ b.why_says }}</div>
+        {% elif b.armed %}
+        <div class="meta">{{ t('arm.attested', who=b.who) if b.who
+                              else t('arm.attested_unknown') }}</div>
+        {% endif %}
       </div>
       <button class="sw" type="button" data-key="{{ b.key }}"
               aria-pressed="{{ 'true' if b.armed else 'false' }}"

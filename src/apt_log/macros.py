@@ -70,6 +70,12 @@ REQUEST_MAX_AGE = 60.0
 
 POLL_EVERY = 1.0
 
+# How often the scheduler looks for something to fire. Far coarser than the
+# loop's own tick because a fire has a five-minute window either side of it,
+# and re-parsing the schedule every second to answer "not yet" sixty times a
+# minute is work nobody asked for.
+FIRE_EVERY = 5.0
+
 # ------------------------------------------------------------ auto sign-in
 # The app expires its session mid-use: the alert's only button lands on the
 # sign-in screen, which the portal (correctly) will not photograph and she
@@ -2860,6 +2866,218 @@ def _check_tasks(driver, report) -> None:
             f"{len(left)} of {len(pending)} tasks did not tick")
 
 
+# ---------------------------------------------------------------- EVV entry
+#
+# THE ONE PLACE IN THIS PROJECT THAT WRITES A RECORD ABOUT A PERSON.
+#
+# Everything else here reads a screen or moves between them. These two press
+# the control that tells an agency a caregiver arrived at a patient's home at
+# a particular minute, and they run from a timer rather than from a finger.
+# What makes that acceptable is REQ-5.9: somebody armed this block in advance
+# and that arming is an attestation of presence, recorded with their name.
+#
+# The patient's name arrives as the macro's ARGUMENT and is never logged, never
+# put in an exception message, and never written to a status file — `execute`
+# already sends `type(exc).__name__` rather than the message for exactly this
+# reason, and these keep that true by not putting a name in one.
+
+# The word on the control that starts a visit, per app. Matched as a phrase,
+# not a fragment: on Mobile Caregiver+ the immediate left-hand neighbour of
+# "Comenzar Visita" is "Cancelar Visita", and cancelling somebody's visit by
+# a loose match is the failure this whole file is written to avoid.
+EVV_ENTRY_WORDS = {
+    "com.tellus.evv.v2": ("Comenzar Visita", "Comenzar visita"),
+    "com.inmyteam.inmyteam": ("Check in",),
+}
+
+# What the screen says once the entry has landed. Read back rather than
+# trusting the tap (REQ-4 verify-after-acting), and this app makes it easy:
+# the real start time appears and the controls go away.
+EVV_STARTED_WORDS = {
+    "com.tellus.evv.v2": ("Hora de inicio real", "Servicio Completada"),
+    "com.inmyteam.inmyteam": ("Check out",),
+}
+
+# inMyTeam refuses any visit that is not today's, in as many words, and draws
+# no control at all. Seeing this is not a failure of navigation — it is the
+# app telling us the visit is not actionable.
+NOT_TODAY_WORDS = ("not scheduled for today", "no está programada para hoy")
+
+EVV_SETTLE = 1.2
+
+
+# WHAT A FIRE NOTICE MAY SAY, WHICH IS ALMOST NOTHING.
+#
+# These land on a lock screen and travel through a public relay, so they carry
+# no patient, no visit, no time and no app — the same rule the code notice
+# already follows. The sentence's whole job is to get somebody to open the
+# portal, where the details are behind the tailnet and a login.
+#
+# Only failures are announced. A check-in that worked is the machine doing its
+# job, and a phone that buzzes for every routine success is a phone somebody
+# turns off before the one that matters.
+FIRE_FAILED = "A scheduled check-in did not complete. Open the portal."
+FIRE_MISSED = "A scheduled check-in was missed and needs doing by hand."
+
+
+def _tell_somebody_about_the_fire(item, outcome: str) -> None:
+    """Alert on a fire that did not land. Never raises — see notify."""
+    if outcome == "done":
+        return
+    sentence = FIRE_MISSED if outcome == "missed" else FIRE_FAILED
+    try:
+        from apt_log import push
+
+        push.send(PUSH_TITLE, sentence, url=PORTAL_URL, tag="evv")
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not push the fire notice (%s)", exc)
+    try:
+        from apt_log import notify
+
+        notify.send(sentence, url=PORTAL_URL)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not alert about the fire (%s)", exc)
+
+
+def _evv_arg(app: str, patient: str) -> str:
+    """One string carrying both halves, because a macro takes one argument.
+
+    JSON rather than a delimiter: a patient's name is arbitrary text and
+    choosing a separator it cannot contain is a guess about somebody's name.
+    """
+    return json.dumps({"app": app, "patient": patient})
+
+
+def _evv_parts(arg: str) -> tuple[str, str]:
+    """(package, patient) from a macro argument, or a refusal.
+
+    Accepts a bare name too, for a press from the portal where the app in
+    front is the app meant.
+    """
+    raw = (arg or "").strip()
+    if not raw:
+        raise RuntimeError("no patient was named")
+    try:
+        doc = json.loads(raw)
+    except json.JSONDecodeError:
+        return _front_package(), raw
+    if not isinstance(doc, dict):
+        raise RuntimeError("that is not a visit")
+    patient = str(doc.get("patient") or "").strip()
+    if not patient:
+        raise RuntimeError("no patient was named")
+    return str(doc.get("app") or "") or _front_package(), patient
+
+
+def _bring_up(driver, package: str) -> None:
+    """The app in front, or a refusal. Never presses anything on it."""
+    if driver.current_package == package:
+        return
+    wake_display()
+    driver.activate_app(package)
+    if not wait_for(lambda: driver.current_package == package, timeout=15.0):
+        raise RuntimeError("the app did not come to the front")
+    time.sleep(EVV_SETTLE)
+
+
+def _row_for(driver, patient: str):
+    """The visit row for this patient, as the smallest clickable holding it.
+
+    Both apps put the patient's name inside the row rather than on it —
+    Mobile Caregiver+ in the row's `content-desc`, inMyTeam in a child of the
+    card — so this is the same smallest-enclosing-clickable rule the rest of
+    the file uses. Located by NAME and never by index: REQ-4 forbids reaching
+    a patient by position, and both apps' row ids are positions.
+    """
+    return _words(driver, patient)
+
+
+def _evv_entry(driver, report, arg: str) -> None:
+    """Press the app's own check-in for one patient, and verify it landed.
+
+    `arg` is the patient's name as the schedule spells it.
+
+    Refuses rather than guesses, at every step: an app that is not in front,
+    a patient whose row is not on the screen, a visit the app says is not
+    today's, a control that is not drawn, and a screen that does not confirm
+    afterwards are all failures, and each leaves the visit for a person. The
+    scheduler has already claimed the occurrence by the time this runs, so a
+    failure here means the entry is made by hand — never retried into a record
+    claiming a later arrival than the truth (REQ-5.5).
+    """
+    from apt_log import autoentry
+
+    package, patient = _evv_parts(arg)
+    why = autoentry.refusal(package, "entry")
+    if why:
+        # Named rather than attempted. HHAeXchange+'s control has only ever
+        # been seen on a visit already under way; pressing an unknown button
+        # on a live agency record to find out what it does is not a thing to
+        # do.
+        raise RuntimeError(f"this app's entry is not walked ({why})")
+
+    report("macro.step.launching")
+    _bring_up(driver, package)
+
+    report("macro.step.finding_patient")
+    row = _row_for(driver, patient)
+    if row is None:
+        raise RuntimeError("that visit is not on this screen")
+    row.click()
+    time.sleep(EVV_SETTLE)
+
+    tree = driver.page_source or ""
+    if any(w.lower() in tree.lower() for w in NOT_TODAY_WORDS):
+        # inMyTeam gates the action to the scheduled day and says so. This is
+        # the app being right, not the walk being wrong.
+        raise RuntimeError("the app says this visit is not today's")
+
+    report("macro.step.checking_in")
+    button = _words(driver, *EVV_ENTRY_WORDS[package])
+    if button is None:
+        raise RuntimeError("the check-in control is not on this screen")
+    button.click()
+    time.sleep(EVV_SETTLE)
+
+    # VERIFY, because "the tap was accepted" is not "the visit started". The
+    # cost of believing a tap that did not take is a shift with no check-in
+    # on it, which is the exact failure this project exists to prevent — and
+    # one week of live data had three of them.
+    report("macro.step.confirming")
+    if not wait_for(lambda: any(
+            w.lower() in (driver.page_source or "").lower()
+            for w in EVV_STARTED_WORDS[package]), timeout=12.0):
+        raise RuntimeError("the screen did not confirm the check-in")
+
+
+def _evv_prepare(driver, report, arg: str) -> None:
+    """Open the patient's visit and stop, leaving the control on the screen.
+
+    THE ANSWER TO inMyTeam NOT BEING ARMABLE THE NIGHT BEFORE. That app draws
+    "Check in" only on the scheduled day — the evening before shows "This
+    visit is not scheduled for today" and no control, so there is nothing to
+    get ready against until the day arrives.
+
+    Arming is not the walk, though. Arming is a standing decision about a
+    recurring block; the walk belongs on the day, in the lead window. This is
+    that walk. By the time the entry is due the app is open, signed in and on
+    the patient's own detail, so the fire is one press rather than a cold
+    start, a login and a search against the clock.
+
+    IT PRESSES NOTHING CONSEQUENTIAL. Opening a visit's detail is reading.
+    """
+    package, patient = _evv_parts(arg)
+    report("macro.step.launching")
+    _bring_up(driver, package)
+    report("macro.step.finding_patient")
+    row = _row_for(driver, patient)
+    if row is None:
+        raise RuntimeError("that visit is not on this screen")
+    row.click()
+    time.sleep(EVV_SETTLE)
+    report("macro.step.ready")
+
+
 def _phone_settings(driver, report) -> None:
     """Open Android's own Settings.
 
@@ -2924,6 +3142,14 @@ MACROS: dict[str, Macro] = {
         Macro("uma_agency", "macro.uma_agency", _uma_agency),
         Macro("uma_agency_for", "macro.uma_agency", _uma_agency_for,
               takes_arg=True),
+        # THE TWO THAT WRITE A RECORD ABOUT A PERSON. `evv_entry` is in
+        # CONFIRM: a person pressing it by hand is asked first, because from
+        # the portal it looks like any other button and it is not one. The
+        # scheduler does not go through that prompt — its confirmation is the
+        # arming switch, thrown in advance and recorded with a name.
+        Macro("evv_entry", "macro.evv_entry", _evv_entry, takes_arg=True),
+        Macro("evv_prepare", "macro.evv_prepare", _evv_prepare,
+              takes_arg=True),
         Macro("clear_screen", "macro.clear_screen", _clear_screen),
         Macro("check_tasks", "macro.check_tasks", _check_tasks),
         Macro("phone_settings", "macro.phone_settings", _phone_settings),
@@ -2966,7 +3192,13 @@ CONFIRM = ("restart_phone", "update_app", "update_hhax_uma",
            # Asks because it sends a real text message to a real phone and
            # steps toward a rate limit that would lock the account out of
            # the app. Cheap to press, not free.
-           "inmyteam_resend_code")
+           "inmyteam_resend_code",
+           # Asks because it writes an EVV record asserting a caregiver was
+           # at a patient's home. From the portal it looks like every other
+           # button on the page and it is not one of them. The SCHEDULER does
+           # not come through here — its confirmation is the arming switch,
+           # thrown in advance and recorded with a name (REQ-5.9).
+           "evv_entry")
 
 
 # Session-expiry dialogs, per app. A dialog whose wording is recognised as
@@ -3240,6 +3472,12 @@ class Runner:
         # scans immediately.
         self._stitch_next_at: float | None = None
         self._stitch_last_page: tuple | None = None
+        # When the scheduler last looked for something to fire (monotonic).
+        # The loop ticks once a second and a fire has a five-minute window,
+        # so this keeps it from re-reading the schedule sixty times a minute.
+        # None, not 0.0, for the same reason as the auth cooldown: "never
+        # looked" is a different fact from "looked at the epoch".
+        self._fire_checked: float | None = None
         # Whether each app's last substantive screen was a foldable page
         # (a run of date headers): a CHANGE in this is a page transition
         # even when the activity name never changes (Compose keeps every
@@ -3348,11 +3586,99 @@ class Runner:
                 if action is not None:
                     sign.do_action(action)
                 self.maybe_auto_auth()
+                self.maybe_fire()
                 self.maybe_warm()
                 self.maybe_stitch()
             except Exception as exc:  # noqa: BLE001
                 log.warning("macro runner: %s", exc)
             self._stop.wait(POLL_EVERY)
+
+    def maybe_fire(self) -> bool:
+        """Do the armed entries whose minute has come. The scheduler's hands.
+
+        Runs on the same loop as everything else, so it holds the one resident
+        session the same way a macro does and cannot interleave gestures with
+        one. It yields to a running macro rather than queueing behind it: a
+        fire that waits is a fire that lands late, and late is refused.
+
+        THE ORDER HERE IS THE SAFETY PROPERTY. The occurrence is spent BEFORE
+        the phone is touched, so a crash mid-press cannot leave the slot open
+        for the next tick to press again — a double check-in is a corrupted
+        record on somebody's timesheet, which is worse than a missed one. The
+        outcome is amended after.
+        """
+        from apt_log import arming, autoentry, schedule as schedule_mod
+
+        if read_status(self._status_path).state == "running":
+            return False
+        # The loop ticks once a SECOND, and a fire has a five-minute window —
+        # so re-reading and re-parsing the schedule sixty times a minute buys
+        # nothing at all. Cheapest question first: with nothing armed there is
+        # no schedule to read, which is also the shipped state.
+        if not arming.armed():
+            return False
+        tick = time.monotonic()
+        if self._fire_checked is not None \
+                and tick - self._fire_checked < FIRE_EVERY:
+            return False
+        self._fire_checked = tick
+        now = datetime.now().astimezone()
+        try:
+            plan = schedule_mod.load()
+        except Exception as exc:  # noqa: BLE001 — no schedule is not an error
+            log.debug("no schedule to fire from (%s)", exc)
+            return False
+        items = autoentry.fireable(autoentry.due(plan, now))
+        if not items:
+            self._say_what_was_missed(plan, now)
+            return False
+
+        item = items[0]          # oldest first; the rest ride the next tick
+        # The claim on the slot, taken first and unconditionally.
+        autoentry.spend(item.occurrence, "running",
+                        {"app": item.visit.app, "kind": item.kind,
+                         # WHO SAID SHE WAS THERE. The record must never read
+                         # as though a machine observed her (REQ-5.9).
+                         "presence": "attested",
+                         "attested_by": item.who,
+                         "attested_at": item.attested_at,
+                         "due": item.when.isoformat()})
+        log.info("firing an armed %s for a %s visit attested by %s",
+                 item.kind, item.visit.app, item.who or "unknown")
+        rid = uuid.uuid4().hex[:12]
+        try:
+            status = self.execute("evv_entry", rid,
+                                  _evv_arg(item.visit.app, item.visit.patient))
+        except Exception as exc:  # noqa: BLE001
+            autoentry.spend(item.occurrence, "failed",
+                            {"error": type(exc).__name__})
+            log.warning("the armed fire failed (%s)", type(exc).__name__)
+            return False
+        outcome = "done" if status.state == "done" else "failed"
+        autoentry.spend(item.occurrence, outcome,
+                        {"error": status.error or ""})
+        _tell_somebody_about_the_fire(item, outcome)
+        return outcome == "done"
+
+    def _say_what_was_missed(self, plan, now) -> None:
+        """An armed entry whose window closed with nothing recorded.
+
+        Said once — the ledger is marked as it is announced — because a person
+        now has to make the entry by hand and the honest arrival minute is
+        already in the past. Silence here would be the machine quietly not
+        doing the one thing it was armed to do.
+        """
+        from apt_log import autoentry
+
+        for item in autoentry.missed(plan, now):
+            if autoentry.refusal(item.visit.app, item.kind):
+                continue
+            autoentry.spend(item.occurrence, "missed",
+                            {"app": item.visit.app, "kind": item.kind,
+                             "due": item.when.isoformat()})
+            log.warning("an armed %s went past its window unrecorded",
+                        item.kind)
+            _tell_somebody_about_the_fire(item, "missed")
 
     def maybe_warm(self) -> bool:
         """Pre-scan the just-signed-in app's other tabs, once.
