@@ -1520,10 +1520,17 @@
          answer to that. Offered only on the app that can be asked; see
          macros.CHECK_LOG_APPS. #}
       <button id="btn-checks" hidden aria-label="{{ t('macro.evv_checks') }}">
+        {# A CLOCK WINDING BACK, not a document. The first try was a page with
+           a tick inside it, and at this size the enclosing square swallowed
+           everything in it — reported as "this square icon is just not very
+           telling what this button does", which is exactly right: a 16-unit
+           box next to a 1.9 stroke reads as a box. Nothing here encloses
+           anything, so every line of it survives at twenty pixels, and what
+           it says — a time, going back — is what the screen behind it holds. #}
         <svg class="tool" viewBox="0 0 24 24" fill="none" stroke="currentColor"
              stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"
-          ><rect x="4" y="4" width="16" height="16" rx="2.5"/
-          ><path d="M4 9h16"/><path d="M8.5 13.5 L10.5 15.5 L15 11"/></svg>
+          ><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/
+          ><path d="M12 7.5v5l3.5 2"/></svg>
       </button>
       <button id="btn-sign" aria-label="{{ t('sign.button') }}">
         <svg class="tool" viewBox="0 0 24 24" fill="none" stroke="currentColor"
