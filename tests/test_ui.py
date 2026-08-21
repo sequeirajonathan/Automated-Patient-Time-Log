@@ -3332,21 +3332,61 @@ class TestAVisitIsAWayIntoItsApp:
         assert 'data-package="com.hhaexchange.uma"' in card
         assert 'data-macro="hhax_uma_login"' in card
 
+    def _two_apps(self):
+        return self._plan(
+            self._one("Ada", "com.hhaexchange.uma"),
+            self._one("Bea", "com.tellus.evv.v2", "10:00", "12:00"))
+
+    def _after(self, client, running, *upcoming):
+        """The after-card, for a plan told outright what is running and what
+        is still to come.
+
+        THE CLOCK IS NOT A FIXTURE. The page picks a different visit for the
+        card below depending on whether a visit is running, and both answers
+        are correct layouts — so a test that lets the hour decide is testing
+        whichever one it happened to run in. The earlier version asked for a
+        block at 10:00–12:00 and passed every time except between ten and
+        noon, when it reported a bug the page does not have.
+
+        `running` and `upcoming` are real `Visit`s, lifted off a day far
+        enough away that today's hour cannot reach them.
+        """
+        from apt_log import schedule as sched
+
+        plan = self._two_apps()
+        with patch.object(sched.Schedule, "current", return_value=running), \
+             patch.object(sched.Schedule, "upcoming",
+                          return_value=list(upcoming)):
+            page = self._page(client, plan)
+        return page[page.index('id="after"'):page.index('id="btn-schedule"')]
+
+    def _ada_and_bea(self):
+        from datetime import date, timedelta
+
+        day = self._two_apps().on(date.today() + timedelta(days=3))
+        return (next(v for v in day if v.patient == "Ada"),
+                next(v for v in day if v.patient == "Bea"))
+
     def test_the_second_card_carries_its_own(self, client):
         """The two visits are usually on different apps, so the second card
-        cannot borrow the first's.
+        cannot borrow the first's. Nothing running: the cards are the first
+        and the second visit still to come."""
+        ada, bea = self._ada_and_bea()
+        after = self._after(client, None, ada, bea)
+        assert 'data-package="com.tellus.evv.v2"' in after
+        assert 'data-macro="mobile_caregiver_pin"' in after
 
-        THIS TEST WAS RIGHT AND THE PAGE WAS WRONG. It began failing at 07:35
-        on a Friday, which looked like a clock-dependent flake — but the hour
-        was only what made the bug visible. While a visit is RUNNING the card
-        above holds the current one, and the card below was taking `queue[0]`,
-        which is the visit after NEXT. The genuine next visit appeared nowhere
-        on the home screen.
+    def test_and_while_a_visit_is_running_it_carries_the_genuine_next(
+            self, client):
+        """THIS IS THE CASE THAT WAS BROKEN.
+
+        While a visit is RUNNING the card above holds the current one, and the
+        card below was taking `queue[0]` — the visit after NEXT. The genuine
+        next visit appeared nowhere on the home screen. Ada is running here, so
+        the card below must be Bea rather than whoever follows her.
         """
-        page = self._page(client, self._plan(
-            self._one("Ada", "com.hhaexchange.uma"),
-            self._one("Bea", "com.tellus.evv.v2", "10:00", "12:00")))
-        after = page[page.index('id="after"'):page.index('id="btn-schedule"')]
+        ada, bea = self._ada_and_bea()
+        after = self._after(client, ada, bea, ada)
         assert 'data-package="com.tellus.evv.v2"' in after
         assert 'data-macro="mobile_caregiver_pin"' in after
 
