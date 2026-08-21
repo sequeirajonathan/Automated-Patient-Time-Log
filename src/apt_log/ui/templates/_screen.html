@@ -39,6 +39,35 @@
   <div class="a-alert" role="alert">{{ m.notice }}</div>
   {% endif %}
 
+  {% if m.permission %}
+  {# ANDROID'S OWN PERMISSION PROMPT, DRAWN AS A PROMPT.
+     The general reflow banded this into one row — the question squeezed to
+     "A l..", the accuracy radios reduced to two bare checkboxes, the three
+     stacked buttons laid side by side like a segmented control. It is the
+     dialog standing between a scheduled check-in and the record it exists to
+     write, so it gets its own shape: the question first and whole, then what
+     is being chosen, then the three answers stacked the way the phone stacks
+     them, with the affirmative filled and the refusal marked. #}
+  <div class="a-perm" role="group" aria-label="{{ m.permission.message }}">
+    <p class="a-permq">{{ m.permission.message }}</p>
+    {% if m.permission.choices %}
+    <div class="a-permchoices">
+      {% for c in m.permission.choices %}
+      <button type="button" class="a-permchoice{% if c.on %} on{% endif %}"
+              aria-pressed="{{ 'true' if c.on else 'false' }}"
+              data-aim='{{ c.aim | tojson }}'>{{ c.txt }}</button>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div class="a-permacts">
+      {% for a in m.permission.actions %}
+      <button type="button" class="a-permact {{ a.tone }}"
+              data-aim='{{ a.aim | tojson }}'>{{ a.txt }}</button>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   {% if m.dismiss %}
   {# The way out of a modal. Drawn ABOVE the sheet's own controls because
      that is where the phone puts it, and because the whole point is that it

@@ -867,6 +867,42 @@
                        font-weight:600; color:var(--muted); text-align:right;
                        max-width:38%; }
 
+  /* ANDROID'S PERMISSION PROMPT. Every button here gets a rule of its own:
+     an unstyled <button> paints the user-agent's control chrome, which this
+     page has been bitten by three times. */
+  .a-perm { background:var(--card); border-radius:18px; padding:16px;
+            margin:4px 4px 12px; box-shadow:var(--shadow-card); }
+  .a-permq { margin:0 0 14px; font-size:16px; line-height:1.35;
+             font-weight:600; color:var(--fg); }
+  .a-permchoices { display:flex; gap:8px; margin-bottom:14px; }
+  .a-permchoice { flex:1; border-radius:13px; padding:11px 8px;
+                  border:1.5px solid var(--hair, rgba(128,128,128,.3));
+                  background:transparent; color:var(--muted);
+                  font-size:14px; font-weight:600; cursor:pointer;
+                  transition:transform .15s var(--spring); }
+  /* Which accuracy the phone has already chosen. It arrives checked, and a
+     page that did not show that would be asking her to pick something that
+     is not actually a blank choice. */
+  .a-permchoice.on { border-color:var(--tint); color:var(--tint);
+                     background:rgba(99,91,255,.12); }
+  .a-permchoice:active { transform:scale(.96); }
+  /* Stacked, the way the phone stacks them — they were laid out side by side
+     as though they were a segmented control, which made three different
+     decisions look like one choice of three equal things. */
+  .a-permacts { display:flex; flex-direction:column; gap:8px; }
+  .a-permact { width:100%; border:none; border-radius:13px; padding:13px;
+               font-size:15px; font-weight:600; cursor:pointer;
+               background:var(--track, rgba(128,128,128,.18));
+               color:var(--fg);
+               transition:transform .15s var(--spring), filter .15s ease; }
+  .a-permact:active { transform:scale(.97); filter:brightness(.92); }
+  /* The one that lets the check-in happen leads. `Only this time` is not an
+     answer worth emphasising — it puts the identical dialog in front of
+     tomorrow's visit — and the refusal is marked rather than hidden. */
+  .a-permact.allow { background:var(--tint); color:#fff; }
+  .a-permact.deny { background:transparent; color:var(--bad, #c0392b);
+                    box-shadow:inset 0 0 0 1.5px currentColor; }
+
   /* The way out of a modal, above the modal's own controls — where the
      phone puts it, and where it has to be found BEFORE anything is pressed.
      Quiet on purpose: it is an escape, not an action, and the two things

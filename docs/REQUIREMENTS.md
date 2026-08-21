@@ -241,20 +241,25 @@ at the building. It cannot establish that the caregiver is. That limit is inhere
 is why the handwritten log stays authoritative (§1.1) — no amount of signal strength
 changes it.
 
-**5.9 — Attested presence, and why this deployment needs it.**
+**5.9 — Arming as the decision to act.**
 
 REQ-5 was written for a controller that lives *at* the care location: the gateway MAC and
 the wifi BSSID anchor the phone to that building because the controller never leaves it.
 
-**This deployment is not that.** The phone is tethered to a Pi at the caregiver's own
-home, and the caregiver travels to several addresses. Every network anchor the gate can
-read attests to the *house the Pi is in*, identically, for every patient on the round. The
-gate is not weak here — it is measuring the wrong building, and it would return the same
-strong PASS whether she was at a patient's home or asleep. A gate that cannot fail is not
-a gate.
+**That is exactly this deployment.** The owner's correction, and it supersedes an earlier
+reading of this section that had the Pi at the caregiver's own house instead:
 
-So in this deployment the presence claim comes from a **person**, in advance, and the act
-that makes it is **arming**. The owner's words, and they are the requirement:
+> "The Pi lives at the building and so does the phone — there will never be an out of
+> range GPS check."
+
+So the anchors describe the right building, the location fix corroborates rather than
+contradicts, and the gate means what REQ-5 says it means. Nothing in 5.1–5.8 is weakened
+or worked around.
+
+**What arming adds is the decision, not the location.** The gate answers "are the devices
+at the building"; it cannot answer "should this visit be entered automatically, right
+now, on this caregiver's behalf". That is a judgement, and it is made in advance by a
+person. The owner's words, and they are the requirement:
 
 > "If armed you can assume my sister is already taking care of the patient. The issue
 > wasn't made clear — she's already there at that time, she just doesn't have the time to
@@ -278,9 +283,12 @@ and it is the account holder's to make.
   indistinguishable from one whose presence was observed.
 - **It is per block and it is explicit.** Nothing arms itself, nothing stays armed by
   inference, and the shipped state is everything off (see `arming.py`).
-- **The network anchors are still read and still recorded**, as corroboration and as the
-  honest note that they describe the Pi's building. They no longer gate, and 5.2's
-  passing condition does not apply to an attested fire.
+- **The network anchors still gate, exactly as 5.2 says.** The Pi is at the building, so
+  they are meaningful here and there is no reason to relax them. Arming is an *additional*
+  condition on top of the gate, never a substitute for it: a fire needs both.
+- **What the anchors describe is the building the Pi is in.** For a patient at a different
+  address they would still pass, because the devices have not moved. That is the one edge
+  the gate cannot see, and arming — a person deciding, per block — is what covers it.
 - **5.5 still holds for everything else.** A fire that cannot complete — the app is not
   signed in, the visit is not on the app's own schedule, the control is not drawn — fails
   closed and alerts. Attested presence answers *where she is*; it does not answer whether
