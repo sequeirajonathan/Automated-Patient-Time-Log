@@ -155,9 +155,10 @@ class TestExecute:
             performed.extend(paths)
             measured.append(bounds)
             # `_perform` answers with the canvas readings either side of the
-            # replay, so the log can say whether the ink landed rather than
-            # leaving it to be guessed at from a screenshot afterwards.
-            return (0, 900)
+            # replay and a per-stroke tally, so the log can say whether the
+            # ink landed rather than leaving it to be guessed at from a
+            # screenshot afterwards.
+            return (0, 900, "+900/1")
 
         with patch.object(sign, "_perform", side_effect=stub), \
              patch("apt_log.resident.run", side_effect=lambda w: w(driver)):
@@ -480,7 +481,7 @@ class TestRotatedPaths:
         real = sign.build_paths
         # `_perform` answers (ink before, ink after) so the log can say
         # whether the ink landed; a bare mock unpacks to nothing.
-        with patch.object(sign, "_perform", return_value=(0, 900)), \
+        with patch.object(sign, "_perform", return_value=(0, 900, "+900/1")), \
              patch.object(sign, "build_paths",
                           side_effect=lambda *a, **kw: built.update(kw) or
                           real(*a, **kw)), \
@@ -496,7 +497,7 @@ class TestRotatedPaths:
         driver.page_source = CANVAS + CHROME
         built = {}
         real = sign.build_paths
-        with patch.object(sign, "_perform", return_value=(0, 900)), \
+        with patch.object(sign, "_perform", return_value=(0, 900, "+900/1")), \
              patch.object(sign, "build_paths",
                           side_effect=lambda *a, **kw: built.update(kw) or
                           real(*a, **kw)), \
@@ -1289,3 +1290,53 @@ class TestRotatedLabelsScaleWithTheScreen:
     def test_nothing_to_read_is_not_rotated(self):
         for empty in ("", "<hierarchy/>"):
             assert sign.presentation_rotated(empty) is False
+
+
+class TestThePerStrokeRecord:
+    """Four experiments failed to reproduce the one failure that matters: a
+    real signature lost its middle stroke, twice, and every synthetic replay
+    of the same shape, position, order, point count and clumping landed. Two
+    fixes were shipped on theories that turned out to be wrong.
+
+    So the next real signature is answered from the record instead. This is
+    the instrument: per stroke, what the canvas gained and how many attempts
+    it took.
+    """
+
+    BOUNDS = [13, 998, 707, 1469]
+
+    def _tally(self, ink_readings):
+        driver = MagicMock()
+        readings = list(ink_readings)
+        with patch.object(sign, "_draw"), \
+             patch.object(sign, "_canvas_ink",
+                          side_effect=lambda b, s=None: readings.pop(0)), \
+             patch.object(sign.time, "sleep"):
+            _first, _last, tally = sign._perform(
+                driver, [[(1, 1)], [(2, 2)]], bounds=self.BOUNDS)
+        return tally
+
+    def test_a_clean_replay_records_a_gain_for_each_stroke(self):
+        # start 0, stroke one -> 500, stroke two -> 900, final look 900.
+        assert self._tally([0, 500, 900, 900]) == "+500/1,+400/1"
+
+    def test_a_stroke_that_took_three_goes_says_so(self):
+        """The shape of the real failure: one stroke gains nothing however
+        many times it is drawn, while its neighbours gain normally."""
+        # start 0, s1 -> 500, s2 -> 500, 500, 500 (three goes, no gain),
+        # then the final look.
+        tally = self._tally([0, 500, 500, 500, 500])
+        assert tally == "+500/1,+0/3"
+
+    def test_the_record_carries_no_coordinates(self):
+        """Deltas and counts only. A pixel total cannot reconstruct a
+        signature, which is the line REQ-10.6 draws around everything here."""
+        tally = self._tally([0, 500, 900, 900])
+        for part in tally.split(","):
+            gain, tries = part.split("/")
+            int(gain)
+            int(tries)
+
+    def test_an_unreadable_canvas_records_nothing_rather_than_zero(self):
+        """None is not zero — the distinction the whole retry rule rests on."""
+        assert self._tally([None, None, None]) == ""
