@@ -2397,12 +2397,40 @@ class TestThePadOnAFullScreenSignature:
     def test_the_caption_comes_from_the_label_over_the_button(self):
         """These buttons carry no text of their own — "Borrar" and "Enviar"
         are separate labels drawn on top of them."""
+        assert [a["txt"] for a in self._actions(self._doc())] \
+            == ["Borrar", "Enviar"]
+
+    def test_a_button_is_not_dropped_for_want_of_its_label(self):
+        """AN EMPTY LIST IS NOT "NO BUTTONS" — it is the pad falling back to
+        the legacy coordinate pair, which off the legacy app presses nothing.
+
+        The label is a separate TextView laid over the button, so a dump that
+        arrives mid-repaint can be missing it while the button is plainly
+        there. The resource-id has already named both the screen and the
+        action by then, so the action's own word stands in and the button
+        stays pressable.
+        """
         doc = self._doc()
         doc["statics"] = []
-        assert self._actions(doc) == []
+        got = self._actions(doc)
+        assert [a["txt"] for a in got] == ["Borrar", "Enviar"]
+        assert [a["aim"]["rid"] for a in got] == [
+            "signature_screen_clear_button", "signature_screen_submit_button"]
 
-    def test_nothing_is_offered_off_a_signature_screen(self):
-        assert self._actions(self._doc(canvas=False)) == []
+    def test_a_flickering_canvas_flag_does_not_take_the_buttons_away(self):
+        """That flag comes from a mark in the hierarchy and it flickers —
+        caught live reading False while the signature screen was plainly
+        open. Gating the pad's only working step-two controls on it dropped
+        the pad onto the legacy pair mid-signature. The ids are the gate."""
+        assert [a["txt"] for a in self._actions(self._doc(canvas=False))] \
+            == ["Borrar", "Enviar"]
+
+    def test_an_ordinary_page_still_offers_nothing(self):
+        doc = self._doc(canvas=False)
+        doc["elements"] = [{"rid": "menu_top_bar_back_button", "cls": "View",
+                            "b": [6, 17, 31, 42]}]
+        doc["statics"] = []
+        assert self._actions(doc) == []
 
     def test_a_generic_save_id_is_not_taken_for_the_pads(self):
         """The legacy visit page's own `button_save`. An id has to name the
@@ -2414,13 +2442,44 @@ class TestThePadOnAFullScreenSignature:
                            "txt": "Salvar"}]
         assert self._actions(doc) == []
 
-    def test_the_legacy_coordinate_pair_hides_when_these_exist(self):
+    def test_the_legacy_coordinate_pair_shows_only_where_it_can_press(self):
+        """IT USED TO FILL IN WHENEVER THE NAMED BUTTONS CAME BACK EMPTY, ON
+        ANY APP.
+
+        `sign.button_targets` derives that coordinate only for the legacy
+        app and answers None everywhere else, so on HHAeXchange+ the pad
+        offered a Borrar and a Salvar whose every press could only answer
+        "no_canvas". Reported as the pad's step-two button doing nothing,
+        and finished from the phone view instead — which worked, because
+        that path taps the element.
+        """
         from pathlib import Path
 
         js = strip_js_comments((Path(__file__).resolve().parents[1]
                                 / "src/apt_log/ui/static/phone.js")
                                .read_text(encoding="utf-8"))
-        assert "legacy.hidden = sheetActions.length > 0" in js
+        assert "legacyUsable = !sheetActions.length && !!meta.legacy_pad" in js
+        assert "legacy.hidden = !legacyUsable" in js
+
+    def test_only_the_legacy_app_gets_the_coordinate_pair(self):
+        from apt_log import sign as sign_mod
+        from apt_log.ui.app import _legacy_pad
+
+        assert _legacy_pad("com.hhaexchange.uma") is False
+        assert _legacy_pad("com.inmyteam.inmyteam") is False
+        assert _legacy_pad("") is False
+        assert _legacy_pad(sign_mod.ROTATED_CANVAS_APPS[0]) is True
+
+    def test_the_flag_agrees_with_what_the_controller_will_do(self):
+        """The pad must not offer a button the controller answers None for.
+        Checked against `button_targets` itself rather than a repeated list.
+        """
+        from apt_log import sign as sign_mod
+        from apt_log.ui.app import _legacy_pad
+
+        for package in ("com.hhaexchange.uma", "com.inmyteam.inmyteam"):
+            assert sign_mod.button_targets("<hierarchy/>", package) is None
+            assert _legacy_pad(package) is False
 
     def test_enviar_leads_in_the_pad(self):
         """The pad emphasises an affirmative caption, and this app's is not

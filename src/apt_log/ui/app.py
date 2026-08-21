@@ -914,10 +914,16 @@ def _sheet_actions(doc: dict, model: dict | None) -> list[dict]:
     # Where the app names its own Borrar and Enviar, they are real elements
     # with real bounds and they ride as ordinary verified taps. The pad shows
     # what the phone actually has, on either shape of signature screen.
-    if doc.get("canvas"):
-        named = _canvas_actions(doc)
-        if named:
-            return named
+    # NOT GATED ON `canvas` EITHER, for the reason stated two paragraphs up:
+    # that flag flickers. Gating the NAMED buttons on it meant a flicker took
+    # the pad's only working step-two controls away and dropped it onto the
+    # legacy coordinate pair, which on this app cannot press anything at all
+    # (see `sign.ROTATED_CANVAS_APPS` — the pair is for the LEGACY app).
+    # `_canvas_actions` is safe ungated: it demands a resource-id naming both
+    # the signature screen and the action, which no ordinary page carries.
+    named = _canvas_actions(doc)
+    if named:
+        return named
     if not model or not model.get("dismiss"):
         return []
     for row in model.get("rows") or ():
@@ -928,6 +934,23 @@ def _sheet_actions(doc: dict, model: dict | None) -> list[dict]:
                  "aim": it["aim"]}
                 for it in row["items"] if it.get("aim")]
     return []
+
+
+def _legacy_pad(package: str) -> bool:
+    """Whether the legacy coordinate pair can press anything on this app.
+
+    `sign.button_targets` answers None off `ROTATED_CANVAS_APPS`, so on every
+    other app that pair is two buttons wired to a guaranteed refusal.
+    """
+    from apt_log import sign as sign_mod
+
+    return bool(package) and package in sign_mod.ROTATED_CANVAS_APPS
+
+
+# What to call a signature button whose overlaid label did not arrive. The
+# app's own words on the app whose ids these are, so the pad still reads as
+# the phone's screen and not as the portal's own invention.
+_FALLBACK_WORD = {"clear": "Borrar", "confirm": "Enviar"}
 
 
 def _canvas_actions(doc: dict) -> list[dict]:
@@ -941,6 +964,15 @@ def _canvas_actions(doc: dict) -> list[dict]:
 
     Clear first, submit last: the pad emphasises the last one, and the last
     one has to be the affirmative.
+
+    A BUTTON IS NOT DROPPED FOR WANT OF ITS LABEL. The caption is drawn as a
+    separate TextView laid over the button, and a dump that arrives without
+    it — mid-repaint, or with the label folded elsewhere — used to remove the
+    button from this list entirely. An empty list is not "no buttons": it
+    sends the pad to the legacy coordinate pair, which on this app presses
+    nothing. The resource-id has already named both the screen and the
+    action by the time we get here, so where the label is absent the action's
+    own word stands in and the button stays pressable.
     """
     from apt_log import sign as sign_mod
 
@@ -954,9 +986,7 @@ def _canvas_actions(doc: dict) -> list[dict]:
                 continue
             if not any(h in rid for h in sign_mod.CANVAS_ID_HINTS):
                 continue          # see sign._app_buttons: a generic id is not
-            caption = _caption_over(doc, element["b"])
-            if not caption:
-                continue
+            caption = _caption_over(doc, element["b"]) or _FALLBACK_WORD[kind]
             found.append((order[kind],
                           {"txt": caption,
                            "aim": {"rid": element.get("rid", ""),
@@ -1289,6 +1319,19 @@ async def live(ws: WebSocket):
                     # off this screen there is nothing to press.
                     "canvas": bool(screen_doc.get("canvas")
                                    and screen_doc.get("landscape")),
+                    # WHETHER THE LEGACY COORDINATE PAIR CAN PRESS ANYTHING.
+                    #
+                    # It presses a point derived from the canvas on a page the
+                    # app draws rotated, and `sign.button_targets` answers None
+                    # for every package outside `ROTATED_CANVAS_APPS` — which
+                    # holds the LEGACY app alone. The pad showed that pair
+                    # whenever the named buttons came back empty, on any app,
+                    # so on HHAeXchange+ it offered a Borrar and a Salvar that
+                    # could only ever answer "no_canvas". Reported as the pad's
+                    # step-two button doing nothing, and finished from the
+                    # phone view instead — which worked, because that path taps
+                    # the element.
+                    "legacy_pad": _legacy_pad(screen_doc.get("app", "")),
                     # A system panel is over the app. Nothing she taps will
                     # reach the app underneath while this is true, so the page
                     # stops pretending otherwise and offers the way out.
