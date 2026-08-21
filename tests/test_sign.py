@@ -800,11 +800,52 @@ class TestPressingAnElementNotAPoint:
         assert sign._click_element(Driver(), {"rid": "a:id/b",
                                               "txt": "Salvar"}) is False
 
-    def test_a_captionless_target_is_never_pressed(self):
+    def test_a_captionless_target_with_an_ordinary_id_is_never_pressed(self):
+        """The bare `button_save` on the visit page is the ✎ on a real
+        record. Nothing about its id says signature, so the caption is the
+        only evidence there is and its absence is disqualifying."""
         class Driver:
             def find_elements(self, how, what):
                 raise AssertionError("should not have looked")
-        assert sign._click_element(Driver(), {"rid": "a:id/b", "txt": ""}) is False
+        assert sign._click_element(Driver(), {"rid": "a:id/button_save",
+                                              "txt": ""}) is False
+
+    def test_a_captionless_button_whose_id_names_the_signature_screen_presses(self):
+        """THE RULE THAT FOUND IT AND THE RULE THAT PRESSES IT MUST AGREE.
+
+        `_app_buttons` accepts `signature_screen_submit_button` without a
+        caption on purpose — the id names the screen as well as the action,
+        which is exactly the evidence a bare `button_save` lacks. This
+        function used to re-check with the opposite rule and refuse, so on
+        HHAeXchange+ — where Borrar and Enviar are captionless Views with
+        their words drawn over them as separate TextViews — the app-side
+        press could never succeed. Reported as the pad's step-two button
+        doing nothing.
+        """
+        pressed = []
+
+        class El:
+            def click(self_inner): pressed.append(True)
+
+        class Driver:
+            def find_elements(self, how, what):
+                self.what = what
+                return [El()]
+
+        d = Driver()
+        el = {"rid": "com.hhaexchange.uma:id/signature_screen_submit_button",
+              "txt": ""}
+        assert sign._click_element(d, el) is True
+        assert "signature_screen_submit_button" in d.what
+        assert "@text" not in d.what      # there is no caption to match on
+        assert pressed == [True]
+
+    def test_even_a_signature_id_refuses_when_two_things_match(self):
+        class Driver:
+            def find_elements(self, how, what): return [object(), object()]
+        assert sign._click_element(
+            Driver(),
+            {"rid": "x:id/signature_screen_submit_button", "txt": ""}) is False
 
 
 class TestTheRecordCanSayWhichButtonIsWhich:
@@ -822,6 +863,27 @@ class TestTheRecordCanSayWhichButtonIsWhich:
         for word in ("Borrar", "Salvar", "Anular", "Clear", "Save"):
             node = f'<node text="{word}" bounds="[0,0][10,10]"/>'
             assert sign._control_word(node) == word
+
+    def test_the_word_on_the_submit_button_is_kept(self):
+        """ENVIAR WAS MISSING FROM THE VOCABULARY, AND IT IS THE ONE THAT
+        MATTERS.
+
+        The live capture of the HHAeXchange+ signature screen came back with
+        "Borrar" beside the clear button and an empty string beside the
+        submit one — which reads as "the app does not name that button" when
+        the app names it perfectly well. `_SAVE_WORDS` has held "enviar" all
+        along; the two lists were never reconciled.
+        """
+        for word in ("Enviar", "enviar", "Send"):
+            node = f'<node text="{word}" bounds="[0,0][10,10]"/>'
+            assert sign._control_word(node) == word
+
+    def test_every_word_the_finder_acts_on_can_be_recorded(self):
+        """The record exists to hand over a repair. A caption the matcher
+        uses and the dump blanks is exactly the gap that cost an hour."""
+        missing = [w for w in (sign._SAVE_WORDS + sign._CLEAR_WORDS)
+                   if w not in sign._CONTROL_WORDS]
+        assert missing == []
 
     def test_a_name_is_not(self):
         """The whole reason the record carries no text."""

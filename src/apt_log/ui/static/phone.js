@@ -466,11 +466,19 @@
       // from the screen payload, and the payload changes while the ink is
       // landing. Re-apply the lock over anything freshly built.
       if (pad.waitingId) padWaiting(true);
+      // The legacy pair presses a COORDINATE, and the controller derives it
+      // only for the legacy app — `button_targets` answers None everywhere
+      // else, so off that app both of its buttons are wired to a refusal.
+      // It used to fill in whenever the named buttons came back empty, on
+      // any app, which is how the pad came to show a Borrar and a Salvar on
+      // HHAeXchange+ that could not press anything: "the drop down pencil
+      // enviar did not work". It shows only where it works now.
+      const legacyUsable = !sheetActions.length && !!meta.legacy_pad;
       // Shown when the app has given us real buttons to press, or on the
       // legacy rotated pages where the pair is pressed by coordinate.
-      approw.hidden = !sheetActions.length && !meta.canvas;
+      approw.hidden = !sheetActions.length && !legacyUsable;
       const legacy = document.getElementById('sign-legacyrow');
-      if (legacy) legacy.hidden = sheetActions.length > 0;
+      if (legacy) legacy.hidden = !legacyUsable;
     }
     const onLauncher = meta.name === 'launcher';
     // While a macro is working — and for a grace period after it ends —

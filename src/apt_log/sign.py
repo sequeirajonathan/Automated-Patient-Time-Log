@@ -353,6 +353,17 @@ _CONTROL_WORDS = frozenset((
     "borrar", "salvar", "anular", "atrás", "atras", "cancelar", "guardar",
     "limpiar", "aceptar", "de acuerdo", "firmar",
     "clear", "save", "cancel", "back", "ok", "done", "sign", "submit",
+    # ENVIAR WAS MISSING, AND IT IS THE ONE THAT MATTERS.
+    #
+    # This dump is the only artifact built to hand over a signature repair,
+    # and the word HHAeXchange+ writes on its submit button was not on the
+    # list — so the live capture of that screen came back with "Borrar"
+    # beside the clear button and an EMPTY string beside the submit one,
+    # which reads as "the app does not name that button" when in fact the
+    # app names it perfectly well. An hour of this repair went into the
+    # wrong half of the screen because of it. `_SAVE_WORDS` has held
+    # "enviar" all along; these two lists were simply never reconciled.
+    "enviar", "send",
 ))
 
 
@@ -868,20 +879,45 @@ _XPATH = "xpath"
 
 
 def _click_element(driver, el: dict) -> bool:
-    """Press the app's own button, matched on BOTH its id and its caption.
+    """Press the app's own button, re-matched on the SAME evidence that found it.
 
-    Both are required at press time for the same reason the caption is
-    required at match time: this activity publishes one `button_save` on the
-    signature page reading "Salvar" and another on the ordinary visit page
-    with no caption at all, and the second one is the ✎ on a real record.
+    The caption is required at press time for the same reason it is required
+    at match time: this activity publishes one `button_save` on the signature
+    page reading "Salvar" and another on the ordinary visit page with no
+    caption at all, and the second one is the ✎ on a real record.
     Re-checking here closes the gap between reading the tree and acting on it,
     where the screen may have changed underneath.
+
+    Where the ID names the signature screen, the id is the evidence and the
+    id is what gets re-checked — see the block below. Either way the press
+    happens only against exactly one match.
     """
     rid, txt = el.get("rid") or "", el.get("txt") or ""
-    if not rid or not txt:
+    if not rid:
         return False
-    quoted = txt.replace("'", "&apos;")
-    xpath = f"//*[@resource-id='{rid}'][@text='{quoted}']"
+    if not txt:
+        # A CAPTIONLESS BUTTON WHOSE ID NAMES THE SIGNATURE SCREEN.
+        #
+        # `_app_buttons` decided, deliberately and with the reasoning above
+        # it, that `signature_screen_submit_button` needs no caption: the id
+        # names the screen as well as the action, which is exactly the
+        # evidence the bare `button_save` on the visit page lacks. This
+        # function then re-checked with the OPPOSITE rule and refused
+        # everything it was handed, so on HHAeXchange+ — where both Borrar
+        # and Enviar are captionless Views with the words drawn over them as
+        # separate TextViews — the app-side press could never succeed.
+        #
+        # The two rules have to agree. A caption is still required where the
+        # caption was the evidence; where the id was, the id is what gets
+        # re-checked. The single-match guard below is unchanged and still
+        # does the real work of refusing an ambiguous screen.
+        if not any(hint in rid.split("/")[-1].lower()
+                   for hint in CANVAS_ID_HINTS):
+            return False
+        xpath = f"//*[@resource-id='{rid}']"
+    else:
+        quoted = txt.replace("'", "&apos;")
+        xpath = f"//*[@resource-id='{rid}'][@text='{quoted}']"
     try:
         matches = driver.find_elements(_XPATH, xpath)
     except Exception as exc:  # noqa: BLE001
