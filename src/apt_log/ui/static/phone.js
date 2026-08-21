@@ -1065,82 +1065,15 @@
   // in half a second later looks broken on a bad connection. Everything here
   // is about what happens AFTER that first paint.
   //
-  // Two jobs, and they are separate on purpose:
+  // One job: the refresh, because the next visit becomes the current one
+  // while the page sits open on a kitchen counter. It re-reads rather than
+  // reloads — a reload would take her out of whatever else she was doing.
   //
-  //   the reveal, which spins when pressed and never on its own. A thing that
-  //   moves by itself on a page somebody is trying to read is an annoyance the
-  //   second time and furniture by the tenth;
-  //
-  //   the refresh, because the next visit becomes the current one while the
-  //   page sits open on a kitchen counter. It re-reads rather than reloads —
-  //   a reload would take her out of whatever else she was doing.
+  // Nothing here animates. Two cards, both still, both a way into their own
+  // app. The version between these two turned a drum on a timer and it was
+  // the wrong answer twice over: motion nobody asked for, on the one part of
+  // the page somebody is actually trying to read.
   const SCHEDULE_EVERY = 60000;
-  // How long one face of the drum holds before the wheel turns. Long enough
-  // to read a name, a day and a time without hurrying; short enough that a
-  // glance at the page while the kettle boils sees more than one.
-  const DWELL = 5200;
-  let wheelAt = 0;
-  let wheelTimer = 0;
-
-  // The cylinder's geometry, computed rather than written down. N faces evenly
-  // spaced round a drum whose front face is the panel's own height h sit at
-  // radius (h/2) / tan(π/N) — hard-coding that would be a pixel dependency,
-  // and this project has already been round that loop once with the landscape
-  // check.
-  function layOutWheel() {
-    const inner = document.getElementById('wheelinner');
-    if (!inner) return 0;
-    const faces = inner.children;
-    const n = faces.length;
-    if (!n) return 0;
-    const h = inner.offsetHeight || 76;
-    const step = 360 / n;
-    // One face is a flat panel, not a cylinder: no rotation, no depth, and
-    // nothing to dim behind it.
-    const radius = n < 2 ? 0
-      : (h / 2) / Math.tan(Math.PI / n);
-    for (let i = 0; i < n; i++) {
-      faces[i].style.transform =
-        'rotateX(' + (i * step) + 'deg) translateZ(' + radius + 'px)';
-    }
-    return step;
-  }
-
-  function turnWheelTo(i) {
-    const inner = document.getElementById('wheelinner');
-    if (!inner || !inner.children.length) return;
-    const n = inner.children.length;
-    const step = 360 / n;
-    wheelAt = ((i % n) + n) % n;
-    // Kept counting upward rather than reset to zero on wrap: snapping the
-    // transform back would spin the drum the whole way round backwards in
-    // front of her, once per lap, for no reason.
-    inner.style.transform = 'rotateX(' + (-i * step) + 'deg)';
-    for (let k = 0; k < n; k++) {
-      inner.children[k].dataset.front = k === wheelAt ? '1' : '0';
-    }
-  }
-
-  let wheelTurn = 0;
-
-  function spin() {
-    const inner = document.getElementById('wheelinner');
-    if (!inner || inner.children.length < 2) return;
-    wheelTurn += 1;
-    turnWheelTo(wheelTurn);
-  }
-
-  function startWheel() {
-    const wheel = document.getElementById('wheel');
-    if (!wheel || wheel.hidden) return;
-    layOutWheel();
-    wheelTurn = 0;
-    turnWheelTo(0);
-    clearInterval(wheelTimer);
-    if (document.getElementById('wheelinner').children.length > 1) {
-      wheelTimer = setInterval(spin, DWELL);
-    }
-  }
 
   function paintUpNext(plan) {
     const card = document.getElementById('upnext');
@@ -1188,58 +1121,47 @@
     card.dataset.name = v.app || '';
   }
 
-  // The drum, rebuilt when the queue behind it has moved on. Compared by what
-  // is actually on the faces rather than rebuilt every minute: tearing the
-  // wheel down and standing it up again mid-turn is a visible stutter every
-  // sixty seconds, for a queue that changes a few times a day.
-  function paintWheel(plan) {
-    const wheel = document.getElementById('wheel');
-    const inner = document.getElementById('wheelinner');
-    if (!wheel || !inner || !plan || !plan.ok) return;
-    const queue = plan.queue || [];
-    const now = Array.prototype.map.call(inner.children,
-      (f) => f.dataset.package + '|' + (f.querySelector('.who') || {}).textContent);
-    const next = queue.map((v) => v.package + '|' + v.patient);
-    if (now.length === next.length && now.every((x, i) => x === next[i])) return;
-
-    inner.textContent = '';
-    for (let i = 0; i < queue.length; i++) {
-      const v = queue[i];
-      const face = document.createElement('button');
-      face.className = 'face';
-      face.type = 'button';
-      face.dataset.i = String(i);
-      face.dataset.front = i === 0 ? '1' : '0';
-      face.dataset.package = v.package || '';
-      face.dataset.macro = v.macro || '';
-      face.dataset.open = v.open || '';
-      face.dataset.name = v.app || '';
-      const who = document.createElement('span');
-      who.className = 'who';
-      // textContent throughout: a patient's name is somebody else's words and
-      // this page has no business interpreting them as markup.
-      who.textContent = v.patient;
-      const sub = document.createElement('span');
-      sub.className = 'sub';
-      const chip = document.createElement('span');
-      chip.className = 'chip';
-      chip.style.background = v.accent || '#666';
+  // The card under it: the one visit after the one above, and nothing else.
+  //
+  // IT WAS A TURNING DRUM. The wheel showed one at a time, which was right,
+  // and it moved on its own, which was not — asked for plainly: "I don't like
+  // the behaviour of the wheel, maybe simple is better and just displays the
+  // next patient". A card that sits still says the same thing with nothing to
+  // wait for and nothing competing for the eye of somebody reading the card
+  // above it.
+  function paintAfter(plan) {
+    const card = document.getElementById('after');
+    if (!card || !plan || !plan.ok) return;
+    const v = (plan.queue || [])[0];
+    card.hidden = !v;
+    if (!v) return;
+    const who = card.querySelector('.who');
+    const sub = card.querySelector('.sub');
+    const chip = card.querySelector('.chip');
+    // textContent throughout: a patient's name is somebody else's words and
+    // this page has no business interpreting them as markup.
+    if (who) who.textContent = v.patient;
+    if (chip) {
       chip.textContent = v.mark || '';
-      sub.appendChild(chip);
-      sub.appendChild(document.createTextNode(
-        v.day + ' · ' + v.fires + ' – ' + v.ends));
-      face.appendChild(who);
-      face.appendChild(sub);
-      inner.appendChild(face);
+      chip.style.background = v.accent || '#666';
     }
-    wheel.hidden = queue.length === 0;
-    startWheel();
+    if (sub) {
+      // The chip is inside .sub, so the text after it is replaced rather than
+      // the whole node — otherwise the badge is destroyed on every refresh.
+      while (sub.lastChild && sub.lastChild !== chip) sub.removeChild(sub.lastChild);
+      sub.appendChild(document.createTextNode(
+        ' ' + v.day + ' · ' + v.fires + ' – ' + v.ends));
+    }
+    card.dataset.package = v.package || '';
+    card.dataset.macro = v.macro || '';
+    card.dataset.open = v.open || '';
+    card.dataset.name = v.app || '';
   }
 
   function refreshSchedule() {
     fetch('/api/schedule', { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
-      .then((plan) => { if (plan) { paintUpNext(plan); paintWheel(plan); } })
+      .then((plan) => { if (plan) { paintUpNext(plan); paintAfter(plan); } })
       .catch(() => { /* the card keeps the last answer it had */ });
   }
 
@@ -1256,8 +1178,8 @@
   }
 
   function wireSchedule() {
-    const wheel = document.getElementById('wheel');
-    if (wheel) wheel.addEventListener('click', (ev) => openVisitsApp(ev.target));
+    const after = document.getElementById('after');
+    if (after) after.addEventListener('click', () => openVisitsApp(after));
     const card = document.getElementById('upnext');
     if (card && card.dataset.macro) {
       card.addEventListener('click', () => launch(card));
@@ -1268,8 +1190,43 @@
     // view puts its way back — one habit rather than two.
     const back = document.getElementById('btn-sched-home');
     if (back) back.addEventListener('click', () => view('launcher'));
-    startWheel();
+    const arm = document.getElementById('btn-arm');
+    if (arm) arm.addEventListener('click', () => view('arm'));
+    const armBack = document.getElementById('btn-arm-home');
+    if (armBack) armBack.addEventListener('click', () => view('launcher'));
+    wireArming();
     setInterval(refreshSchedule, SCHEDULE_EVERY);
+  }
+
+  // ---------------------------------------------------------- what is armed
+  //
+  // A switch here changes what the machine is ALLOWED to do, so it is not
+  // moved until the server says it moved. An optimistic flip would leave a
+  // control reading "on" over a machine that never recorded it — which, for
+  // this particular switch, is the worst possible way to be wrong.
+  //
+  // Not gated on `driving()`: this touches a file on the controller, not the
+  // phone, and the coach-mode rule is about not pressing things on somebody
+  // else's screen.
+  function wireArming() {
+    for (const sw of document.querySelectorAll('.sw')) {
+      sw.addEventListener('click', () => {
+        if (sw.disabled) return;
+        const want = sw.getAttribute('aria-pressed') !== 'true';
+        sw.disabled = true;
+        fetch('/schedule/arm', {
+          method: 'POST',
+          body: new URLSearchParams({ key: sw.dataset.key, on: want ? '1' : '0' }),
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        }).then((r) => (r.ok ? r.json() : null))
+          .then((doc) => {
+            if (doc) sw.setAttribute('aria-pressed', doc.armed ? 'true' : 'false');
+            else toast(i18n.failed || '');
+          })
+          .catch(() => toast(i18n.failed || ''))
+          .finally(() => { sw.disabled = false; });
+      });
+    }
   }
 
   // -------------------------------------------------------------------- wire

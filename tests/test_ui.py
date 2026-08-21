@@ -171,7 +171,15 @@ class TestWritePaths:
                          # and nothing else: the subscription can push to
                          # that phone and cannot reach the app, the phone,
                          # or the record.
-                         "/api/push/subscribe"}
+                         "/api/push/subscribe",
+                         # Which visits the scheduler will be allowed to act
+                         # on. It writes one short file on the CONTROLLER and
+                         # cannot reach the app, the phone or the record —
+                         # and today nothing reads it, because nothing fires
+                         # yet. It is here so that the switch a person throws
+                         # already means what they meant by it when firing
+                         # does land.
+                         "/schedule/arm"}
 
     def test_no_route_accepts_a_raw_coordinate_or_keycode(self, client):
         """/tap takes an element from a named frame; /device takes an action
@@ -3071,13 +3079,13 @@ class TestTheNextVisitOnTheHomeScreen:
             self._one("Bea", "06:00", "09:00")))
         assert Translator("en").t("sched.buffered") in page
 
-    def test_the_drum_is_hidden_when_there_is_nothing_after_the_next_one(
+    def test_the_second_card_is_hidden_when_there_is_no_second_visit(
             self, client):
-        """One visit in the whole week: there is no queue to turn through, and
-        a wheel with nothing on it should not be on the page."""
+        """One visit in the whole week: a card with nothing on it should not
+        be on the page."""
         page = self._rendered(client, self._plan(
             self._one("Ada", days=["mon"])))
-        head = page[page.index('id="wheel"'):page.index('id="wheel"') + 200]
+        head = page[page.index('id="after"'):page.index('id="after"') + 220]
         assert "hidden" in head
 
     def test_the_full_week_is_grouped_by_day(self, client):
@@ -3152,13 +3160,14 @@ class TestTheScheduleApi:
 
 
 
-class TestTheDrum:
-    """What comes after the next visit, one at a time, on a wheel that turns
-    by itself as the round advances.
+class TestTheCardUnderIt:
+    """The one visit after the one above, and nothing else.
 
-    The flat list this replaced was the wrong shape twice over: it printed
-    every name at once, which is a table with extra steps, and it clipped
-    nothing, because the window was a <span> inside a <button>.
+    This was a drum that turned on a timer for exactly one session. Asked to
+    stop: "I don't like the behaviour of the wheel, maybe simple is better
+    and just displays the next patient." Motion nobody asked for, on the part
+    of the page somebody is actually trying to read, was the wrong answer —
+    and simpler is also less to go wrong.
     """
 
     def _js(self) -> str:
@@ -3169,46 +3178,43 @@ class TestTheDrum:
         return Path("src/apt_log/ui/templates/phone.html").read_text(
             encoding="utf-8")
 
-    def test_it_turns_on_its_own(self):
-        """Asked for in those words — it spins as time goes by. The earlier
-        version deliberately did not, and that was the wrong call for a page
-        somebody glances at rather than reads."""
+    def test_no_timer_moves_anything_on_the_page(self):
+        """Two intervals are left and both earn it: re-reading the schedule,
+        and the clock, which is a clock. Neither animates a control."""
         js = self._js()
-        assert "setInterval(spin, DWELL)" in js
+        intervals = [l.strip() for l in js.splitlines() if "setInterval" in l]
+        assert len(intervals) == 2
+        assert any("refreshSchedule" in l for l in intervals)
+        assert any("tick" in l for l in intervals)
 
-    def test_a_single_face_does_not_turn(self):
-        """One thing on the wheel is a flat panel. Rotating it would be
-        movement with nothing to reveal."""
+    def test_the_wheel_is_gone_rather_than_hidden(self):
         js = self._js()
-        assert "children.length > 1" in js
+        for ghost in ("wheel__inner", "turnWheelTo", "layOutWheel",
+                      "startWheel", "DWELL"):
+            assert ghost not in js
 
-    def test_the_geometry_is_computed_not_written_down(self):
-        """A hard-coded radius is a pixel dependency, and this project has
-        already been round that loop with the landscape check — a new phone
-        with a different screen would tip the drum on its side."""
-        js = self._js()
-        assert "Math.tan(Math.PI / n)" in js
-        assert "offsetHeight" in js
-
-    def test_it_is_clipped_with_clip_path_and_not_overflow(self):
-        """WebKit does not reliably clip preserve-3d children with
-        overflow:hidden. inset() it does. Same class of bug as the <span>,
-        and worth the less familiar property."""
+    def test_it_is_padded_like_the_card_above_it(self):
+        """The drum's faces sat flush to the edge and the two cards read as
+        belonging to different pages — "text is too close to the edges, make
+        it uniform like the current and upcoming patient"."""
         css = self._css()
-        rule = css[css.index("  .wheel {"):css.index("  .wheel .cap")]
-        assert "clip-path: inset(" in rule
-        assert "preserve-3d" in css
-
-    def test_somebody_who_asked_not_to_be_moved_is_not_moved(self):
-        css = self._css()
-        block = css[css.index("@media (prefers-reduced-motion: reduce) {\n    .wheel__inner"):]
-        assert "transition:none" in block[:220]
+        top = css[css.index("  .upnext {"):css.index("  .upnext .cap")]
+        after = css[css.index("  .after {"):css.index("  .after .cap")]
+        assert "padding:14px 16px" in top
+        assert "padding:14px 16px" in after
 
     def test_a_patients_name_goes_in_as_text_never_as_markup(self):
         js = self._js()
-        body = js[js.index("function paintWheel"):js.index("function refreshSchedule")]
+        body = js[js.index("function paintAfter"):js.index("function refreshSchedule")]
         assert "who.textContent = v.patient" in body
         assert "innerHTML" not in body
+
+    def test_the_badge_survives_a_refresh(self):
+        """The chip lives inside the line the times are written into, so a
+        naive rewrite of that line destroys it."""
+        js = self._js()
+        body = js[js.index("function paintAfter"):js.index("function refreshSchedule")]
+        assert "sub.lastChild !== chip" in body
 
 
 class TestAVisitIsAWayIntoItsApp:
@@ -3238,15 +3244,15 @@ class TestAVisitIsAWayIntoItsApp:
         assert 'data-package="com.hhaexchange.uma"' in card
         assert 'data-macro="hhax_uma_login"' in card
 
-    def test_each_face_of_the_drum_carries_its_own(self, client):
-        """Different patients are on different apps, so the drum cannot
-        borrow the card's."""
+    def test_the_second_card_carries_its_own(self, client):
+        """The two visits are usually on different apps, so the second card
+        cannot borrow the first's."""
         page = self._page(client, self._plan(
             self._one("Ada", "com.hhaexchange.uma"),
             self._one("Bea", "com.tellus.evv.v2", "10:00", "12:00")))
-        wheel = page[page.index('id="wheel"'):page.index('id="btn-schedule"')]
-        assert 'data-package="com.tellus.evv.v2"' in wheel
-        assert 'data-macro="mobile_caregiver_pin"' in wheel
+        after = page[page.index('id="after"'):page.index('id="btn-schedule"')]
+        assert 'data-package="com.tellus.evv.v2"' in after
+        assert 'data-macro="mobile_caregiver_pin"' in after
 
     def test_the_press_goes_through_the_same_launch_the_tiles_use(self):
         js = strip_js_comments(
@@ -3329,3 +3335,146 @@ class TestTheWayBackToAnAppsOwnFirstPage:
             Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
         block = js[js.index("getElementById('btn-apphome')"):]
         assert "if (!driving()) return;" in block[:300]
+
+
+class TestTheArmingPage:
+    """A control page for what the scheduler may act on. Everything ships
+    off, and the page says what a switch means today rather than implying a
+    capability that is not built."""
+
+    def _plan(self, *visits):
+        from apt_log import schedule as sched
+
+        return sched.parse({"zone": "America/New_York",
+                            "visits": list(visits)})
+
+    def _one(self, patient, app="com.hhaexchange.uma", start="06:00",
+             end="09:00", **extra):
+        return {"patient": patient, "app": app, "start": start, "end": end,
+                "days": ["mon", "wed"], **extra}
+
+    def _page(self, client, plan):
+        with patch("apt_log.schedule.load", return_value=plan):
+            return client.get("/app", headers={"Accept-Language": "en"}).text
+
+    def test_every_recurring_block_gets_a_switch(self, client):
+        page = self._page(client, self._plan(
+            self._one("Ada"), self._one("Bea", start="10:00", end="12:00")))
+        arm = page[page.index('id="armview"'):]
+        assert arm.count('class="sw"') == 2
+
+    def test_one_row_per_block_and_not_per_day(self, client):
+        """The week view lists a Monday-and-Wednesday visit twice. Arming is
+        a standing decision and would be asked twice over."""
+        page = self._page(client, self._plan(self._one("Ada")))
+        arm = page[page.index('id="armview"'):]
+        assert arm.count('class="sw"') == 1
+
+    def test_everything_starts_off(self, client):
+        page = self._page(client, self._plan(self._one("Ada")))
+        arm = page[page.index('id="armview"'):]
+        assert 'aria-pressed="true"' not in arm
+
+    def test_the_page_says_that_nothing_fires_yet(self, client):
+        """A page of switches implies something happens when they are on,
+        and today nothing does."""
+        page = self._page(client, self._plan(self._one("Ada")))
+        assert Translator("en").t("arm.note") in page
+
+    def test_the_switch_is_identified_by_a_key_not_by_a_name(self, client):
+        """What gets POSTed, stored and logged is a hash. The patient's name
+        is on the row beside it and in the switch's own aria-label, which is
+        right — a bare toggle with no label is worse for somebody using a
+        screen reader than one that says whose visit it is. The rule is about
+        what travels, not about what is displayed."""
+        import re
+
+        page = self._page(client, self._plan(self._one("Ada")))
+        arm = page[page.index('id="armview"'):]
+        key = re.search(r'data-key="([^"]*)"', arm).group(1)
+        assert key and "ada" not in key.lower()
+        assert all(c in "0123456789abcdef" for c in key)
+
+    def test_there_is_a_way_in_and_a_way_home(self, client):
+        page = client.get("/app").text
+        assert 'id="btn-arm"' in page
+        assert 'id="btn-arm-home"' in page
+
+
+class TestThrowingASwitchFromThePage:
+    def test_it_records_the_choice(self, client):
+        from apt_log import arming
+
+        r = client.post("/schedule/arm", data={"key": "abc123", "on": "1"})
+        assert r.status_code == 200
+        assert r.json()["armed"] is True
+        assert "abc123" in arming.armed()
+
+    def test_and_takes_it_back(self, client):
+        from apt_log import arming
+
+        client.post("/schedule/arm", data={"key": "abc123", "on": "1"})
+        r = client.post("/schedule/arm", data={"key": "abc123", "on": "0"})
+        assert r.json()["armed"] is False
+        assert arming.armed() == set()
+
+    def test_anything_that_is_not_a_one_is_off(self, client):
+        """A missing or odd value must not arm something."""
+        r = client.post("/schedule/arm", data={"key": "abc123"})
+        assert r.json()["armed"] is False
+
+    def test_a_long_key_is_cut_rather_than_stored(self, client):
+        from apt_log import arming
+
+        client.post("/schedule/arm", data={"key": "x" * 500, "on": "1"})
+        assert all(len(k) <= 64 for k in arming.armed())
+
+    def test_the_switch_waits_for_the_server(self):
+        """An optimistic flip leaves a control reading "on" over a machine
+        that never recorded it — which, for this switch, is the worst
+        possible way to be wrong."""
+        js = strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+        body = js[js.index("function wireArming"):]
+        # The attribute is only written from the server's answer.
+        assert "sw.setAttribute('aria-pressed', doc.armed" in body
+        assert body.index("fetch('/schedule/arm'") < body.index("setAttribute")
+
+
+class TestTheHomeScreenUsesItsHeight:
+    """Asked for: "there needs to be more vertical spacing for the content in
+    the home page, everything is too close to the top and neglects the white
+    space below closer to the language controls"."""
+
+    def _css(self) -> str:
+        return Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+
+    def test_the_schedule_block_takes_the_slack_at_both_ends(self):
+        """Three auto margins on one flex column is the browser doing the
+        arithmetic, which beats a number that would be wrong on the next
+        screen size."""
+        css = self._css()
+        rule = css[css.index("  #upnext-wrap {"):css.index("  #launcher footer {")]
+        assert "margin-top:auto" in rule
+        assert "margin-bottom:auto" in rule
+
+    def test_every_control_on_the_launcher_is_styled(self, client):
+        """A <button> with no rule of its own paints the user agent's own
+        control chrome — a half-width white box on this background. It has
+        happened twice now: once to the drum's faces, once to the
+        full-schedule button when the drum's CSS block was cut out around
+        it."""
+        page = client.get("/app").text
+        launcher = page[page.index('<div class="view" id="launcher">'):
+                        page.index('<div class="view" id="screenview">')]
+        import re
+
+        classes = set()
+        for tag in re.findall(r"<button[^>]*>", launcher):
+            found = re.search(r'class="([^"]*)"', tag)
+            classes.update((found.group(1) if found else "").split())
+        assert classes, "no buttons found — the slice is wrong"
+        for name in classes:
+            assert ".%s {" % name in page or ".%s{" % name in page, \
+                f"{name} has no rule of its own"

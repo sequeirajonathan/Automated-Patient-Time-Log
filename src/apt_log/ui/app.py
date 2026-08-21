@@ -326,6 +326,7 @@ def phone_app(request: Request):
             "apps": PHONE_APPS,
             "m": model,
             "plan": _schedule_model(),
+            "arming": _arming_model(),
             "screen_doc": screen_doc or {},
             "pending": queue.current(),
             "KIND_SIGNATURE": KIND_SIGNATURE,
@@ -712,6 +713,64 @@ def _schedule_model() -> dict:
         "queue": [_a_visit(v, now) for v in upcoming[1:]],
         "week": [_a_visit(v, now) for v in week],
     }
+
+
+def _arming_model() -> dict:
+    """Every recurring block, with a switch each.
+
+    One row per BLOCK, not per occurrence: "arm this patient's Monday
+    morning" is a standing decision about a recurring thing. The week view
+    lists the same block once per day it falls on and would ask the same
+    question five times.
+    """
+    from apt_log import arming
+
+    try:
+        plan = schedule_mod.load()
+    except schedule_mod.BadSchedule as exc:
+        return {"ok": False, "error": str(exc), "blocks": [], "armed": 0}
+    on = arming.armed()
+    rows = []
+    for block in plan.blocks:
+        key = arming.key_for(block)
+        rows.append({
+            "key": key,
+            "armed": key in on,
+            "patient": block.patient,
+            "app": _app_label(block.app),
+            "mark": _app_entry(block.app).get("mark", ""),
+            "accent": _app_entry(block.app).get("accent", "#666"),
+            "agency": block.agency,
+            "days": [DAY_NAMES[d] for d in sorted(block.days)],
+            "start": block.start.strftime("%-I:%M %p").lower(),
+            "end": block.end.strftime("%-I:%M %p").lower(),
+            "part": block.part,
+            "of": block.of,
+        })
+    rows.sort(key=lambda r: (r["patient"], r["start"], r["part"]))
+    return {"ok": True, "error": "", "blocks": rows,
+            "armed": sum(1 for r in rows if r["armed"])}
+
+
+# Monday-first, matching `date.weekday()` and `schedule.DAYS`.
+DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+@app.post("/schedule/arm")
+def schedule_arm(request: Request, key: str = Form(...),
+                 on: str = Form("")):
+    """Switch one block on or off.
+
+    A POST because it changes what the machine is allowed to do, and it
+    answers with the state it actually reached rather than the state it was
+    asked for — a switch that looks thrown and is not is worse than one that
+    refuses.
+    """
+    from apt_log import arming
+
+    now = arming.set_armed(key[:64], on == "1")
+    return JSONResponse({"key": key[:64], "armed": now,
+                         "total": len(arming.armed())})
 
 
 @app.get("/api/schedule")

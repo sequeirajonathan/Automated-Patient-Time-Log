@@ -1,6 +1,9 @@
 {
   "app.language": "Idioma",
   "app.title": "Registro de Horas de Pacientes",
+  "arm.note": "Todavía no se ejecuta nada. Estos interruptores registran en qué visitas se le permitirá actuar al programador cuando la entrada automática esté lista — activar uno no registra una visita hoy.",
+  "arm.title": "Entrada automática",
+  "arm.toggle": "Entrada automática para {patient}",
   "choice.gps_warning": "Si elige la ubicación, se le preguntará al teléfono dónde está, y el teléfono no está con usted.",
   "choice.only_offered": "Aquí solo se pueden elegir las opciones que la propia aplicación está mostrando.",
   "choice.prompt": "La aplicación está ofreciendo estas opciones. Elija cómo se debe verificar esta visita.",
