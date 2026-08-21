@@ -389,3 +389,44 @@ class TestNoPatientIsNamedInThisRepository:
         for surname in ("Villalon", "Puppo", "Mastrapa", "Batista",
                         "Torrien", "Zaldivar", "Fonseca", "Mederos"):
             assert surname.lower() not in source.lower()
+
+
+class TestTheWalkedFlowsCarryNoPatient:
+    """docs/EVV_FLOWS.md records what each app requires to reach a check-in
+    control. Those screens carry names, home addresses and phone numbers, and
+    a document written from them is exactly where one would end up by
+    accident.
+
+    Structure — resource ids, control captions, status words — is what a macro
+    needs and what nobody can re-derive later. That is what may be written
+    down; the people may not.
+    """
+
+    def _doc(self) -> str:
+        from pathlib import Path
+
+        return Path("docs/EVV_FLOWS.md").read_text(encoding="utf-8")
+
+    def test_no_surname_from_the_round_appears(self):
+        doc = self._doc().lower()
+        for surname in ("villalon", "puppo", "mastrapa", "batista",
+                        "torrien", "zaldivar", "fonseca", "mederos",
+                        "caridad", "onorina", "atanasio", "marina",
+                        "lucresia", "nieves", "carmen"):
+            assert surname not in doc, f"{surname} reached a document"
+
+    def test_no_street_address_or_telephone_number(self):
+        """Both were on the visit-detail screen this was written from."""
+        import re
+
+        doc = self._doc()
+        assert not re.search(r"\b\d{2,5}\s+\w+\s+(St|Ave|Rd|Dr|Blvd)\b", doc)
+        assert not re.search(r"\(\d{3}\)\s*\d{3}-\d{4}", doc)
+
+    def test_it_still_says_what_a_macro_would_need(self):
+        """The other half of the rule. A document scrubbed until it is
+        useless has not protected anybody, it has just lost the walk."""
+        doc = self._doc()
+        for needed in ("visits_event", "Comenzar Visita", "Cancelar Visita",
+                       "content-desc", "com.tellus.evv.v2"):
+            assert needed in doc
