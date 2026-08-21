@@ -949,6 +949,15 @@ def _click_element(driver, el: dict) -> bool:
 # cannot double an existing stroke — and the canvas is never cleared, so a
 # stroke that DID land is never at risk.
 STROKE_RETRIES = 2
+
+# How long the app gets to PAINT a stroke before the canvas is measured. The
+# whole retry mechanism depends on this: measure too soon and a stroke that
+# landed perfectly reads as missing, and gets drawn again. Set against the
+# same stalled-frame evidence as INK_SETTLE — this app's own log shows frames
+# taking seconds under an accessibility dump — and deliberately generous,
+# because the cost of waiting is a third of a second per stroke and the cost
+# of not waiting is a signature that looks like it lost a letter.
+INK_PAINT = 0.4
 # A stroke is dozens of dark pixels at minimum. Twenty is comfortably below
 # the smallest real mark and comfortably above the noise of a repaint.
 INK_LANDED = 20
@@ -1032,7 +1041,8 @@ def _perform(driver, paths, bounds=None, serial=None) -> None:
     # the reading before the next. A screenshot is a synchronous
     # SurfaceFlinger round trip and this replay already has a good reason to
     # believe that leaning on the app mid-signature is not free.
-    before = _canvas_ink(bounds, serial) if bounds else None
+    first = _canvas_ink(bounds, serial) if bounds else None
+    before = first
     for i, path in enumerate(paths):
         if i:
             time.sleep(STROKE_GAP)
@@ -1041,6 +1051,22 @@ def _perform(driver, paths, bounds=None, serial=None) -> None:
             continue
         after = before
         for _ in range(STROKE_RETRIES):
+            # LOOK ONLY AFTER THE APP HAS HAD TIME TO PAINT.
+            #
+            # There was no pause here at all, and `perform()` returns when
+            # the DRIVER accepted the chain — not when the phone finished
+            # injecting it, which is the same fact `execute` already leans on
+            # when it waits before dumping the hierarchy. So the canvas was
+            # being measured while the stroke was still on its way, read as
+            # "left no ink", and drawn again.
+            #
+            # Watched on inMyTeam: "stroke 2 of 3 left no ink; drawing it
+            # again" twice in one replay, on the arch of an A whose crossbar
+            # landed either side of it. The owner's read was that the phone
+            # had the whole signature and the machine was looking too soon,
+            # and the code agrees with him — there was nothing here to make
+            # it wait.
+            time.sleep(INK_PAINT)
             after = _canvas_ink(bounds, serial)
             if after is None or after - before >= INK_LANDED:
                 break
@@ -1049,6 +1075,13 @@ def _perform(driver, paths, bounds=None, serial=None) -> None:
             time.sleep(STROKE_GAP)
             _draw(driver, path)
         before = after if after is not None else before
+    # And once more at the end, so "done" is not announced over a canvas the
+    # last stroke has not reached yet. The peek she is looking at is the
+    # frame the feed publishes next; declaring success before the ink is
+    # painted is what makes a finished signature look like it lost a stroke.
+    if bounds:
+        time.sleep(INK_PAINT)
+    return (first, _canvas_ink(bounds, serial) if bounds else None)
 
 
 def execute(payload: dict, status_path: Path | None = None) -> Status:
@@ -1105,7 +1138,14 @@ def execute(payload: dict, status_path: Path | None = None) -> Status:
                                       max(x for x, _ in pth),
                                       max(y for _, y in pth))
                      for pth in paths if pth))
-        _perform(driver, paths, bounds=bounds)
+        # WHAT THE CANVAS ACTUALLY HELD, before and after. The one number
+        # that settles "did the ink land or did we look too soon" — the
+        # question this replay has now raised twice, both times answerable
+        # only by guessing at a screenshot afterwards. Two integers in the
+        # log, and nothing reconstructable from them.
+        was, now_ink = _perform(driver, paths, bounds=bounds)
+        if was is not None and now_ink is not None:
+            placed[0] += " ink=%d->%d" % (was, now_ink)
         status.state = "done"
 
     try:
