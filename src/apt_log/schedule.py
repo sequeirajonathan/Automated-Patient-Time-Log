@@ -29,6 +29,14 @@ THE ARITHMETIC, which is the whole reason this is a module and not a table.
     hourly entries, the second follows the first at the same address with
     nobody to drive anywhere, and it fires on the hour.
 
+  * AND IT APPLIES ONLY WITHIN ONE APP. Corrected against the written cards:
+    "the 5-minute travel buffer applies only to back-to-back visits within the
+    same app. Cross-app transitions can be scheduled at the exact same clock
+    time with no buffer." Weekday mornings are the case — one patient's visit
+    ends at six and another's begins at six, and because the check-out and the
+    check-in happen in two different systems there is nothing to wait for.
+    Both are entered at six, exactly as the cards say.
+
   * Where a gap already exists — an hour between visits, or the five minutes
     already built into the app's own times — nothing is added. The rule is
     "no gap at all", not "always five minutes".
@@ -305,17 +313,21 @@ class Schedule:
         and not on Saturday for exactly that reason.
         """
         today = [b for b in self.blocks if day.weekday() in b.days]
-        # Nominal ends belonging to OTHER patients. A patient's own second
-        # entry is not somebody to drive away from — see the note at the top.
-        ends: dict[str, set[str]] = {}
+        # Nominal ends, with whose they are and in which app. A patient's own
+        # second entry is not somebody to drive away from, and neither is a
+        # visit that ends in a DIFFERENT app — see the notes at the top.
+        ends: dict[str, set[tuple[str, str]]] = {}
         for block in today:
-            ends.setdefault(block.end.isoformat(), set()).add(block.patient)
+            ends.setdefault(block.end.isoformat(), set()).add(
+                (block.patient, block.app))
 
         visits = []
         for block in today:
             starts = self._at(day, block.start)
-            others = ends.get(block.start.isoformat(), set()) - {block.patient}
-            fires = starts + BUFFER if others else starts
+            before = ends.get(block.start.isoformat(), set())
+            drove = {who for who, app in before
+                     if who != block.patient and app == block.app}
+            fires = starts + BUFFER if drove else starts
             lead = LEAD_BY_APP.get(block.app, LEAD)
             visits.append(Visit(block=block, starts=starts,
                                 ends=self._at(day, block.end),
