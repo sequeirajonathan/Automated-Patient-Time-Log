@@ -93,7 +93,7 @@
   /* ------------------------------------------------------------- launcher */
   #launcher { background:
       radial-gradient(120% 90% at 20% 0%, #2b3f86 0%, #161e3a 55%, #0b0f1d 100%);
-      color:#fff; padding: calc(52px + env(safe-area-inset-top)) 28px
+      color:#fff; padding: calc(40px + env(safe-area-inset-top)) 28px
                           calc(22px + env(safe-area-inset-bottom)); }
   #launcher time { font-size:46px; font-weight:250; letter-spacing:.01em;
                    display:block; text-align:center; }
@@ -127,6 +127,15 @@
   .tile .name { font-size:11.5px; font-weight:500; letter-spacing:.01em;
                 color:rgba(255,255,255,.95); text-align:center;
                 line-height:1.25; min-height:2.5em; }
+  /* THE PAGE USES ITS OWN HEIGHT NOW.
+     Everything sat at the top and left a band of nothing above the language
+     switch — "too close to the top and neglects the white space below". The
+     schedule block takes an auto margin on both sides, so what was one dead
+     gap at the bottom becomes breathing room shared between the tiles, the
+     cards and the footer. Three auto margins on one column is flexbox doing
+     the arithmetic, which beats guessing at a number that would be wrong on
+     the next screen size. */
+  #upnext-wrap { margin-top:auto; margin-bottom:auto; width:100%; }
   #launcher footer { margin-top:auto; text-align:center;
                      display:flex; flex-direction:column; align-items:center;
                      gap:12px; }
@@ -193,75 +202,39 @@
               border:1px solid rgba(255,255,255,.2); border-radius:999px;
               padding:1px 7px; margin-left:6px; white-space:nowrap; }
 
-  /* --------------------------------------------------------------- the drum
-     What comes after the next visit, one at a time, on a wheel that turns by
-     itself as the round advances.
+  /* ------------------------------------------------------- the one after
+     A second card, the same shape and the same padding as the one above it,
+     one step quieter.
 
-     A FLAT LIST WAS THE FIRST ATTEMPT AND IT WAS THE WRONG SHAPE TWICE OVER.
-     It printed every name at once — which is not a reveal, it is a table with
-     extra steps — and it clipped nothing, because the window was a <span>
-     inside a <button>: inline boxes ignore `height` and `overflow`, and a
-     button's own layout is special enough that fixing the display alone did
-     not hold on the device. So the window is a plain element now and the
-     press target is around it, not around the clip.
+     IT WAS A TURNING DRUM AND NOW IT IS NOT. The wheel showed one visit at a
+     time, which was the right idea, and it moved on its own, which was not:
+     "I don't like the behaviour of the wheel, maybe simple is better and just
+     displays the next patient". A card that sits still says the same thing
+     with nothing to wait for and nothing to catch the eye of somebody trying
+     to read the card above it.
 
-     The geometry is a real cylinder rather than a strip that slides. Faces sit
-     at rotateX(i · step) translateZ(radius); turning the drum to -i · step
-     brings face i to the front, and the ones either side fall away at an angle
-     the way a fruit-machine reel does. `radius` is computed from the panel's
-     own height in the client — (h/2) / tan(π/N) — because a hard-coded one is
-     a pixel dependency, and this project has already been round that loop with
-     the landscape check.
+     Its padding is `.upnext`'s, deliberately and not by coincidence — the
+     drum's faces were flush to the edge and the two cards read as belonging
+     to different pages. */
+  .after { margin-top:12px; border-radius:20px; padding:14px 16px;
+           background:rgba(255,255,255,.05); width:100%; display:block;
+           border:1px solid rgba(255,255,255,.10);
+           color:inherit; font:inherit; text-align:left; }
+  .after .cap { display:block; font-size:11px; letter-spacing:.09em;
+                text-transform:uppercase; color:rgba(255,255,255,.5); }
+  .after .who { display:block; font-size:17px; font-weight:600; margin-top:3px;
+                line-height:1.2; }
+  .after .sub { display:block; font-size:13px; margin-top:4px;
+                color:rgba(255,255,255,.68); }
+  .after .chip { display:inline-block; font-size:10px; font-weight:700;
+                 border-radius:5px; padding:1px 6px; margin-right:7px;
+                 vertical-align:1px; color:#fff; }
 
-     CLIPPED WITH clip-path, NOT overflow. WebKit does not reliably clip
-     preserve-3d children with `overflow:hidden`; `inset()` it does. This is
-     the same class of bug as the <span>, found the same way, and worth the
-     less familiar property. */
-  .wheel { margin-top:12px; height:86px; position:relative;
-           perspective:760px; clip-path: inset(0 round 18px);
-           border-radius:18px; background:rgba(255,255,255,.045);
-           border:1px solid rgba(255,255,255,.10); }
-  .wheel .cap { position:absolute; top:8px; left:16px; z-index:3;
-                font-size:10px; letter-spacing:.10em; text-transform:uppercase;
-                color:rgba(255,255,255,.45); pointer-events:none; }
-  .wheel__inner { position:absolute; inset:0; transform-style:preserve-3d;
-                  transition: transform .85s cubic-bezier(.2,.85,.25,1); }
-  /* A face is a <button>, so its background, border and font all have to be
-     stood down explicitly — left alone, the user agent paints its own light
-     control chrome and the drum reads as a strip of brushed metal with the
-     text embossed into it. Seen in a screenshot; the earlier flat list never
-     showed it because the button was the whole panel rather than each face. */
-  .face { position:absolute; inset:0; display:flex; flex-direction:column;
-          justify-content:center; padding:26px 16px 10px; text-align:left;
-          background:none; border:none; color:inherit; font:inherit;
-          width:100%; backface-visibility:hidden; }
-  /* Everything but the face in front is dimmed, so the reel reads as one
-     answer with others behind it rather than as several competing ones. */
-  .face { opacity:.25; transition: opacity .5s ease; }
-  .face[data-front="1"] { opacity:1; }
-  .face .who { font-size:16px; font-weight:600; line-height:1.15;
-               white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .face .sub { font-size:12px; color:rgba(255,255,255,.66); margin-top:2px;
-               white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .face .chip { display:inline-block; font-size:10px; font-weight:700;
-                border-radius:5px; padding:1px 5px; margin-right:6px;
-                vertical-align:1px; color:#fff; }
-  /* The top and bottom of the drum fade, which is what sells it as a curved
-     surface rather than a box with something sliding inside it. */
-  .wheel::before, .wheel::after { content:""; position:absolute; left:0;
-      right:0; height:20px; z-index:2; pointer-events:none; }
-  .wheel::before { top:0;
-      background:linear-gradient(rgba(11,15,29,.85), transparent); }
-  .wheel::after { bottom:0;
-      background:linear-gradient(transparent, rgba(11,15,29,.85)); }
-  /* Asked not to be moved: the wheel stops turning and simply shows the face
-     it is on. The content is the answer; the rotation is decoration. */
-  @media (prefers-reduced-motion: reduce) {
-    .wheel__inner { transition:none; }
-    .face { transition:none; }
-  }
-
-  .fullbtn { margin-top:12px; width:100%; border-radius:14px; padding:11px;
+  /* Lost once already, when the drum's block was cut out around it — it sat
+     between the wheel and the screen view and went with the wheel. The page
+     rendered a half-width white box over the card below, which is what an
+     unstyled <button> looks like on this background. */
+  .fullbtn { margin-top:14px; width:100%; border-radius:14px; padding:12px;
              font-size:15px; font-weight:600; color:#fff;
              background:rgba(255,255,255,.12);
              border:1px solid rgba(255,255,255,.18); }
@@ -298,6 +271,50 @@
   .slotrow .buffered { color:var(--muted); border-color:var(--hair, #ccc); }
   .emptyday { padding:10px 0; color:var(--muted); font-size:14px;
               border-top:1px solid var(--hair, rgba(128,128,128,.22)); }
+
+  /* ----------------------------------------------------------- arming view
+     What the scheduler is allowed to act on. One row per recurring block,
+     not per occurrence — arming is a standing decision about a Monday
+     morning, and the week view would ask the same question five times. */
+  #armview { background:var(--bg); }
+  body[data-view="launcher"] #armview, body[data-view="screen"] #armview,
+  body[data-view="schedule"] #armview { transform:translateX(102%);
+                                        opacity:0; pointer-events:none; }
+  body[data-view="arm"] #launcher, body[data-view="arm"] #screenview,
+  body[data-view="arm"] #scheduleview { transform:scale(.92); opacity:0;
+                                        pointer-events:none; }
+  #armview .body { overflow-y:auto; -webkit-overflow-scrolling:touch;
+                   padding:0 16px calc(24px + env(safe-area-inset-bottom)); }
+  /* Said once, at the top, and not dressed up. A page of switches implies
+     something happens when they are on, and today nothing does. */
+  .armnote { margin:12px 0 4px; padding:12px 14px; border-radius:14px;
+             background:var(--hair, rgba(128,128,128,.14));
+             font-size:13px; line-height:1.45; color:var(--muted); }
+  .armrow { display:flex; align-items:center; gap:12px; padding:12px 0;
+            border-top:1px solid var(--hair, rgba(128,128,128,.22)); }
+  .armrow .grow { flex:1; min-width:0; }
+  .armrow .who { font-size:15px; font-weight:600; }
+  .armrow .meta { font-size:12px; color:var(--muted); margin-top:2px; }
+  .armrow .chip { display:inline-block; font-size:10px; font-weight:700;
+                  border-radius:5px; padding:1px 6px; margin-right:7px;
+                  vertical-align:1px; color:#fff; }
+  /* `.buffered` was written for the launcher's dark ground — white text on a
+     translucent white border. Reused here it is white on near-white, which is
+     to say invisible: the "1/2" telling somebody WHICH half of a split visit
+     a switch controls was the one thing on the row that could not be read. */
+  .armrow .buffered { color:var(--muted); border-color:var(--hair, #ccc); }
+  /* A switch, not a checkbox: this is the one control on the page whose
+     state has to be readable from across a kitchen. */
+  .sw { flex:0 0 auto; width:52px; height:31px; border-radius:999px;
+        border:1px solid var(--hair, rgba(128,128,128,.3)); position:relative;
+        background:rgba(128,128,128,.25); transition:background .2s ease; }
+  .sw::after { content:""; position:absolute; top:2px; left:2px;
+               width:25px; height:25px; border-radius:50%; background:#fff;
+               box-shadow:0 1px 3px rgb(0 0 0 / .35);
+               transition: transform .2s var(--spring); }
+  .sw[aria-pressed="true"] { background:#2e9c63; border-color:#2e9c63; }
+  .sw[aria-pressed="true"]::after { transform:translateX(21px); }
+  .sw[disabled] { opacity:.5; }
 
   /* iOS large-title header: action row, then the title; the hairline appears
      only once content has scrolled beneath it. */
@@ -1304,25 +1321,20 @@
     </div>
     {% endif %}
 
-    {# The drum. One visit at a time, turning by itself as the round runs on.
-       Each face is a way into its own app, same as the card above. #}
-    <div class="wheel" id="wheel" aria-live="polite"
-         {{ 'hidden' if not plan.queue }}>
+    {# The one after. Still, and a way into its own app like the card above. #}
+    {% set nxt = plan.queue[0] if plan.queue else None %}
+    <button class="after" id="after" type="button" {{ 'hidden' if not nxt }}
+            data-package="{{ nxt.package if nxt }}"
+            data-macro="{{ nxt.macro if nxt }}"
+            data-open="{{ nxt.open if nxt }}"
+            data-name="{{ nxt.app if nxt }}">
       <span class="cap">{{ t('sched.after_that') }}</span>
-      <div class="wheel__inner" id="wheelinner">
-        {% for v in plan.queue %}
-        <button class="face" type="button" data-i="{{ loop.index0 }}"
-                data-front="{{ '1' if loop.first else '0' }}"
-                data-package="{{ v.package }}" data-macro="{{ v.macro }}"
-                data-open="{{ v.open }}" data-name="{{ v.app }}">
-          <span class="who">{{ v.patient }}</span>
-          <span class="sub">
-            <span class="chip" style="background:{{ v.accent }}">{{ v.mark }}</span
-            >{{ v.day }} · {{ v.fires }} – {{ v.ends }}</span>
-        </button>
-        {% endfor %}
-      </div>
-    </div>
+      <span class="who">{{ nxt.patient if nxt }}</span>
+      <span class="sub">
+        <span class="chip" style="background:{{ nxt.accent if nxt else '#666' }}"
+          >{{ nxt.mark if nxt }}</span
+        >{{ nxt.day if nxt }} · {{ nxt.fires if nxt }} – {{ nxt.ends if nxt }}</span>
+    </button>
 
     <button class="fullbtn" id="btn-schedule" type="button">
       {{ t('sched.view_full') }}</button>
@@ -1653,6 +1665,7 @@
              stroke-width="2.4"><path d="M15 5 L8 12 L15 19"/></svg>
         {{ t('phone.home') }}</button>
       <span class="spacer"></span>
+      <button id="btn-arm">{{ t('arm.title') }}</button>
     </div>
     <div class="hdr-title"><h1>{{ t('sched.title') }}</h1></div>
   </header>
@@ -1679,6 +1692,53 @@
             {{ v.app }}{% if v.agency %} · {{ v.agency }}{% endif %}</div>
         </div>
       </div>
+    {% endfor %}
+    {% endif %}
+  </div>
+</div>
+
+{# ------------------------------------------------------------ auto-entry
+   What the scheduler is allowed to act on. One row per recurring block —
+   arming is a standing decision about a Monday morning, not about the
+   fourteenth of March, and the week view would ask the same question five
+   times over.
+
+   Everything ships OFF, and the note at the top says what a switch means
+   today rather than implying a capability that is not built. #}
+<div class="view" id="armview">
+  <header class="hdr">
+    <div class="hdr-row">
+      <button id="btn-arm-home">
+        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.4"><path d="M15 5 L8 12 L15 19"/></svg>
+        {{ t('phone.home') }}</button>
+      <span class="spacer"></span>
+    </div>
+    <div class="hdr-title"><h1>{{ t('arm.title') }}</h1></div>
+  </header>
+  <div class="body">
+    <p class="armnote">{{ t('arm.note') }}</p>
+    {% if not arming.ok %}
+    <p class="emptyday">{{ t('sched.unreadable') }} — {{ arming.error }}</p>
+    {% elif not arming.blocks %}
+    <p class="emptyday">{{ t('sched.none_configured') }}</p>
+    {% else %}
+    {% for b in arming.blocks %}
+    <div class="armrow">
+      <div class="grow">
+        <div class="who">{{ b.patient }}
+          {%- if b.of > 1 %} <span class="buffered">{{ b.part }}/{{ b.of }}</span>{% endif -%}
+        </div>
+        <div class="meta">
+          <span class="chip" style="background:{{ b.accent }}">{{ b.mark }}</span
+          >{{ b.days|join(' ') }} · {{ b.start }} – {{ b.end }}
+          {%- if b.agency %} · {{ b.agency }}{% endif -%}
+        </div>
+      </div>
+      <button class="sw" type="button" data-key="{{ b.key }}"
+              aria-pressed="{{ 'true' if b.armed else 'false' }}"
+              aria-label="{{ t('arm.toggle', patient=b.patient) }}"></button>
+    </div>
     {% endfor %}
     {% endif %}
   </div>

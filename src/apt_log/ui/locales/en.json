@@ -1,6 +1,9 @@
 {
   "app.language": "Language",
   "app.title": "Patient Time Log",
+  "arm.note": "Nothing here fires yet. These switches record which visits the scheduler will be allowed to act on once automatic entry is built — turning one on does not enter a visit today.",
+  "arm.title": "Auto-entry",
+  "arm.toggle": "Auto-entry for {patient}",
   "choice.gps_warning": "Choosing location will ask the phone where it is, and the phone is not with you.",
   "choice.only_offered": "Only the options the app itself is showing can be chosen here.",
   "choice.prompt": "The app is offering these. Choose how this visit should be verified.",
