@@ -1232,9 +1232,9 @@
      thing to press — it only redraws — so it stands down and step two takes
      the emphasis. The whole failure was a button that looked like the finish
      and was not. */
-  .signsheet.drawn .signsend { background:transparent; color:var(--muted);
+  #signsheet.drawn .signsend { background:transparent; color:var(--muted);
                                border:1px solid var(--hair, rgba(128,128,128,.4)); }
-  .signsheet.drawn .approw { outline:2px solid #2e9c63; outline-offset:6px;
+  #signsheet.drawn .approw { outline:2px solid #2e9c63; outline-offset:6px;
                              border-radius:14px; }
   .signsend { width:100%; margin-top:14px; border:none; border-radius:14px;
               background:var(--tint); color:#fff; font-size:16.5px;
@@ -1247,10 +1247,19 @@
      app's own — they name the app's buttons — and this is what makes them
      unmistakably not hers. */
   .padrow.onphone button { position:relative; padding-left:34px; }
+  /* The mark that says "this one presses the PHONE, not the portal". It was
+     a bare 11x18 rounded rectangle, which is not a phone — it is an empty
+     box, and it was reported as one: "those two icons next to Borrar and
+     Enviar are broken, they don't show anything".
+     The screen line and the home bar are what make it read as a handset at
+     this size. Drawn rather than a glyph so no font has to have it. */
   .padrow.onphone button::before { content:""; position:absolute;
-              left:13px; top:50%; margin-top:-9px; width:11px; height:18px;
+              left:13px; top:50%; margin-top:-10px; width:13px; height:20px;
               border:1.6px solid currentColor; border-radius:3px;
-              opacity:.55; }
+              opacity:.75; }
+  .padrow.onphone button::after { content:""; position:absolute;
+              left:16px; top:50%; margin-top:5px; width:7px; height:1.6px;
+              border-radius:1px; background:currentColor; opacity:.75; }
   #sign-appbtns button { min-height:46px; }
   .approw-label { flex:0 1 auto; font-size:13px; }
   .padrow button { flex:1; padding:12px; border-radius:13px;

@@ -3683,8 +3683,22 @@ class TestThePadsButtonDoesNotLookLikeTheFinish:
         js = self._js()
         assert "markDrawn(false)" in js
 
+    def test_the_phone_mark_looks_like_a_phone(self):
+        """It was a bare rounded rectangle — an empty box, and reported as
+        one. A screen line and a home bar are what make it read as a handset
+        at 13 by 20 pixels."""
+        css = Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+        assert ".padrow.onphone button::before" in css
+        assert ".padrow.onphone button::after" in css
+
     def test_step_two_is_the_one_emphasised_once_the_ink_has_landed(self):
         css = Path("src/apt_log/ui/templates/phone.html").read_text(
             encoding="utf-8")
-        assert ".signsheet.drawn .approw" in css
-        assert ".signsheet.drawn .signsend" in css
+        # The id, not a class of the same name — the sheet is
+        # `<div id="signsheet" class="sheet">`, and `.signsheet` matched
+        # nothing at all. Caught in a screenshot: the button stayed a filled
+        # primary after the ink had landed, which is the exact thing this
+        # change exists to stop.
+        assert "#signsheet.drawn .approw" in css
+        assert "#signsheet.drawn .signsend" in css
