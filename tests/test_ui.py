@@ -3334,7 +3334,15 @@ class TestAVisitIsAWayIntoItsApp:
 
     def test_the_second_card_carries_its_own(self, client):
         """The two visits are usually on different apps, so the second card
-        cannot borrow the first's."""
+        cannot borrow the first's.
+
+        THIS TEST WAS RIGHT AND THE PAGE WAS WRONG. It began failing at 07:35
+        on a Friday, which looked like a clock-dependent flake — but the hour
+        was only what made the bug visible. While a visit is RUNNING the card
+        above holds the current one, and the card below was taking `queue[0]`,
+        which is the visit after NEXT. The genuine next visit appeared nowhere
+        on the home screen.
+        """
         page = self._page(client, self._plan(
             self._one("Ada", "com.hhaexchange.uma"),
             self._one("Bea", "com.tellus.evv.v2", "10:00", "12:00")))
@@ -3818,3 +3826,50 @@ class TestThePadsButtonDoesNotLookLikeTheFinish:
         # change exists to stop.
         assert "#signsheet.drawn .approw" in css
         assert "#signsheet.drawn .signsend" in css
+
+
+class TestTheHomeScreenNeverSkipsAVisit:
+    """Found by a test that started failing at 07:35 on a Friday and looked
+    like a clock-dependent flake. The hour was only what made it visible.
+
+    `#upnext` shows the CURRENT visit when there is one, so `#after` has to
+    show `next` — not `queue[0]`, which is the visit after next. During a
+    visit the home screen was showing the current one and the one after next,
+    and the genuine next visit appeared nowhere at all: the single moment she
+    is least able to go hunting for it.
+    """
+
+    def _plan(self, *visits):
+        from apt_log import schedule as sched
+
+        return sched.parse({"zone": "America/New_York",
+                            "visits": list(visits)})
+
+    def _every_day(self, patient, app, start, end):
+        return {"patient": patient, "app": app, "start": start, "end": end,
+                "days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]}
+
+    def test_the_after_card_binds_to_next_while_one_is_running(self):
+        from pathlib import Path
+
+        markup = (Path(__file__).resolve().parents[1]
+                  / "src/apt_log/ui/templates/phone.html").read_text(
+                      encoding="utf-8")
+        assert "plan.next if plan.current" in markup
+
+    def test_the_two_cards_are_never_the_same_visit(self, client):
+        """Whatever the hour, the two cards hold two different visits."""
+        import re
+
+        plan = self._plan(
+            self._every_day("Ada", "com.hhaexchange.uma", "06:00", "09:00"),
+            self._every_day("Bea", "com.tellus.evv.v2", "10:00", "12:00"))
+        with patch("apt_log.schedule.load", return_value=plan):
+            page = client.get("/app",
+                              headers={"Accept-Language": "en"}).text
+        upnext = page[page.index('id="upnext"'):page.index('id="after"')]
+        after = page[page.index('id="after"'):page.index('id="btn-schedule"')]
+        first = re.search(r'data-package="([^"]*)"', upnext).group(1)
+        second = re.search(r'data-package="([^"]*)"', after).group(1)
+        assert first and second
+        assert first != second

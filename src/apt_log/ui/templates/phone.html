@@ -1413,8 +1413,16 @@
     </div>
     {% endif %}
 
-    {# The one after. Still, and a way into its own app like the card above. #}
-    {% set nxt = plan.queue[0] if plan.queue else None %}
+    {# The one after. Still, and a way into its own app like the card above.
+
+       WHICH ONE THAT IS DEPENDS ON WHAT THE CARD ABOVE IS SHOWING. While a
+       visit is RUNNING the card above holds the current one, so the one
+       after it is `next` — and taking `queue[0]` there skipped a whole
+       visit: the card showed the one after next, and the genuine next visit
+       appeared nowhere on the home screen at all. Only ever visible during a
+       visit, which is exactly when she is least able to go looking for it. #}
+    {% set nxt = (plan.next if plan.current
+                  else (plan.queue[0] if plan.queue else None)) %}
     <button class="after" id="after" type="button" {{ 'hidden' if not nxt }}
             data-package="{{ nxt.package if nxt }}"
             data-macro="{{ nxt.macro if nxt }}"
