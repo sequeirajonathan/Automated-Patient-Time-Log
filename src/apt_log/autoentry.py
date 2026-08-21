@@ -212,6 +212,25 @@ def supported(app: str) -> bool:
     return app in SUPPORTED
 
 
+def _armed_since(claim: dict) -> datetime | None:
+    """When the switch was thrown, or None if the record does not say.
+
+    None means the switch predates attestations being recorded, which makes
+    it an OLD one — armed long enough ago that yesterday's visit really was
+    its responsibility. So an unknown time reports as normal rather than
+    suppressing; the filter exists for the switch thrown minutes ago, not for
+    the one thrown last month.
+    """
+    raw = str((claim or {}).get("at") or "")
+    if not raw:
+        return None
+    try:
+        when = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return when if when.tzinfo else when.astimezone()
+
+
 def _days_to_look_at(schedule, now: datetime) -> tuple:
     """Which calendar days could hold a visit that matters at `now`.
 
@@ -269,16 +288,25 @@ def due(schedule, now: datetime, armed_keys=None,
     return out
 
 
-def missed(schedule, now: datetime, armed_keys=None) -> list[Due]:
+def missed(schedule, now: datetime, armed_keys=None,
+           attestations=None) -> list[Due]:
     """Armed occurrences whose window closed with nothing recorded.
 
     Not a fire — the opposite. This is what a person needs told, because the
     entry now has to be made by hand and the honest arrival minute is already
     in the past.
+
+    NOTHING BEFORE THE SWITCH WAS THROWN. Watched live: arming Carmen's
+    weekday block at 00:46 immediately announced YESTERDAY's 05:00 as missed
+    and alerted a phone about it. It was not missed — nobody had armed it, so
+    the machine was never going to do it, and saying otherwise turns the one
+    notice that means "go and do this by hand" into noise. A visit is only
+    missable from the moment somebody took responsibility for it.
     """
     from apt_log import arming
 
     keys = arming.armed() if armed_keys is None else set(armed_keys)
+    claims = arming.attestations() if attestations is None else attestations
     if not keys:
         return []
     out: list[Due] = []
@@ -287,10 +315,13 @@ def missed(schedule, now: datetime, armed_keys=None) -> list[Due]:
             key = arming.key_for(visit.block)
             if key not in keys:
                 continue
+            since = _armed_since(claims.get(key) or {})
             for kind, moment in (("entry", visit.entry_at),
                                  ("exit", visit.exit_at)):
                 if moment is None or now - moment <= GRACE:
                     continue
+                if since is not None and moment < since:
+                    continue        # nobody had armed it when it came round
                 item = Due(visit=visit, kind=kind, when=moment, key=key,
                            who="", attested_at="")
                 if is_spent(item.occurrence):

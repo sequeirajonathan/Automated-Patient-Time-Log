@@ -10,6 +10,7 @@ fires into an app whose control has never been walked.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -32,9 +33,22 @@ def monday(hour, minute=0):
     return datetime(2026, 8, 17, hour, minute, tzinfo=ZONE)
 
 
-def arm(block, who="Jonathan"):
+def arm(block, who="Jonathan", since=None):
+    """Arm a block, attested BEFORE the fixture week.
+
+    `set_armed` stamps the real clock, and these fixtures live in a fixed
+    week in the past — so every attestation would land in the future and
+    `missed()` would suppress the whole file's worth of slipped visits. The
+    stamp is rewritten to a week before the fixture Monday, which is what
+    "this has been armed for a while" means here. A test about the switch
+    being thrown JUST NOW passes its own `since`.
+    """
     key = arming.key_for(block)
     arming.set_armed(key, True, who=who)
+    when = since if since is not None else monday(0, 0) - timedelta(days=7)
+    doc = arming._read()
+    doc.setdefault("by", {})[key] = {"who": who, "at": when.isoformat()}
+    arming._path().write_text(json.dumps(doc), encoding="utf-8")
     return key
 
 
@@ -705,3 +719,46 @@ class TestGettingTheAppUpBeforeTheEntry:
         with patch.object(runner, "execute", side_effect=RuntimeError("no")):
             runner.maybe_prepare()
         assert len(autoentry.due(s, monday(9, 0))) == 1
+
+
+class TestArmingDoesNotClaimThePast:
+    """WATCHED LIVE. Arming Carmen's weekday block at 00:46 immediately
+    announced YESTERDAY's 05:00 as missed and alerted a phone about it. It
+    was not missed — nobody had armed it, so the machine was never going to
+    do it, and saying otherwise turns the one notice that means "go and do
+    this by hand" into noise."""
+
+    def test_a_switch_thrown_now_does_not_report_yesterday(self):
+        s = a_schedule(days=["mon", "tue"])
+        key = arm(s.blocks[0], who="Jonathan")
+        # Armed a minute ago; yesterday's visit is long past its window.
+        claims = {key: {"who": "Jonathan",
+                        "at": monday(13, 0).isoformat()}}
+        tuesday = monday(9, 0) + timedelta(days=1)
+        assert autoentry.missed(s, tuesday, attestations=claims) == []
+
+    def test_but_it_does_report_one_missed_since_it_was_armed(self):
+        s = a_schedule(days=["mon", "tue"])
+        key = arm(s.blocks[0], who="Jonathan")
+        claims = {key: {"who": "Jonathan",
+                        "at": (monday(9, 0) - timedelta(days=2)).isoformat()}}
+        late = monday(9, 0) + autoentry.GRACE + timedelta(minutes=1)
+        assert [d.kind for d in
+                autoentry.missed(s, late, attestations=claims)] == ["entry"]
+
+    def test_a_switch_with_no_recorded_time_reports_as_before(self):
+        """It predates attestations, which makes it an OLD switch — armed
+        long enough ago that yesterday really was its responsibility."""
+        s = a_schedule()
+        key = arm(s.blocks[0])
+        late = monday(9, 0) + autoentry.GRACE + timedelta(minutes=1)
+        assert [d.kind for d in
+                autoentry.missed(s, late, attestations={key: {}})] == ["entry"]
+
+    def test_an_unparseable_time_is_treated_as_unknown_not_as_now(self):
+        s = a_schedule()
+        key = arm(s.blocks[0])
+        late = monday(9, 0) + autoentry.GRACE + timedelta(minutes=1)
+        claims = {key: {"who": "x", "at": "not a date"}}
+        assert [d.kind for d in
+                autoentry.missed(s, late, attestations=claims)] == ["entry"]
