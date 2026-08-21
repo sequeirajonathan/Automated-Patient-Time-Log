@@ -1199,3 +1199,74 @@ class TestGettingToTheWorkLogFromWhereverTheAppIsStanding:
         assert macros._open_my_work(driver, lambda _s: None) is False
         assert state["backs"] == 1
         assert brought == ["com.inmyteam.inmyteam"]
+
+
+class TestTheWorkLogIsOnePress:
+    """Asked for outright: "I just need the steps to get to that screen so
+    that my sister can keep an eye on the arm. I can't seem to reliably get to
+    this screen."
+
+    Neither could the walk on its first try, and neither could I by hand on
+    three of five attempts. Four presses deep behind a drawer, a tab that is
+    not the one that opens, and a Search that must follow the tab — and every
+    wrong turn returns an empty list that looks exactly like a day with no
+    work on it.
+    """
+
+    def test_it_is_offered_on_the_page_she_already_has(self):
+        from apt_log import macros
+
+        assert "evv_checks" in macros.OPERATIONS
+
+    def test_it_never_needs_her_to_name_the_patient(self, monkeypatch):
+        """The scheduler picked the visit; asking her which one it picked is
+        asking the wrong person."""
+        from apt_log import macros
+
+        asked = {}
+        monkeypatch.setattr(macros, "_the_visit_in_hand",
+                            lambda: ("com.inmyteam.inmyteam", "Carmen"))
+        monkeypatch.setattr(macros, "_bring_up", lambda d, p: None)
+        monkeypatch.setattr(
+            macros, "_todays_check_events",
+            lambda d, r, patient: asked.setdefault("patient", patient) and [])
+        macros._evv_checks(object(), lambda _s: None, "")
+        assert asked["patient"] == "Carmen"
+
+    def test_the_visit_in_hand_is_the_running_one(self, monkeypatch):
+        from apt_log import macros
+
+        running = type("V", (), {"app": "com.inmyteam.inmyteam",
+                                 "patient": "Carmen"})()
+        plan = type("P", (), {"zone": None,
+                              "current": lambda self, now: running,
+                              "upcoming": lambda self, now, limit: []})()
+        self._with_plan(macros, monkeypatch, plan)
+        assert macros._the_visit_in_hand() == ("com.inmyteam.inmyteam",
+                                               "Carmen")
+
+    def test_and_the_next_one_when_none_is_running(self, monkeypatch):
+        from apt_log import macros
+
+        nxt = type("V", (), {"app": "com.tellus.evv.v2",
+                             "patient": "Bea"})()
+        plan = type("P", (), {"zone": None,
+                              "current": lambda self, now: None,
+                              "upcoming": lambda self, now, limit: [nxt]})()
+        self._with_plan(macros, monkeypatch, plan)
+        assert macros._the_visit_in_hand() == ("com.tellus.evv.v2", "Bea")
+
+    def test_an_empty_schedule_says_so_rather_than_guessing(self, monkeypatch):
+        import pytest
+        from apt_log import macros
+
+        plan = type("P", (), {"zone": None,
+                              "current": lambda self, now: None,
+                              "upcoming": lambda self, now, limit: []})()
+        self._with_plan(macros, monkeypatch, plan)
+        with pytest.raises(RuntimeError):
+            macros._the_visit_in_hand()
+
+    def _with_plan(self, macros, monkeypatch, plan):
+        from apt_log import schedule as schedule_mod
+        monkeypatch.setattr(schedule_mod, "load", lambda: plan)
