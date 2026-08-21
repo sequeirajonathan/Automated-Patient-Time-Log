@@ -686,6 +686,9 @@
   }
 
   function padRedraw() {
+    // Drawing again means she is starting over, so the sheet stops claiming
+    // the last signature is on the phone.
+    if (pad.strokes.length && !pad.waitingId) markDrawn(false);
     const c = padCanvas();
     if (c && pad.ctx) {
       drawStrokes(pad.ctx, c, (p, cc) => [p[0] * cc.width, p[1] * cc.height]);
@@ -890,6 +893,25 @@
     // done or failed, the sentence arrives rendered; show it either way. On
     // done it says to check the screen and press the app's own save.
     toast(s.text || '');
+    // THE INK HAS LANDED, SO THE PAD'S BUTTON IS NO LONGER THE ONE TO PRESS.
+    //
+    // It only ever redrew, and pressing it again is exactly what happened six
+    // times in seven minutes: draw, press what looks like Send, watch it be
+    // redrawn, press again. So on success the button restyles and renames
+    // itself to what it actually does, a line appears saying where the finish
+    // is, and step two is outlined.
+    markDrawn(s.state === 'done');
+  }
+
+  function markDrawn(on) {
+    const sheet = document.getElementById('signsheet');
+    if (sheet) sheet.classList.toggle('drawn', !!on);
+    const hint = document.getElementById('sign-hint');
+    if (hint) hint.hidden = !on;
+    const send = document.getElementById('sign-send');
+    if (send && i18n.signSendAgain) {
+      send.textContent = on ? i18n.signSendAgain : i18n.signSend;
+    }
   }
 
   // -------------------------------------------------------------------- relay

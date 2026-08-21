@@ -3637,3 +3637,54 @@ class TestTheDaysAreTranslated:
         assert doc["week"][0]["day"] in ("Lunes", "Martes", "Miércoles",
                                          "Jueves", "Viernes", "Sábado",
                                          "Domingo")
+
+
+class TestThePadsButtonDoesNotLookLikeTheFinish:
+    """Six signature replays in seven minutes and not one press of the app's
+    own button. She drew, pressed what read as Send, watched the signature be
+    redrawn, and did it again — because the pad's button said "Enviar al
+    teléfono" while the app's button two rows down said "Enviar".
+
+    The pad's button DRAWS. It has never submitted anything.
+    """
+
+    def _js(self) -> str:
+        return strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+
+    def test_the_word_send_is_gone_from_the_pads_own_button(self):
+        for lang in ("en", "es"):
+            word = Translator(lang).t("sign.send").lower()
+            assert "send" not in word and "enviar" not in word
+
+    def test_it_says_what_it_actually_does(self):
+        assert "draw" in Translator("en").t("sign.send").lower()
+        assert "dibujar" in Translator("es").t("sign.send").lower()
+
+    def test_once_the_ink_lands_the_button_renames_itself(self):
+        """Pressing it again only redraws, which is the loop that happened."""
+        js = self._js()
+        assert "markDrawn" in js
+        body = js[js.index("function markDrawn"):]
+        assert "signSendAgain" in body[:500]
+
+    def test_and_a_line_appears_saying_where_the_finish_is(self, client):
+        page = client.get("/app", headers={"Accept-Language": "en"}).text
+        assert 'id="sign-hint"' in page
+        assert Translator("en").t("sign.now_press") in page
+
+    def test_the_hint_is_hidden_until_then(self, client):
+        page = client.get("/app").text
+        hint = page[page.index('id="sign-hint"') - 60:
+                    page.index('id="sign-hint"') + 60]
+        assert "hidden" in hint
+
+    def test_drawing_again_puts_the_sheet_back_to_step_one(self):
+        js = self._js()
+        assert "markDrawn(false)" in js
+
+    def test_step_two_is_the_one_emphasised_once_the_ink_has_landed(self):
+        css = Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+        assert ".signsheet.drawn .approw" in css
+        assert ".signsheet.drawn .signsend" in css

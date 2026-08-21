@@ -815,6 +815,36 @@ def build(doc: dict) -> dict | None:
             # glyph keeps its meaning: the agency picker's info button
             # rendered as an empty box until its glyph translated.
             item["txt"] = ICON_LABELS.get(item["txt"].strip(), "")
+        if kind == "button" and not item["txt"]:
+            # A BUTTON WHOSE CAPTION IS DRAWN ON TOP OF IT.
+            #
+            # Buttons only, and that restriction was earned: a text field's
+            # placeholder also sits inside its own box, and folding it in
+            # here took "Buscar por nombre" off the search box and wrote it
+            # on the field as a label. A field's hint has its own machinery
+            # further down and this must not race it.
+            #
+            # All three care apps do this — the button carries no text of its
+            # own and the word sits in a separate node laid over it. Rendered
+            # as found, the button comes out blank and the word comes out
+            # beside it as loose prose, which is what "those two icons next to
+            # Borrar and Enviar are broken, they don't show anything" is: not
+            # a broken icon, an empty button standing next to its own caption.
+            #
+            # STRICT CONTAINMENT, the same rule `_canvas_actions` uses. A
+            # label inside the box belongs to the box; a label that merely
+            # overlaps is a neighbour, and guessing there is how "Enviar"
+            # ends up written on the Clear button.
+            for i, s in enumerate(statics):
+                if i in folded or s.get("step", 0) != e.get("step", 0):
+                    continue
+                word = (s.get("txt") or "").strip()
+                if not word or _is_icon_text(word):
+                    continue
+                if _contains(e["b"], s["b"]):
+                    item["txt"] = word
+                    folded.add(i)
+                    break
         if kind == "row":
             own = sorted(labels.get(id(e), []),
                          key=lambda s: (s["b"][1], s["b"][0]))
