@@ -1043,6 +1043,24 @@ def _perform(driver, paths, bounds=None, serial=None) -> None:
     # believe that leaning on the app mid-signature is not free.
     first = _canvas_ink(bounds, serial) if bounds else None
     before = first
+    # WHAT EACH STROKE ACTUALLY ADDED, AND HOW MANY GOES IT TOOK.
+    #
+    # Four experiments failed to reproduce the one failure that matters. A
+    # steep vertical stroke inks; a stroke that reverses direction inks; the
+    # exact shape, position, order and point count of the signature that lost
+    # its arch all ink when replayed synthetically; so do points clumped the
+    # way a slowing finger clumps them. Every synthetic lands. Only the real
+    # signatures lose a stroke, and they have done it twice.
+    #
+    # So the trigger is in something a hand-drawn stroke carries that a
+    # generated one does not, and guessing at it has now cost two wrong
+    # fixes. This is the instrument instead: per stroke, what the canvas
+    # gained and how many attempts it took. The next real signature answers
+    # it from the record rather than from another theory.
+    #
+    # Deltas and counts only — a pixel total cannot reconstruct a signature,
+    # which is the same line REQ-10.6 draws around everything else here.
+    tally: list[str] = []
     for i, path in enumerate(paths):
         if i:
             time.sleep(STROKE_GAP)
@@ -1050,6 +1068,7 @@ def _perform(driver, paths, bounds=None, serial=None) -> None:
         if before is None:
             continue
         after = before
+        tries = 1
         for _ in range(STROKE_RETRIES):
             # LOOK ONLY AFTER THE APP HAS HAD TIME TO PAINT.
             #
@@ -1074,6 +1093,9 @@ def _perform(driver, paths, bounds=None, serial=None) -> None:
                      i + 1, len(paths))
             time.sleep(STROKE_GAP)
             _draw(driver, path)
+            tries += 1
+        if after is not None:
+            tally.append("%+d/%d" % (after - before, tries))
         before = after if after is not None else before
     # And once more at the end, so "done" is not announced over a canvas the
     # last stroke has not reached yet. The peek she is looking at is the
@@ -1081,7 +1103,8 @@ def _perform(driver, paths, bounds=None, serial=None) -> None:
     # painted is what makes a finished signature look like it lost a stroke.
     if bounds:
         time.sleep(INK_PAINT)
-    return (first, _canvas_ink(bounds, serial) if bounds else None)
+    return (first, _canvas_ink(bounds, serial) if bounds else None,
+            ",".join(tally))
 
 
 def execute(payload: dict, status_path: Path | None = None) -> Status:
@@ -1143,9 +1166,24 @@ def execute(payload: dict, status_path: Path | None = None) -> Status:
         # question this replay has now raised twice, both times answerable
         # only by guessing at a screenshot afterwards. Two integers in the
         # log, and nothing reconstructable from them.
-        was, now_ink = _perform(driver, paths, bounds=bounds)
+        was, now_ink, per_stroke = _perform(driver, paths, bounds=bounds)
         if was is not None and now_ink is not None:
             placed[0] += " ink=%d->%d" % (was, now_ink)
+        if per_stroke:
+            placed[0] += " strokes_ink=%s" % per_stroke
+        # WHETHER ANYBODY WAS WATCHING. The leading unproven theory is that a
+        # viewer's live peek competes with the replay for the phone — this
+        # app's own log has shown frames taking three seconds under exactly
+        # that load. Every synthetic replay so far ran with nobody watching
+        # and every one landed; both real failures had the portal open. One
+        # boolean in the log is what turns that from a coincidence into
+        # evidence, either way.
+        try:
+            from apt_log.macros import someone_is_watching
+
+            placed[0] += " watched=%d" % int(bool(someone_is_watching()))
+        except Exception:  # noqa: BLE001 — diagnostics never break a replay
+            pass
         status.state = "done"
 
     try:
