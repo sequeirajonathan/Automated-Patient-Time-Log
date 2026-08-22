@@ -36,7 +36,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, time as dtime, timedelta
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -2893,6 +2893,7 @@ def _check_tasks(driver, report) -> None:
 EVV_ENTRY_WORDS = {
     "com.tellus.evv.v2": ("Comenzar Visita", "Comenzar visita"),
     "com.inmyteam.inmyteam": ("Check in",),
+    "com.hhaexchange.uma": ("Registro de entrada de EVV",),
 }
 
 # What the screen says once the entry has landed. Read back rather than
@@ -2901,6 +2902,10 @@ EVV_ENTRY_WORDS = {
 EVV_STARTED_WORDS = {
     "com.tellus.evv.v2": ("Hora de inicio real", "Servicio Completada"),
     "com.inmyteam.inmyteam": ("Check out",),
+    # The button flips from entrada to salida, and the banner names the
+    # minute the call went in — either is proof the record was written.
+    "com.hhaexchange.uma": ("Registro de salida de EVV",
+                            "pendiente de aprobaci"),
 }
 
 # inMyTeam refuses any visit that is not today's, in as many words, and draws
@@ -3080,13 +3085,31 @@ def _answer_the_permission_dialog(driver, report) -> bool:
     return True
 
 
-def _evv_arg(app: str, patient: str) -> str:
-    """One string carrying both halves, because a macro takes one argument.
+def _evv_arg(app: str, patient: str, at: str = "") -> str:
+    """One string carrying the parts, because a macro takes one argument.
 
     JSON rather than a delimiter: a patient's name is arbitrary text and
     choosing a separator it cannot contain is a guess about somebody's name.
+
+    `at` is the block's own start, "HH:MM", and it is not decoration: one
+    patient can have TWO cards on the same evening, each with its own
+    check-in button, and pressing the wrong one records the wrong half of
+    the visit. Optional because two of the three apps show one card per
+    patient per day and have never needed it.
     """
-    return json.dumps({"app": app, "patient": patient})
+    doc = {"app": app, "patient": patient}
+    if at:
+        doc["at"] = at
+    return json.dumps(doc)
+
+
+def _evv_when(arg: str) -> str:
+    """The block's start from a macro argument, "HH:MM", or "" when unsaid."""
+    try:
+        doc = json.loads((arg or "").strip())
+    except (json.JSONDecodeError, AttributeError):
+        return ""
+    return str(doc.get("at") or "") if isinstance(doc, dict) else ""
 
 
 def _evv_parts(arg: str) -> tuple[str, str]:
@@ -3573,6 +3596,154 @@ def _the_visit_in_hand() -> tuple[str, str]:
     return visit.app, visit.patient
 
 
+# HHAeXchange+ PUTS ITS CHECK-IN ON THE LANDING SCREEN.
+#
+# Walked live on 2026-08-21 at 20:05, four minutes before a real visit, with
+# the owner watching. No agency has to be chosen — confirmed by the owner for
+# every patient in this app, "regardless of agency selected" — and no visit
+# detail has to be opened. Programación lists today's visits already
+# expanded, each with a full-width `Registro de entrada de EVV`. Pressing it
+# opens `Verificación electrónica de visitas` with a GPS map and a single
+# `Continuar`, and pressing that writes the record: the visit screen then
+# says "Llamada EVV en H:MM p. m. pendiente de aprobación de la oficina" and
+# the button becomes `Registro de salida de EVV`.
+#
+# TWO CARDS CAN CARRY THE SAME NAME. A patient whose evening is written as
+# two entries has two cards, each with its own button, and pressing the wrong
+# one records the wrong half. They are told apart by the hours printed on the
+# card — which are the AGENCY's window, not ours: the cards say 8:00-9:00 and
+# 9:00-10:00 where the schedule says 8:05 and 9:05. So the match is nearest,
+# not equal, and a card further off than this is not the visit we meant.
+UMA_CARD_TOLERANCE = timedelta(minutes=20)
+UMA_CLOCK_IN_ID = "clock_in"
+UMA_GPS_CONTINUE_ID = "gps_continue"
+UMA_GPS_WORDS = ("Verificación electrónica", "Verificacion electronica")
+
+
+def _uma_cards(driver, patient: str) -> list[dict]:
+    """Every check-in button on the schedule that belongs to this patient,
+    each with the window printed on its card.
+
+    `[{"button": el, "at": time|None, "says": "8:00 p. m. - 9:00 p. m."}]`,
+    in the order they sit on the screen.
+    """
+    from apt_log import feed as feed_mod
+
+    source = driver.page_source or ""
+    els = feed_mod.elements(source)
+    rows = feed_mod.statics(source)
+    buttons = [e for e in els if UMA_CLOCK_IN_ID in (e.get("rid") or "")
+               and int(e.get("step") or 0) == 0]
+    buttons.sort(key=lambda e: e["b"][1])
+
+    named = [r for r in rows
+             if patient.lower() in (r.get("txt") or "").lower()]
+    out = []
+    for button in buttons:
+        top = button["b"][1]
+        # The card's own name and hours are the nearest of each ABOVE the
+        # button — the layout is name, hours, details, button.
+        mine = [r for r in named if r["b"][3] <= top]
+        if not mine:
+            continue
+        mine.sort(key=lambda r: top - r["b"][3])
+        if top - mine[0]["b"][3] > 400:
+            continue                    # a different card's name entirely
+        hours = [r for r in rows
+                 if r["b"][3] <= top and _uma_start(r.get("txt") or "")]
+        hours.sort(key=lambda r: top - r["b"][3])
+        says = hours[0]["txt"] if hours else ""
+        out.append({"button": button, "at": _uma_start(says), "says": says})
+    return out
+
+
+_UMA_HOUR = re.compile(r"(\d{1,2}):(\d{2})\s*([ap])\.?\s*m\.?", re.I)
+
+
+def _uma_start(text: str):
+    """The first clock reading in a card's hours line, as a `time`, or None."""
+    found = _UMA_HOUR.search(text or "")
+    if not found:
+        return None
+    hour, minute, half = int(found.group(1)), int(found.group(2)), found.group(3).lower()
+    if half == "p" and hour != 12:
+        hour += 12
+    if half == "a" and hour == 12:
+        hour = 0
+    return dtime(hour % 24, minute)
+
+
+def _uma_pick(cards: list[dict], want: str) -> dict:
+    """The card for the block starting at `want` ("HH:MM"), or a refusal.
+
+    Nearest rather than equal, because the card prints the agency's window
+    and the schedule keeps the caregiver's — five minutes apart by design.
+    Refuses on a tie or on nothing close enough: a check-in on the wrong
+    half is worse than one not made.
+    """
+    if not cards:
+        raise RuntimeError("that visit is not on this screen")
+    if len(cards) == 1:
+        return cards[0]
+    if not want:
+        raise RuntimeError("two visits for this patient and no time to tell "
+                           "them apart")
+    hh, _, mm = want.partition(":")
+    target = dtime(int(hh), int(mm))
+    def far(card):
+        if card["at"] is None:
+            return timedelta(days=1)
+        a = timedelta(hours=target.hour, minutes=target.minute)
+        b = timedelta(hours=card["at"].hour, minutes=card["at"].minute)
+        return abs(a - b)
+    ranked = sorted(cards, key=far)
+    if far(ranked[0]) > UMA_CARD_TOLERANCE:
+        raise RuntimeError("no card on this screen matches that visit's time")
+    if len(ranked) > 1 and far(ranked[1]) == far(ranked[0]):
+        raise RuntimeError("two cards match that time equally well")
+    return ranked[0]
+
+
+def _uma_entry(driver, report, patient: str, want: str) -> None:
+    """Press this app's check-in for one visit, through the GPS screen.
+
+    Presses exactly twice and verifies after both: the card's own button,
+    then `Continuar` on the map. Anything it cannot identify is a refusal
+    rather than a guess, because every press here writes to a live agency
+    record.
+    """
+    report("macro.step.finding_patient")
+    card = _uma_pick(_uma_cards(driver, patient), want)
+    log.info("uma card chosen: %s", card["says"] or "(no hours printed)")
+
+    report("macro.step.checking_in")
+    _tap_element(driver, card["button"])
+    if not wait_for(lambda: any(w in (driver.page_source or "")
+                                for w in UMA_GPS_WORDS), timeout=20.0):
+        raise RuntimeError("the verification screen did not open")
+    _answer_the_permission_dialog(driver, report)
+
+    # GPS, always — the owner's standing instruction. The other tab is a FOB
+    # reader this project has no way to hold.
+    from apt_log import feed as feed_mod
+    here = [e for e in feed_mod.elements(driver.page_source or "")
+            if UMA_GPS_CONTINUE_ID in (e.get("rid") or "")
+            and int(e.get("step") or 0) == 0]
+    if len(here) != 1:
+        # A stitched page repeats a FIXED footer at every step it was
+        # captured in, and this map does not scroll. Step 0 is the copy on
+        # the glass; anything else and we do not know what we would press.
+        raise RuntimeError("the continue button is not where it should be")
+    _tap_element(driver, here[0])
+
+
+def _tap_element(driver, element) -> None:
+    """Touch the centre of an element read out of the tree."""
+    x1, y1, x2, y2 = element["b"]
+    driver.tap([((x1 + x2) // 2, (y1 + y2) // 2)])
+    time.sleep(EVV_SETTLE)
+
+
 def _evv_entry(driver, report, arg: str) -> None:
     """Press the app's own check-in for one patient, and verify it landed.
 
@@ -3624,18 +3795,24 @@ def _evv_entry(driver, report, arg: str) -> None:
     if already:
         raise RuntimeError(f"this visit is already checked in ({already})")
 
-    report("macro.step.finding_patient")
-    # Opens TODAY's visit or refuses — see `_open_todays_visit`. inMyTeam
-    # gates the action to the scheduled day and says so, and the app being
-    # right about that is not the walk being wrong.
-    _open_todays_visit(driver, report, package, patient)
+    if package == "com.hhaexchange.uma":
+        # A shape of its own: the button is on the landing screen and the
+        # press is followed by a GPS map with its own Continuar. See
+        # `_uma_entry`, walked live with the owner watching.
+        _uma_entry(driver, report, patient, _evv_when(arg))
+    else:
+        report("macro.step.finding_patient")
+        # Opens TODAY's visit or refuses — see `_open_todays_visit`. inMyTeam
+        # gates the action to the scheduled day and says so, and the app being
+        # right about that is not the walk being wrong.
+        _open_todays_visit(driver, report, package, patient)
 
-    report("macro.step.checking_in")
-    button = _words(driver, *EVV_ENTRY_WORDS[package])
-    if button is None:
-        raise RuntimeError("the check-in control is not on this screen")
-    button.click()
-    time.sleep(EVV_SETTLE)
+        report("macro.step.checking_in")
+        button = _words(driver, *EVV_ENTRY_WORDS[package])
+        if button is None:
+            raise RuntimeError("the check-in control is not on this screen")
+        button.click()
+        time.sleep(EVV_SETTLE)
     # AND AGAIN AFTER THE PRESS, because this is where it actually appeared:
     # `Check in` is what asks for the fix, so the dialog lands between the
     # press and the confirmation rather than before either.
@@ -4270,7 +4447,8 @@ class Runner:
         rid = uuid.uuid4().hex[:12]
         try:
             status = self.execute("evv_entry", rid,
-                                  _evv_arg(item.visit.app, item.visit.patient))
+                                  _evv_arg(item.visit.app, item.visit.patient,
+                                           item.visit.block.start.strftime("%H:%M")))
         except Exception as exc:  # noqa: BLE001
             autoentry.spend(item.occurrence, "failed",
                             {"error": type(exc).__name__})
@@ -4330,7 +4508,8 @@ class Runner:
             rid = uuid.uuid4().hex[:12]
             try:
                 self.execute("evv_prepare", rid,
-                             _evv_arg(item.visit.app, item.visit.patient))
+                             _evv_arg(item.visit.app, item.visit.patient,
+                                           item.visit.block.start.strftime("%H:%M")))
             except Exception as exc:  # noqa: BLE001 — a failed walk is not a
                 # failed fire. The entry still has its own attempt, from
                 # wherever the phone happens to be, and that attempt is the

@@ -3534,14 +3534,23 @@ class TestTheArmingPage:
         assert Translator("en").t("arm.means") in page
 
     def test_a_switch_that_cannot_fire_says_so_on_its_face(self, client):
-        """HHAeXchange+'s check-in control has never been walked. Reading
-        "armed" over a visit nobody is going to check in is worse than
-        reading nothing at all."""
+        """Reading "armed" over a visit nobody is going to check in is worse
+        than reading nothing at all.
+
+        The example used to be HHAeXchange+, whose check-in was unwalked
+        until 2026-08-21. The retired legacy app carries the rule now — the
+        point was never that one particular app was unwalked, it is that an
+        unwalked one must not wear a live-looking switch.
+        """
         page = self._page(client, self._plan(
-            self._one("Ada", app="com.hhaexchange.uma")))
+            self._one("Ada", app="com.hhaexchange.caregiver")))
         arm = page[page.index('id="armview"'):]
         assert "inert" in arm
-        assert Translator("en").t("arm.why.control_not_walked") in arm
+        # The broader reason: nobody has mapped this app at all. The narrower
+        # "control_not_walked" was for an app whose screens were walked but
+        # whose check-in button had never been seen — which described
+        # HHAeXchange+ exactly, until it was walked.
+        assert Translator("en").t("arm.why.app_not_walked") in arm
 
     def test_a_switch_that_can_fire_carries_no_warning(self, client):
         page = self._page(client, self._plan(

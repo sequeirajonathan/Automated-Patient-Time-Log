@@ -129,18 +129,40 @@ class TestExecution:
 
 
 class TestTheLineMacrosDoNotCross:
-    def test_no_macro_clocks_in(self):
+    def test_only_the_entry_macro_clocks_in(self):
         """Signing in is twelve taps with no judgement in them. Clocking in is
         one tap that produces a record and, if wrong, a call from the agency.
         The line is about which mistakes are recoverable, not which are hard.
+
+        THE LINE MOVED, ON PURPOSE, AND THIS IS WHERE IT SITS NOW. It used to
+        be "no macro clocks in", enforced by grepping the module for the
+        tokens a clock-in control is named by. Arm-and-fire crossed that line
+        deliberately: `evv_entry` exists to write a record, under an
+        attestation somebody made per block. The grep only kept passing
+        afterwards because the two apps walked first happen to caption their
+        controls "Check in" and "Comenzar Visita" rather than "clock in" —
+        an accident of vocabulary, not a guard. HHAeXchange+'s is
+        `schedule_screen_clock_in`, and it would have failed the old test for
+        no reason that mattered.
+
+        So the rule is stated as what it always meant: exactly one macro may
+        press a check-in, and pressing it by hand asks first.
         """
         import inspect
         from apt_log import macros as mod
 
-        source = inspect.getsource(mod)
-        for forbidden in ("btn_clock_in", "clock_in", "choose_verification",
-                          "open_verification_chooser"):
-            assert forbidden not in source
+        may = {"evv_entry"}
+        tokens = ("clock_in", "EVV_ENTRY_WORDS", "_uma_entry")
+        for name, macro in mod.MACROS.items():
+            if name in may:
+                continue
+            source = inspect.getsource(macro.run)
+            for token in tokens:
+                assert token not in source, (name, token)
+
+        # And a press from the portal is never a stray tap: it asks, because
+        # from that page it looks like every other button and is not one.
+        assert "evv_entry" in mod.CONFIRM
 
     def test_a_macro_refuses_an_unrecognised_dialog(self):
         """Same rule the session module holds. A macro is not an excuse to tap

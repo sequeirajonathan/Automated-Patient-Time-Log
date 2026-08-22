@@ -31,10 +31,10 @@ FOUR THINGS GUARD EVERY FIRE, and none of them is presence:
              her, or by anybody
   SUPPORTED  the app's entry is actually implemented and walked
 
-The last one is not a formality. HHAeXchange+'s check-in control has never been
-observed on a visit that had not already started (docs/EVV_FLOWS.md, "Still to
-observe"), so this module refuses that app by name rather than guessing at a
-button on a live agency record.
+The last one is not a formality, and it held HHAeXchange+ out of this list
+until its check-in was actually walked on a live visit with the owner watching
+(docs/EVV_FLOWS.md). An app whose entry nobody has seen is refused by name
+rather than guessed at, and the refusal is the feature.
 
 LATE IS WORSE THAN NEVER. A fire that has slipped past its window is not
 quietly caught up: the record would claim an arrival minute that has passed,
@@ -67,15 +67,27 @@ GRACE = timedelta(minutes=5)
 # APPS WHOSE ENTRY HAS BEEN WALKED AND CAN BE PRESSED.
 #
 # Mobile Caregiver+ publishes `Comenzar Visita` with real bounds and a
-# machine-readable status, and inMyTeam publishes `Check in` on the day. Both
-# were walked end to end. HHAeXchange+ is absent ON PURPOSE — its control has
-# only ever been seen on a visit already under way, and the button that starts
-# an unstarted one is unobserved. Adding it here without walking it would mean
+# machine-readable status, and inMyTeam publishes `Check in` on the day.
+#
+# HHAeXchange+ WAS ABSENT FROM THIS LIST FOR MONTHS, and the reason it is
+# here now is that the thing it was waiting on finally happened: its control
+# had only ever been seen on a visit already under way, so the button that
+# starts an unstarted one was unobserved, and adding it would have meant
 # pressing an unknown control on a live agency record.
-SUPPORTED = ("com.tellus.evv.v2", "com.inmyteam.inmyteam")
+#
+# It was walked on 2026-08-21 at 20:05, four minutes before a real visit,
+# with the owner watching and confirming each step. Programación lists the
+# day's visits already expanded, each with its own `Registro de entrada de
+# EVV`; pressing it opens a GPS map with one `Continuar`; pressing that
+# writes the record. No agency has to be chosen — confirmed by the owner for
+# every patient in the app — and no visit detail has to be opened.
+SUPPORTED = ("com.tellus.evv.v2", "com.inmyteam.inmyteam",
+             "com.hhaexchange.uma")
 
 # Why each app is not supported, in a word a sentence can be built from.
-UNSUPPORTED_REASON = {"com.hhaexchange.uma": "control_not_walked"}
+# Empty, now that all three have been walked — kept because the next app
+# added will arrive unwalked, and because "" is a worse answer than a name.
+UNSUPPORTED_REASON: dict[str, str] = {}
 
 # ENTRY ONLY, AND THE NAME OF THE FEATURE IS THE HONEST SCOPE: auto-ENTRY.
 #

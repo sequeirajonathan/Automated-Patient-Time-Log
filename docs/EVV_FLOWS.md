@@ -9,9 +9,13 @@ one of these screens and none of them belong in a repository. What is written do
 structure — resource ids, control captions, the words a status is reported in — which is
 what a macro needs and what a reader six months from now cannot re-derive.
 
-**Nothing in this pass pressed a check-in control.** Walking to the screen is reading;
-pressing the button writes a record asserting that a caregiver was at somebody's home.
-See "The question in front of arm-and-fire" at the bottom.
+**The first pass pressed nothing.** Walking to a screen is reading; pressing the button
+writes a record asserting that a caregiver was at somebody's home. That held until
+2026-08-21, when HHAeXchange+'s check-in was pressed deliberately, on a real visit, with
+the owner watching and confirming each step — because it was the last thing standing
+between that app and arm-and-fire, and it could not be learned any other way. See "The
+check-in, walked at last" below, and "The question in front of arm-and-fire" at the
+bottom.
 
 ---
 
@@ -114,8 +118,8 @@ Not yet measured across a cold start. The arm lead stays at the default until it
 
 ## HHAeXchange+ (Exchange+) — `com.hhaexchange.uma`
 
-Walked 2026-08-20 as far as the schedule. The check-in control itself is still
-unobserved — see the end of this section.
+Walked 2026-08-20 as far as the schedule; the check-in walked 2026-08-21 — see "The
+check-in, walked at last" at the end of this section.
 
 ### The two screens before any patient
 
@@ -179,11 +183,64 @@ Continuar visitando                        schedule_screen_continue_shift
 So this app, like Mobile Caregiver+, reports the **actual** recorded time after the
 fact — which is what makes "did the check-in work" answerable rather than inferred.
 
-### Still to observe
+### The check-in, walked at last
 
-The control on a card for a visit that has **not** started — today's was already under
-way, and a live visit is not something to experiment on. Also whether a GPS confirmation
-precedes submission, and the status vocabulary for a missed or late visit.
+**Walked 2026-08-21 at 20:05**, four minutes before a real visit, with the owner
+watching and confirming each press. This is the entry that held this app out of
+`autoentry.SUPPORTED` for months, because its control had only ever been seen on a visit
+already under way and a live agency record is not a thing to experiment on.
+
+It is **two presses on the landing screen**, and nothing else:
+
+1. **`Registro de entrada de EVV`** — a full-width primary button on the visit's own
+   card. Programación lists the day's visits **already expanded**, each with its own
+   button (`…:id/schedule_screen_clock_in`). Future days are collapsed rows with a
+   chevron and no button.
+2. **`Continuar`** (`…:id/map_screen_gps_continue_button`) on the screen that opens:
+   `Verificación electrónica de visitas`, tabs **GPS** and **Dispositivo FOB**, a Google
+   map with a `PIN de paciente` and a `PIN de profesional sanitario/a`. GPS is the tab
+   that opens and the one to use — the owner's standing instruction, "GPS always"; the
+   FOB reader is hardware this project cannot hold.
+
+Afterwards the visit screen carries the patient, the address, the window, and a banner:
+**"Llamada EVV en H:MM p. m. pendiente de aprobación de la oficina"** — so the record is
+written and awaiting the office. The button becomes **`Registro de salida de EVV`**,
+which is the check-out and stays hers.
+
+**NO AGENCY HAS TO BE CHOSEN.** Confirmed by the owner for every patient in this app,
+"regardless of agency selected". The agency picker is a filter for reading, not a step in
+checking in — so `uma_agency_for` stays a button on the console and is not wired into the
+fire.
+
+**AND NO VISIT DETAIL HAS TO BE OPENED**, which is the difference from the other two
+apps: their control lives one screen in, this one is on the list.
+
+#### Which card, when a patient has two
+
+A patient whose evening is written as two entries has **two cards, each with its own
+button**, and pressing the wrong one records the wrong half. They are told apart by the
+hours printed on the card — and those are the **agency's** window, not ours: the cards
+read `8:00 p. m. - 9:00 p. m.` and `9:00 p. m. - 10:00 p. m.` where the schedule says
+8:05 and 9:05, because the five minutes are the travel buffer.
+
+So `_uma_pick` matches **nearest, not equal**, within twenty minutes, and refuses on a
+tie, on nothing close enough, and on two cards with no time to tell them apart. A
+check-in on the wrong half is worse than one not made.
+
+#### Two things seen and not explained
+
+* **The two map pins were about eight miles apart** — the caregiver's near Opa-Locka, the
+  patient's at her real address in North Miami — and the app **accepted the check-in
+  anyway**. So this GPS check does not appear to be enforced at submission. Do not build
+  on that.
+* A **stitched** capture of the map repeats the fixed `Continuar` footer at every scroll
+  step, on a screen that does not scroll. The walk takes the step-0 copy and refuses if
+  it cannot find exactly one.
+
+#### Still to observe
+
+The status vocabulary for a missed or late visit, and what the office's approval of a
+pending call looks like from the phone.
 
 ---
 
