@@ -1239,6 +1239,39 @@
                  border:.5px solid var(--line); }
   .preview-label { font-size:12px; color:var(--muted); text-align:center;
                    margin:10px 0 0; }
+  /* The adopted row, above the pad. Filled pills rather than the pad's own
+     quiet text buttons: this is the primary action for the people it is for,
+     and the pad below it is the fallback. */
+  .adopted { margin:0 0 14px; }
+  .adopted[hidden] { display:none; }
+  .adopted-label { display:block; font-size:12px; color:var(--muted);
+                   margin-bottom:7px; }
+  .adopted-row { display:flex; flex-wrap:wrap; gap:8px; }
+  /* The name is the whole button. A row of identical "Sign" pills is how the
+     wrong person's signature gets applied, so the name never truncates to an
+     ellipsis — the pill wraps to a second line instead. */
+  .adopted-row button { flex:1 1 auto; min-height:44px; padding:9px 16px;
+                        border:none; border-radius:12px; cursor:pointer;
+                        background:var(--accent); color:#fff; font:inherit;
+                        font-size:15px; font-weight:600; text-align:center;
+                        white-space:normal; }
+  .adopted-row button:disabled { opacity:.45; cursor:default; }
+  .adoptwrap { margin-top:14px; text-align:center; }
+  .adoptform { margin-top:10px; text-align:left; padding:14px;
+               border-radius:14px; background:var(--bg);
+               border:1px solid var(--line); }
+  .adoptform[hidden] { display:none; }
+  .adopthint { margin:0 0 12px; font-size:13px; line-height:1.4;
+               color:var(--muted); }
+  .adoptlabel { display:block; font-size:12px; font-weight:600;
+                margin:0 0 4px; }
+  .adoptform input { width:100%; box-sizing:border-box; min-height:44px;
+                     padding:10px 12px; margin-bottom:12px; font:inherit;
+                     font-size:16px; border-radius:10px; background:var(--card);
+                     border:1px solid var(--line); color:var(--ink); }
+  .adoptform button { width:100%; min-height:44px; border:none; font:inherit;
+                      font-size:15px; font-weight:600; border-radius:12px;
+                      cursor:pointer; background:var(--accent); color:#fff; }
   /* A control the app itself has greyed out. Shown, because "clock out is
      here but not yet" is worth knowing, and unpressable, because a press
      that goes nowhere reads as the portal being broken. */
@@ -1775,6 +1808,21 @@
     <span class="signstep-n">1</span>
     <span class="signstep-t">{{ t('sign.step_draw') }}</span>
   </div>
+  {# ONE PRESS, FOR A HAND THAT CANNOT DRAW.
+
+     Several of these patients cannot hold a stylus, and what was happening
+     instead was the caregiver signing for them — off the record, no trail.
+     REQ-10.6a is the agency-approved answer: a party adopts a signature once,
+     in person, and afterwards applies it themselves with a single press.
+
+     It sits ABOVE the pad because for the people who have adopted one, the pad
+     is not the thing they came here for. Each button carries the party's own
+     name, because a row of identical "Sign" buttons is how the wrong person's
+     signature gets applied. Hidden entirely when nobody has adopted one. #}
+  <div class="adopted" id="sign-adopted" hidden>
+    <span class="adopted-label">{{ t('sign.adopted_label') }}</span>
+    <div class="adopted-row" id="sign-adopted-row"></div>
+  </div>
   <canvas id="signpad" width="10" height="10"></canvas>
   {# Against the canvas, because they act ON the canvas. Plain text buttons:
      undoing a stroke is not a decision worth a filled pill. #}
@@ -1798,6 +1846,30 @@
   <button type="button" id="sign-send" class="signsend">{{ t('sign.send') }}</button>
   {# Only after the ink has landed. Says the one thing that was missing. #}
   <p class="signhint" id="sign-hint" hidden>{{ t('sign.now_press') }}</p>
+
+  {# ADOPTION HAPPENS WHERE THE DRAWING ALREADY HAPPENS.
+
+     A separate settings page would mean the patient signing in one place and
+     the adoption being recorded in another, which is how a witness line ends
+     up guessed at afterwards. Here, the strokes on the pad above are the ones
+     being adopted, and the person who drew them is in the room.
+
+     Deliberately unhurried — two written fields and a confirm — because this
+     is the moment the agency's approval actually rests on. REQ-10.6a. #}
+  <div class="adoptwrap">
+    <button type="button" id="sign-adopt-open" class="padtool">
+      {{ t('sign.adopt_open') }}</button>
+    <div class="adoptform" id="sign-adopt" hidden>
+      <p class="adopthint">{{ t('sign.adopt_hint') }}</p>
+      <label class="adoptlabel" for="adopt-name">{{ t('sign.adopt_who') }}</label>
+      <input type="text" id="adopt-name" autocomplete="off" spellcheck="false">
+      <label class="adoptlabel" for="adopt-witness">
+        {{ t('sign.adopt_witness') }}</label>
+      <input type="text" id="adopt-witness" autocomplete="off">
+      <button type="button" id="adopt-save" class="primary">
+        {{ t('sign.adopt_save') }}</button>
+    </div>
+  </div>
 
   <div class="approw" id="sign-approw" hidden>
     <div class="signstep">
@@ -1988,6 +2060,10 @@
     signSendAgain: {{ t('sign.send_again')|tojson }},
     signEmpty:   {{ t('signature.empty')|tojson }},
     signLockLapsed: {{ t('sign.lock_lapsed')|tojson }},
+    adoptNeedName: {{ t('sign.adopt_need_name')|tojson }},
+    adoptNeedWitness: {{ t('sign.adopt_need_witness')|tojson }},
+    adoptSaved: {{ t('sign.adopt_saved')|tojson }},
+    adoptGone: {{ t('sign.adopt_gone')|tojson }},
     live:    {{ t('papp.live')|tojson }},
     syncing: {{ t('papp.syncing')|tojson }},
     webTitle: {{ t('papp.web')|tojson }},

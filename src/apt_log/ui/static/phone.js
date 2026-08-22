@@ -956,6 +956,92 @@
     }
   }
 
+  // ---------------------------------------------------------- adopted (10.6a)
+  // A party who cannot hold a stylus adopts a signature once and afterwards
+  // applies it with one press of their own. The press is the whole point —
+  // nothing on a timer reaches any of this, and the server enforces that far
+  // more seriously than this file can (see enrolled.py).
+  //
+  // What crosses the wire is a NAME. The strokes stay on the Pi, so this
+  // screen can put somebody's signature in front of them and cannot obtain it.
+  function renderAdopted(parties) {
+    const wrap = document.getElementById('sign-adopted');
+    const row = document.getElementById('sign-adopted-row');
+    if (!wrap || !row) return;
+    row.textContent = '';
+    for (const p of (parties || [])) {
+      if (!p || !p.name) continue;
+      const b = document.createElement('button');
+      b.type = 'button';
+      // textContent, never innerHTML: this is a person's name out of a file
+      // somebody types into, and it is going onto a page.
+      b.textContent = p.name;
+      b.dataset.name = p.name;
+      row.appendChild(b);
+    }
+    wrap.hidden = !row.children.length;
+  }
+
+  function loadAdopted() {
+    fetch('/signature/roster')
+      .then((r) => (r.ok ? r.json() : { parties: [] }))
+      .then((d) => renderAdopted(d.parties))
+      .catch(() => {});
+  }
+
+  function applyAdopted(name) {
+    if (!driving() || !name) return;
+    busy(i18n.signSending || '');
+    fetch('/signature/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name, package: currentPackage || '' })
+    }).then(async (r) => {
+      const out = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        unbusy();
+        // An adoption withdrawn on another device, or a store that has moved
+        // underneath this page. Saying which beats a bare "failed" — one means
+        // draw it by hand, the other means try again.
+        toast((out.error === 'not_enrolled' ? i18n.adoptGone : i18n.failed)
+              || '');
+        loadAdopted();
+        return;
+      }
+      // From here it is the ordinary replay: same status push, same lock, same
+      // step two. An adopted signature is not a different kind of ink.
+      pad.waitingId = out.id || '';
+      padWaiting(true);
+    }).catch(() => { unbusy(); toast(i18n.failed || ''); });
+  }
+
+  function adoptSave() {
+    const name = (document.getElementById('adopt-name') || {}).value || '';
+    const witness = (document.getElementById('adopt-witness') || {}).value || '';
+    if (!name.trim()) { toast(i18n.adoptNeedName || ''); return; }
+    if (!pad.strokes.length) { toast(i18n.signEmpty || ''); return; }
+    const rect = padCanvas().getBoundingClientRect();
+    fetch('/signature/enroll', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim(), strokes: pad.strokes,
+                             aspect: rect.width / rect.height,
+                             witness: witness.trim() })
+    }).then(async (r) => {
+      if (!r.ok) {
+        // The server refuses an adoption that does not say who was present,
+        // and that refusal is the requirement rather than a validation nicety
+        // — so it gets its own sentence rather than a generic failure.
+        toast((r.status === 400 ? i18n.adoptNeedWitness : i18n.failed) || '');
+        return;
+      }
+      const form = document.getElementById('sign-adopt');
+      if (form) form.hidden = true;
+      toast(i18n.adoptSaved || '');
+      loadAdopted();
+    }).catch(() => toast(i18n.failed || ''));
+  }
+
   // -------------------------------------------------------------------- relay
   function applyRelay(html, nonce) {
     if (window.APTLOG_DRAWING) return;   // never yank a half-drawn signature
@@ -1596,6 +1682,23 @@
     });
     const send = document.getElementById('sign-send');
     if (send) send.addEventListener('click', padSend);
+
+    // Adopted signatures (REQ-10.6a). Delegated, because the row is rebuilt
+    // every time the roster is read and per-button listeners would not
+    // survive it.
+    const adoptedRow = document.getElementById('sign-adopted-row');
+    if (adoptedRow) adoptedRow.addEventListener('click', (ev) => {
+      const b = ev.target.closest('button');
+      if (b && b.dataset.name) applyAdopted(b.dataset.name);
+    });
+    const adoptOpen = document.getElementById('sign-adopt-open');
+    if (adoptOpen) adoptOpen.addEventListener('click', () => {
+      const form = document.getElementById('sign-adopt');
+      if (form) form.hidden = !form.hidden;
+    });
+    const adoptBtn = document.getElementById('adopt-save');
+    if (adoptBtn) adoptBtn.addEventListener('click', adoptSave);
+    loadAdopted();
 
     // The app's own Borrar/Salvar, relayed. The outcome rides the same
     // sign-status push the replay uses, so the toast comes back rendered

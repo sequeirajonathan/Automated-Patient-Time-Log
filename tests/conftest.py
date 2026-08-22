@@ -16,7 +16,7 @@ import importlib
 
 import pytest
 
-from apt_log import flight, macros, prefs, schedule, sms, versions
+from apt_log import enrolled, flight, macros, prefs, schedule, sms, versions
 from apt_log.ui import mirror, state
 
 
@@ -120,6 +120,23 @@ def _isolated_prefs(tmp_path, monkeypatch):
     # that forgets.
     monkeypatch.setattr(schedule, "SCHEDULE_PATH",
                         tmp_path / "schedule.json")
+
+    # AND NOTHING MAY TOUCH THE ADOPTED SIGNATURES.
+    #
+    # The same argument as the schedule above, one degree worse. The store
+    # holds stroke sets that reproduce real people's signatures, and a test
+    # that enrols one would — on the Pi, from the deploy gate — write into
+    # the live file that two patients' signatures live in. `enroll` REPLACES
+    # the store's entry for a name, so a fixture enrolling "Test Patient"
+    # costs nothing but a fixture enrolling under a real name would overwrite
+    # the real adoption with test scribble, and the next check-out would draw
+    # it in front of the patient.
+    #
+    # Both paths, because the trail is written on the same press as the
+    # lookup and appending test rows to the real signing record would corrupt
+    # the one file that exists to answer an auditor.
+    monkeypatch.setattr(enrolled, "STORE_PATH", tmp_path / "signatures.json")
+    monkeypatch.setattr(enrolled, "USE_PATH", tmp_path / "signings.jsonl")
     yield
 
 

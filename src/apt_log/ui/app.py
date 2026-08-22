@@ -1860,6 +1860,84 @@ async def sign_action(request: Request):
     return JSONResponse({"ok": True, "id": rid})
 
 
+@app.get("/signature/roster")
+def signature_roster():
+    """Who has adopted a signature. NEVER the signatures themselves.
+
+    `enrolled.roster` is built to answer exactly this and to hold nothing
+    re-stampable; this route must not reach past it into the store. That is
+    the whole reason the two functions are separate.
+    """
+    from apt_log import enrolled as enrolled_mod
+
+    return JSONResponse({"parties": enrolled_mod.roster()})
+
+
+@app.post("/signature/enroll")
+async def signature_enroll(request: Request):
+    """Adopt a signature for one party, in person.
+
+    Drawn once by its owner on the portal's own pad, with a witness named.
+    Everything about this is deliberate and slow — it is the moment the
+    agency's approval actually rests on, and it happens with both people
+    sitting down, not against a clock.
+    """
+    from apt_log import enrolled as enrolled_mod
+
+    payload = await request.json()
+    try:
+        digest = enrolled_mod.enroll(payload.get("name", ""),
+                                     payload.get("strokes"),
+                                     aspect=float(payload.get("aspect") or 1.0),
+                                     witness=payload.get("witness", ""))
+    except (TypeError, ValueError) as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    return JSONResponse({"ok": True, "digest": digest[:12]})
+
+
+@app.post("/signature/forget")
+async def signature_forget(request: Request):
+    """Withdraw an adoption. Hers to withdraw at any time, and the reason the
+    roster shows the date: an adoption nobody remembers making is one to drop."""
+    from apt_log import enrolled as enrolled_mod
+
+    payload = await request.json()
+    return JSONResponse({"ok": enrolled_mod.forget(payload.get("name", ""))})
+
+
+@app.post("/signature/apply")
+async def signature_apply(request: Request):
+    """Draw an adopted signature onto the canvas in front of the phone.
+
+    THE PRESS IS THE POINT. This route exists to be called by a person who has
+    just touched a button, standing next to the phone, at the moment they are
+    attesting to a visit. It is not reachable from the scheduler and it never
+    will be — `autoentry` cannot import `enrolled` and a test enforces it.
+
+    What crosses the wire is a NAME. The strokes are looked up here and handed
+    straight to the same replay every hand-drawn signature uses, so this route
+    can be used to put somebody's signature on the screen in front of them and
+    cannot be used to obtain it.
+
+    And as everywhere else on this path: it draws, it does not commit. The
+    app's own Enviar stays a separate press.
+    """
+    from apt_log import enrolled as enrolled_mod
+    from apt_log import sign as sign_mod
+
+    payload = await request.json()
+    name = payload.get("name", "")
+    found = enrolled_mod.strokes_for(name)
+    if found is None:
+        return JSONResponse({"error": "not_enrolled"}, status_code=404)
+    strokes, aspect = found
+    rid = sign_mod.request(strokes, aspect=aspect)
+    enrolled_mod.record_use(name, enrolled_mod.digest_for(name),
+                            package=str(payload.get("package") or ""))
+    log.info("adopted signature queued for replay (%s)", rid)
+    return JSONResponse({"ok": True, "id": rid})
+
+
 @app.post("/relay")
 def submit_relay(request: Request,
                  nonce: str = Form(...), kind: str = Form(...),
