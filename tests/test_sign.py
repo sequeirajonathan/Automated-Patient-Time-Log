@@ -585,16 +585,52 @@ class TestAppButtons:
         target = sign.button_targets(self.PAGE, self.LEGACY)["clear"]
         assert tuple(point) == tuple(target["point"])
 
+    # A page that REMEMBERS a signature: the canvas is present in the tree but
+    # small, the way a completed visit keeps its saved signatures' wrappers.
+    # This is what "off the moment" actually means — it is not about the screen
+    # being upright, which is what this test used to assert with a fixture
+    # (CANVAS + CHROME) that is in fact a perfectly good landscape pad.
+    REMEMBERED = (
+        '<node class="android.view.View" resource-id="com.x:id/signature_view"'
+        ' text="" clickable="false" bounds="[100,200][400,300]" />'
+        '<node class="android.widget.Button" resource-id="com.x:id/btn_save"'
+        ' text="Salvar" clickable="true" bounds="[0,660][200,720]" />'
+        '<node class="android.widget.TextView" resource-id="com.x:id/foot"'
+        ' text="footer" clickable="false" bounds="[0,700][1600,720]" />')
+
     def test_do_action_refuses_off_the_signature_screen(self, tmp_path):
         driver = MagicMock()
         driver.current_package = self.LEGACY
-        driver.page_source = CANVAS + CHROME    # upright, not the moment
+        driver.page_source = self.REMEMBERED    # a canvas, but not a pad
         with patch.object(sign, "_perform") as perform, \
              patch("apt_log.resident.run", side_effect=lambda w: w(driver)):
             status = sign.do_action({"id": "a2", "kind": "confirm"},
                                     tmp_path / "s.json")
         assert status.state == "failed" and status.reason == "no_canvas"
         perform.assert_not_called()
+
+    def test_a_page_that_only_remembers_a_signature_is_not_a_moment(self):
+        assert sign.signing_moment(self.REMEMBERED) is False
+        assert sign.button_targets(self.REMEMBERED, self.LEGACY) is None
+
+    def test_a_landscape_pad_still_offers_the_apps_own_buttons(self):
+        """HHAeXchange+'s check-out signature pages, and the bug they found.
+
+        Seen on the real check-out: action_bar_root [0,0][1600,720], a
+        `signature_screen_signature_pad` the app names outright, and Borrar and
+        Enviar as captionless Views with the words drawn over them. The screen
+        needs NO quarter turn, so the old `sideways` gate answered None and the
+        portal's step two came up empty on the one screen it exists for.
+        """
+        assert sign.signing_moment(CANVAS + CHROME) is True
+        assert sign.sideways(CANVAS + CHROME, "com.hhaexchange.uma") is False
+        targets = sign.button_targets(CANVAS + CHROME, "com.hhaexchange.uma")
+        assert targets is not None
+        # Pressed as an ELEMENT. The canvas-relative offsets were measured on
+        # the legacy rotated page and mean nothing here, so they must not
+        # appear — a guess must never replace a fact the tree publishes.
+        assert "element" in targets["confirm"]
+        assert "point" not in targets["confirm"]
 
     def test_the_status_kind_survives_the_file(self, tmp_path):
         sign.write_status(sign.Status(id="a3", state="done", kind="confirm"),
