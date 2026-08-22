@@ -195,6 +195,14 @@ class TestLateIsWorseThanNever:
                    for d in got)
 
 
+# THE STAND-IN FOR "NOBODY HAS WALKED THIS APP'S CHECK-IN".
+#
+# It used to be HHAeXchange+, which was walked on 2026-08-21 and is now in
+# SUPPORTED — so these tests would have passed for the wrong reason, or been
+# deleted, which is worse. The retired legacy app is genuinely unwalked and
+# still a care app, so the rule keeps a real example to be true about.
+LEGACY = "com.hhaexchange.caregiver"
+
 class TestAnAppWhoseControlHasNeverBeenWalked:
     """HHAeXchange+'s check-in control has only ever been seen on a visit
     already under way. Pressing an unknown control on a live agency record to
@@ -205,10 +213,10 @@ class TestAnAppWhoseControlHasNeverBeenWalked:
         assert autoentry.supported("com.inmyteam.inmyteam") is True
 
     def test_and_the_unwalked_one_is_not(self):
-        assert autoentry.supported("com.hhaexchange.uma") is False
+        assert autoentry.supported(LEGACY) is False
 
     def test_the_refusal_has_a_reason_that_can_be_said_out_loud(self):
-        assert autoentry.UNSUPPORTED_REASON["com.hhaexchange.uma"]
+        assert autoentry.refusal(LEGACY, "entry") == "app_not_walked"
 
     def test_nothing_unknown_is_supported_by_accident(self):
         assert autoentry.supported("com.some.other.app") is False
@@ -342,15 +350,18 @@ class TestWhatTheMachineWillActuallyPress:
         assert autoentry.refusal("com.inmyteam.inmyteam", "entry") == ""
 
     def test_an_entry_on_the_unwalked_app_is_not(self):
-        assert autoentry.refusal("com.hhaexchange.uma", "entry") \
-            == "control_not_walked"
+        # "app_not_walked" rather than "control_not_walked": nobody has
+        # mapped this app at all. The narrower reason existed for an app
+        # whose screens WERE walked but whose check-in button was never
+        # seen, which was HHAeXchange+ until it was.
+        assert autoentry.refusal(LEGACY, "entry") == "app_not_walked"
 
     def test_no_exit_is_fired_on_any_app(self):
         """No app's check-out control has been walked. inMyTeam's is "Note &
         Check out", which opens the note and the signature flow — a screen
         where the caregiver signs, and not one a timer should press for her."""
         for app in ("com.tellus.evv.v2", "com.inmyteam.inmyteam",
-                    "com.hhaexchange.uma"):
+                    LEGACY):
             assert autoentry.refusal(app, "exit") == "exit_is_hers"
 
     def test_fireable_keeps_the_entry_and_drops_the_exit(self):
@@ -363,7 +374,7 @@ class TestWhatTheMachineWillActuallyPress:
     def test_the_unwalked_app_is_dropped_even_when_armed_and_due(self):
         """The whole point: an armed HHAeXchange+ visit is DUE, and still not
         pressed, because nobody has seen the button that starts it."""
-        s = a_schedule(app="com.hhaexchange.uma")
+        s = a_schedule(app=LEGACY)
         arm(s.blocks[0])
         due_now = autoentry.due(s, monday(9, 0))
         assert len(due_now) == 1
@@ -413,7 +424,12 @@ class TestTheRunnerActuallyFires:
             execute.return_value = _Done()
             runner.maybe_fire()
         sent = _json.loads(execute.call_args.args[2])
-        assert sent == {"app": "com.tellus.evv.v2", "patient": "Ada"}
+        # AND WHICH VISIT, not just which patient. One patient can have two
+        # cards on the same evening in HHAeXchange+, each with its own
+        # check-in button, and the walk cannot choose between them without
+        # being told the hour the block starts.
+        assert sent == {"app": "com.tellus.evv.v2", "patient": "Ada",
+                        "at": "09:00"}
 
     def test_it_does_not_fire_twice(self, tmp_path, monkeypatch):
         """THE LEDGER IS WHAT STOPS THIS, not the tick throttle. So the
@@ -481,7 +497,7 @@ class TestTheRunnerActuallyFires:
         from unittest.mock import patch
 
         self._armed_schedule(monkeypatch, monday(9, 0),
-                             app="com.hhaexchange.uma")
+                             app=LEGACY)
         runner = self._runner(tmp_path)
         with patch.object(runner, "execute") as execute:
             assert runner.maybe_fire() is False
@@ -702,7 +718,7 @@ class TestGettingTheAppUpBeforeTheEntry:
                                                      monkeypatch):
         from unittest.mock import patch
 
-        self._armed(monkeypatch, monday(8, 50), app="com.hhaexchange.uma")
+        self._armed(monkeypatch, monday(8, 50), app=LEGACY)
         runner = self._runner(tmp_path)
         with patch.object(runner, "execute") as execute:
             assert runner.maybe_prepare() is False
@@ -1576,3 +1592,105 @@ class TestTheCheckInBelongsToTheFirstHalf:
 
         kept = autoentry.fireable([due(1), due(2)])
         assert [d.visit.block.part for d in kept] == [1]
+
+
+class TestPickingTheRightCardInExchangePlus:
+    """WALKED LIVE on 2026-08-21 at 20:05, four minutes before a real visit,
+    with the owner watching, and confirmed by him to hold for every patient
+    in this app "regardless of agency selected".
+
+    HHAeXchange+ puts its check-in on the landing screen: Programación lists
+    today's visits already expanded, each with its own `Registro de entrada
+    de EVV`. No agency is chosen and no visit detail is opened.
+
+    WHICH MAKES PICKING THE CARD THE WHOLE PROBLEM. A patient whose evening
+    is written as two entries has TWO cards, each with a button, and pressing
+    the wrong one records the wrong half of the visit on a live agency
+    record. They are told apart by the hours printed on the card — which are
+    the AGENCY's window, not ours: the cards read 8:00-9:00 and 9:00-10:00
+    where the schedule says 8:05 and 9:05.
+    """
+
+    def _cards(self, *pairs):
+        from datetime import time as dtime
+        return [{"button": {"b": [44, y, 688, y + 52]},
+                 "at": dtime(int(t.split(":")[0]), int(t.split(":")[1])),
+                 "says": t}
+                for y, t in pairs]
+
+    def test_it_reads_the_hours_a_card_prints(self):
+        from apt_log import macros
+
+        assert macros._uma_start("8:00 p. m. - 9:00 p. m.").hour == 20
+        assert macros._uma_start("9:00 p. m. - 10:00 p. m.").hour == 21
+        assert macros._uma_start("5:00 a. m. - 8:00 a. m.").hour == 5
+        assert macros._uma_start("12:15 p. m. - 5:15 p. m.").hour == 12
+        assert macros._uma_start("12:30 a. m. - 1:30 a. m.").hour == 0
+        assert macros._uma_start("Detalles del paciente") is None
+
+    def test_the_nearest_card_wins_not_the_equal_one(self):
+        """The schedule says 8:05 and the card says 8:00, by design — the
+        five minutes are the travel buffer. Equality would never match."""
+        from apt_log import macros
+
+        cards = self._cards((388, "20:00"), (637, "21:00"))
+        assert macros._uma_pick(cards, "20:05")["says"] == "20:00"
+        assert macros._uma_pick(cards, "21:05")["says"] == "21:00"
+
+    def test_a_lone_card_needs_no_time_at_all(self):
+        """Two of the three apps show one card per patient per day, and the
+        schedule has never had to say which visit it meant."""
+        from apt_log import macros
+
+        cards = self._cards((388, "06:00"))
+        assert macros._uma_pick(cards, "")["says"] == "06:00"
+
+    def test_but_two_cards_and_no_time_is_a_refusal(self):
+        import pytest
+        from apt_log import macros
+
+        cards = self._cards((388, "20:00"), (637, "21:00"))
+        with pytest.raises(RuntimeError, match="tell them apart"):
+            macros._uma_pick(cards, "")
+
+    def test_and_nothing_close_enough_is_a_refusal(self):
+        """A check-in on the wrong half is worse than one not made."""
+        import pytest
+        from apt_log import macros
+
+        cards = self._cards((388, "20:00"), (637, "21:00"))
+        with pytest.raises(RuntimeError, match="matches that visit"):
+            macros._uma_pick(cards, "06:00")
+
+    def test_a_tie_is_a_refusal_too(self):
+        import pytest
+        from apt_log import macros
+
+        cards = self._cards((388, "20:00"), (637, "20:00"))
+        with pytest.raises(RuntimeError, match="equally well"):
+            macros._uma_pick(cards, "20:05")
+
+    def test_an_empty_screen_is_a_refusal(self):
+        import pytest
+        from apt_log import macros
+
+        with pytest.raises(RuntimeError, match="not on this screen"):
+            macros._uma_pick([], "20:05")
+
+    def test_the_app_is_now_walked_end_to_end(self):
+        from apt_log import macros
+
+        assert "com.hhaexchange.uma" in macros.EVV_ENTRY_WORDS
+        assert "Registro de entrada de EVV" in \
+            macros.EVV_ENTRY_WORDS["com.hhaexchange.uma"]
+        assert "Registro de salida de EVV" in \
+            macros.EVV_STARTED_WORDS["com.hhaexchange.uma"]
+
+    def test_the_fire_tells_the_walk_which_visit_it_means(self):
+        """Without the start time the walk cannot choose between two cards,
+        so the scheduler has to say — and it does, off the block itself."""
+        from apt_log import macros
+
+        arg = macros._evv_arg("com.hhaexchange.uma", "Ada", "20:05")
+        assert macros._evv_when(arg) == "20:05"
+        assert macros._evv_parts(arg) == ("com.hhaexchange.uma", "Ada")
