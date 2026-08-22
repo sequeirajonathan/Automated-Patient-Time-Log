@@ -1,0 +1,239 @@
+"""A signature adopted once, applied by its owner with one press.
+
+WHY THIS EXISTS, AND WHAT CHANGED TO ALLOW IT.
+
+REQ-10.6 forbade keeping a signature. The reasoning was sound and is worth
+restating, because this module is the exception to it and an exception nobody
+can explain is just a hole: a stored signature replayed by a timer attests to
+a visit nobody witnessed at that moment, and on a record that gets billed that
+is a falsified attestation, with the caregiver's name on it.
+
+What changed is not the storage. It is the moment.
+
+Several of these patients cannot hold a stylus. They were asking the caregiver
+to sign for them, which is the very thing REQ-10.6 was written to prevent and
+was already happening by hand, off the record, with no trail at all. The
+agency's answer — approved, and written up by the owner as an amendment to
+REQ-10.6 — is the one every e-signature system reaches: a party adopts a
+signature once, in person, and afterwards applies it with a single deliberate
+press. Presence and intent are what make an attestation, not the freshness of
+the strokes.
+
+So the rules this module keeps are the ones that carry that argument, and they
+are not negotiable inside it:
+
+**A press, always, by the person it belongs to.** Nothing here is reachable
+from the scheduler, from a macro, or from any timer. `autoentry` cannot see
+this module and a test says so. Check-out does not fire on any app and this
+does not change that — it makes the signature screen a one-press screen for
+two people standing in front of it, and nothing else.
+
+**The strokes never leave this machine.** No route answers them, in any shape.
+The portal asks "apply Carmen's signature" by name; the lookup and the replay
+both happen on the Pi. A stolen portal session can ask for a signature to be
+drawn on the phone in the room; it cannot walk away with the signature.
+
+**Enrolment is witnessed and recorded.** A signature is adopted only with an
+explicit statement of who was present, and the record keeps that with the date.
+An adoption nobody can account for later is worth less than no adoption.
+
+**Every application is audited.** Who, when, on which app, with the digest of
+what was drawn. This is the trail that answers an auditor, and it is the whole
+reason this is better than the caregiver signing by hand — which leaves none.
+
+WHERE IT LIVES. `/etc/aptlog/signatures.json`, 0600, beside the schedule and
+for the same reason stated at the top of `schedule.py`: it names the people
+cared for. It is more sensitive than the schedule, not less — a stroke set is
+reproducible ink — so `sanitize-for-image.sh` removes it before any image is
+taken, and nothing in this repository has ever seen one.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+import unicodedata
+from datetime import datetime
+from pathlib import Path
+
+from apt_log import sign as sign_mod
+
+log = logging.getLogger(__name__)
+
+STORE_PATH = Path("/etc/aptlog/signatures.json")
+
+# Owner-only. The schedule next to it is 0644 and can afford to be; a stroke
+# set is the thing itself, and any account on this machine reading it has a
+# signature it can reproduce.
+STORE_MODE = 0o600
+
+# What an adoption must say about itself before it is written. Not a checkbox
+# in a template — a sentence the person doing the enrolling types, naming who
+# was present. "Consent recorded" with nothing behind it is not a record.
+MIN_WITNESS = 4
+
+_SPACE = re.compile(r"\s+")
+
+
+def key(name: str) -> str:
+    """The stable form of a party's name.
+
+    Case and spacing vary between the card, the app and whatever gets typed
+    into the portal at eight in the morning; none of that should produce a
+    second enrolment for the same person. Accents are folded for matching only
+    — the display name is kept exactly as it was given, because it is a
+    person's name and this file is the last place to be casual about that.
+    """
+    folded = unicodedata.normalize("NFKD", name or "")
+    folded = "".join(c for c in folded if not unicodedata.combining(c))
+    return _SPACE.sub(" ", folded).strip().casefold()
+
+
+# --------------------------------------------------------------------- store
+def _read(path: Path | None = None) -> dict:
+    try:
+        doc = json.loads((path or STORE_PATH).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return doc if isinstance(doc, dict) else {}
+
+
+def _write(doc: dict, path: Path | None = None) -> None:
+    """Replace the store, never widening its mode.
+
+    Written to a temporary file with the mode set BEFORE the rename, so there
+    is no instant at which a world-readable file holds a signature.
+    """
+    target = path or STORE_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(".tmp")
+    tmp.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+    os.chmod(tmp, STORE_MODE)
+    os.replace(tmp, target)
+
+
+def enroll(name: str, strokes, aspect: float = 1.0, witness: str = "",
+           path: Path | None = None) -> str:
+    """Adopt a signature for `name`. Returns its digest.
+
+    Refuses a payload that is not signature-shaped (the same check the live
+    replay uses, so nothing can be enrolled that could not be drawn) and
+    refuses an adoption that does not say who was present.
+    """
+    display = _SPACE.sub(" ", (name or "").strip())
+    if not display:
+        raise ValueError("a signature belongs to somebody")
+    if not sign_mod.validate(strokes):
+        raise ValueError("that is not a signature")
+    if len((witness or "").strip()) < MIN_WITNESS:
+        raise ValueError("an adoption has to say who was present")
+
+    doc = _read(path)
+    digest = sign_mod.digest(strokes)
+    doc[key(display)] = {
+        "name": display,
+        "strokes": strokes,
+        "aspect": float(aspect or 1.0),
+        "digest": digest,
+        "witness": witness.strip(),
+        "at": datetime.now().astimezone().isoformat(),
+    }
+    _write(doc, path)
+    # The digest and nothing else. The log is read over a shoulder and shipped
+    # in a bug report; the strokes are not going into it.
+    log.info("signature adopted (%s…)", digest[:8])
+    return digest
+
+
+def forget(name: str, path: Path | None = None) -> bool:
+    """Drop an adoption. True if there was one."""
+    doc = _read(path)
+    if doc.pop(key(name), None) is None:
+        return False
+    _write(doc, path)
+    log.info("signature adoption withdrawn")
+    return True
+
+
+def enrolled(name: str, path: Path | None = None) -> bool:
+    return key(name) in _read(path)
+
+
+def roster(path: Path | None = None) -> list[dict]:
+    """Who has adopted a signature — WITHOUT the signatures.
+
+    This is what the portal is allowed to see. Every field here is safe on a
+    screen somebody else can look at; `strokes` is deliberately absent and the
+    route that serves this must never reach past it.
+    """
+    out = []
+    for entry in _read(path).values():
+        if not isinstance(entry, dict):
+            continue
+        out.append({"name": entry.get("name", ""),
+                    "digest": (entry.get("digest") or "")[:12],
+                    "witness": entry.get("witness", ""),
+                    "at": entry.get("at", "")})
+    return sorted(out, key=lambda e: e["name"].casefold())
+
+
+def strokes_for(name: str, path: Path | None = None) -> tuple | None:
+    """The adopted strokes and their aspect, or None.
+
+    THE ONE FUNCTION THAT HANDS BACK A SIGNATURE, and the reason the module
+    docstring is as long as it is. Its only legitimate caller is the route
+    that answers a press by the person the signature belongs to. It must never
+    be reachable from the scheduler, and `test_enrolled.py` holds a test that
+    fails if `autoentry` or `macros` so much as imports this module.
+    """
+    entry = _read(path).get(key(name))
+    if not isinstance(entry, dict):
+        return None
+    strokes = entry.get("strokes")
+    if not sign_mod.validate(strokes):
+        # A store that has been edited by hand into something unsignable is a
+        # refusal, not a crash and not a half-drawn signature.
+        log.warning("an adopted signature is not signature-shaped; refusing")
+        return None
+    return strokes, float(entry.get("aspect") or 1.0)
+
+
+def digest_for(name: str, path: Path | None = None) -> str:
+    entry = _read(path).get(key(name))
+    return (entry or {}).get("digest", "") if isinstance(entry, dict) else ""
+
+
+# --------------------------------------------------------------------- trail
+# Deliberately NOT an `audit.AuditRecord`. That type is a check-off attempt and
+# its mandatory fields say so — a scheduled time, a gate result, a transport
+# mode. Applying a signature has none of those, and inventing them to satisfy
+# the constructor would put fiction in the one file that exists to be trusted.
+# So this is its own append-only line, with only what actually happened in it.
+USE_PATH = Path("/var/lib/aptlog/signings.jsonl")
+
+
+def record_use(name: str, digest: str, package: str = "",
+               path: Path | None = None) -> None:
+    """One line per application. Never the strokes.
+
+    This trail is the answer to the question the agency will eventually ask —
+    who signed, when, on which app — and it is the reason an adopted signature
+    applied in the room is a better record than the caregiver signing by hand,
+    which leaves nothing behind at all.
+    """
+    target = path or USE_PATH
+    line = json.dumps({"at": datetime.now().astimezone().isoformat(),
+                       "name": name, "digest": (digest or "")[:16],
+                       "package": package, "how": "pressed"},
+                      separators=(",", ":"), sort_keys=True)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("a", encoding="utf-8") as fh:
+            fh.write(line + "\n")
+    except OSError as exc:
+        # A trail that cannot be written is worth saying loudly, but it must
+        # not take the signature down with it — the two people are standing
+        # there and the screen is in front of them.
+        log.warning("could not record the signing (%s)", exc)

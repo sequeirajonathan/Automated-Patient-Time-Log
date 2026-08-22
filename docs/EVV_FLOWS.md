@@ -541,11 +541,13 @@ it can never be read as something a machine observed.
 |---|---|---|
 | Mobile Caregiver+ | **fires** | `Comenzar Visita` walked, with a machine-readable confirmation afterwards |
 | inMyTeam | **fires** | `Check in` walked; the lead-window walk gets the control drawn (below) |
-| HHAeXchange+ | **refuses** | its control has only ever been seen on a visit already under way |
+| HHAeXchange+ | **fires** | the card's own `Registro de entrada de EVV`, then `Continuar` past the map |
 
-The refusal is by name (`autoentry.UNSUPPORTED_REASON`) and the arming page dims those
-rows and says why on their face — a switch that cannot fire must never look like one that
-can.
+All three entries are walked, so `autoentry.UNSUPPORTED_REASON` is empty today. The
+mechanism stays: an app that has never been walked refuses by name, and the arming page
+dims those rows and says why on their face — a switch that cannot fire must never look
+like one that can. The refusals that remain in force are about the *occurrence* rather
+than the app — `entry_is_the_first_half` and `exit_is_hers` — and they are listed below.
 
 **No check-OUT fires on any app.** Mobile Caregiver+ was only ever seen in its
 not-started and completed states, so the control that ends a running visit is unobserved;

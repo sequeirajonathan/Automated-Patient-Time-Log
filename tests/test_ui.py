@@ -179,7 +179,30 @@ class TestWritePaths:
                          # yet. It is here so that the switch a person throws
                          # already means what they meant by it when firing
                          # does land.
-                         "/schedule/arm"}
+                         "/schedule/arm",
+                         # Adopted signatures, REQ-10.6a. Three writes, and
+                         # each one is a person pressing a button in a room
+                         # with the phone:
+                         #
+                         #   /signature/enroll  adopt, with a witness named
+                         #   /signature/apply   draw an adopted one, by NAME
+                         #   /signature/forget  withdraw an adoption
+                         #
+                         # `apply` is the one worth staring at, and it belongs
+                         # on this list for the same reason `/sign` does: it
+                         # takes no coordinate and no strokes. It takes a name,
+                         # the lookup happens on the Pi, and the replay lands
+                         # inside exactly one canvas element or refuses. So it
+                         # can put a signature on the screen in front of the
+                         # person it belongs to, and it cannot be used to get
+                         # one out of the machine.
+                         #
+                         # None of the three is reachable from the scheduler —
+                         # test_enrolled.py holds the import-graph test that
+                         # keeps it that way, which is the invariant that
+                         # actually matters here.
+                         "/signature/enroll", "/signature/apply",
+                         "/signature/forget"}
 
     def test_no_route_accepts_a_raw_coordinate_or_keycode(self, client):
         """/tap takes an element from a named frame; /device takes an action

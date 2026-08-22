@@ -364,11 +364,39 @@ signatures lift the pen.
 the `signature_requested` event. A payload without a matching outstanding nonce is
 rejected, so a captured request body cannot be submitted twice.
 
-**10.6 — Freshness (non-negotiable).** Every signature is captured fresh, in response to a
-specific prompt, and **discarded from memory once replayed**. The system must never store
-a signature bitmap or stroke set for reuse on a later patient. Caching and re-stamping
-would make the system sign on her behalf rather than transmit her signing, which is a
-different thing entirely and not one this project builds.
+**10.6 — Freshness (non-negotiable).** Every signature captured through the *relay* path
+is captured fresh, in response to a specific prompt, and **discarded from memory once
+replayed**. Caching and re-stamping on that path would make the system sign on her behalf
+rather than transmit her signing, which is a different thing entirely and not one this
+project builds.
+
+**10.6a — Adopted signatures (amendment, agency-approved).** Several patients cannot hold
+a stylus. They were asking the caregiver to sign for them — the exact outcome 10.6 was
+written to prevent, happening by hand, off the record, with no trail at all. The agency
+approved, and the owner wrote, this narrower rule in its place.
+
+A party may **adopt** a signature: draw it once, in person, and afterwards apply it with a
+single press of their own. This is what every e-signature system does, and what makes an
+attestation valid is presence and intent, not the freshness of the strokes.
+
+The amendment holds only while all four of these do. They are the conditions the agency's
+approval rests on, not implementation detail:
+
+1. **A press, by the person it belongs to, at the moment of attesting.** No timer, macro
+   or scheduled job may apply an adopted signature. The check-out is triggered by hand
+   with both parties present; the script drives up to the signature screen and stops.
+2. **The strokes never leave the device.** No route, response or log returns them. The
+   portal asks by name; the lookup and the replay both happen on the Pi.
+3. **Adoption is witnessed and dated**, with a written statement of who was present.
+4. **Every application is recorded** — who, when, which app, and the digest.
+
+Storage is `/etc/aptlog/signatures.json`, 0600, removed by `sanitize-for-image.sh`. It is
+more sensitive than the schedule, which merely names people; this reproduces their
+signatures.
+
+Enforcement lives in `tests/test_enrolled.py`, including an import-graph test that fails
+if `autoentry`, `macros`, `schedule` or `feed` can so much as see the module. Reasoning in
+a docstring is not enforcement.
 
 **10.7 — Mapping.** Normalised strokes map onto the target element's bounds, not the
 screen:
