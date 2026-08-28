@@ -3590,6 +3590,78 @@ def _already_entered(driver, report, package: str, patient: str) -> str:
                  if any(v in w.lower() for v in CHECK_IN_WORDS_SEEN)), "")
 
 
+# The two faces of a signed-OUT inMyTeam, and the only honest test that the
+# sign-out landed. The drawer row vanishing proves the drawer closed and
+# nothing else; what settles it is the app asking again — which is the same
+# pair of screens `_inmyteam_walk` waits for on the way in, read here in
+# reverse.
+SIGN_IN_START_WORDS = ("Get Started", "Comenzar", "Empezar")
+
+
+def _asks_to_sign_in(driver) -> bool:
+    """Whether inMyTeam is showing its splash or its number field."""
+    if _words(driver, *SIGN_IN_START_WORDS) is not None:
+        return True
+    try:
+        return any(e.is_displayed() for e in driver.find_elements(
+            "xpath", '//*[@class="android.widget.EditText"]'))
+    except Exception:  # noqa: BLE001
+        return False
+
+# What the sign-out row says, in both languages. Same reasoning as
+# DRAWER_DESCS: the ids in that drawer are Material's own and carry no
+# language, the captions do, and a caption list that knows one language is a
+# walk that works on one phone.
+SIGN_OUT_WORDS = ("Cerrar sesión", "Cerrar sesion", "Sign out", "Log out")
+
+
+def _inmyteam_sign_out(driver, report) -> None:
+    """Sign inMyTeam out, so the next launch has to do the whole OTP dance.
+
+    EXISTS TO BE TESTED WITH, and that is worth saying plainly. Nothing in
+    the scheduled path wants this: an app that is signed in should stay
+    signed in, and signing out costs a code, a text and a walk. It is here
+    because the sign-in walk cannot be exercised without first undoing it,
+    and doing that by hand means somebody in Florida holding the phone.
+
+    Confirmed before it runs (see CONFIRM) for the same reason
+    `restart_phone` is: it takes a working app and makes it not work, and
+    getting back needs a carrier, a code and a screen to type it into. The
+    5am arm depends on that recovery, which is the real cost of a stray
+    press.
+    """
+    report("macro.step.opening")
+    _freshen(driver, report, INMYTEAM)
+
+    drawer = _the_drawer(driver)
+    if drawer is None:
+        # `_back_to_the_drawer` walks out of an inner page; if the drawer is
+        # still not there afterwards this is not the app's front, and a blind
+        # press in a nav list is how the wrong menu item gets chosen.
+        _back_to_the_drawer(driver, report, INMYTEAM)
+        drawer = _the_drawer(driver)
+    if drawer is None:
+        raise RuntimeError("the navigation drawer is not on this screen")
+
+    report("macro.step.opening_drawer")
+    _tap_element(driver, drawer)
+    wait_for(lambda: _words(driver, *SIGN_OUT_WORDS) is not None, timeout=8.0)
+
+    row = _words(driver, *SIGN_OUT_WORDS)
+    if row is None:
+        raise RuntimeError("the drawer opened but has no sign-out on it")
+
+    report("macro.step.signing_out")
+    _tap_element(driver, row)
+
+    # SIGNED OUT MEANS THE APP ASKS AGAIN. The drawer's own row disappearing
+    # proves only that the drawer closed. What settles it is the sign-in
+    # screen, which is the same test the sign-in walk uses in reverse.
+    if not wait_for(lambda: _asks_to_sign_in(driver), timeout=20.0):
+        raise RuntimeError("sign-out was pressed and the app is still signed in")
+    report("macro.step.finished")
+
+
 def _evv_checks(driver, report, arg: str) -> None:
     """Show the day's check-in and check-out record for one patient.
 
@@ -3995,6 +4067,8 @@ MACROS: dict[str, Macro] = {
               takes_arg=True),
         Macro("evv_prepare", "macro.evv_prepare", _evv_prepare,
               takes_arg=True),
+        Macro("inmyteam_sign_out", "macro.inmyteam_sign_out",
+              _inmyteam_sign_out),
         Macro("clear_screen", "macro.clear_screen", _clear_screen),
         Macro("check_tasks", "macro.check_tasks", _check_tasks),
         Macro("phone_settings", "macro.phone_settings", _phone_settings),
@@ -4043,7 +4117,11 @@ CONFIRM = ("restart_phone", "update_app", "update_hhax_uma",
            # button on the page and it is not one of them. The SCHEDULER does
            # not come through here — its confirmation is the arming switch,
            # thrown in advance and recorded with a name (REQ-5.9).
-           "evv_entry")
+           "evv_entry",
+           # Asks because it takes a working app and makes it not work.
+           # Getting back in needs a carrier, a code and a screen to type
+           # it into, and the 5am arm depends on that recovery landing.
+           "inmyteam_sign_out")
 
 
 # Session-expiry dialogs, per app. A dialog whose wording is recognised as
