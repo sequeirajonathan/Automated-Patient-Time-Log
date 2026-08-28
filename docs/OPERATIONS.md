@@ -494,3 +494,51 @@ any new device.
 What does **not** work, and was tried first: `setprop persist.sys.locale` is
 denied to shell by SELinux, and `settings put system system_locales` sets only
 the preference list, not the active locale.
+
+### inMyTeam is registered to the SIM, so a new SIM means a new account number
+
+The single most expensive thing about the swap, and it did not surface until
+the phone was signed out for the first time.
+
+inMyTeam signs in by texting a code to **the number the account is registered
+to**, and that account is registered to the SIM in this handset. So
+`INMYTEAM_PHONE` in `/etc/aptlog/secrets.env` is not a person's number and not
+a preference — it is the new SIM's own line, and after a swap it holds the
+**old** handset's. Everything downstream then fails in a way that points
+somewhere else entirely:
+
+- the sign-in walk types the stale number and the app answers, in a dialog,
+  `Advertencia! / El número de teléfono no esta registrado`;
+- no code is ever sent, so nothing arrives to read;
+- auto-auth fires correctly, gets that far, and reports a timeout.
+
+Read the new line off the phone rather than asking around for it. `dumpsys
+isub` redacts the MSISDN on Android 16 (`number=13057[****]`), but the
+telephony binder does not:
+
+```
+adb shell service call iphonesubinfo 20
+# Result: Parcel(...  '1.3.0.5.7.0.9.7.7.0.8...')  → +1 305 709 7708
+```
+
+The UTF-16 payload spells the digits out one per cell. Then:
+
+```
+sudo cp -a /etc/aptlog/secrets.env /etc/aptlog/secrets.env.bak-$(date +%F-%H%M%S)
+sudo sed -i 's/^INMYTEAM_PHONE=.*/INMYTEAM_PHONE=<ten digits, no country code>/' \
+    /etc/aptlog/secrets.env
+```
+
+The file stays `0600 apt:apt` and never enters the repository. The proof it
+worked is on the code screen itself, which quotes the number back:
+`Un texto con un código se envió a …`.
+
+**A check that would have caught it in a second:** the phone's own inbox. If
+this handset has been receiving codes from inMyTeam's sender, the account is on
+this handset's line — so if a number is being refused as unregistered while
+codes keep landing here, the stored number is wrong, not the account.
+
+```
+adb shell content query --uri content://sms/inbox \
+    --projection address:date --sort "date DESC LIMIT 3"
+```
