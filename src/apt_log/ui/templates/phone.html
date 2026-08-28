@@ -2102,7 +2102,12 @@
     <div class="padrow onphone" id="sign-appbtns"></div>
     {# The legacy pair, for the rotated pages whose tree shows no buttons at
        all and where the only way is a press at a derived coordinate. Hidden
-       the moment the app gives us something real to aim at. #}
+       the moment the app gives us something real to aim at.
+
+       IT KEEPS ITS CLEAR, and deliberately: the replay's own wipe presses the
+       app's clear ELEMENT, and this row exists precisely for the screen that
+       publishes no elements to press. Where the automatic clear cannot reach,
+       the manual one is the only one there is. #}
     <div class="padrow onphone" id="sign-legacyrow">
       <button type="button" id="app-clear">{{ t('sign.appclear') }}</button>
       <button type="button" id="app-save" class="primary">{{ t('sign.appsave') }}</button>

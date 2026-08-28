@@ -142,6 +142,18 @@
     bindAims(root);
   }
 
+  // WHAT EACH APP CALLS ITS OWN CLEAR, on a signature sheet. The same words
+  // the controller matches on (`sign._CLEAR_WORDS`), kept in step with it by
+  // a test rather than by memory — the two lists disagreeing would mean the
+  // replay wiping a canvas whose button the pad still shows, or the pad
+  // hiding a button nothing wipes.
+  //
+  // Anchored: "borrar" as a whole caption, never as a fragment of a longer
+  // one, because dropping a button on a substring match is how an
+  // affirmative with an unlucky name disappears from the only row that
+  // finishes a signature.
+  const CLEAR_WORDS = /^(borrar|clear|limpiar)$/i;
+
   // Every element carrying a verified aim — a reflow control, or an app tab
   // lifted into the control bar — posts the same tap the overlay always did.
   function bindAims(root) {
@@ -458,7 +470,23 @@
     // not switching between the phone view and the front end to finish one
     // signature. Ordinary aims, pressed through the ordinary verified tap.
     const approw = document.getElementById('sign-approw');
-    const sheetActions = meta.sheet_actions || [];
+    // ONE CONTROL IN STEP TWO, NOT TWO.
+    //
+    // The app's Borrar used to sit here beside its Done, equally weighted,
+    // because a second replay lands ON TOP of the first — the pad sends her
+    // whole signature every time, so anything already on the canvas had to be
+    // wiped or the two overlapped. Redoing meant Borrar, redraw, send, Done:
+    // four presses across two screens for one signature, and it was reported
+    // as exactly that back and forth.
+    //
+    // The replay clears the canvas itself now (`sign._wipe_the_canvas`), so
+    // this button has nothing left to do and redrawing is just pressing Send
+    // again. Filtered here rather than skipped in the loop below, so the row's
+    // cache key, its emphasis pass and the decision to show step two at all
+    // are all made against what is actually going to be on screen — an app
+    // publishing ONLY a clear must not leave step two headed and empty.
+    const sheetActions = (meta.sheet_actions || []).filter(
+      (a) => !CLEAR_WORDS.test((a.txt || '').trim()));
     if (approw) {
       const slot = document.getElementById('sign-appbtns');
       const key = JSON.stringify(sheetActions);

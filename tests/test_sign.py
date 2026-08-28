@@ -1504,3 +1504,81 @@ class TestWhoseSignatureThisScreenWants:
 
     def test_no_statics_is_not_an_error(self):
         assert sign.signer_named({}) == ""
+
+
+class TestTheReplayClearsBeforeItDraws:
+    """One control in the pencil drawer, and this is what makes it one.
+
+    A second replay lands ON TOP of the first — the pad sends the whole
+    signature every time — so anything already on the canvas had to be wiped
+    or the two overlapped into a scribble. That is why the app's Borrar sat
+    beside its Done as an equal peer, and why redoing a signature took four
+    presses across two screens.
+
+    The clear belongs to the send, so the replay does it. What it must never
+    do is press the affirmative: that press belongs to the party signing, and
+    it is the whole of REQ-10.6a.
+    """
+
+    PAD = ('<node class="android.view.View"'
+           ' resource-id="com.x:id/signature_screen_signature_pad"'
+           ' clickable="false" bounds="[14,196][1522,500]" />')
+    CLEAR = ('<node class="android.widget.Button"'
+             ' resource-id="com.x:id/signature_screen_clear_button"'
+             ' text="Borrar" clickable="true" bounds="[28,589][90,641]" />')
+    SAVE = ('<node class="android.widget.Button"'
+            ' resource-id="com.x:id/signature_screen_submit_button"'
+            ' text="Enviar" clickable="true" bounds="[1410,589][1522,641]" />')
+
+    def _driver(self):
+        d = MagicMock()
+        d.tap = MagicMock()
+        return d
+
+    def test_it_presses_the_clear(self):
+        d = self._driver()
+        placed = [""]
+        assert sign._wipe_the_canvas(d, self.PAD + self.CLEAR + self.SAVE,
+                                     placed) is True
+        d.tap.assert_called_once()
+        (points,), _ = d.tap.call_args
+        assert points == [(59, 615)], "not the centre of Borrar"
+
+    def test_it_never_presses_the_save(self):
+        """`_app_buttons` hands back both in one dictionary. Pressing the
+        wrong key here commits a signature nobody confirmed."""
+        d = self._driver()
+        sign._wipe_the_canvas(d, self.PAD + self.CLEAR + self.SAVE, [""])
+        (points,), _ = d.tap.call_args
+        assert points != [(1466, 615)], "that is Enviar"
+
+    def test_a_screen_with_no_clear_is_not_a_failure(self):
+        """A pad that publishes no clear is a pad with nothing to wipe, and
+        the replay drew over whatever was there long before this existed."""
+        d = self._driver()
+        assert sign._wipe_the_canvas(d, self.PAD, [""]) is False
+        d.tap.assert_not_called()
+
+    def test_a_refused_tap_does_not_stop_the_replay(self):
+        """The old behaviour is the fallback: draw anyway, and say in the log
+        that the canvas was not cleared."""
+        d = self._driver()
+        d.tap.side_effect = RuntimeError("gone")
+        placed = [""]
+        assert sign._wipe_the_canvas(d, self.PAD + self.CLEAR, placed) is False
+        assert "cleared=err" in placed[0]
+
+    def test_it_is_recorded(self):
+        placed = [""]
+        sign._wipe_the_canvas(self._driver(), self.PAD + self.CLEAR, placed)
+        assert "cleared=1" in placed[0]
+
+    def test_the_replay_wipes_before_it_builds_paths(self):
+        """Order is the whole point: a clear that arrives after the ink is a
+        clear that erases the signature it was meant to make room for."""
+        from pathlib import Path
+
+        source = Path("src/apt_log/sign.py").read_text(encoding="utf-8")
+        body = source.split("def execute(", 1)[1]
+        assert body.index("_wipe_the_canvas(") < body.index("_perform(")
+        assert body.index("_wipe_the_canvas(") < body.index("build_paths(")

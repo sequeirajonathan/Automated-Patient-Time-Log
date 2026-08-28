@@ -1204,6 +1204,46 @@ def _perform(driver, paths, bounds=None, serial=None) -> None:
             ",".join(tally))
 
 
+# How long the app gets to repaint an emptied canvas before ink goes onto it.
+# The same argument as INK_PAINT and measured against the same evidence: this
+# surface has been seen taking seconds to produce a frame, and a stroke drawn
+# into a canvas that is still clearing is a stroke that gets wiped by the
+# clear it arrived behind.
+CLEAR_SETTLE = 0.6
+
+
+def _wipe_the_canvas(driver, xml: str, placed) -> bool:
+    """Press the app's own clear, if this screen has one. Never the save.
+
+    Returns whether it pressed, and a False is not a failure: HHAeXchange+'s
+    pad publishes both buttons, inMyTeam's publishes both, and a screen that
+    publishes neither is a screen where there was nothing to wipe. The replay
+    goes on either way — it did before this existed, and a signature drawn
+    over an empty canvas is the ordinary case.
+
+    THE SAVE IS DELIBERATELY UNREACHABLE FROM HERE. `_app_buttons` returns it
+    in the same dictionary and this function must never look at that key: the
+    press that commits a signature belongs to the party signing it, which is
+    the whole of REQ-10.6a and the reason the replay has never touched it.
+    """
+    target = (_app_buttons(xml) or {}).get("clear")
+    if not target:
+        return False
+    x, y = target["xy"]
+    try:
+        driver.tap([(x, y)])
+    except Exception as exc:  # noqa: BLE001
+        # Worth saying and not worth stopping for. The old behaviour was to
+        # draw over whatever was there; that is still what happens, and the
+        # log is what tells us it happened.
+        log.warning("could not clear the canvas first (%s)", exc)
+        placed[0] += " cleared=err"
+        return False
+    time.sleep(CLEAR_SETTLE)
+    placed[0] += " cleared=1"
+    return True
+
+
 def execute(payload: dict, status_path: Path | None = None) -> Status:
     """Find the canvas, replay the strokes, publish the outcome."""
     from apt_log import resident
@@ -1249,6 +1289,24 @@ def execute(payload: dict, status_path: Path | None = None) -> Status:
         # dumps subside. The replay does its own dump right here — for the
         # canvas bounds it cannot draw without — so it now waits too.
         time.sleep(INK_SETTLE)
+        # AND WIPE WHAT WAS THERE, so the drawer needs one button and not two.
+        #
+        # Step two used to show the app's own Borrar and Hecho side by side,
+        # equally weighted, because a second replay lands ON TOP of the first
+        # — the pad sends her WHOLE signature every time, so anything already
+        # on the canvas has to go or the two overlap into a scribble. Redoing
+        # meant Borrar, redraw, send, Hecho: four presses across two screens
+        # for one signature, and it was reported as exactly that back and
+        # forth.
+        #
+        # The clear belongs to the send, so it happens here. What this does
+        # NOT do is press the affirmative — Hecho stays hers, REQ-10.6a rests
+        # on it, and nothing in this file may reach for it.
+        #
+        # Only on her press. This runs inside a replay she asked for, which is
+        # already a request to put a specific signature on that canvas; it is
+        # never on a timer and never on arrival at the screen.
+        _wipe_the_canvas(driver, xml, placed)
         paths = build_paths(strokes, bounds, payload.get("aspect", 1.0),
                             rotate=sideways(xml, package))
         placed[0] = " canvas=%s boxes=%s" % (

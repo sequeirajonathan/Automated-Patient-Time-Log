@@ -4817,3 +4817,63 @@ class TestTheMappingNamesAppsTheWayTheTilesDo:
 
         assert _app_called("com.example.new") == "com.example.new"
         assert _app_called("") == ""
+
+
+class TestStepTwoHasOneButton:
+    """The pencil drawer's back-and-forth, removed at the source.
+
+    Borrar and Hecho sat side by side as equal peers because a second replay
+    lands on top of the first. Now the replay wipes the canvas itself, so
+    redrawing is pressing Send again and the clear has nothing left to do —
+    which leaves the affirmative alone in the row.
+    """
+
+    def _js(self) -> str:
+        return strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+
+    def test_the_clear_is_filtered_out_of_the_row(self):
+        js = self._js()
+        assert "const CLEAR_WORDS = /^(borrar|clear|limpiar)$/i;" in js
+        assert "!CLEAR_WORDS.test((a.txt || '').trim())" in js
+
+    def test_it_is_filtered_before_the_row_is_measured(self):
+        """The cache key, the emphasis pass and the decision to show step two
+        at all must all see what is actually going on screen — an app
+        publishing ONLY a clear must not leave step two headed and empty."""
+        js = self._js()
+        head = js.split("const sheetActions =", 1)[1]
+        assert "filter(" in head[:200]
+        # Read ONCE, at the declaration, and never again: a second reader
+        # downstream is a reader that sees the clear the row is hiding.
+        assert js.count("meta.sheet_actions") == 1
+
+    def test_the_caption_must_be_the_whole_word(self):
+        """Dropping a button on a substring match is how an affirmative with
+        an unlucky name disappears from the only row that finishes a
+        signature."""
+        import re
+
+        pattern = re.compile(r"^(borrar|clear|limpiar)$", re.I)
+        assert pattern.match("Borrar")
+        assert not pattern.match("Borrar todo")
+        assert not pattern.match("No borrar")
+
+    def test_the_two_lists_of_clear_words_agree(self):
+        """The controller wipes on `sign._CLEAR_WORDS` and the pad hides on
+        this one. They disagreeing means the replay clearing a canvas whose
+        button the pad still shows, or the pad hiding a button nothing
+        wipes."""
+        from apt_log import sign as sign_mod
+
+        js = self._js()
+        pattern = js.split("const CLEAR_WORDS = /^(", 1)[1].split(")$/", 1)[0]
+        assert sorted(pattern.split("|")) == sorted(sign_mod._CLEAR_WORDS)
+
+    def test_the_legacy_row_keeps_its_clear(self):
+        """The replay's wipe presses the app's clear ELEMENT, and that row
+        exists for the screen that publishes no elements to press."""
+        html = Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+        legacy = html.split('id="sign-legacyrow"', 1)[1].split("</div>", 1)[0]
+        assert 'id="app-clear"' in legacy
