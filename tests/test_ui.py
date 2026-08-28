@@ -5087,3 +5087,93 @@ class TestTheSaveSaysWhichMachineFailed:
                 Path(f"src/apt_log/ui/locales/{code}.json").read_text(
                     encoding="utf-8"))
             assert word in catalogue["sign.adopt_no_store"]
+
+
+class TestWithdrawingAnAdoptionFromTheRow:
+    """The first signature ever registered here was a test scribble, saved
+    under a patient's name by accident.
+
+    There was no way to take it off the machine FROM the machine — the only
+    route to `/signature/forget` was a shell over the tailnet. A signature
+    under the wrong person's name is the exact failure this whole feature is
+    careful about, so undoing it cannot be the one thing that needs a laptop.
+    """
+
+    def _js(self) -> str:
+        return strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+
+    def _html(self) -> str:
+        return Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+
+    def test_the_row_offers_it(self):
+        body = self._js().split("function renderMap(", 1)[1].split(
+            "\n  }", 1)[0]
+        assert "rm.dataset.forgetFor" in body
+        assert "i18n.sigForget" in body
+
+    def test_only_on_rows_that_have_one(self):
+        """A Remove button over "not registered" is a control with nothing to
+        act on."""
+        body = self._js().split("function renderMap(", 1)[1].split(
+            "\n  }", 1)[0]
+        assert "if (p.adopted) {" in body
+        assert ".sigrow.none .sigforget { display:none; }" in self._html()
+
+    def test_it_takes_two_presses(self):
+        """It deletes the only copy: the strokes are not archived anywhere, so
+        there is no undo and the person has to be in the room again to make
+        another."""
+        body = self._js().split("function forgetPressed(", 1)[1].split(
+            "\n  }", 1)[0]
+        assert "classList.contains('armed')" in body
+        assert "i18n.sigForgetSure" in body
+        # The first press must return without deleting anything.
+        first = body.split("classList.contains('armed')", 1)[1].split(
+            "return;", 1)[0]
+        assert "fetch(" not in first
+
+    def test_it_disarms_itself(self):
+        """A press somebody thought better of must not sit there armed."""
+        js = self._js()
+        assert "const FORGET_ARMED = 4000;" in js
+        assert "setTimeout(disarmForget, FORGET_ARMED)" in js
+
+    def test_pressing_anything_else_disarms_it(self):
+        """Safer than leaving it primed behind whatever she does next."""
+        js = self._js()
+        handler = js.split("sigList.addEventListener", 1)[1].split(
+            "\n    });", 1)[0]
+        assert "disarmForget();" in handler
+
+    def test_it_forgets_by_the_name_the_store_holds(self):
+        """The row shows the schedule's spelling and the store may hold
+        another — forgetting the wrong string would silently do nothing."""
+        body = self._js().split("function renderMap(", 1)[1].split(
+            "\n  }", 1)[0]
+        assert "rm.dataset.forgetFor = p.adopted_as || p.name" in body
+
+    def test_both_lists_are_re_read_afterwards(self):
+        """The pad's own adopted row must stop offering a signature that no
+        longer exists."""
+        body = self._js().split("function forgetPressed(", 1)[1].split(
+            "\n  }", 1)[0]
+        assert "loadMap();" in body
+        assert "loadAdopted();" in body
+
+    def test_the_armed_state_is_visible(self):
+        """The state change is what makes the second press deliberate rather
+        than a double tap."""
+        assert ".sigrow .sigforget.armed {" in self._html()
+
+    def test_it_is_said_in_both_languages(self):
+        import json
+
+        for code in ("en", "es"):
+            catalogue = json.loads(
+                Path(f"src/apt_log/ui/locales/{code}.json").read_text(
+                    encoding="utf-8"))
+            for key in ("sigmap.forget", "sigmap.forget_sure",
+                        "sigmap.forgotten"):
+                assert catalogue[key].strip(), f"{code} {key}"

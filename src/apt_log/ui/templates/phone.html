@@ -346,6 +346,15 @@
                    font-weight:600; cursor:pointer;
                    background:var(--tint-soft); color:var(--tint); }
   .sigrow.none button { background:var(--accent); color:#fff; }
+  /* WITHDRAWING ONE. Quiet until it is armed, because it deletes the only
+     copy of somebody's signature: the strokes are not archived anywhere, so
+     there is no undo and the person has to be in the room again to make
+     another. Armed it turns red and says so — the state change is what makes
+     the second press deliberate rather than a double tap. */
+  .sigrow .sigforget { background:transparent; color:var(--muted);
+                       padding:0 10px; }
+  .sigrow.none .sigforget { display:none; }
+  .sigrow .sigforget.armed { background:#b4230f; color:#fff; }
   /* Said once, at the top, and not dressed up. */
   .armnote { margin:12px 0 4px; padding:12px 14px; border-radius:14px;
              background:var(--hair, rgba(128,128,128,.14));
@@ -2410,6 +2419,9 @@
     sigMissing: {{ t('sigmap.missing')|tojson }},
     sigAdopt: {{ t('sigmap.adopt')|tojson }},
     sigReplace: {{ t('sigmap.replace')|tojson }},
+    sigForget: {{ t('sigmap.forget')|tojson }},
+    sigForgetSure: {{ t('sigmap.forget_sure')|tojson }},
+    sigForgotten: {{ t('sigmap.forgotten')|tojson }},
     sigNotScheduled: {{ t('sigmap.not_scheduled')|tojson }},
     sigFiledAs: {{ t('sigmap.filed_as')|tojson }},
     live:    {{ t('papp.live')|tojson }},

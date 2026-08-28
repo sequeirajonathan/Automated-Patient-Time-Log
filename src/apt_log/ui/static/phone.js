@@ -1288,6 +1288,23 @@
       grow.appendChild(meta);
       row.appendChild(grow);
 
+      // WITHDRAWING ONE, on the rows that have one. The first signature ever
+      // registered here was a test scribble saved under a patient's name by
+      // accident, and there was no way to take it off the machine from the
+      // machine — the only route to `/signature/forget` was a shell.
+      //
+      // A signature under the wrong person's name is the exact failure this
+      // whole feature is careful about, so undoing it cannot be the one thing
+      // that needs a laptop and a tailnet.
+      if (p.adopted) {
+        const rm = document.createElement('button');
+        rm.type = 'button';
+        rm.className = 'sigforget';
+        rm.textContent = i18n.sigForget || '';
+        rm.dataset.forgetFor = p.adopted_as || p.name;
+        row.appendChild(rm);
+      }
+
       // ONE BUTTON, AND IT DOES NOT DRAW ANYTHING. Adoption still means the
       // pad and the person; this only carries the name across so
       // nobody types it twice and so the adoption lands under the spelling
@@ -1313,6 +1330,54 @@
   // where an adoption has to happen — the strokes being adopted are the ones
   // on that canvas, drawn by the person in the room — so this opens it and
   // fills the field, and stops there.
+  // TWO PRESSES, BECAUSE IT DELETES THE ONLY COPY.
+  //
+  // The strokes are not archived anywhere — that is the point of them never
+  // leaving the machine — so withdrawing an adoption is not undoable, and the
+  // person has to be in the room again to make another. A stray thumb on a
+  // list of patients must not be able to do that.
+  //
+  // The button asks on the button itself rather than in a dialog: this page
+  // has no modal, and adding one for this would be a new pattern to learn for
+  // the least-used control on it. It disarms itself after a few seconds, so a
+  // press somebody thought better of does not sit there armed.
+  const FORGET_ARMED = 4000;
+  let forgetTimer = 0;
+
+  function disarmForget() {
+    clearTimeout(forgetTimer);
+    forgetTimer = 0;
+    const armed = document.querySelector('.sigforget.armed');
+    if (armed) {
+      armed.classList.remove('armed');
+      armed.textContent = i18n.sigForget || '';
+    }
+  }
+
+  function forgetPressed(btn) {
+    const name = btn.dataset.forgetFor || '';
+    if (!btn.classList.contains('armed')) {
+      disarmForget();
+      btn.classList.add('armed');
+      btn.textContent = i18n.sigForgetSure || '';
+      forgetTimer = setTimeout(disarmForget, FORGET_ARMED);
+      return;
+    }
+    disarmForget();
+    fetch('/signature/forget', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name })
+    }).then((r) => {
+      if (!r.ok) { toast(i18n.failed || ''); return; }
+      toast(i18n.sigForgotten || '');
+      // Both lists: the row here goes back to "not registered", and the pad's
+      // own adopted row must stop offering a signature that no longer exists.
+      loadMap();
+      loadAdopted();
+    }).catch(() => toast(i18n.failed || ''));
+  }
+
   function adoptFrom(name) {
     // THE REGISTRATION SHEET, NOT THE CHECK-OUT PAD.
     //
@@ -1811,8 +1876,14 @@
     // row would go with it.
     const sigList = document.getElementById('sigmap-list');
     if (sigList) sigList.addEventListener('click', (ev) => {
-      const hit = ev.target.closest && ev.target.closest('[data-adopt-for]');
+      if (!ev.target.closest) return;
+      const drop = ev.target.closest('[data-forget-for]');
+      if (drop) { forgetPressed(drop); return; }
+      const hit = ev.target.closest('[data-adopt-for]');
       if (!hit) return;
+      // Any other press on the list is an answer of "no" to a button left
+      // armed — safer than leaving it primed behind whatever she does next.
+      disarmForget();
       adoptFrom(hit.dataset.adoptFor);
     });
     wireArming();
