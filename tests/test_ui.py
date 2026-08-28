@@ -4507,14 +4507,33 @@ class TestThePencilOnlyWhereThereIsSomethingToSign:
             Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
 
     def test_it_is_gated_on_a_drawing_surface(self):
-        assert "signBtn.hidden = !meta.canvas || onLauncher" in self._js()
+        assert "signBtn.hidden = !padHere || onLauncher" in self._js()
 
-    def test_it_is_the_same_fact_step_two_uses(self):
-        """`meta.canvas` is what the app-side button row already gates on, so
-        the pencil and those buttons appear together rather than one of them
-        arriving early."""
+    def test_the_gate_survives_a_portrait_pad(self):
+        """`meta.canvas` means canvas AND SIDEWAYS. inMyTeam's "Firma del
+        Paciente" sheet is PORTRAIT, so gating on it hid the pencil on the one
+        screen the pad exists for — reported from the room, with the sheet
+        open and an adopted signature unreachable."""
+        js = self._js()
+        assert "meta.pad" in js
         app = Path("src/apt_log/ui/app.py").read_text(encoding="utf-8")
-        assert '"canvas": bool(screen_doc.get("canvas")' in app
+        assert '"pad": bool(screen_doc.get("canvas")),' in app
+
+    def test_no_single_signal_can_hide_it(self):
+        """The canvas flag FLICKERS — `_sheet_actions` refuses to gate on it
+        and says so. A union means a flicker cannot take the pencil away while
+        the app's own buttons are plainly there."""
+        js = self._js()
+        assert ("const padHere = !!sheetActions.length || legacyUsable"
+                " || !!meta.pad;") in js
+
+    def test_the_gate_can_see_what_it_reads(self):
+        """`legacyUsable` was scoped to the block that draws step two. Read
+        from the pencil's gate it would throw — at exactly the moment a
+        signature screen appears and nowhere else."""
+        js = self._js()
+        assert js.count("const legacyUsable") == 1
+        assert js.index("const legacyUsable") < js.index("const padHere")
 
     def test_it_starts_hidden_in_the_markup(self):
         """Shown-then-hidden flashes it into the toolbar on first paint."""

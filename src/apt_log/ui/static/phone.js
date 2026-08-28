@@ -487,6 +487,11 @@
     // publishing ONLY a clear must not leave step two headed and empty.
     const sheetActions = (meta.sheet_actions || []).filter(
       (a) => !CLEAR_WORDS.test((a.txt || '').trim()));
+    // Out here rather than inside the block below, because the pencil's own
+    // gate needs it too and a const scoped to that `if` is invisible from
+    // there — the kind of thing that throws at exactly the moment a signature
+    // screen appears and nowhere else.
+    const legacyUsable = !sheetActions.length && !!meta.legacy_pad;
     if (approw) {
       const slot = document.getElementById('sign-appbtns');
       const key = JSON.stringify(sheetActions);
@@ -528,7 +533,6 @@
       // any app, which is how the pad came to show a Borrar and a Salvar on
       // HHAeXchange+ that could not press anything: "the drop down pencil
       // enviar did not work". It shows only where it works now.
-      const legacyUsable = !sheetActions.length && !!meta.legacy_pad;
       // Shown when the app has given us real buttons to press, or on the
       // legacy rotated pages where the pair is pressed by coordinate.
       approw.hidden = !sheetActions.length && !legacyUsable;
@@ -625,13 +629,23 @@
     // box". A control that is present everywhere and works in one place
     // teaches that it does not work.
     //
-    // `meta.canvas` is the same fact step two already gates on — a drawing
-    // surface in front, drawn sideways — so the pencil and the app-side
-    // buttons appear and disappear together rather than one of them arriving
-    // early. The canvas drawn into the page stays a second way in: she can
-    // still tap the box itself, which is where her eye already is.
+    // THE FIRST GATE WAS WRONG IN TWO WAYS AND ITS COMMENT CLAIMED OTHERWISE.
+    // It read `meta.canvas`, saying that was "the same fact step two gates
+    // on". Step two gates on no such thing: `_sheet_actions` refuses to use
+    // that flag and says why — it FLICKERS, caught reading False with the
+    // signature sheet plainly open. And `meta.canvas` means canvas AND
+    // SIDEWAYS, while inMyTeam's "Firma del Paciente" sheet is portrait. So
+    // on the one screen the pad exists for, the pencil was hidden and an
+    // adopted signature could not be applied at all. Reported from the room,
+    // with the sheet open and Carmen's signature unreachable.
+    //
+    // A union of three, so no single flickering signal can take it away: the
+    // app's own buttons for this sheet, the legacy coordinate pair, or a
+    // drawing surface reported at any orientation. Hidden only when all three
+    // say there is nothing to sign on.
+    const padHere = !!sheetActions.length || legacyUsable || !!meta.pad;
     const signBtn = document.getElementById('btn-sign');
-    if (signBtn) signBtn.hidden = !meta.canvas || onLauncher;
+    if (signBtn) signBtn.hidden = !padHere || onLauncher;
 
     // Whose pad this is. Kept as state rather than read at press time: the
     // sheet can be open while the screen underneath changes, and the name on

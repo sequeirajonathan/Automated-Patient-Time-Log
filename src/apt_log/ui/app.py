@@ -1451,6 +1451,22 @@ async def live(ws: WebSocket):
                     # off this screen there is nothing to press.
                     "canvas": bool(screen_doc.get("canvas")
                                    and screen_doc.get("landscape")),
+                    # A DRAWING SURFACE, WHATEVER WAY UP IT IS.
+                    #
+                    # `canvas` above means canvas AND SIDEWAYS, which is the
+                    # legacy app's rotated pad and not a general fact. The
+                    # pencil was gated on it and inMyTeam's "Firma del
+                    # Paciente" sheet is PORTRAIT — so on the one screen that
+                    # needed the pad, the pencil was hidden and an adopted
+                    # signature could not be applied at all. Reported live,
+                    # with the sheet open and nothing to press.
+                    #
+                    # This is the raw fact and the caller unions it with the
+                    # app-side buttons, because this flag FLICKERS — see
+                    # `_sheet_actions`, which refuses to gate on it for that
+                    # reason and was sitting three lines away while the pencil
+                    # was gated on it anyway.
+                    "pad": bool(screen_doc.get("canvas")),
                     # WHOSE SIGNATURE THIS SCREEN IS ASKING FOR.
                     #
                     # inMyTeam's exit puts two identical pads back to back —
