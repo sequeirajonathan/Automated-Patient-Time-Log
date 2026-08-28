@@ -255,6 +255,34 @@ DEFAULT_SUB_ID = "1"
 _SENT_OK = "Parcel(00000000"
 
 
+def _took_it(out: str) -> bool:
+    """Whether telephony accepted the text, whatever `service call` printed.
+
+    THE ZERO IS THE SIGNAL; THE WHITESPACE AROUND IT IS NOT.
+
+    This was a literal substring match, and it was measured on one phone. The
+    replacement handset prints the same zero status word with a TAB inside the
+    parcel —
+
+        Result: Parcel(\t00000000    '....')
+
+    — so the match failed on every successful send. Three texts went out over
+    IMS, the phone logged `SEND_SMS ... status = 1 (Ok)` and
+    `MO_RECEIVING_202_ACCEPTED` for each, and this function called all three
+    failures. The count in the portal read "sent to 0 of 3" while three people
+    had the code in their hand.
+
+    That is the worst shape this particular bug could take: it does not lose
+    the message, it loses the KNOWLEDGE that the message went, and it sent a
+    real diagnosis (Sadia is not getting texts) chasing the wrong cause.
+
+    So the reply is normalised before it is read, and the zero word is what is
+    looked for. A failure still prints differently — an exception, a wrong
+    arity, a transaction that is not this method — and still reads as false.
+    """
+    return _SENT_OK in re.sub(r"\s+", "", out or "")
+
+
 def _dialable(number: str) -> str:
     """A number as digits, with a North American country code taken off.
 
@@ -298,7 +326,7 @@ def send(number: str, body: str, serial: str | None = None,
                 "s16", "null",
                 "i32", "0",
                 "i64", "0"], serial)
-    if _SENT_OK in out:
+    if _took_it(out):
         return True
     # The number is not logged. The failure is worth a line; who it was for is
     # not this log's business, and a log on this machine is read over

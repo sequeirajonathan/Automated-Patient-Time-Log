@@ -670,3 +670,47 @@ class TestTheCodeOnRequest:
         out = sms.broadcast_latest(provider=self._people(), now=160.0)
         assert "604820" not in json.dumps(out)
         assert set(out) == {"sent", "of", "found", "age"}
+
+
+class TestReadingTheReplyTelephonyActuallyPrints:
+    """The parcel's whitespace is not part of the answer.
+
+    `_SENT_OK` was a literal substring measured on one handset. The
+    replacement prints the same zero status word with a tab inside the parcel,
+    so the match failed on every successful send: three texts went out over
+    IMS — the phone logged `SEND_SMS ... status = 1 (Ok)` and
+    `MO_RECEIVING_202_ACCEPTED` for each — and `send` reported all three
+    failed.
+
+    That is the worst shape the bug could take. It does not lose the message,
+    it loses the knowledge that the message went, and it sent a real
+    diagnosis chasing the wrong cause.
+    """
+
+    def test_the_shape_the_old_phone_printed(self):
+        assert sms._took_it("Result: Parcel(00000000    '....')") is True
+
+    def test_the_shape_the_new_phone_prints(self):
+        """Tab inside the parcel. Seen live on the Galaxy A36, Android 16."""
+        assert sms._took_it("Result: Parcel(\t00000000    '....')") is True
+
+    def test_a_reply_split_across_lines(self):
+        assert sms._took_it("Result: Parcel(\n  00000000 '....')") is True
+
+    def test_an_exception_is_still_a_refusal(self):
+        assert sms._took_it(
+            "Result: Parcel(00000001 ffffffff 'java.lang.SecurityException')"
+        ) is False
+
+    def test_no_reply_at_all_is_a_refusal(self):
+        assert sms._took_it("") is False
+        assert sms._took_it(None) is False
+
+    def test_a_nonzero_status_is_a_refusal(self):
+        assert sms._took_it("Result: Parcel(\tffffffff    '....')") is False
+
+    def test_send_reports_true_on_the_new_phones_reply(self, monkeypatch):
+        """End to end through `send`, which is where the count comes from."""
+        monkeypatch.setattr(sms, "_adb",
+                            lambda *a, **k: "Result: Parcel(\t00000000    '....')")
+        assert sms.send("5550105276", "hi") is True
