@@ -4502,3 +4502,64 @@ class TestTheSplashButtonIsActuallyNamed:
 
     def test_english_is_still_covered(self):
         assert any(w in "Get Started" for w in macros.SIGN_IN_START_WORDS)
+
+
+class TestAutoAuthRecognisesTheSpanishSplash:
+    """The screen in the caregiver's own screenshot.
+
+    `_IMT_LOGIN_WORDS` carried "get started" with the comment "the marketing
+    splash" — in English only. The app renders Spanish, the splash says
+    "Comencemos", `wants_to_sign_in` answered False, and auto-auth never
+    recognised a signed-out phone as one that wants signing in. She opened
+    the portal, saw the splash, and had to press it herself, which is the one
+    thing auto-auth exists to prevent.
+
+    Third time this shape of bug landed in a day: DRAWER_DESCS, then the
+    walk's own start button, then this.
+    """
+
+    # Verbatim from the live handset.
+    SPLASH = {
+        "app": "com.inmyteam.inmyteam",
+        "statics": [
+            {"txt": "EL FUTURO de las agencias de atención domiciliaria"},
+            {"txt": "Atender a los pacientes y realizar un seguimiento "
+                    "del servicio"},
+        ],
+        "elements": [{"txt": "Comencemos"}],
+    }
+
+    def test_the_spanish_splash_wants_to_sign_in(self):
+        assert macros.wants_to_sign_in(self.SPLASH) is True
+
+    def test_the_english_splash_still_does(self):
+        doc = dict(self.SPLASH, elements=[{"txt": "Let's Get Started"}],
+                   statics=[{"txt": "THE FUTURE of home care agencies"}])
+        assert macros.wants_to_sign_in(doc) is True
+
+    def test_the_headline_alone_is_enough(self):
+        """The button's caption has already changed once. The headline is on
+        that screen either way."""
+        doc = dict(self.SPLASH, elements=[{"txt": ""}])
+        assert macros.wants_to_sign_in(doc) is True
+
+    def test_the_code_screen_still_does_not(self):
+        """Reaching it is the walk's destination; treating it as 'please sign
+        in' would put the loop back at a screen it had arrived at."""
+        doc = {"app": "com.inmyteam.inmyteam",
+               "statics": [{"txt": "Introduce el código"}],
+               "elements": []}
+        assert macros.wants_to_sign_in(doc) is False
+
+    def test_the_signed_in_home_does_not(self):
+        doc = {"app": "com.inmyteam.inmyteam",
+               "statics": [{"txt": "Visitas"}, {"txt": "Mis pacientes"}],
+               "elements": [{"txt": "Mis Viajes"}]}
+        assert macros.wants_to_sign_in(doc) is False
+
+    def test_the_splash_captions_are_not_retyped(self):
+        """One list, shared by the walk that presses the splash, the sign-out
+        check that waits for it, and auto-auth. Retyped in three places is
+        right in two of them."""
+        for word in macros.SIGN_IN_START_WORDS:
+            assert word.lower() in macros._IMT_LOGIN_WORDS

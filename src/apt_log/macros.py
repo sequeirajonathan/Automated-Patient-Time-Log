@@ -4284,11 +4284,27 @@ def auth_macro_for(app: str, provider=None, doc: dict | None = None) -> str | No
 # live under `mainactivity`, so the atlas cannot tell them apart and the
 # capture refusals never fire — there is no password field anywhere in the
 # walk. Its own words are the only signal it gives.
-_IMT_LOGIN_WORDS = (
-    "get started",            # the marketing splash
+# THE SPLASH'S CAPTIONS COME FROM ONE PLACE, and this is the third time that
+# has mattered today. `_IMT_LOGIN_WORDS` carried "get started" with the comment
+# "the marketing splash" — in English only. The app renders Spanish, the splash
+# says "Comencemos", `wants_to_sign_in` answered False, and auto-auth never
+# recognised a signed-out phone as a phone that wants signing in. The caregiver
+# opened the portal, saw the splash, and had to press it herself, which is the
+# one thing auto-auth exists to prevent.
+#
+# So the button's own captions are taken from SIGN_IN_START_WORDS rather than
+# retyped here. Three places now ask "is this the splash" — the walk that
+# presses it, the sign-out check that waits for it, and this — and a list that
+# is retyped in three places is a list that will be right in two of them.
+_IMT_LOGIN_WORDS = tuple(w.lower() for w in SIGN_IN_START_WORDS) + (
+    # The splash's own headline, which is on that screen whether or not the
+    # button's caption changes again.
+    "futuro de las agencias",
+    "future of home care",
+    # The phone-number screen, in both languages.
     "sign in with your phone",
     "enter your cell phone",
-    "iniciar sesión con su",  # the same screens with the phone in Spanish
+    "iniciar sesión con su",
     "número de teléfono",
 )
 
