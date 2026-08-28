@@ -3645,7 +3645,12 @@ def _inmyteam_sign_out(driver, report) -> None:
         raise RuntimeError("the navigation drawer is not on this screen")
 
     report("macro.step.opening_drawer")
-    _tap_element(driver, drawer)
+    # `.click()`, not `_tap_element`. That helper takes a DICT read out of the
+    # published tree and indexes `element["b"]`; `_the_drawer` and `_words`
+    # hand back Appium WebElements. Mixing the two is a TypeError that only
+    # shows up with a real driver in front of it — which is how it got to the
+    # phone.
+    drawer.click()
     wait_for(lambda: _words(driver, *SIGN_OUT_WORDS) is not None, timeout=8.0)
 
     row = _words(driver, *SIGN_OUT_WORDS)
@@ -3653,7 +3658,7 @@ def _inmyteam_sign_out(driver, report) -> None:
         raise RuntimeError("the drawer opened but has no sign-out on it")
 
     report("macro.step.signing_out")
-    _tap_element(driver, row)
+    row.click()
 
     # SIGNED OUT MEANS THE APP ASKS AGAIN. The drawer's own row disappearing
     # proves only that the drawer closed. What settles it is the sign-in
