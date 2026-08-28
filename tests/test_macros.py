@@ -3704,7 +3704,7 @@ class TestTypingTheCodeItself:
         button.click.side_effect = lambda: asking.__setitem__("still", False)
 
         steps = []
-        with patch_mod("apt_log.sms.wait_for_code", return_value="604820"), \
+        with patch_mod("apt_log.sms.newest_after", return_value=(1234.0, "604820")), \
                 patch_mod.object(macros, "_push_the_code") as pushed, \
                 patch_mod("apt_log.macros.time.sleep"), fast_clock():
             done = macros._fill_in_the_code(driver, steps.append, sent=0.0)
@@ -3719,7 +3719,7 @@ class TestTypingTheCodeItself:
         from unittest.mock import patch as patch_mod
 
         driver, box, _ = self._driver()
-        with patch_mod("apt_log.sms.wait_for_code", return_value="604820"), \
+        with patch_mod("apt_log.sms.newest_after", return_value=(1234.0, "604820")), \
                 patch_mod.object(macros, "_push_the_code"), \
                 patch_mod("apt_log.macros.time.sleep"), fast_clock():
             macros._fill_in_the_code(driver, lambda _s: None, sent=0.0)
@@ -3730,7 +3730,7 @@ class TestTypingTheCodeItself:
         from unittest.mock import patch as patch_mod
 
         driver, box, _ = self._driver()
-        with patch_mod("apt_log.sms.wait_for_code", return_value=""):
+        with patch_mod("apt_log.sms.newest_after", return_value=(0.0, "")):
             assert macros._fill_in_the_code(
                 driver, lambda _s: None, sent=0.0) is False
         box.send_keys.assert_not_called()
@@ -3751,7 +3751,7 @@ class TestTypingTheCodeItself:
                 patch_mod("apt_log.secrets.FileSecretProvider",
                           return_value=MemorySecretProvider(
                               **{INMYTEAM_PHONE: "3055550123"})), \
-                patch_mod("apt_log.sms.wait_for_code", return_value=""), \
+                patch_mod("apt_log.sms.newest_after", return_value=(0.0, "")), \
                 patch_mod.object(macros, "_say_the_code_is_waiting") as told, \
                 patch_mod("apt_log.macros.time.sleep"), \
                 patch_mod("apt_log.macros.time.monotonic",
@@ -3766,7 +3766,7 @@ class TestTypingTheCodeItself:
         from unittest.mock import patch as patch_mod
 
         driver, box, _ = self._driver(boxes=0)
-        with patch_mod("apt_log.sms.wait_for_code", return_value="604820"):
+        with patch_mod("apt_log.sms.newest_after", return_value=(1234.0, "604820")):
             assert macros._fill_in_the_code(
                 driver, lambda _s: None, sent=0.0) is False
         box.send_keys.assert_not_called()
@@ -3775,7 +3775,7 @@ class TestTypingTheCodeItself:
         from unittest.mock import patch as patch_mod
 
         driver, box, _ = self._driver(boxes=2)
-        with patch_mod("apt_log.sms.wait_for_code", return_value="604820"):
+        with patch_mod("apt_log.sms.newest_after", return_value=(1234.0, "604820")):
             assert macros._fill_in_the_code(
                 driver, lambda _s: None, sent=0.0) is False
         box.send_keys.assert_not_called()
@@ -3786,7 +3786,7 @@ class TestTypingTheCodeItself:
         from unittest.mock import patch as patch_mod
 
         driver, _, _ = self._driver(asking=True)
-        with patch_mod("apt_log.sms.wait_for_code", return_value="604820"), \
+        with patch_mod("apt_log.sms.newest_after", return_value=(1234.0, "604820")), \
                 patch_mod.object(macros, "_push_the_code"), \
                 patch_mod("apt_log.macros.time.sleep"), fast_clock():
             assert macros._fill_in_the_code(
@@ -3810,7 +3810,7 @@ class TestTypingTheCodeItself:
         type(driver).page_source = property(
             lambda self: "Enter your code" if asking["still"] else "Visits")
 
-        with patch_mod("apt_log.sms.wait_for_code", return_value="604820"), \
+        with patch_mod("apt_log.sms.newest_after", return_value=(1234.0, "604820")), \
                 patch_mod.object(macros, "_push_the_code"), \
                 patch_mod("apt_log.macros.time.sleep"), fast_clock():
             done = macros._fill_in_the_code(driver, lambda _s: None, sent=0.0)
@@ -3827,32 +3827,80 @@ class TestTypingTheCodeItself:
         assert "notify" not in source
 
 
-class TestTheCodeIsPassedOnBeforeItIsTyped:
-    """Asked for twice, in his words: everyone should get the code, by text,
-    because the phone has cell service.
+class TestTheCodeIsClaimedRatherThanBroadcast:
+    """Who gets the code the controller just used: nobody.
 
-    The people on that list are the FALLBACK for this walk going wrong — so
-    the order matters and it is the whole design. Forwarding after a
-    successful sign-in would text the code only in the case where nobody
-    needed it.
+    This class used to assert the opposite — that the code went out BY TEXT
+    before it was typed — and that reasoning was half right. The people on
+    that list ARE the fallback for this walk going wrong, which is why every
+    failure path below still texts. What it missed is the success case.
+
+    One phone holds the SIM and three people sign in against it. A code this
+    walk consumed and then texted onward is a SPENT code landing on three
+    phones: somebody types it, inMyTeam refuses it, the field clears, a
+    dialog the tree cannot see appears, and one of a limited number of
+    attempts is gone. The person who actually needed a code is left worse off
+    than if nothing had been sent at all.
+
+    So: claimed on the way in, released and texted on every way out that is
+    not a successful sign-in.
     """
 
     def _driver(self, **kwargs):
         return TestTypingTheCodeItself()._driver(**kwargs)
 
-    def test_it_goes_out_before_the_code_is_typed(self):
+    def test_a_successful_sign_in_texts_nobody(self):
         from unittest.mock import patch as patch_mod
 
-        driver, box, _ = self._driver()
-        order = []
-        box.send_keys.side_effect = lambda _c: order.append("typed")
-        with patch_mod("apt_log.sms.wait_for_code", return_value="604820"), \
+        driver, box, button = self._driver()
+        asking = {"still": True}
+        type(driver).page_source = property(
+            lambda self: "Enter your code" if asking["still"] else "Visits")
+        button.click.side_effect = lambda: asking.__setitem__("still", False)
+
+        with patch_mod("apt_log.sms.newest_after",
+                       return_value=(1234.0, "604820")), \
                 patch_mod.object(macros, "_push_the_code"), \
-                patch_mod.object(macros, "_pass_the_code_on",
-                                 lambda: order.append("texted")), \
+                patch_mod.object(macros, "_pass_the_code_on") as texted, \
+                patch_mod("apt_log.macros.time.sleep"), fast_clock():
+            assert macros._fill_in_the_code(
+                driver, lambda _s: None, sent=0.0) is True
+        texted.assert_not_called()
+
+    def test_the_code_it_takes_is_claimed(self):
+        """Which is what makes the broadcast and the page skip it."""
+        from unittest.mock import patch as patch_mod
+
+        driver, box, button = self._driver()
+        asking = {"still": True}
+        type(driver).page_source = property(
+            lambda self: "Enter your code" if asking["still"] else "Visits")
+        button.click.side_effect = lambda: asking.__setitem__("still", False)
+
+        with patch_mod("apt_log.sms.newest_after",
+                       return_value=(1234.0, "604820")), \
+                patch_mod.object(macros, "_push_the_code"), \
+                patch_mod("apt_log.sms.claim") as claimed, \
                 patch_mod("apt_log.macros.time.sleep"), fast_clock():
             macros._fill_in_the_code(driver, lambda _s: None, sent=0.0)
-        assert order[:2] == ["texted", "typed"]
+        claimed.assert_called_once_with(1234.0)
+
+    def test_a_failed_sign_in_gives_the_code_back(self):
+        """Released BEFORE it is texted, so the forwarder can see it."""
+        from unittest.mock import patch as patch_mod
+
+        driver, _, _ = self._driver(boxes=0)
+        order = []
+        with patch_mod("apt_log.sms.newest_after",
+                       return_value=(1234.0, "604820")), \
+                patch_mod("apt_log.sms.claim"), \
+                patch_mod("apt_log.sms.release",
+                          lambda w: order.append("released")), \
+                patch_mod.object(macros, "_pass_the_code_on",
+                                 lambda: order.append("texted")):
+            assert macros._fill_in_the_code(
+                driver, lambda _s: None, sent=0.0) is False
+        assert order == ["released", "texted"]
 
     def test_it_goes_out_even_when_the_screen_moved(self):
         """No box to type into is precisely when somebody else needs the
@@ -3860,7 +3908,7 @@ class TestTheCodeIsPassedOnBeforeItIsTyped:
         from unittest.mock import patch as patch_mod
 
         driver, box, _ = self._driver(boxes=0)
-        with patch_mod("apt_log.sms.wait_for_code", return_value="604820"), \
+        with patch_mod("apt_log.sms.newest_after", return_value=(1234.0, "604820")), \
                 patch_mod.object(macros, "_pass_the_code_on") as texted:
             assert macros._fill_in_the_code(
                 driver, lambda _s: None, sent=0.0) is False
@@ -3870,7 +3918,7 @@ class TestTheCodeIsPassedOnBeforeItIsTyped:
         from unittest.mock import patch as patch_mod
 
         driver, _, _ = self._driver()
-        with patch_mod("apt_log.sms.wait_for_code", return_value=""), \
+        with patch_mod("apt_log.sms.newest_after", return_value=(0.0, "")), \
                 patch_mod.object(macros, "_pass_the_code_on") as texted:
             macros._fill_in_the_code(driver, lambda _s: None, sent=0.0)
         texted.assert_not_called()
@@ -3886,7 +3934,7 @@ class TestTheCodeIsPassedOnBeforeItIsTyped:
             lambda self: "Enter your code" if asking["still"] else "Visits")
         button.click.side_effect = lambda: asking.__setitem__("still", False)
 
-        with patch_mod("apt_log.sms.wait_for_code", return_value="604820"), \
+        with patch_mod("apt_log.sms.newest_after", return_value=(1234.0, "604820")), \
                 patch_mod.object(macros, "_push_the_code"), \
                 patch_mod("apt_log.sms.forward_any_new",
                           side_effect=RuntimeError("no signal")), \

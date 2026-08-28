@@ -135,6 +135,15 @@ def _isolated_prefs(tmp_path, monkeypatch):
     # Both paths, because the trail is written on the same press as the
     # lookup and appending test rows to the real signing record would corrupt
     # the one file that exists to answer an auditor.
+    # The claim ledger, for the same reason as everything above it: a test
+    # that claims a code would, on the Pi, mark a REAL message as taken by the
+    # controller — and a claimed code is one the broadcast and the page both
+    # skip. A test could silently stop a caregiver being sent the code she is
+    # waiting for.
+    monkeypatch.setattr(sms, "_claimed_path",
+                        lambda: tmp_path / "code-claimed.json")
+    monkeypatch.setattr(sms, "_forwarded_path",
+                        lambda: tmp_path / "code-forwarded.json")
     monkeypatch.setattr(enrolled, "STORE_PATH", tmp_path / "signatures.json")
     monkeypatch.setattr(enrolled, "USE_PATH", tmp_path / "signings.jsonl")
     yield
