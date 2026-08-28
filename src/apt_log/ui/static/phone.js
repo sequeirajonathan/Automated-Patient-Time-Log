@@ -1369,6 +1369,31 @@
     if (week) week.addEventListener('click', (ev) => openVisitsApp(ev.target));
     const open = document.getElementById('btn-schedule');
     if (open) open.addEventListener('click', () => view('schedule'));
+
+    // The sign-in code, to the phones that do not have it. Disabled while it
+    // runs: reading the inbox is an adb round trip against a phone that is
+    // usually busy, and a second press would send everybody a second text.
+    const code = document.getElementById('btn-code');
+    if (code) code.addEventListener('click', () => {
+      code.disabled = true;
+      busy(i18n.codeSending || '');
+      fetch('/code/broadcast', { method: 'POST' })
+        .then(async (r) => {
+          const out = await r.json().catch(() => ({}));
+          unbusy();
+          if (!r.ok) { toast(i18n.codeFailed || ''); return; }
+          // Three different answers, because they need three different
+          // things done about them. "Nobody is on the list" is a setup
+          // problem, "no code arrived" means sign in again to make one, and
+          // a count means look at your phone.
+          if (!out.of) toast(i18n.codeNobody || '');
+          else if (!out.found) toast(i18n.codeNone || '');
+          else toast((i18n.codeSent || '').replace('{n}', out.sent)
+                     .replace('{of}', out.of));
+        })
+        .catch(() => { unbusy(); toast(i18n.codeFailed || ''); })
+        .then(() => { code.disabled = false; });
+    });
     // Back to Home, in the same place and with the same chevron the screen
     // view puts its way back — one habit rather than two.
     const back = document.getElementById('btn-sched-home');

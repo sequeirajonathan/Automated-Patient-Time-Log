@@ -258,7 +258,7 @@ _SENT_OK = "Parcel(00000000"
 def _dialable(number: str) -> str:
     """A number as digits, with a North American country code taken off.
 
-    "+1 (954) 540-5276", "1-954-540-5276" and "9545405276" are one person,
+    "+1 (555) 010-5276", "1-555-010-5276" and "5550105276" are one person,
     and a list where they are three is a list that texts them twice and calls
     it two recipients. Eleven digits beginning with 1 is the only shape
     collapsed — anything longer is a country code that is NOT this one's, and
@@ -465,3 +465,50 @@ def forward_any_new(serial: str | None = None, now: float | None = None,
     if not code:
         return 0
     return forward_code(code, when, serial=serial)
+
+
+# ------------------------------------------------------- the code, on request
+# WHY A BUTTON EXISTS AT ALL, when `forward_any_new` already passes codes on
+# by itself.
+#
+# The OTP arrives on ONE phone — the one with the SIM inMyTeam texts. The
+# caregiver signs in on her OWN phone, which never sees it. The standing
+# forwarder covers the case where a code lands and everyone is told; it does
+# not cover the case she is actually in, which is standing at a login screen
+# with a code that arrived ninety seconds ago and a text that never came,
+# because the poll had already marked that message forwarded once.
+#
+# So this is the same work with the dedup deliberately off: a person is asking,
+# and a person asking twice means they did not get it the first time. The
+# throttle and the dedup exist to stop a MACHINE sending one code six times;
+# neither has anything useful to say to somebody holding a phone.
+def broadcast_latest(serial: str | None = None, provider=None,
+                     now: float | None = None) -> dict:
+    """Send the newest code to everyone on the list, because somebody asked.
+
+    Returns what happened, never the code itself — the digits go to the
+    phones and nowhere else. A caller that wanted them back would be a caller
+    putting an OTP into a browser tab, a server log and a screenshot.
+
+    `{"sent": n, "of": m, "found": bool, "age": seconds}`. `found` false with
+    `of` non-zero means the inbox had no code inside the freshness window,
+    which is a different problem from having nobody to send to.
+    """
+    at = time.time() if now is None else now
+    people = recipients(provider)
+    if not people:
+        return {"sent": 0, "of": 0, "found": False, "age": 0.0}
+    when, code = _newest(serial=serial, now=at)
+    if not code:
+        return {"sent": 0, "of": len(people), "found": False, "age": 0.0}
+    # Marked even though this send ignores the mark. The standing poll runs a
+    # few times a minute behind this, and without the mark it would find the
+    # same message a moment later and send everyone a second copy.
+    _mark_forwarded(when)
+    body = FORWARD_TEXT.format(code=code)
+    sent = sum(1 for number in people if send(number, body, serial))
+    # The count and the age. Not the digits, not the numbers they went to.
+    log.info("code broadcast on request to %d of %d (%.0fs old)",
+             sent, len(people), max(0.0, at - when))
+    return {"sent": sent, "of": len(people), "found": True,
+            "age": max(0.0, at - when)}

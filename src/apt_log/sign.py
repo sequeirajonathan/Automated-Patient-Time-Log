@@ -544,19 +544,50 @@ CANVAS_DOMINANT_W = 0.6
 CANVAS_DOMINANT_H = 0.35
 
 
+def signing_moment(xml: str) -> bool:
+    """Whether a pad is LIVE on this screen, rather than remembered by it.
+
+    Split out of `sideways`, which was answering two questions at once and
+    getting the second one wrong on a screen that did not exist when it was
+    written. "Is the ink turned a quarter turn" and "is there a pad here to
+    press buttons on" are different questions, and HHAeXchange+'s check-out
+    pages are the case that separates them: a real signature pad, drawn
+    genuinely landscape (1600x720), needing no turn at all. Asking `sideways`
+    whether to offer the app's own Borrar and Enviar answered no, and the
+    caregiver got step two of the portal with nothing in it.
+
+    A moment is: something that actually draws (or the pad's own captioned
+    save), exactly one canvas by the finder's reckoning, and that canvas
+    DOMINATING the screen. The last part is what keeps a completed visit
+    page — which keeps the saved signatures' wrappers in its tree — from
+    reading as a live pad.
+    """
+    # A DRAWING SURFACE, or the pad's own captioned save. Either is evidence;
+    # the tab WRAPPER alone is not.
+    if not (_has_drawing_surface(xml) or _app_buttons(xml).get("confirm")):
+        return False
+    max_x, max_y = _extent(xml)
+    if not max_x:
+        return False
+    bounds, _ = find_canvas(xml, dump=False)
+    if bounds is None:
+        return False
+    return ((bounds[2] - bounds[0]) >= CANVAS_DOMINANT_W * max_x
+            and (bounds[3] - bounds[1]) >= CANVAS_DOMINANT_H * max_y)
+
+
 def sideways(xml: str, package: str = "") -> bool:
     """Whether ink replayed onto this screen must turn a quarter turn.
 
-    True only for a signature MOMENT: the replay's own finder accepts the
-    screen (exactly one canvas) and that canvas dominates it. The peek and
-    the ink turn by this same answer — they must never disagree.
+    True only for a signature MOMENT drawn rotated inside a PORTRAIT activity.
+    A genuinely landscape pad needs no turn — injected coordinates already
+    follow the rotated display — which is why the moment test now lives in
+    `signing_moment` and this function is only about the turn.
     """
     if presentation_rotated(xml):
         return True
     if package not in ROTATED_CANVAS_APPS:
         return False
-    # A DRAWING SURFACE, or the pad's own captioned save. Either is evidence;
-    # the tab WRAPPER alone is not.
     #
     # `layout_tab_content_signature` sits on this app's visit page whether or
     # not the pad is showing. Until now the finder happened to reject that page
@@ -571,16 +602,12 @@ def sideways(xml: str, package: str = "") -> bool:
     # Where the app publishes only wrappers, as it did on the screen that
     # failed tonight, the captioned Salvar is what appears and disappears with
     # the pad.
-    if not (_has_drawing_surface(xml) or _app_buttons(xml).get("confirm")):
+    if not signing_moment(xml):
         return False
+    # PORTRAIT is what is left to check. A truly landscape page needs no turn,
+    # and that is the whole distinction this function now carries.
     max_x, max_y = _extent(xml)
-    if not max_x or max_x >= max_y:
-        return False
-    bounds, _ = find_canvas(xml, dump=False)
-    if bounds is None:
-        return False
-    return ((bounds[2] - bounds[0]) >= CANVAS_DOMINANT_W * max_x
-            and (bounds[3] - bounds[1]) >= CANVAS_DOMINANT_H * max_y)
+    return bool(max_x) and max_x < max_y
 
 
 # --------------------------------------------------------------------- paths
@@ -771,7 +798,29 @@ def button_targets(xml: str, package: str = "") -> dict | None:
     Each kind is answered independently, because a screen that names its
     save and draws its clear should still be able to save.
     """
-    if not sideways(xml, package):
+    # A SIGNATURE SCREEN, WHICH IS NOT THE SAME AS A SIDEWAYS ONE.
+    #
+    # This gate used to be `sideways()`, and that was right while the only
+    # signature page here was the legacy app's, drawn a quarter turn inside a
+    # portrait activity. HHAeXchange+'s check-out pages are not that: they are
+    # GENUINELY landscape — action_bar_root [0,0][1600,720], seen on the real
+    # check-out — so `sideways` answers False, correctly, and the whole row of
+    # app-side buttons vanished on the one screen it was built for. The
+    # caregiver was left pressing Enviar on the phone by hand while the portal
+    # showed her step two and nothing in it.
+    #
+    # The canvas is the right gate. `find_canvas` accepting this screen is what
+    # makes it a signature moment; the turn is a separate question about how the
+    # ink is mapped, and only the pixel fallback below actually depends on it.
+    #
+    # It has to be SOME gate, not none: `_app_buttons` matches a caption in
+    # _SAVE_WORDS, and the plan-of-care duties screen carries a `Guardar`
+    # ("poc_task_save_button") that would otherwise be offered as a signature
+    # submit on a screen with no signature on it.
+    if not signing_moment(xml):
+        return None
+    bounds, _refusal = find_canvas(xml, dump=False)
+    if bounds is None:
         return None
     targets: dict[str, dict] = {}
     for kind, el in _app_buttons(xml).items():
@@ -787,16 +836,19 @@ def button_targets(xml: str, package: str = "") -> dict | None:
     # canvas to leave a strip down the left for the buttons to live in;
     # where the canvas runs the full width there is no strip and nothing
     # here is better than a guess, so it declines rather than inventing one.
-    if len(targets) < len(ACTIONS):
-        bounds, _ = find_canvas(xml, dump=False)
-        if bounds is not None:
-            x1, _y1, _x2, y2 = bounds
-            if x1 >= _MIN_STRIP:
-                x = max(x1 // 2, 4)
-                targets.setdefault("clear",
-                                   {"point": [x, y2 - _BUTTON_CLEAR_LIFT]})
-                targets.setdefault("confirm",
-                                   {"point": [x, y2 - _BUTTON_CONFIRM_LIFT]})
+    #
+    # STILL GATED ON THE TURN, and now that is the only thing that is. These
+    # offsets were measured on the legacy app's rotated page and mean nothing
+    # anywhere else — a derived coordinate on a screen whose buttons the tree
+    # publishes perfectly well would be a guess replacing a fact.
+    if sideways(xml, package) and len(targets) < len(ACTIONS):
+        x1, _y1, _x2, y2 = bounds
+        if x1 >= _MIN_STRIP:
+            x = max(x1 // 2, 4)
+            targets.setdefault("clear",
+                               {"point": [x, y2 - _BUTTON_CLEAR_LIFT]})
+            targets.setdefault("confirm",
+                               {"point": [x, y2 - _BUTTON_CONFIRM_LIFT]})
     return targets or None
 
 

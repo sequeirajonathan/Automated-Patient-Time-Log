@@ -12,6 +12,7 @@ is none of this project's business, and typing a code that has expired.
 from __future__ import annotations
 
 import importlib
+import json
 import time
 from unittest.mock import patch
 
@@ -291,7 +292,7 @@ class TestSendingOneFromThisPhone:
     open — and walking away to Messages abandons the sign-in this exists to
     help."""
 
-    def _args(self, out=sms._SENT_OK, number="954-540-5276", body="hi"):
+    def _args(self, out=sms._SENT_OK, number="555-010-5276", body="hi"):
         seen = {}
 
         def fake(args, serial=None, timeout=20.0):
@@ -314,9 +315,9 @@ class TestSendingOneFromThisPhone:
 
     def test_the_number_arrives_as_bare_digits(self):
         """Whatever shape the secrets file was written in."""
-        args = self._args(number="+1 (954) 540-5276")["args"]
-        assert "9545405276" in args
-        assert "+1 (954) 540-5276" not in args
+        args = self._args(number="+1 (555) 010-5276")["args"]
+        assert "5550105276" in args
+        assert "+1 (555) 010-5276" not in args
 
     def test_a_body_with_spaces_survives_the_devices_own_shell(self):
         import shlex
@@ -330,12 +331,12 @@ class TestSendingOneFromThisPhone:
     def test_the_argument_list_matches_the_aidl(self):
         """Ten arguments in the order sendTextForSubscriber declares them.
         Getting this wrong sends somebody else's field as the message."""
-        args = self._args(number="9545405276", body="hi")["args"]
+        args = self._args(number="5550105276", body="hi")["args"]
         assert args[5:] == [
             "i32", sms.DEFAULT_SUB_ID,
             "s16", sms.SEND_PKG,
             "s16", "null",          # callingAttributionTag
-            "s16", "9545405276",    # destAddr
+            "s16", "5550105276",    # destAddr
             "s16", "null",          # scAddr
             "s16", "hi",            # text
             "s16", "null",          # sentIntent
@@ -362,7 +363,7 @@ class TestSendingOneFromThisPhone:
         with patch.object(sms, "_adb", lambda *a, **k: called.append(1) or ""):
             assert sms.send("", "hi") is False
             assert sms.send("nonsense", "hi") is False
-            assert sms.send("9545405276", "") is False
+            assert sms.send("5550105276", "") is False
         assert not called
 
     def test_the_number_is_never_logged(self, caplog):
@@ -370,8 +371,8 @@ class TestSendingOneFromThisPhone:
         failure is worth a line; who it was for is not."""
         with caplog.at_level("WARNING"), patch.object(sms, "_adb",
                                                       lambda *a, **k: "no"):
-            sms.send("9545405276", "hi")
-        assert "9545405276" not in caplog.text
+            sms.send("5550105276", "hi")
+        assert "5550105276" not in caplog.text
 
 
 class TestWhoTheCodeGoesTo:
@@ -386,24 +387,24 @@ class TestWhoTheCodeGoesTo:
 
     def test_labelled_entries_read_as_their_numbers(self):
         """The names are for whoever edits the file. Nothing uses them."""
-        assert self._people("A:9545405276,B:7863568328") == [
-            "9545405276", "7863568328"]
+        assert self._people("A:5550105276,B:5550208328") == [
+            "5550105276", "5550208328"]
 
     def test_bare_numbers_work_too(self):
-        assert self._people("9545405276, 7863568328") == [
-            "9545405276", "7863568328"]
+        assert self._people("5550105276, 5550208328") == [
+            "5550105276", "5550208328"]
 
     def test_punctuation_people_actually_type_is_tolerated(self):
-        assert self._people("Jon:(954) 540-5276") == ["9545405276"]
+        assert self._people("Jon:(555) 010-5276") == ["5550105276"]
 
     def test_the_same_person_twice_is_one_text(self):
-        assert self._people("A:9545405276,B:954-540-5276") == ["9545405276"]
+        assert self._people("A:5550105276,B:555-010-5276") == ["5550105276"]
 
     def test_and_with_a_country_code_is_still_the_same_person(self):
         """The shape people actually paste. A list where these are two is a
         list that texts one person twice and reports two recipients."""
-        assert self._people("A:+1 954-540-5276,B:9545405276") == [
-            "9545405276"]
+        assert self._people("A:+1 555-010-5276,B:5550105276") == [
+            "5550105276"]
 
     def test_a_number_that_is_not_this_country_is_left_alone(self):
         """Eleven digits beginning with 1 is the only shape collapsed.
@@ -412,7 +413,7 @@ class TestWhoTheCodeGoesTo:
 
     def test_something_too_short_to_be_a_number_is_dropped(self):
         """Rather than texting whatever the typo dialled."""
-        assert self._people("A:9545405276,B:1234") == ["9545405276"]
+        assert self._people("A:5550105276,B:1234") == ["5550105276"]
 
     def test_no_list_configured_is_an_empty_list_not_a_crash(self):
         """The shipped state. Absent, nothing is forwarded and the sign-in
@@ -590,3 +591,82 @@ class TestTheTickBehindTheWalk:
                              lambda **k: asked.append(1) or (0.0, "")):
             assert sms.forward_any_new(now=100.0, force=True) == 0
         assert not asked
+
+
+class TestTheCodeOnRequest:
+    """The button, and the one thing it must never do.
+
+    The OTP lands on the phone with the SIM; she signs in on her own phone,
+    which never sees it. The standing forwarder cannot help her once it has
+    marked that message passed on, so a person asking has to be able to
+    override the dedup — and the answer must still not carry the digits.
+    """
+
+    def _people(self):
+        from apt_log.secrets import MemorySecretProvider
+
+        return MemorySecretProvider(
+            CODE_RECIPIENTS="A:5551110000,B:5552220000")
+
+    def test_it_sends_to_everyone_on_the_list(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sms, "_forwarded_path", lambda: tmp_path / "f")
+        monkeypatch.setattr(sms, "_newest", lambda **k: (100.0, "604820"))
+        sent = []
+        monkeypatch.setattr(sms, "send",
+                            lambda n, b, s=None: sent.append((n, b)) or True)
+        out = sms.broadcast_latest(provider=self._people(), now=160.0)
+        assert out["sent"] == 2 and out["of"] == 2 and out["found"] is True
+        assert out["age"] == pytest.approx(60.0)
+        assert len(sent) == 2
+
+    def test_a_second_press_still_sends(self, monkeypatch, tmp_path):
+        """THE WHOLE POINT. `forward_code` refuses a message it has already
+        passed on, which is right for a machine polling and wrong for a
+        person who did not get the text."""
+        monkeypatch.setattr(sms, "_forwarded_path", lambda: tmp_path / "f")
+        monkeypatch.setattr(sms, "_newest", lambda **k: (100.0, "604820"))
+        monkeypatch.setattr(sms, "send", lambda n, b, s=None: True)
+        first = sms.broadcast_latest(provider=self._people(), now=160.0)
+        second = sms.broadcast_latest(provider=self._people(), now=170.0)
+        assert first["sent"] == 2
+        assert second["sent"] == 2
+
+    def test_it_marks_the_message_so_the_poll_does_not_double_up(
+            self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sms, "_forwarded_path", lambda: tmp_path / "f")
+        monkeypatch.setattr(sms, "_newest", lambda **k: (100.0, "604820"))
+        monkeypatch.setattr(sms, "send", lambda n, b, s=None: True)
+        sms.broadcast_latest(provider=self._people(), now=160.0)
+        assert sms.already_forwarded(100.0) is True
+        # ...so the standing forwarder finds it done and sends nothing.
+        assert sms.forward_code("604820", 100.0, provider=self._people()) == 0
+
+    def test_no_code_is_not_the_same_as_nobody_to_tell(self, monkeypatch,
+                                                       tmp_path):
+        monkeypatch.setattr(sms, "_forwarded_path", lambda: tmp_path / "f")
+        monkeypatch.setattr(sms, "_newest", lambda **k: (0.0, ""))
+        monkeypatch.setattr(sms, "send", lambda n, b, s=None: True)
+        out = sms.broadcast_latest(provider=self._people(), now=160.0)
+        assert out["found"] is False and out["of"] == 2 and out["sent"] == 0
+
+    def test_nobody_on_the_list_reads_no_inbox_at_all(self, monkeypatch):
+        """A feature switched off must not query a caregiver's messages."""
+        looked = []
+        monkeypatch.setattr(sms, "_newest",
+                            lambda **k: looked.append(1) or (0.0, ""))
+        from apt_log.secrets import MemorySecretProvider
+
+        out = sms.broadcast_latest(provider=MemorySecretProvider(
+            CODE_RECIPIENTS=""), now=160.0)
+        assert out == {"sent": 0, "of": 0, "found": False, "age": 0.0}
+        assert looked == []
+
+    def test_the_digits_never_come_back(self, monkeypatch, tmp_path):
+        """A response carrying the code would put an OTP in a browser tab,
+        a server log and the next screenshot of the portal."""
+        monkeypatch.setattr(sms, "_forwarded_path", lambda: tmp_path / "f")
+        monkeypatch.setattr(sms, "_newest", lambda **k: (100.0, "604820"))
+        monkeypatch.setattr(sms, "send", lambda n, b, s=None: True)
+        out = sms.broadcast_latest(provider=self._people(), now=160.0)
+        assert "604820" not in json.dumps(out)
+        assert set(out) == {"sent", "of", "found", "age"}

@@ -1860,6 +1860,30 @@ async def sign_action(request: Request):
     return JSONResponse({"ok": True, "id": rid})
 
 
+@app.post("/code/broadcast")
+def broadcast_code():
+    """Text the newest sign-in code to everyone on the list, on her ask.
+
+    The OTP lands on the phone holding the SIM. She signs in on her own
+    phone, which never sees it, and the standing forwarder cannot help her
+    once it has already marked that message passed on. This is the button for
+    the moment she is actually in: at a login screen, code somewhere, no text.
+
+    **The digits are not in the answer.** They go to the phones and nowhere
+    else — a response carrying the code would put an OTP in a browser tab, in
+    this process's log, and in the next screenshot of the portal. What comes
+    back is how many were sent, of how many, and how old the code was.
+    """
+    from apt_log import sms as sms_mod
+
+    try:
+        out = sms_mod.broadcast_latest()
+    except Exception as exc:  # noqa: BLE001 — a phone that will not answer
+        log.warning("could not broadcast the code (%s)", exc)
+        return JSONResponse({"error": "unreachable"}, status_code=502)
+    return JSONResponse(out)
+
+
 @app.get("/signature/roster")
 def signature_roster():
     """Who has adopted a signature. NEVER the signatures themselves.

@@ -1502,6 +1502,24 @@
 
     <button class="fullbtn" id="btn-schedule" type="button">
       {{ t('sched.view_full') }}</button>
+
+    {# THE CODE, TO THE PHONES THAT DO NOT HAVE IT.
+
+       inMyTeam texts its sign-in code to the ONE phone holding the SIM. She
+       signs in on her own phone, which never sees it, and the standing
+       forwarder cannot help her once it has already marked that message
+       passed on — so the moment she is actually in, at a login screen with a
+       code that came and went, had no button at all.
+
+       On the front page rather than in the console because that is the page
+       she is looking at when it happens, and because a person who cannot sign
+       in cannot go looking through a menu for the thing that would let her.
+
+       It sends; it does not display. The digits go to the three phones and
+       never into this page — a code on screen is a code in the next
+       screenshot. #}
+    <button class="fullbtn" id="btn-code" type="button">
+      {{ t('code.send') }}</button>
   </div>
 
   <footer>
@@ -2060,6 +2078,11 @@
     signSendAgain: {{ t('sign.send_again')|tojson }},
     signEmpty:   {{ t('signature.empty')|tojson }},
     signLockLapsed: {{ t('sign.lock_lapsed')|tojson }},
+    codeSending: {{ t('code.sending')|tojson }},
+    codeSent:    {{ t('code.sent')|tojson }},
+    codeNone:    {{ t('code.none')|tojson }},
+    codeNobody:  {{ t('code.nobody')|tojson }},
+    codeFailed:  {{ t('code.failed')|tojson }},
     adoptNeedName: {{ t('sign.adopt_need_name')|tojson }},
     adoptNeedWitness: {{ t('sign.adopt_need_witness')|tojson }},
     adoptSaved: {{ t('sign.adopt_saved')|tojson }},

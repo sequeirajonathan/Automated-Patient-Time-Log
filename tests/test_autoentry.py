@@ -33,6 +33,39 @@ def monday(hour, minute=0):
     return datetime(2026, 8, 17, hour, minute, tzinfo=ZONE)
 
 
+class _FixedClock:
+    """`datetime`, with `now()` pinned to the fixture week."""
+
+    @staticmethod
+    def now(tz=None):
+        at = monday(12, 0)
+        return at if tz is None else at.astimezone(tz)
+
+    fromisoformat = staticmethod(datetime.fromisoformat)
+
+
+@pytest.fixture(autouse=True)
+def _the_ledger_clock_stands_still(monkeypatch):
+    """A SUITE THAT EXPIRES IS A DEPLOY GATE THAT EXPIRES.
+
+    `autoentry._forget_old` prunes the ledger against the REAL clock —
+    `datetime.now() - LEDGER_KEEPS`, eight days — and every fixture in this
+    file lives on a fixed Monday. So `spend()` wrote an occurrence and the
+    prune dropped it on the way back out, and seven tests here asserting
+    "nothing fires twice" quietly stopped testing anything.
+
+    They did not fail on the day the fixture date was chosen. They passed for
+    eight days and then failed for ever, and they failed on the machine that
+    gates deploys — the manager runs this suite before every release, so an
+    expired fixture is a Pi that cannot ship. Caught eleven days after the
+    fixture Monday, with the deploy gate already red.
+
+    Pinning the clock is the fix rather than moving the date forward, which
+    would only reset the fuse.
+    """
+    monkeypatch.setattr(autoentry, "datetime", _FixedClock)
+
+
 def arm(block, who="Jonathan", since=None):
     """Arm a block, attested BEFORE the fixture week.
 
@@ -290,12 +323,13 @@ class TestTheLedgerDoesNotGrowForever:
         """It exists to stop a repeat, and a repeat can only happen within a
         day. Keeping a year would hold a record of a caregiver's movements
         long after the thing it prevents is impossible."""
-        old = (datetime.now().astimezone()
-               - autoentry.LEDGER_KEEPS - timedelta(days=2)).date()
+        # Both dates from the SAME clock the ledger prunes against. Taking
+        # "old" from the real clock and letting the module prune against the
+        # pinned one is how this test would go green on a lie.
+        today = monday(12, 0)
+        old = (today - autoentry.LEDGER_KEEPS - timedelta(days=2)).date()
         autoentry.spend(f"abc:{old.isoformat()}:entry", "done")
-        autoentry.spend("def:%s:entry"
-                        % datetime.now().astimezone().date().isoformat(),
-                        "done")
+        autoentry.spend(f"def:{today.date().isoformat()}:entry", "done")
         keys = autoentry.spent()
         assert not any(k.startswith("abc:") for k in keys)
         assert any(k.startswith("def:") for k in keys)

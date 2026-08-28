@@ -577,3 +577,133 @@ That helps every app. It is the only thing that makes inMyTeam work at all.
   crash mid-press cannot leave the slot open for the next tick.
 - **A fire that cannot complete fails closed** (REQ-5.5) and alerts, carrying no patient,
   visit or time — those notices land on a lock screen and a public relay.
+
+## The check-out, watched end to end
+
+Recorded on a live check-out of one patient's Friday evening block, 21 August, 22:00–22:18
+Eastern, with the caregiver and the patient both present. Nothing here was walked by the
+machine: the controller pressed `Continuar visitando` once to see where it led, then took
+its hands off and recorded. Fifty-one screens at 0.4-second resolution, read from the
+documents the feed already publishes so the phone carried no extra load.
+
+This is the first time the exit has been seen at all.
+
+### The shape of it
+
+```
+Schedule, the RUNNING card
+  ├ ✓ Registros de entrada de EVV 8:08 p. m.     schedule_screen_banner_clocked_in
+  ├ 🕐 La visita está en curso
+  └ Continuar visitando                          schedule_screen_continue_shift
+       └ Visit detail
+            ├ Funciones                          visit_details_duties
+            ├ Notas                              visit_details_notes
+            ├ Preferencias                       visit_details_preferences
+            └ Registro de salida de EVV          visit_details_clock_out_button_disabled
+                 ├ Paso 1 de 3   GPS             map_screen_gps_continue_button
+                 ├ Paso 2 de 3   PATIENT signs   signature_screen_*
+                 └ Paso 3 de 3   CAREGIVER signs signature_screen_*
+                      └ back to the schedule, exit recorded
+```
+
+**The exit is three steps and the app numbers them**, in `menu_top_bar_steps`: `Paso 1 de
+3`, `Paso 2 de 3`, `Paso 3 de 3`. That string is the most useful thing on these screens —
+it says where in the flow the phone is, without inference.
+
+**It also tells the entry GPS from the exit GPS.** Both show the same map with the same
+`map_screen_gps_continue_button`; the entry one carries no step counter and the exit one
+says `Paso 1 de 3`. Nothing else distinguishes them.
+
+### The button whose name is a lie
+
+`visit_details_clock_out_button_disabled`. It reports `enabled=true clickable=true`, and
+pressing it is what opens `Paso 1 de 3`. The `_disabled` suffix is part of the id, not a
+state — the app ships one id and never renames it. Worth writing down because it reads as
+a refusal and is not one; an automation that skipped it on the strength of its name would
+never find the exit at all.
+
+### Both signatures, and who they belong to
+
+Two signature screens, back to back, and the app says whose each one is in
+`title_bar_title`:
+
+| Step | `title_bar_title` | Who |
+|---|---|---|
+| Paso 2 de 3 | `«PATIENT NAME» Firma de` | the patient |
+| Paso 3 de 3 | `«CAREGIVER NAME» Firma de` | the caregiver |
+
+The word order is the app's own — a broken concatenation of *Firma de «name»* — and the
+name is the prefix. **This is the machine-readable answer to "whose signature is this
+screen asking for"**, which is exactly what an adopted signature (REQ-10.6a) needs in
+order to offer the right one and no other. It does not make anything automatic: the press
+still belongs to the party it belongs to.
+
+### The pad, measured
+
+The screen is **genuinely landscape** — `action_bar_root [0,0][1600,720]` — not a portrait
+activity drawing itself sideways. That distinction had never come up before, because the
+only signature page this project had seen was the legacy app's rotated one.
+
+```
+signature_screen_signature_pad     [14,196][1522,500]   1508 x 304, aspect 4.96
+signature_screen_clear_button      [28,589][90,641]     "Borrar", caption drawn over it
+signature_screen_submit_button     [1410,589][1522,641] "Enviar",  caption drawn over it
+signature_screen_date              08/21/2026 10:12 p. m.
+```
+
+Run against the real capture, `find_canvas` accepts the pad outright and refuses nothing:
+the app names it, it is 40% of the screen, and the instruction text sits in a child with
+no id, so there is exactly one candidate. Both buttons are captionless `View`s with the
+words as separate `TextView`s, which is the case `_app_buttons` already handles by
+requiring the id to name the signature screen.
+
+### What that landscape screen broke
+
+`button_targets` was gated on `sideways()`, and `sideways()` is False here — correctly,
+because a genuinely landscape page needs no quarter turn. So on the one screen the
+app-button row exists for, the portal offered nothing, and the caregiver pressed `Enviar`
+on the phone by hand.
+
+The gate was answering two questions at once. They are now separate:
+
+- **`signing_moment(xml)`** — is a pad LIVE here? Something that draws, exactly one canvas,
+  and that canvas dominating the screen. The last part is what keeps a completed visit —
+  which keeps its saved signatures' wrappers in the tree — from reading as a live pad.
+- **`sideways(xml, package)`** — must the ink be turned? Only for a moment drawn rotated
+  inside a *portrait* activity.
+
+`button_targets` now gates on the moment and presses the app's own elements; the
+canvas-relative pixel offsets stay gated on the turn, because they were measured on the
+legacy rotated page and mean nothing anywhere else. It needs *some* gate and not none: the
+duties screen carries a `Guardar` (`poc_task_save_button`) that would otherwise be offered
+as a signature submit on a screen with no signature on it.
+
+### Two blocks, one exit
+
+That evening was two cards — 8:00–9:00 and 9:00–10:00 p.m. What the record shows:
+
+- the 8 p.m. card was entered at 8:08 p.m. and, at the end of the night, **was still
+  `La visita está en curso`**;
+- the 9 p.m. card was entered at **10:07 p.m.** and exited at **10:15 p.m.**, both after
+  the fact, and both by hand.
+
+So the exit was recorded against the *second* block, and the first was left open. That is
+the caregiver's own practice and the office reconciles it; it is written here as observed
+and not as a rule, because nothing about it was explained.
+
+It does sharpen what the existing `entry_is_the_first_half` refusal means. That refusal is
+about the *scheduled* fire — the machine must not open a second entry at 9:05 p.m. on its
+own. It says nothing about a person entering the second block at the end of the visit in
+order to close it, which is what happened here.
+
+### Left unexplained
+
+- **Whether `Funciones` gates the clock-out.** The duties were filled and saved between the
+  two, and the visit detail showed `necesario` either side of it, but the clock-out was
+  never pressed with the duties empty — so the gate is assumed and not demonstrated.
+- **The care plan.** `Funciones` first answered *"A este paciente no se le ha asignado un
+  plan de atención"* and a moment later listed eleven duties. Both were captured; which
+  condition produces which is unknown.
+- **Whether anything confirms after `Paso 3 de 3`.** Five seconds separate the last
+  signature from the schedule page, and a 0.4-second poll could have missed a brief
+  dialog.
