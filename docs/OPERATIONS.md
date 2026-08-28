@@ -425,3 +425,72 @@ the page never binds an interface reachable from it.
 
 Show patient **initials or IDs by default**, full names only behind an explicit reveal.
 Most glances at this page are "did the 2pm fire?", which needs no identifying detail.
+
+## Swapping the phone
+
+Written after the Galaxy A36 replaced the previous handset, because none of
+this was written down the first time and all of it had to be found again.
+
+### Auto Blocker silently withholds ADB
+
+Samsung ships **Auto Blocker ON by default** on this model, and one of the
+things it blocks is USB debugging. It does not refuse a connection or raise a
+prompt — it removes the ADB interface from the USB descriptor entirely, so the
+phone enumerates as MTP and nothing else:
+
+```
+bNumInterfaces  3
+  iInterface  MTP
+  iInterface  CDC Abstract Control Model (ACM)
+  iInterface  CDC ACM Data          ← no ADB interface anywhere
+```
+
+`adb devices` is then empty — **not** `unauthorized`, which is the state a
+pending authorization produces. That difference is the whole diagnosis:
+
+- **`unauthorized`** → the phone is offering ADB and waiting for someone to
+  accept the fingerprint prompt.
+- **absent entirely, MTP only** → the phone is not offering ADB at all, and no
+  amount of replugging, restarting adb, or rebooting the Pi will change it.
+  Something on the phone is switched off.
+
+The absence of an "Allow USB debugging?" prompt therefore reads as reassuring
+and means the opposite. It cost a round trip to Florida and back to establish.
+
+Turn it off at **Settings → Security and privacy → Auto Blocker**. The ADB
+interface appears immediately; no reboot, no replug.
+
+### USB autosuspend drops the phone
+
+The hub the phone hangs off was set to `power/control = auto`, and a suspended
+hub takes its downstream device with it — 48 disconnects on that port in a
+single boot. `/etc/udev/rules.d/50-aptlog-usb-nosuspend.rules` pins the phone
+and the hub to `on` so this cannot recur across a reboot or a re-enumeration.
+
+### The apps must run in Spanish, and the phone need not
+
+Every EVV caption this project matches on was read off a Spanish phone —
+`Comenzar Visita`, `Registro de entrada de EVV`, `Continuar visitando`,
+`Funciones`, `Paso 1 de 3`, `Borrar`, `Enviar`. On an English handset none of
+them match, and arm-and-fire refuses rather than misfires: the safe failure,
+and still a system that does nothing.
+
+The replacement arrived on `en-US`. Rather than turn the whole phone Spanish —
+which would leave the people supporting it driving a Spanish device — the
+**per-app locale** is set, which Android has carried since 13:
+
+```
+adb shell cmd locale set-app-locales com.inmyteam.inmyteam --locales es-US
+adb shell cmd locale set-app-locales com.hhaexchange.uma   --locales es-US
+adb shell cmd locale set-app-locales com.tellus.evv.v2     --locales es-US
+adb shell cmd locale get-app-locales <pkg>                 # read it back
+```
+
+The care apps render Spanish, the phone's own UI stays English, and every
+walked caption keeps working. This survives a reboot and an app update; it does
+not survive a factory reset or a reinstall, so it belongs in the checklist for
+any new device.
+
+What does **not** work, and was tried first: `setprop persist.sys.locale` is
+denied to shell by SELinux, and `settings put system system_locales` sets only
+the preference list, not the active locale.
