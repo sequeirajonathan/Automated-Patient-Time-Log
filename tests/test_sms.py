@@ -714,3 +714,58 @@ class TestReadingTheReplyTelephonyActuallyPrints:
         monkeypatch.setattr(sms, "_adb",
                             lambda *a, **k: "Result: Parcel(\t00000000    '....')")
         assert sms.send("5550105276", "hi") is True
+
+
+class TestTheCodeOnThePage:
+    """The fail-safe for a text that never comes.
+
+    `broadcast_latest` deliberately withholds the digits; this one gives them
+    up, and the difference is the point. A one-time code from an ordinary
+    mobile number is the textbook shape of a smishing attempt and carriers
+    filter exactly that — the handset logged `SEND_SMS status = 1 (Ok)` for
+    all three recipients and one received nothing. A phone out of service does
+    the same.
+
+    What must NOT change is the log. That was the real half of the reasoning
+    for keeping digits out of a response, and it still holds.
+    """
+
+    def test_it_gives_the_digits_and_the_age(self, monkeypatch):
+        now = time.time()
+        monkeypatch.setattr(sms, "_newest", lambda **k: (now - 372, "604820"))
+        out = sms.latest_for_display(now=now)
+        assert out["found"] is True
+        assert out["code"] == "604820"
+        assert out["age"] == 372
+
+    def test_nothing_recent_is_an_honest_empty(self, monkeypatch):
+        monkeypatch.setattr(sms, "_newest", lambda **k: (0.0, ""))
+        assert sms.latest_for_display() == {"found": False}
+
+    def test_it_looks_further_back_than_the_typing_window(self):
+        """FRESH_WITHIN is short because a stale code TYPED burns an attempt.
+        A code READ costs nothing, and the caregiver can see its age."""
+        assert sms.SHOW_WITHIN > sms.FRESH_WITHIN
+
+    def test_it_asks_for_its_own_window(self, monkeypatch):
+        seen = {}
+
+        def fake(**kw):
+            seen.update(kw)
+            return (0.0, "")
+        monkeypatch.setattr(sms, "_newest", fake)
+        sms.latest_for_display()
+        assert seen["within"] == sms.SHOW_WITHIN
+
+    def test_the_digits_never_reach_the_log(self, monkeypatch, caplog):
+        """THE LINE THAT SURVIVES FROM THE OLD REASONING.
+
+        A journal is read over a shoulder and pasted into bug reports. The
+        age answers "was there a code" without putting a credential in it.
+        """
+        now = time.time()
+        monkeypatch.setattr(sms, "_newest", lambda **k: (now - 30, "604820"))
+        with caplog.at_level("INFO"):
+            sms.latest_for_display(now=now)
+        assert "604820" not in caplog.text
+        assert "30s old" in caplog.text or "30" in caplog.text

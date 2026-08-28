@@ -1884,6 +1884,53 @@ def broadcast_code():
     return JSONResponse(out)
 
 
+@app.get("/code/latest")
+def latest_code_on_the_page():
+    """The newest sign-in code, its age, and the minute it arrived.
+
+    THE FAIL-SAFE FOR A TEXT THAT NEVER COMES. The broadcast is the first
+    answer and it is not a complete one: a text can be filtered as smishing
+    (a one-time code from an ordinary mobile number is the textbook shape),
+    blocked, or simply not delivered to a phone with no service. Seen live —
+    the handset logged `SEND_SMS status = 1 (Ok)` for all three recipients
+    and one of them never received a thing.
+
+    So the code is on the page too, where somebody on the tailnet can read
+    it. That reverses the line `/code/broadcast` holds, deliberately: the
+    reasoning there was that a code in a response is a code in a log, and the
+    log half is the real risk — so `latest_for_display` writes the age to the
+    journal and never the digits. The page itself is behind the same door as
+    the patients' names and the ability to record a visit; a number that dies
+    in fifteen minutes is not what makes it worth protecting.
+
+    ALWAYS WITH ITS AGE. A code shown bare is a code somebody types at nine
+    minutes old and blames the machine for. The minute is rendered in the
+    schedule's own zone — Eastern — because the people reading this page are
+    not all in it.
+    """
+    from apt_log import sms as sms_mod
+
+    try:
+        out = sms_mod.latest_for_display()
+    except Exception as exc:  # noqa: BLE001 — a phone that will not answer
+        log.warning("could not read the code for the page (%s)", exc)
+        return JSONResponse({"error": "unreachable"}, status_code=502)
+
+    if out.get("found"):
+        zone = _schedule_zone()
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+
+            when = datetime.fromtimestamp(out.pop("at"),
+                                          ZoneInfo(zone) if zone else None)
+            out["said"] = _clock(when, _zone_says(ZoneInfo(zone)) if zone else "")
+        except Exception:  # noqa: BLE001 — a clock is not worth a 500
+            out.pop("at", None)
+            out["said"] = ""
+    return JSONResponse(out)
+
+
 @app.get("/signature/roster")
 def signature_roster():
     """Who has adopted a signature. NEVER the signatures themselves.

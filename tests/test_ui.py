@@ -3303,13 +3303,27 @@ class TestTheCardUnderIt:
             encoding="utf-8")
 
     def test_no_timer_moves_anything_on_the_page(self):
-        """Two intervals are left and both earn it: re-reading the schedule,
-        and the clock, which is a clock. Neither animates a control."""
+        """Three intervals are left and each earns it: re-reading the
+        schedule, the clock (which is a clock), and the sign-in code's age.
+
+        The property is not the COUNT — it is that no timer animates a
+        control. So the allowed set is named rather than tallied, which says
+        what is actually being defended and makes the next addition an
+        argument somebody has to write down instead of a number to bump.
+
+        The code's age earns its place the same way the clock does: it is a
+        reading that goes stale on a page nobody is touching, and a code
+        labelled "1 minute ago" that is really nine is the one failure that
+        card exists to prevent.
+        """
         js = self._js()
         intervals = [l.strip() for l in js.splitlines() if "setInterval" in l]
-        assert len(intervals) == 2
-        assert any("refreshSchedule" in l for l in intervals)
-        assert any("tick" in l for l in intervals)
+        allowed = ("refreshSchedule", "tick", "refreshCode")
+        for line in intervals:
+            assert any(name in line for name in allowed), (
+                f"unexplained timer: {line}")
+        for name in allowed:
+            assert any(name in line for line in intervals), f"{name} timer lost"
 
     def test_the_wheel_is_gone_rather_than_hidden(self):
         js = self._js()

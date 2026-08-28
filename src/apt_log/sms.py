@@ -540,3 +540,50 @@ def broadcast_latest(serial: str | None = None, provider=None,
              sent, len(people), max(0.0, at - when))
     return {"sent": sent, "of": len(people), "found": True,
             "age": max(0.0, at - when)}
+
+
+# ------------------------------------------------------- the code, on the page
+# HOW LONG A CODE IS WORTH SHOWING.
+#
+# Deliberately not FRESH_WITHIN. That window is three minutes because typing a
+# stale code into inMyTeam is worse than typing nothing — the app rejects it,
+# clears the field, raises a dialog the tree cannot see, and spends one of a
+# limited number of attempts. Nothing about that reasoning applies to a person
+# reading a number off a page: she can see for herself whether it works, and a
+# code shown with its age is a code she can judge.
+#
+# Fifteen minutes because past that it is certainly dead, and showing a dead
+# code with "15 minutes ago" beside it is worse than showing nothing — it
+# invites her to type it.
+SHOW_WITHIN = 15 * 60.0
+
+
+def latest_for_display(serial: str | None = None,
+                       now: float | None = None) -> dict:
+    """The newest code and how old it is, for the portal to show.
+
+    THIS RETURNS THE DIGITS, and the rest of this module deliberately does
+    not. The reasoning that kept them out of `broadcast_latest` was that a
+    code in a response is a code in a log and in a screenshot — and the log
+    half of that is real, which is why nothing here writes the code anywhere.
+
+    What changed is the delivery problem. The text is the only way the code
+    reaches a caregiver signing in on her own phone, and a text that does not
+    arrive — filtered, no service, blocked — leaves her with nothing at all.
+    The portal is on the tailnet, behind the same door as the patient names,
+    the round, and the ability to record a visit; a six-digit number that dies
+    in minutes is not what makes that page worth protecting.
+
+    So: shown on the page, never written to the log, and always with its age,
+    because a code without its age is a code somebody will type at nine
+    minutes old and blame the machine for.
+    """
+    at = time.time() if now is None else now
+    when, code = _newest(within=SHOW_WITHIN, serial=serial, now=at)
+    if not code:
+        return {"found": False}
+    # The AGE is logged, never the digits — enough to answer "was there one"
+    # from the journal without putting a credential in it.
+    log.info("a code is on the page (%.0fs old)", max(0.0, at - when))
+    return {"found": True, "code": code,
+            "age": int(max(0.0, at - when)), "at": when}

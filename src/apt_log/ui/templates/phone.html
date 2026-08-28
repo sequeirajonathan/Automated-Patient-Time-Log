@@ -1242,6 +1242,25 @@
   /* The adopted row, above the pad. Filled pills rather than the pad's own
      quiet text buttons: this is the primary action for the people it is for,
      and the pad below it is the fallback. */
+  /* The code, when there is a live one. Deliberately the loudest thing on
+     the page while it exists and absent entirely when it does not — this is
+     read at arm's length by somebody who cannot sign in. Tabular figures so
+     six digits are six even columns, and generous tracking so a 6 and an 8
+     cannot be confused at a glance. */
+  .codecard { margin-top:14px; border-radius:16px; padding:14px 16px;
+              background:var(--card); border:1px solid var(--line);
+              display:flex; flex-direction:column; align-items:center;
+              gap:3px; }
+  .codecard[hidden] { display:none; }
+  .codecap { font-size:11px; letter-spacing:.09em; text-transform:uppercase;
+             color:var(--muted); }
+  .codedigits { font-size:38px; font-weight:700; letter-spacing:.16em;
+                font-variant-numeric:tabular-nums; line-height:1.15;
+                color:var(--ink); }
+  /* The age turns amber as the code ages out, because "6 minutes ago" read
+     quickly looks the same as "1 minute ago". */
+  .codeage { font-size:13px; color:var(--muted); }
+  .codecard.stale .codeage { color:#b45309; font-weight:600; }
   .adopted { margin:0 0 14px; }
   .adopted[hidden] { display:none; }
   .adopted-label { display:block; font-size:12px; color:var(--muted);
@@ -1520,6 +1539,24 @@
        screenshot. #}
     <button class="fullbtn" id="btn-code" type="button">
       {{ t('code.send') }}</button>
+
+    {# THE FAIL-SAFE, FOR A TEXT THAT NEVER COMES.
+
+       The broadcast is the first answer and it is not a complete one. A
+       one-time code arriving from an ordinary mobile number is the textbook
+       shape of a smishing attempt and carriers filter exactly that; the phone
+       reported `status = 1 (Ok)` for all three recipients and one of them
+       received nothing at all. A phone with no service does the same.
+
+       So the code is here too. Shown only when there is a live one, and never
+       without its age — a code on its own is a code somebody types at nine
+       minutes old and blames the machine for. The minute is Eastern, because
+       the people reading this are not all in it. #}
+    <div class="codecard" id="codecard" hidden>
+      <span class="codecap">{{ t('code.latest') }}</span>
+      <span class="codedigits" id="code-digits"></span>
+      <span class="codeage" id="code-age"></span>
+    </div>
   </div>
 
   <footer>
@@ -2078,6 +2115,9 @@
     signSendAgain: {{ t('sign.send_again')|tojson }},
     signEmpty:   {{ t('signature.empty')|tojson }},
     signLockLapsed: {{ t('sign.lock_lapsed')|tojson }},
+    codeJustNow: {{ t('code.just_now')|tojson }},
+    codeAgoOne:  {{ t('code.ago_one')|tojson }},
+    codeAgoMany: {{ t('code.ago_many')|tojson }},
     codeSending: {{ t('code.sending')|tojson }},
     codeSent:    {{ t('code.sent')|tojson }},
     codeNone:    {{ t('code.none')|tojson }},
