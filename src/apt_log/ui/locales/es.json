@@ -28,6 +28,7 @@
  "code.nobody": "Todavía no hay nadie configurado para recibir el código.",
  "code.none": "No hay ningún código reciente en el teléfono. Empiece a iniciar sesión y vuelva a pulsar aquí.",
  "code.send": "Envíenme el código de acceso",
+ "code.send_short": "Enviar",
  "code.sending": "Leyendo los mensajes del teléfono…",
  "code.sent": "Código enviado a {n} de {of} teléfonos. Revise sus mensajes.",
  "common.no": "No",

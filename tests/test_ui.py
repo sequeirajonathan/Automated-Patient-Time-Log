@@ -4397,3 +4397,133 @@ class TestCopyingTheSignInCode:
                     encoding="utf-8"))
             for key in ("code.copy", "code.copied", "code.copy_failed"):
                 assert key in cat, f"{lang} is missing {key}"
+
+
+class TestTheCodeAndItsButtonAreOneSlot:
+    """The home screen was crowded, and this was most of it.
+
+    A full-width "Text me the sign-in code" button AND a four-line card
+    stacked under it came to roughly 190px on the one screen whose job is to
+    show the next visit — reported as content being pushed out of reach.
+
+    They are the same feature in two states, and there is never a live code
+    and no live code at the same moment, so exactly one of them is on the page
+    at a time.
+    """
+
+    def _js(self) -> str:
+        return strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+
+    def _html(self) -> str:
+        return Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+
+    def test_showing_the_card_hides_the_button(self):
+        js = self._js()
+        assert "function showCodeAs(" in js
+        body = js.split("function showCodeAs(", 1)[1].split("\n  }", 1)[0]
+        assert "card.hidden = !hasCode" in body
+        assert "btn.hidden = !!hasCode" in body
+
+    def test_both_states_go_through_that_one_function(self):
+        """A second place hiding the code card is how the button and the card
+        end up on screen together again — `refreshCode` must ask, not set.
+
+        Scoped to `refreshCode` rather than the whole file: `paintAfter` hides
+        a different card entirely, and a guard that cannot tell two cards
+        apart forbids the page having two.
+        """
+        body = self._js().split("function refreshCode(", 1)[1].split(
+            "\n  }", 1)[0]
+        assert "card.hidden" not in body
+        assert body.count("showCodeAs(") == 2
+
+    def test_the_button_is_what_shows_with_no_code(self):
+        """With nothing to display, "send the latest one" is the only thing
+        left that can help — and it is what the page looks like before the
+        first fetch answers, so it is not hidden in the markup."""
+        html = self._html()
+        assert '<button class="fullbtn" id="btn-code" type="button">' in html
+
+    def test_a_failed_poll_leaves_the_card_alone(self):
+        """Hiding on a dropped request takes a live code off the page from
+        somebody halfway through reading it."""
+        js = self._js()
+        after = js.split("function refreshCode(", 1)[1]
+        assert ".catch(() => {})" in after.split("\n  }", 1)[0]
+
+    def test_the_card_still_carries_a_way_to_send(self):
+        """The full-width button is gone while the card is up, so the card
+        has to keep the broadcast reachable."""
+        html = self._html()
+        assert 'id="btn-code-again"' in html
+        assert "code.send_short" in html
+
+    def test_both_send_controls_share_one_handler(self):
+        """Two copies of a fetch that texts three real people is two places
+        for the disable-while-running guard to be forgotten in."""
+        js = self._js()
+        assert "function broadcastCode(" in js
+        assert js.count("'/code/broadcast'") == 1
+        assert "['btn-code', 'btn-code-again']" in js
+
+    def test_the_press_that_ran_is_the_press_re_enabled(self):
+        """Re-enabling a fixed id would leave whichever control was actually
+        pressed disabled for good."""
+        js = self._js()
+        body = js.split("function broadcastCode(", 1)[1].split("\n    }", 1)[0]
+        assert "pressed.disabled = true" in body
+        assert "pressed.disabled = false" in body
+
+    def test_the_digits_stay_a_full_size_target(self):
+        """Smaller type must not mean a smaller thing to hit: 44px is the
+        tap size the rest of this page holds to."""
+        html = self._html()
+        block = html.split(".codedigits {", 1)[1].split("}", 1)[0]
+        assert "min-height:44px" in block
+
+    def test_the_short_caption_exists_in_both_languages(self):
+        import json
+
+        for code in ("en", "es"):
+            catalogue = json.loads(
+                Path(f"src/apt_log/ui/locales/{code}.json").read_text(
+                    encoding="utf-8"))
+            assert catalogue["code.send_short"].strip()
+
+
+class TestThePencilOnlyWhereThereIsSomethingToSign:
+    """It stood in the toolbar on every screen in both apps.
+
+    Most of the time it opened a pad onto a page with nothing to draw on: the
+    strokes went in, "Draw it on the phone" replayed them, and the answer came
+    back "this screen has no signature box". A control that is present
+    everywhere and works in one place teaches that it does not work.
+    """
+
+    def _js(self) -> str:
+        return strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+
+    def test_it_is_gated_on_a_drawing_surface(self):
+        assert "signBtn.hidden = !meta.canvas || onLauncher" in self._js()
+
+    def test_it_is_the_same_fact_step_two_uses(self):
+        """`meta.canvas` is what the app-side button row already gates on, so
+        the pencil and those buttons appear together rather than one of them
+        arriving early."""
+        app = Path("src/apt_log/ui/app.py").read_text(encoding="utf-8")
+        assert '"canvas": bool(screen_doc.get("canvas")' in app
+
+    def test_it_starts_hidden_in_the_markup(self):
+        """Shown-then-hidden flashes it into the toolbar on first paint."""
+        html = Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+        assert '<button id="btn-sign" hidden' in html
+
+    def test_the_drawn_canvas_is_still_a_way_in(self):
+        """Her eye is already on the box; tapping it must keep opening the
+        pad, or gating the toolbar button would strand her."""
+        js = self._js()
+        assert "closest('[data-sign]')" in js

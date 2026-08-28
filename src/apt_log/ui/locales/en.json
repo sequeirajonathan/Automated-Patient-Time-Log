@@ -28,6 +28,7 @@
  "code.nobody": "Nobody is set up to receive the code yet.",
  "code.none": "No recent sign-in code on the phone. Start a sign-in first, then press this again.",
  "code.send": "Text me the sign-in code",
+ "code.send_short": "Text it",
  "code.sending": "Reading the phone's messages…",
  "code.sent": "Code sent to {n} of {of} phones. Check your messages.",
  "common.no": "No",

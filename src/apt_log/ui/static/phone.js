@@ -588,6 +588,23 @@
     const checksBtn = document.getElementById('btn-checks');
     if (checksBtn) checksBtn.hidden = !meta.checks_app || onLauncher;
 
+    // THE PENCIL IS FOR A SIGNATURE SCREEN, AND ONLY A SIGNATURE SCREEN.
+    //
+    // It stood in the toolbar on every screen in both apps, so most of the
+    // time it opened a pad onto a page with nothing to draw on: her strokes
+    // went into the sheet, "Draw it on the phone" replayed them at a screen
+    // with no canvas, and the answer came back "this screen has no signature
+    // box". A control that is present everywhere and works in one place
+    // teaches that it does not work.
+    //
+    // `meta.canvas` is the same fact step two already gates on — a drawing
+    // surface in front, drawn sideways — so the pencil and the app-side
+    // buttons appear and disappear together rather than one of them arriving
+    // early. The canvas drawn into the page stays a second way in: she can
+    // still tap the box itself, which is where her eye already is.
+    const signBtn = document.getElementById('btn-sign');
+    if (signBtn) signBtn.hidden = !meta.canvas || onLauncher;
+
     // The large title names what is actually in front: the screen's own
     // nav-bar title, else the app the *phone* is showing — never the last
     // tile pressed, which is how the launcher got rendered under a header
@@ -1023,13 +1040,30 @@
     }).catch(() => toast(i18n.codeCopyFailed || ''));
   }
 
+  // ONE OF THE TWO, NEVER BOTH.
+  //
+  // The card and the full-width Send button are the same feature in two
+  // states, and having them stacked was most of what made the home screen
+  // crowded. There is never a live code and no live code at once, so exactly
+  // one of them is on the page at any moment.
+  //
+  // The button is the fallback rather than the card: with no code to show,
+  // "send the latest one" is the only thing left that can help, and it is
+  // also what the page looks like before the first fetch answers.
+  function showCodeAs(hasCode) {
+    const card = document.getElementById('codecard');
+    const btn = document.getElementById('btn-code');
+    if (card) card.hidden = !hasCode;
+    if (btn) btn.hidden = !!hasCode;
+  }
+
   function refreshCode() {
     const card = document.getElementById('codecard');
     if (!card) return;
     fetch('/code/latest')
       .then((r) => (r.ok ? r.json() : { found: false }))
       .then((d) => {
-        if (!d.found) { card.hidden = true; return; }
+        if (!d.found) { showCodeAs(false); return; }
         const digits = document.getElementById('code-digits');
         const age = document.getElementById('code-age');
         // textContent, never innerHTML — this is read off a phone's inbox.
@@ -1040,8 +1074,11 @@
             : codeAgeSays(d.age);
         }
         card.classList.toggle('stale', (d.age || 0) >= CODE_STALE);
-        card.hidden = false;
+        showCodeAs(true);
       })
+      // A failed poll leaves whatever is on screen alone. Hiding the card on
+      // a dropped request would take a live code off the page from somebody
+      // mid-way through reading it.
       .catch(() => {});
   }
 
@@ -1469,9 +1506,12 @@
     const digits = document.getElementById('code-digits');
     if (digits) digits.addEventListener('click', copyCode);
 
-    const code = document.getElementById('btn-code');
-    if (code) code.addEventListener('click', () => {
-      code.disabled = true;
+    // The same broadcast from either control — the full-width button when
+    // there is no code to show, the small one inside the card when there is.
+    // One function, because two copies of a fetch that texts three people is
+    // two places for the disable-while-running guard to be forgotten in.
+    function broadcastCode(pressed) {
+      pressed.disabled = true;
       busy(i18n.codeSending || '');
       fetch('/code/broadcast', { method: 'POST' })
         .then(async (r) => {
@@ -1488,8 +1528,12 @@
                      .replace('{of}', out.of));
         })
         .catch(() => { unbusy(); toast(i18n.codeFailed || ''); })
-        .then(() => { code.disabled = false; });
-    });
+        .then(() => { pressed.disabled = false; });
+    }
+    for (const id of ['btn-code', 'btn-code-again']) {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('click', () => broadcastCode(el));
+    }
     // Back to Home, in the same place and with the same chevron the screen
     // view puts its way back — one habit rather than two.
     const back = document.getElementById('btn-sched-home');

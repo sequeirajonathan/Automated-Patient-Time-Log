@@ -1247,31 +1247,54 @@
      read at arm's length by somebody who cannot sign in. Tabular figures so
      six digits are six even columns, and generous tracking so a 6 and an 8
      cannot be confused at a glance. */
-  .codecard { margin-top:14px; border-radius:16px; padding:14px 16px;
+  /* TWO LINES, WHERE THERE WERE FIVE.
+     A full-width Send plus a four-line card came to about 190px on the one
+     screen whose job is the next visit — reported as the home screen being
+     crowded and its content pushed out of reach. The card is now the digits
+     with a small Send beside them, and one meta line under both; and it takes
+     the Send button's place rather than sitting beneath it, because there is
+     never a live code and no live code at the same time. */
+  .codecard { margin-top:14px; border-radius:16px; padding:10px 14px 9px;
               background:var(--card); border:1px solid var(--line);
-              display:flex; flex-direction:column; align-items:center;
-              gap:3px; }
+              display:flex; flex-direction:column; gap:2px; }
   .codecard[hidden] { display:none; }
-  .codecap { font-size:11px; letter-spacing:.09em; text-transform:uppercase;
+  .codemain { display:flex; align-items:center; gap:10px; }
+  .codecap { font-size:10.5px; letter-spacing:.09em; text-transform:uppercase;
              color:var(--muted); }
   /* A button that looks like the number, because the number is the target.
-     44px min-height is the tap size the rest of this page holds to. */
-  .codedigits { font:inherit; font-size:38px; font-weight:700;
-                letter-spacing:.16em; font-variant-numeric:tabular-nums;
-                line-height:1.15; color:var(--ink); background:none;
-                border:none; padding:4px 10px; min-height:44px; cursor:pointer;
+     44px min-height is the tap size the rest of this page holds to, and it is
+     what keeps this row honest at 30px type: the digits are smaller than they
+     were and the thing a thumb has to hit is not. */
+  .codedigits { flex:1; text-align:left; font:inherit; font-size:30px;
+                font-weight:700;
+                letter-spacing:.14em; font-variant-numeric:tabular-nums;
+                line-height:1.1; color:var(--ink); background:none;
+                border:none; padding:2px 6px; min-height:44px; cursor:pointer;
                 border-radius:10px; }
   .codedigits:active { background:var(--bg); }
   .codedigits:focus-visible { outline:2px solid var(--accent);
                               outline-offset:2px; }
+  /* The broadcast, still reachable while the card stands in for its button.
+     Quiet: the code is already on screen, so sending it is the second thing
+     she wants here, not the first. */
+  .codesend { flex:none; font:inherit; font-size:13px; font-weight:600;
+              color:var(--tint); background:var(--tint-soft); border:none;
+              border-radius:10px; padding:0 13px; min-height:38px;
+              cursor:pointer; }
+  .codesend:active { filter:brightness(.94); }
+  .codesend[disabled] { opacity:.45; }
   /* Says the digits are pressable. Without it a number on a card reads as a
      label and nobody touches it. */
-  .codehint { font-size:11px; color:var(--muted); }
+  .codehint { font-size:10.5px; color:var(--muted); }
   .codecard.copied .codehint { color:var(--accent); font-weight:600; }
   /* The age turns amber as the code ages out, because "6 minutes ago" read
      quickly looks the same as "1 minute ago". */
-  .codeage { font-size:13px; color:var(--muted); }
+  .codeage { font-size:11.5px; color:var(--muted); }
   .codecard.stale .codeage { color:#b45309; font-weight:600; }
+  /* The three of them on one line, separated rather than stacked. `wrap` so a
+     long Spanish age string on a narrow phone drops instead of overflowing. */
+  .codemeta { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 8px;
+              padding:0 6px; }
   .adopted { margin:0 0 14px; }
   .adopted[hidden] { display:none; }
   .adopted-label { display:block; font-size:12px; color:var(--muted);
@@ -1548,6 +1571,23 @@
        It sends; it does not display. The digits go to the three phones and
        never into this page — a code on screen is a code in the next
        screenshot. #}
+    {# ONE ROW FOR THE CODE, NOT TWO BLOCKS.
+
+       This was a full-width Send button AND a four-line card stacked under
+       it — about a hundred and ninety pixels of a screen whose whole job is
+       to show the next visit. Reported as the home screen being crowded, with
+       the content below it pushed out of reach.
+
+       So the two collapse into one control that swaps with itself. There is
+       never a live code AND no live code, so there is never a reason for both
+       to be on the page:
+
+         no live code  →  the Send button, full width, exactly as before
+         live code     →  the card, one row: digits · age · Send
+
+       The digits stay large — this is read at arm's length by somebody who
+       cannot sign in — and everything that was a line of its own becomes part
+       of the row beneath them. #}
     <button class="fullbtn" id="btn-code" type="button">
       {{ t('code.send') }}</button>
 
@@ -1564,15 +1604,27 @@
        minutes old and blames the machine for. The minute is Eastern, because
        the people reading this are not all in it. #}
     <div class="codecard" id="codecard" hidden>
-      <span class="codecap">{{ t('code.latest') }}</span>
-      {# A BUTTON, because it does something. The digits are what she reaches
-         for, so the digits are the target — not a separate copy icon beside
-         them that has to be aimed at. Typing six digits into another phone
-         while reading them off this one is where a 6 becomes an 8. #}
-      <button type="button" class="codedigits" id="code-digits"
-              aria-label="{{ t('code.copy') }}"></button>
-      <span class="codeage" id="code-age"></span>
-      <span class="codehint">{{ t('code.copy') }}</span>
+      <div class="codemain">
+        {# A BUTTON, because it does something. The digits are what she reaches
+           for, so the digits are the target — not a separate copy icon beside
+           them that has to be aimed at. Typing six digits into another phone
+           while reading them off this one is where a 6 becomes an 8. #}
+        <button type="button" class="codedigits" id="code-digits"
+                aria-label="{{ t('code.copy') }}"></button>
+        {# The same broadcast the button above performs, kept reachable while
+           the card has taken its place. Small, because a code that is already
+           on screen is usually enough. #}
+        <button type="button" class="codesend" id="btn-code-again">
+          {{ t('code.send_short') }}</button>
+      </div>
+      {# What used to be three stacked lines. One line, read left to right,
+         in the order it matters: what this is, how old it is, what pressing
+         it does. #}
+      <div class="codemeta">
+        <span class="codecap">{{ t('code.latest') }}</span>
+        <span class="codeage" id="code-age"></span>
+        <span class="codehint">{{ t('code.copy') }}</span>
+      </div>
     </div>
   </div>
 
@@ -1663,7 +1715,10 @@
          <circle cx="16.5" cy="16.5" r="5"/>
          <path d="M16.5 14v2.6l1.8 1.1"/></svg>
       </button>
-      <button id="btn-sign" aria-label="{{ t('sign.button') }}">
+      {# Hidden until a drawing surface is actually in front — see the note in
+         phone.js. Starts hidden rather than shown-then-hidden, so it does not
+         flash into the toolbar on first paint and vanish a tick later. #}
+      <button id="btn-sign" hidden aria-label="{{ t('sign.button') }}">
         <svg class="tool" viewBox="0 0 24 24" fill="none" stroke="currentColor"
              stroke-width="1.9"><path d="M4 20c1.5-.5 2.5-1 3.5-2L19 6.5a2.1 2.1 0 0 0-3-3L4.5 15c-1 1-1.5 2-2 3.5z"/><path d="M13.5 6.5l3 3"/></svg>
       </button>
