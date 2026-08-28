@@ -605,6 +605,13 @@
     const signBtn = document.getElementById('btn-sign');
     if (signBtn) signBtn.hidden = !meta.canvas || onLauncher;
 
+    // Whose pad this is. Kept as state rather than read at press time: the
+    // sheet can be open while the screen underneath changes, and the name on
+    // the heading has to change with it.
+    signerNamed = meta.signer || '';
+    signerAdopted = meta.signer_adopted || '';
+    markSigner();
+
     // The large title names what is actually in front: the screen's own
     // nav-bar title, else the app the *phone* is showing — never the last
     // tile pressed, which is how the launcher got rendered under a header
@@ -1090,6 +1097,12 @@
   //
   // What crosses the wire is a NAME. The strokes stay on the Pi, so this
   // screen can put somebody's signature in front of them and cannot obtain it.
+  // Whose pad is in front, as the app itself names it, and which adopted
+  // party that resolves to. Both come from the screen push; both are "" on
+  // every screen that is not a signature pad.
+  let signerNamed = '';
+  let signerAdopted = '';
+
   function renderAdopted(parties) {
     const wrap = document.getElementById('sign-adopted');
     const row = document.getElementById('sign-adopted-row');
@@ -1106,6 +1119,46 @@
       row.appendChild(b);
     }
     wrap.hidden = !row.children.length;
+    markSigner();
+  }
+
+  // THE APP SAYS WHOSE SIGNATURE IT IS ASKING FOR, SO THE PAD SAYS IT TOO.
+  //
+  // inMyTeam's exit is two identical pads back to back — the patient's, then
+  // the caregiver's — and until now the sheet looked the same on both. A row
+  // of names with nothing marking which one this screen wants is how the
+  // wrong person's signature goes onto a visit record.
+  //
+  // It MARKS; it does not press, and it does not pick on her behalf. Every
+  // adopted party stays on the row and stays pressable, because REQ-10.6a
+  // rests on the press belonging to the person it belongs to — and because a
+  // match this got wrong must be correctable by the person looking at it.
+  //
+  // The matching is the server's (`enrolled.who_signs`): it is tolerant of a
+  // middle initial and of case, and it returns NOTHING when more than one
+  // party could be meant. This file only compares two strings it was handed.
+  function markSigner() {
+    const row = document.getElementById('sign-adopted-row');
+    const heading = document.getElementById('sign-whose');
+    if (heading) {
+      // textContent: the app's own rendering of somebody's legal name.
+      heading.textContent = signerNamed
+        ? (i18n.signWhose || '').replace('{who}', signerNamed) : '';
+      heading.hidden = !signerNamed;
+    }
+    if (!row) return;
+    // Only when the server resolved exactly one party. Without it every pill
+    // stays filled, which is an honest picture of two people who could sign;
+    // with it the one this screen asked for is the only filled one.
+    row.classList.toggle('aimed', !!signerAdopted);
+    for (const b of row.children) {
+      const mine = !!signerAdopted && b.dataset.name === signerAdopted;
+      b.classList.toggle('primary', mine);
+      // Said out loud as well as drawn, because the difference between the
+      // two buttons is which person's signature goes on a legal record.
+      if (mine) b.setAttribute('aria-current', 'true');
+      else b.removeAttribute('aria-current');
+    }
   }
 
   function loadAdopted() {

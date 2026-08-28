@@ -1303,3 +1303,55 @@ def execute(payload: dict, status_path: Path | None = None) -> Status:
              len(strokes or []), shape or "-",
              float(payload.get("aspect") or 0), placed[0])
     return status
+
+
+# ---------------------------------------------------------------- who signs
+# THE APP SAYS WHOSE SIGNATURE IT IS ASKING FOR, and until now nobody read it.
+#
+# inMyTeam's exit is three steps, and two of them are signature pads back to
+# back: `Paso 2 de 3` for the patient, `Paso 3 de 3` for the caregiver. They
+# are the same screen, the same canvas and the same buttons — the ONLY thing
+# distinguishing them is the title bar, which carries the signer's name.
+#
+# Today there is one inMyTeam patient, so "the patient" and "her" are the two
+# possibilities and either could be guessed at. That stops being true the
+# moment a second patient is onboarded, and the failure it produces is the
+# worst one this feature has: an adopted signature applied under the wrong
+# person's name, on a record an auditor reads.
+#
+# So the name is taken from the screen rather than inferred from the step, and
+# the step counter is not used at all. A caption is a fact; "step 2 is always
+# the patient" is a convention the app can change in an update.
+#
+# THE WORD ORDER IS THE APP'S OWN and it is broken: it renders *Firma de
+# «name»* as `«NAME» Firma de`, with the name as the PREFIX. Both orders are
+# accepted because the correct one is one bug-fix release away, and a build
+# that fixed it would otherwise silently stop naming anybody.
+_SIGNS_FOR = ("firma de", "signature of", "firma del", "firma de la")
+
+
+def signer_named(doc: dict) -> str:
+    """Whose signature this screen is asking for, or "".
+
+    "" is a real answer and the common one: every screen that is not a
+    signature pad, and any pad whose title this does not recognise. The caller
+    treats it as "say nothing", never as "assume the patient" — a wrong name
+    here is worse than no name, because the whole point of reading it is to
+    stop somebody's signature going on under another person's heading.
+    """
+    for entry in (doc.get("statics") or []):
+        text = (entry.get("txt") or "").strip()
+        if not text or len(text) > 120:
+            continue
+        low = text.casefold()
+        for marker in _SIGNS_FOR:
+            at = low.find(marker)
+            if at < 0:
+                continue
+            # Whichever side the name is on. The app puts it before today.
+            name = (text[:at] or text[at + len(marker):]).strip(" \t:·-–—,")
+            # A title that is ONLY the phrase names nobody, and a remainder
+            # with no letter in it is punctuation, not a person.
+            if name and any(c.isalpha() for c in name):
+                return name
+    return ""

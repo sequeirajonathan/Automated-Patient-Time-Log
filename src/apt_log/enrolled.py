@@ -237,3 +237,60 @@ def record_use(name: str, digest: str, package: str = "",
         # not take the signature down with it — the two people are standing
         # there and the screen is in front of them.
         log.warning("could not record the signing (%s)", exc)
+
+
+# ------------------------------------------------------- matching the screen
+# THE APP'S NAME AND THE ADOPTED NAME ARE NOT THE SAME STRING, and requiring
+# them to be would make this feature useless on the one case it exists for.
+#
+# The app renders a legal name off an agency record — "LUCRESIA L PUPO" — and
+# the adoption is typed into a phone by somebody standing in a living room,
+# who writes what they call her. Case, accents and a middle initial should not
+# decide whether her own signature is offered to her.
+#
+# WHAT IS NOT TOLERATED IS AMBIGUITY. Every loosening here is a step toward
+# putting one person's signature under another person's name, on a record an
+# auditor reads, so the rule is deliberately conservative in the one direction
+# that matters: more than one candidate returns NOTHING. A caregiver being
+# shown no suggestion loses a tap; a caregiver being shown the wrong one loses
+# the trail.
+_INITIAL = 1
+
+
+def _tokens(name: str) -> set:
+    """Significant parts of a name, folded. Initials are not significant."""
+    return {p for p in key(name).split(" ") if len(p) > _INITIAL}
+
+
+def matches(screen_name: str, adopted_name: str) -> bool:
+    """Whether these two strings plausibly name one person.
+
+    Neither side is treated as authoritative: the app may carry more of the
+    name than the adoption does ("LUCRESIA L PUPO" against "Lucresia Pupo") or
+    less. So the SHORTER significant set has to sit entirely inside the longer
+    one — every word the shorter name uses is a word the longer name agrees
+    with — which rejects two people who merely share a surname while accepting
+    the same person written two ways.
+    """
+    a, b = _tokens(screen_name), _tokens(adopted_name)
+    if not a or not b:
+        return False
+    short, long = (a, b) if len(a) <= len(b) else (b, a)
+    return short <= long
+
+
+def who_signs(screen_name: str, path: Path | None = None) -> str:
+    """The adopted party this screen is asking for, or "".
+
+    Returns the roster's OWN spelling, so the caller can point at a button by
+    the name printed on it rather than by the app's version of it.
+
+    "" for no match and "" for more than one, deliberately conflated: both
+    mean "do not put a signature in front of anybody", and a caller that told
+    them apart would be a caller tempted to pick one.
+    """
+    if not (screen_name or "").strip():
+        return ""
+    hits = [e["name"] for e in roster(path)
+            if e.get("name") and matches(screen_name, e["name"])]
+    return hits[0] if len(hits) == 1 else ""

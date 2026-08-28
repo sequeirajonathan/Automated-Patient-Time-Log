@@ -4527,3 +4527,77 @@ class TestThePencilOnlyWhereThereIsSomethingToSign:
         pad, or gating the toolbar button would strand her."""
         js = self._js()
         assert "closest('[data-sign]')" in js
+
+
+class TestThePadNamesWhoIsSigning:
+    """Two identical pads, back to back, and the sheet looked the same on both.
+
+    inMyTeam's exit asks the patient first and the caregiver second. Same
+    canvas, same buttons; the app names the signer in its title bar and
+    nothing was reading it. A row of adopted names with nothing marking which
+    one this screen wants is how somebody's signature goes onto another
+    person's record.
+    """
+
+    def _js(self) -> str:
+        return strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+
+    def _html(self) -> str:
+        return Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+
+    def test_the_socket_carries_both_answers(self):
+        """What the APP said, and which roster entry that resolves to. They
+        answer different questions: one is a heading, one marks a button."""
+        app = Path("src/apt_log/ui/app.py").read_text(encoding="utf-8")
+        assert '"signer": _signer' in app
+        assert 'enrolled.who_signs(_signer)' in app
+
+    def test_the_matching_is_not_done_in_the_browser(self):
+        """Tolerance for a middle initial belongs in one tested place, and
+        that place refuses to answer when two parties could be meant."""
+        js = self._js()
+        assert "normalize(" not in js.split("function markSigner(", 1)[1][:800]
+        assert "b.dataset.name === signerAdopted" in js
+
+    def test_it_marks_and_does_not_press(self):
+        """REQ-10.6a rests on the press belonging to the party it belongs to.
+        Nothing here may apply a signature."""
+        body = self._js().split("function markSigner(", 1)[1].split(
+            "\n  }", 1)[0]
+        assert "applyAdopted" not in body
+        assert "click()" not in body
+
+    def test_every_party_stays_pressable(self):
+        """A match this got wrong has to be correctable by the person looking
+        at it, so nothing is disabled and nothing is removed."""
+        body = self._js().split("function markSigner(", 1)[1].split(
+            "\n  }", 1)[0]
+        assert "disabled" not in body
+        assert "remove()" not in body
+
+    def test_the_row_falls_back_to_even_handed(self):
+        """With no resolved party every pill stays filled — an honest picture
+        of two people who could sign. `aimed` is what changes that."""
+        assert "row.classList.toggle('aimed', !!signerAdopted)" in self._js()
+        html = self._html()
+        assert ".adopted-row.aimed button {" in html
+        assert ".adopted-row.aimed button.primary {" in html
+
+    def test_the_heading_is_said_in_both_languages(self):
+        import json
+
+        for code in ("en", "es"):
+            catalogue = json.loads(
+                Path(f"src/apt_log/ui/locales/{code}.json").read_text(
+                    encoding="utf-8"))
+            assert "{who}" in catalogue["sign.whose"]
+
+    def test_the_name_goes_in_as_text(self):
+        """It is the app's rendering of somebody's legal name, arriving over a
+        socket and going onto a page."""
+        body = self._js().split("function markSigner(", 1)[1].split(
+            "\n  }", 1)[0]
+        assert "heading.textContent" in body
+        assert "innerHTML" not in body

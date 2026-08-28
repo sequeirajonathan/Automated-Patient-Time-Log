@@ -1442,3 +1442,65 @@ class TestTheWalkerKeepsOffAReplay:
             body = source[source.index(name):]
             body = body[:body.index("\n    def ", 10)]
             assert "sign_mod.in_flight()" in body, name
+
+
+class TestWhoseSignatureThisScreenWants:
+    """The app says it, and until now nobody read it.
+
+    inMyTeam's exit puts two signature pads back to back — `Paso 2 de 3` for
+    the patient, `Paso 3 de 3` for the caregiver. Same canvas, same buttons,
+    same everything except the title bar, which carries the signer's name.
+
+    With one inMyTeam patient that could be guessed at. With two it cannot,
+    and the failure it produces is the worst this feature has: an adopted
+    signature applied under the wrong person's name, on a record an auditor
+    reads.
+    """
+
+    def doc(self, *lines):
+        return {"statics": [{"txt": t} for t in lines]}
+
+    def test_the_apps_own_broken_word_order(self):
+        """It renders *Firma de «name»* as `«NAME» Firma de` — the name is the
+        PREFIX. Read off the live handset."""
+        assert sign.signer_named(
+            self.doc("Paso 2 de 3", "MARIA X GARCIA Firma de")) == \
+            "MARIA X GARCIA"
+
+    def test_the_order_a_bug_fix_would_produce(self):
+        """Accepted too. A release that fixed the concatenation would
+        otherwise silently stop naming anybody."""
+        assert sign.signer_named(self.doc("Firma de Ana Ruiz")) == "Ana Ruiz"
+
+    def test_english_says_it_too(self):
+        assert sign.signer_named(
+            self.doc("Signature of Ana Ruiz")) == "Ana Ruiz"
+
+    def test_an_ordinary_screen_names_nobody(self):
+        assert sign.signer_named(self.doc("Visitas", "Hoy", "Mis Viajes")) == ""
+
+    def test_the_phrase_alone_names_nobody(self):
+        """A title that is only the words is not a person, and returning the
+        empty string is what stops the pad claiming one."""
+        assert sign.signer_named(self.doc("Firma de")) == ""
+
+    def test_punctuation_is_not_a_person(self):
+        assert sign.signer_named(self.doc("— Firma de")) == ""
+
+    def test_a_paragraph_is_not_a_title(self):
+        """A consent blurb mentioning the phrase must not be mistaken for the
+        title bar. Length is the cheap discriminator and the bar is short."""
+        long = ("Al continuar usted acepta que la firma de la persona que "
+                "recibe el servicio se registre electronicamente conforme a "
+                "las normas del programa y de la agencia correspondiente.")
+        assert sign.signer_named(self.doc(long)) == ""
+
+    def test_the_first_naming_caption_wins(self):
+        """One screen, one signer. Two captions is a screen this does not
+        understand, and taking the first is at least deterministic."""
+        got = sign.signer_named(self.doc("Ana Ruiz Firma de",
+                                         "Firma de Beto Sosa"))
+        assert got == "Ana Ruiz"
+
+    def test_no_statics_is_not_an_error(self):
+        assert sign.signer_named({}) == ""

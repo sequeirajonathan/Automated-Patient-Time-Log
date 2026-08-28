@@ -254,3 +254,76 @@ class TestTheRoutes:
         r = client.post("/signature/forget", json={"name": "Carmen Villalon"})
         assert r.json()["ok"] is True
         assert enrolled.strokes_for("Carmen Villalon", path=store) is None
+
+
+class TestMatchingTheScreenToTheRoster:
+    """The app's name and the adopted name are not the same string.
+
+    The app renders a legal name off an agency record; the adoption is typed
+    into a phone by somebody standing in a living room. Case, accents and a
+    middle initial must not decide whether a person's own signature is offered
+    to them — and nothing looser than that, because every loosening is a step
+    toward one person's signature going under another person's name.
+    """
+
+    def test_a_middle_initial_does_not_break_it(self):
+        assert enrolled.matches("MARIA X GARCIA", "Maria Garcia")
+
+    def test_case_and_accents_do_not_break_it(self):
+        assert enrolled.matches("ANA RUÍZ", "ana ruiz")
+
+    def test_a_shared_surname_is_not_a_match(self):
+        """Two people in one household is the ordinary case here, not an
+        exotic one."""
+        assert not enrolled.matches("JUAN PEREZ", "Ana Perez")
+
+    def test_a_different_person_is_not_a_match(self):
+        assert not enrolled.matches("MARIA GARCIA", "Beto Sosa")
+
+    def test_either_side_may_carry_more_of_the_name(self):
+        """Neither the app nor the adoption is authoritative about how much
+        of somebody's name gets written down."""
+        assert enrolled.matches("MARIA GARCIA", "Maria Garcia Lopez")
+        assert enrolled.matches("Maria Garcia Lopez", "MARIA GARCIA")
+
+    def test_an_empty_side_matches_nothing(self):
+        assert not enrolled.matches("", "Maria Garcia")
+        assert not enrolled.matches("Maria Garcia", "")
+
+    def test_initials_alone_are_not_a_name(self):
+        """"M X" against "Maria Garcia" would otherwise pass on an empty
+        significant set."""
+        assert not enrolled.matches("M X", "Maria Garcia")
+
+
+class TestWhoSignsResolvesToOneOrNobody:
+    def _enrol(self, tmp_path, *names):
+        store = tmp_path / "sig.json"
+        for n in names:
+            enrolled.enroll(n, INK, witness=WITNESS, path=store)
+        return store
+
+    def test_one_candidate_returns_the_rosters_own_spelling(self, tmp_path):
+        """So the caller can point at a button by the name printed on it,
+        not by the app's version of it."""
+        store = self._enrol(tmp_path, "Maria Garcia")
+        assert enrolled.who_signs("MARIA X GARCIA", path=store) == \
+            "Maria Garcia"
+
+    def test_two_candidates_return_nobody(self, tmp_path):
+        """Ambiguity is the one thing not tolerated: showing no suggestion
+        costs a tap, showing the wrong one costs the trail."""
+        store = self._enrol(tmp_path, "Maria Garcia", "Maria Garcia Lopez")
+        assert enrolled.who_signs("MARIA GARCIA", path=store) == ""
+
+    def test_no_candidate_returns_nobody(self, tmp_path):
+        store = self._enrol(tmp_path, "Maria Garcia")
+        assert enrolled.who_signs("Beto Sosa", path=store) == ""
+
+    def test_an_unnamed_screen_returns_nobody(self, tmp_path):
+        store = self._enrol(tmp_path, "Maria Garcia")
+        assert enrolled.who_signs("", path=store) == ""
+
+    def test_an_empty_roster_returns_nobody(self, tmp_path):
+        assert enrolled.who_signs("MARIA GARCIA",
+                                  path=tmp_path / "none.json") == ""

@@ -1377,6 +1377,11 @@ async def live(ws: WebSocket):
         chosen = normalise(ws.headers.get("accept-language"))
     t = Translator(chosen)
 
+    # Local, like every other heavy import in this file: `sign` pulls in the
+    # replay machinery and `enrolled` opens the adopted-signature store, and
+    # neither belongs in the import cost of serving a page.
+    from apt_log import enrolled, sign
+
     frame_path = state_mod.STATE_DIR / "frame.json"
     screen_path = state_mod.STATE_DIR / "screen.json"
     last: dict = {}
@@ -1422,6 +1427,10 @@ async def live(ws: WebSocket):
             if screen_doc is not None and _render_key(screen_doc) != last.get("screen_doc"):
                 last["screen_doc"] = _render_key(screen_doc)
                 model = _screen_model(screen_doc)
+                # Read once: it walks the statics, and the roster lookup below
+                # reads a file. Both are cheap and neither is free, and this
+                # runs on every screen change.
+                _signer = sign.signer_named(screen_doc)
                 payload["screen"] = {
                     "id": screen_doc.get("id", ""),
                     "name": screen_doc.get("screen", "unknown"),
@@ -1442,6 +1451,25 @@ async def live(ws: WebSocket):
                     # off this screen there is nothing to press.
                     "canvas": bool(screen_doc.get("canvas")
                                    and screen_doc.get("landscape")),
+                    # WHOSE SIGNATURE THIS SCREEN IS ASKING FOR.
+                    #
+                    # inMyTeam's exit puts two identical pads back to back —
+                    # the patient's, then the caregiver's — and the only thing
+                    # telling them apart is the title bar, which names the
+                    # signer. With one inMyTeam patient that could be guessed
+                    # at; with two it could not, and the failure is somebody's
+                    # signature recorded under another person's name.
+                    #
+                    # Two values, because they answer two different questions.
+                    # `signer` is what the APP says, shown as a heading so the
+                    # person about to press knows whose pad this is. `adopted`
+                    # is which entry in the roster that resolves to, computed
+                    # here rather than in the browser: the tolerance lives in
+                    # one tested place, and it returns nothing at all when
+                    # more than one party could be meant.
+                    "signer": _signer,
+                    "signer_adopted": (enrolled.who_signs(_signer)
+                                       if _signer else ""),
                     # WHETHER THE LEGACY COORDINATE PAIR CAN PRESS ANYTHING.
                     #
                     # It presses a point derived from the canvas on a page the

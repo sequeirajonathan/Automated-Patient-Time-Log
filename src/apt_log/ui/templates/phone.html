@@ -1309,6 +1309,22 @@
                         font-size:15px; font-weight:600; text-align:center;
                         white-space:normal; }
   .adopted-row button:disabled { opacity:.45; cursor:default; }
+  /* WHEN THE SCREEN NAMES ONE OF THEM, THE OTHERS STAND DOWN.
+     Every pill is filled by default and that is right when nothing is known:
+     two equally-weighted names is an honest picture of two people who could
+     sign. It stops being right the moment the app has said which pad this is
+     — then two identical pills are two identical chances of putting somebody
+     else's signature on a visit record.
+     `aimed` is set only when the server matched exactly one party, so a
+     screen it could not resolve falls back to the old, even-handed row. The
+     unmatched names stay pressable: a match this got wrong has to be
+     correctable by the person looking at it. */
+  .adopted-row.aimed button { background:var(--tint-soft); color:var(--tint); }
+  .adopted-row.aimed button.primary { background:var(--accent); color:#fff; }
+  /* Whose pad this is, in the app's own words, above the row. */
+  .signwhose { margin:0 0 10px; font-size:13.5px; line-height:1.35;
+               color:var(--ink); }
+  .signwhose[hidden] { display:none; }
   .adoptwrap { margin-top:14px; text-align:center; }
   .adoptform { margin-top:10px; text-align:left; padding:14px;
                border-radius:14px; background:var(--bg);
@@ -1946,6 +1962,15 @@
      is not the thing they came here for. Each button carries the party's own
      name, because a row of identical "Sign" buttons is how the wrong person's
      signature gets applied. Hidden entirely when nobody has adopted one. #}
+  {# WHOSE PAD THIS IS, IN THE APP'S OWN WORDS.
+
+     inMyTeam's exit puts two identical signature screens back to back — the
+     patient's, then the caregiver's — and this sheet looked the same on both.
+     The app names the signer in its title bar and nothing was reading it.
+
+     Filled from the screen push, never typed here, and empty on every screen
+     that is not a pad. #}
+  <p class="signwhose" id="sign-whose" hidden></p>
   <div class="adopted" id="sign-adopted" hidden>
     <span class="adopted-label">{{ t('sign.adopted_label') }}</span>
     <div class="adopted-row" id="sign-adopted-row"></div>
@@ -2201,6 +2226,7 @@
     adoptNeedWitness: {{ t('sign.adopt_need_witness')|tojson }},
     adoptSaved: {{ t('sign.adopt_saved')|tojson }},
     adoptGone: {{ t('sign.adopt_gone')|tojson }},
+    signWhose: {{ t('sign.whose')|tojson }},
     live:    {{ t('papp.live')|tojson }},
     syncing: {{ t('papp.syncing')|tojson }},
     webTitle: {{ t('papp.web')|tojson }},

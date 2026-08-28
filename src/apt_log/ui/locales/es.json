@@ -375,6 +375,7 @@
  "sign.step_draw": "Firme aquí",
  "sign.step_phone": "Luego termine en el teléfono",
  "sign.wait_phone": "Su firma se está dibujando en el teléfono. Estos botones vuelven cuando termine.",
+ "sign.whose": "Esta pantalla pide la firma de {who}.",
  "sign.wrong_app": "El teléfono no está mostrando una de las aplicaciones de cuidado, así que no se dibujó nada.",
  "signature.brush": "Grosor del trazo",
  "signature.clear": "Borrar",
