@@ -1338,10 +1338,9 @@ def _wipe_the_canvas(driver, xml: str, placed) -> bool:
         # draw over whatever was there; that is still what happens, and the
         # log is what tells us it happened.
         log.warning("could not clear the canvas first (%s)", exc)
-        placed[0] += " cleared=err"
+        placed[0] += " clear=err"
         return False
     time.sleep(CLEAR_SETTLE)
-    placed[0] += " cleared=1"
     return True
 
 
@@ -1407,10 +1406,14 @@ def execute(payload: dict, status_path: Path | None = None) -> Status:
         # Only on her press. This runs inside a replay she asked for, which is
         # already a request to put a specific signature on that canvas; it is
         # never on a timer and never on arrival at the screen.
-        _wipe_the_canvas(driver, xml, placed)
+        wiped = _wipe_the_canvas(driver, xml, placed)
         paths = build_paths(strokes, bounds, payload.get("aspect", 1.0),
                             rotate=sideways(xml, package))
-        placed[0] = " canvas=%s boxes=%s" % (
+        # ASSIGNED, NOT APPENDED, and the wipe writes to the same buffer three
+        # lines above — so its `cleared=` marker was being thrown away before
+        # anybody read it. The one line that says whether the canvas was
+        # emptied first, and it was the line that could not say it.
+        placed[0] = (" cleared=%d" % int(bool(wiped))) + " canvas=%s boxes=%s" % (
             bounds,
             ";".join("%d,%d-%d,%d" % (min(x for x, _ in pth),
                                       min(y for _, y in pth),

@@ -1566,12 +1566,22 @@ class TestTheReplayClearsBeforeItDraws:
         d.tap.side_effect = RuntimeError("gone")
         placed = [""]
         assert sign._wipe_the_canvas(d, self.PAD + self.CLEAR, placed) is False
-        assert "cleared=err" in placed[0]
+        assert "clear=err" in placed[0]
 
-    def test_it_is_recorded(self):
-        placed = [""]
-        sign._wipe_the_canvas(self._driver(), self.PAD + self.CLEAR, placed)
-        assert "cleared=1" in placed[0]
+    def test_whether_it_cleared_survives_into_the_log(self):
+        """It did not. `execute` ASSIGNS to the same buffer the wipe appends
+        to, three lines later — so the one marker saying the canvas had been
+        emptied was thrown away before anybody could read it, on the exact
+        line written to answer that question.
+        """
+        from pathlib import Path
+
+        body = Path("src/apt_log/sign.py").read_text(
+            encoding="utf-8").split("def execute(", 1)[1]
+        wipe = body.index("_wipe_the_canvas(")
+        assign = body.index("placed[0] = ")
+        assert wipe < assign, "the wipe still runs before the buffer is reset"
+        assert "cleared=%d" in body[assign:assign + 400]
 
     def test_the_replay_wipes_before_it_builds_paths(self):
         """Order is the whole point: a clear that arrives after the ink is a
