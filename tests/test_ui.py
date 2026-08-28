@@ -4931,11 +4931,16 @@ class TestRegisteringASignatureIsItsOwnSheet:
                        "sign-appbtns", "sign-legacyrow", "sign-hint"):
             assert absent not in sheet, absent
 
-    def test_it_asks_for_the_two_things_the_requirement_needs(self):
-        """REQ-10.6a: whose signature it is, and who watched it drawn."""
+    def test_it_asks_for_the_one_thing_the_requirement_needs(self):
+        """Whose signature it is. That is the whole of what has to be typed.
+
+        It asked for a witness too, until the field was removed: in front of a
+        patient it put a question whose answer was always the same two people,
+        and a box filled in the same way every time is not a record. The date
+        is kept by the machine and never typed."""
         sheet = self._sheet()
         assert 'id="enrol-name"' in sheet
-        assert 'id="enrol-witness"' in sheet
+        assert "witness" not in sheet
 
     def test_the_name_is_editable(self):
         """The schedule's spelling is the right default because it is what
@@ -4990,11 +4995,13 @@ class TestRegisteringASignatureIsItsOwnSheet:
         assert "pad.strokes = []" in body
         assert "classList.remove('enrolling')" in body
 
-    def test_the_witness_does_not_carry_over(self):
-        """Who watched one person sign is not who watched the next."""
-        body = self._js().split("function closeEnrol(", 1)[1].split(
-            "\n  }", 1)[0]
-        assert "witness.value = ''" in body
+    def test_nothing_of_the_witness_field_is_left_behind(self):
+        """Removed, not hidden: a field still in the markup is a field that
+        comes back the next time somebody restyles the sheet."""
+        html = self._html()
+        assert 'id="enrol-witness"' not in html
+        assert 'id="adopt-witness"' not in html
+        assert "sign.adopt_witness" not in html
 
     def test_every_word_of_it_is_translated(self):
         import json

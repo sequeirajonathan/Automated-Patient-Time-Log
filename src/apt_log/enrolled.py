@@ -33,9 +33,16 @@ The portal asks "apply Carmen's signature" by name; the lookup and the replay
 both happen on the Pi. A stolen portal session can ask for a signature to be
 drawn on the phone in the room; it cannot walk away with the signature.
 
-**Enrolment is witnessed and recorded.** A signature is adopted only with an
-explicit statement of who was present, and the record keeps that with the date.
-An adoption nobody can account for later is worth less than no adoption.
+**Enrolment is dated and recorded.** Every adoption keeps the date it was
+made, and every application afterwards keeps its own.
+
+This condition used to demand more: a typed sentence naming who was present,
+refused if it was missing. The owner of the requirement removed it — the field
+asked, in front of a patient, a question whose answer was always the same two
+people, and a box somebody fills in the same way every time is not a record of
+anything. What is kept is what the machine actually knows: when it happened,
+whose it is, and every use of it afterwards. An honest empty field beats an
+attestation nobody meant.
 
 **Every application is audited.** Who, when, on which app, with the digest of
 what was drawn. This is the trail that answers an auditor, and it is the whole
@@ -69,10 +76,11 @@ STORE_PATH = Path("/etc/aptlog/signatures.json")
 # signature it can reproduce.
 STORE_MODE = 0o600
 
-# What an adoption must say about itself before it is written. Not a checkbox
-# in a template — a sentence the person doing the enrolling types, naming who
-# was present. "Consent recorded" with nothing behind it is not a record.
-MIN_WITNESS = 4
+# Kept as a FIELD and no longer as a demand. Adoptions already written carry
+# the sentence that was typed at the time, and the roster still shows it, so
+# the column cannot be deleted without losing what those records say. New
+# adoptions simply leave it empty rather than being refused for it — see the
+# note in the module docstring for why the demand went.
 
 _SPACE = re.compile(r"\s+")
 
@@ -118,17 +126,19 @@ def enroll(name: str, strokes, aspect: float = 1.0, witness: str = "",
            path: Path | None = None) -> str:
     """Adopt a signature for `name`. Returns its digest.
 
-    Refuses a payload that is not signature-shaped (the same check the live
-    replay uses, so nothing can be enrolled that could not be drawn) and
-    refuses an adoption that does not say who was present.
+    Refuses a payload that is not signature-shaped — the same check the live
+    replay uses, so nothing can be enrolled that could not be drawn — and
+    refuses one that belongs to nobody.
+
+    `witness` is optional and still stored. It stopped being required when the
+    field asking for it was taken off the sheet; adoptions made before that
+    carry what was typed then, and this keeps writing whatever it is given.
     """
     display = _SPACE.sub(" ", (name or "").strip())
     if not display:
         raise ValueError("a signature belongs to somebody")
     if not sign_mod.validate(strokes):
         raise ValueError("that is not a signature")
-    if len((witness or "").strip()) < MIN_WITNESS:
-        raise ValueError("an adoption has to say who was present")
 
     doc = _read(path)
     digest = sign_mod.digest(strokes)
@@ -137,7 +147,7 @@ def enroll(name: str, strokes, aspect: float = 1.0, witness: str = "",
         "strokes": strokes,
         "aspect": float(aspect or 1.0),
         "digest": digest,
-        "witness": witness.strip(),
+        "witness": (witness or "").strip(),
         "at": datetime.now().astimezone().isoformat(),
     }
     _write(doc, path)

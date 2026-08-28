@@ -387,8 +387,16 @@ approval rests on, not implementation detail:
    with both parties present; the script drives up to the signature screen and stops.
 2. **The strokes never leave the device.** No route, response or log returns them. The
    portal asks by name; the lookup and the replay both happen on the Pi.
-3. **Adoption is witnessed and dated**, with a written statement of who was present.
+3. **Adoption is dated**, and the date is kept with the adoption.
 4. **Every application is recorded** — who, when, which app, and the digest.
+
+Condition 3 originally demanded a written statement of who was present, refused if it was
+missing. The owner of this requirement removed it: the field asked, in front of a patient,
+a question whose answer was always the same two people, and a box filled in the same way
+every time is not a record of anything. What is kept is what the machine actually knows —
+whose signature it is, when it was adopted, and every application of it afterwards. The
+`witness` field survives in the store and the roster still shows it, so adoptions made
+before the change keep saying what they said.
 
 Storage is `/etc/aptlog/signatures.json`, 0600, removed by `sanitize-for-image.sh`. It is
 more sensitive than the schedule, which merely names people; this reproduces their

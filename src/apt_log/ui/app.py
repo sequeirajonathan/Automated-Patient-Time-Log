@@ -2063,10 +2063,13 @@ def signature_map():
 async def signature_enroll(request: Request):
     """Adopt a signature for one party, in person.
 
-    Drawn once by its owner on the portal's own pad, with a witness named.
-    Everything about this is deliberate and slow — it is the moment the
+    Drawn once by its owner on the portal's own pad. It is the moment the
     agency's approval actually rests on, and it happens with both people
     sitting down, not against a clock.
+
+    `witness` is accepted and no longer required — the field asking for it
+    came off the sheet, and the store keeps whatever it is given so adoptions
+    made before that keep saying what they said. See REQ-10.6a.
     """
     from apt_log import enrolled as enrolled_mod
 

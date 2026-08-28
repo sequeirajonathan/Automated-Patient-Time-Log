@@ -2088,9 +2088,9 @@
   {# ADOPTION HAPPENS WHERE THE DRAWING ALREADY HAPPENS.
 
      A separate settings page would mean the patient signing in one place and
-     the adoption being recorded in another, which is how a witness line ends
-     up guessed at afterwards. Here, the strokes on the pad above are the ones
-     being adopted, and the person who drew them is in the room.
+     the adoption being recorded in another. Here, the strokes on the pad
+     above are the ones being adopted, and the person who drew them is in the
+     room — which is the whole of what makes this moment the right one.
 
      Deliberately unhurried — two written fields and a confirm — because this
      is the moment the agency's approval actually rests on. REQ-10.6a. #}
@@ -2101,9 +2101,6 @@
       <p class="adopthint">{{ t('sign.adopt_hint') }}</p>
       <label class="adoptlabel" for="adopt-name">{{ t('sign.adopt_who') }}</label>
       <input type="text" id="adopt-name" autocomplete="off" spellcheck="false">
-      <label class="adoptlabel" for="adopt-witness">
-        {{ t('sign.adopt_witness') }}</label>
-      <input type="text" id="adopt-witness" autocomplete="off">
       <button type="button" id="adopt-save" class="primary">
         {{ t('sign.adopt_save') }}</button>
     </div>
@@ -2274,8 +2271,8 @@
    showed the finished ones could never tell you what was left.
 
    It does not draw anything. Adopting still means the pad, the person, and a
-   witness: this view carries the name across so nobody types it twice, and
-   REQ-10.6a is untouched. #}
+   the person drawing it: this view carries the name across so nobody types
+   it twice, and REQ-10.6a is untouched. #}
 <div class="view" id="signaturesview">
   <header class="hdr">
     <div class="hdr-row">
@@ -2323,9 +2320,6 @@
     <button type="button" id="enrol-clear" class="padtool">
       {{ t('sign.erase') }}</button>
   </div>
-  <label class="adoptlabel" for="enrol-witness">
-    {{ t('sign.adopt_witness') }}</label>
-  <input type="text" id="enrol-witness" autocomplete="off">
   <button type="button" id="enrol-save" class="signsend">
     {{ t('sign.adopt_save') }}</button>
   <button type="button" id="enrol-cancel" class="padtool enrolcancel">
@@ -2386,7 +2380,6 @@
     codeNobody:  {{ t('code.nobody')|tojson }},
     codeFailed:  {{ t('code.failed')|tojson }},
     adoptNeedName: {{ t('sign.adopt_need_name')|tojson }},
-    adoptNeedWitness: {{ t('sign.adopt_need_witness')|tojson }},
     adoptSaved: {{ t('sign.adopt_saved')|tojson }},
     adoptGone: {{ t('sign.adopt_gone')|tojson }},
     signWhose: {{ t('sign.whose')|tojson }},

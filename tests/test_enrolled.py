@@ -83,19 +83,41 @@ class TestAdoptingASignature:
 
 
 class TestAnAdoptionSaysWhoWasThere:
-    def test_it_refuses_without_a_witness(self, store):
-        with pytest.raises(ValueError):
-            enrolled.enroll("Carmen Villalon", INK, witness="", path=store)
+    """What an adoption has to say about itself, and what it no longer must.
 
-    def test_a_token_word_is_not_a_witness(self, store):
-        with pytest.raises(ValueError):
-            enrolled.enroll("Carmen Villalon", INK, witness="ok", path=store)
+    Condition 3 of REQ-10.6a once demanded a typed statement of who was
+    present, refused if it was missing. The owner of the requirement removed
+    it: the field asked, in front of a patient, a question whose answer was
+    always the same two people, and a box filled in the same way every time is
+    not a record of anything.
 
-    def test_the_witness_is_kept_with_the_date(self, store):
+    So the demand is gone and the DATE is not — nor is the audit of every
+    later use, which is the part that actually answers an auditor. These tests
+    hold the new line rather than being deleted with the old one: a condition
+    that was dropped on purpose should still have a test saying so.
+    """
+
+    def test_no_witness_is_no_longer_a_refusal(self, store):
+        enrolled.enroll("Carmen Villalon", INK, witness="", path=store)
+        assert enrolled.enrolled("Carmen Villalon", path=store)
+
+    def test_it_can_be_left_out_entirely(self, store):
+        """The client stopped sending the field at all when it came off the
+        sheet, so absent and empty must behave alike."""
+        enrolled.enroll("Carmen Villalon", INK, path=store)
+        assert enrolled.roster(path=store)[0]["witness"] == ""
+
+    def test_the_date_is_still_kept(self, store):
+        """The condition that survived. An adoption with no date is one
+        nobody can place in time, and that one does matter."""
+        enrolled.enroll("Carmen Villalon", INK, path=store)
+        assert enrolled.roster(path=store)[0]["at"]
+
+    def test_an_older_adoption_keeps_what_it_said(self, store):
+        """The field survives in the store and the roster still shows it, so
+        adoptions made before the change do not quietly lose their sentence."""
         enrolled.enroll("Carmen Villalon", INK, witness=WITNESS, path=store)
-        row = enrolled.roster(path=store)[0]
-        assert row["witness"] == WITNESS
-        assert row["at"]
+        assert enrolled.roster(path=store)[0]["witness"] == WITNESS
 
     def test_only_a_signature_can_be_adopted(self, store):
         """The same shape check the live replay uses, so nothing can be
@@ -232,12 +254,16 @@ class TestTheRoutes:
         assert seen["strokes"] == INK
         assert seen["aspect"] == pytest.approx(2.2)
 
-    def test_enrolling_without_a_witness_is_a_four_hundred(self, client,
-                                                           store, monkeypatch):
+    def test_enrolling_without_a_witness_is_accepted_now(self, client, store,
+                                                         monkeypatch):
+        """It used to be a 400. The field came off the sheet, so the client
+        stopped sending it — and a route still refusing would mean every
+        registration failing at the last press."""
         monkeypatch.setattr(enrolled, "STORE_PATH", store)
         r = client.post("/signature/enroll",
                         json={"name": "Carmen Villalon", "strokes": INK})
-        assert r.status_code == 400
+        assert r.status_code == 200
+        assert enrolled.enrolled("Carmen Villalon", path=store)
 
     def test_enrolling_junk_is_a_four_hundred(self, client, store,
                                               monkeypatch):

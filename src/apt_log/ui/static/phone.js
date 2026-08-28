@@ -752,7 +752,7 @@
   // phone" and a step two about an app that was not open — reported as
   // exactly that.
   //
-  // `#enrolpad` is the registration one: a name, a pad, a witness, save. No
+  // `#enrolpad` is the registration one: a name, a pad, save. No
   // phone, no replay, no step two.
   //
   // The drawing machinery is shared because drawing is drawing — the same
@@ -1268,10 +1268,11 @@
         : (i18n.sigMissing || '');
       meta.appendChild(state);
       // What else is true about the row, in one line: which apps will put
-      // this person in front of a pad, who witnessed the adoption, and
-      // whether the adoption is filed under a different spelling than the
-      // schedule uses — which is worth saying, because that difference is
-      // exactly what the matcher had to be tolerant of.
+      // this person in front of a pad, whether the adoption is filed under
+      // a different spelling than the schedule uses — which is worth saying,
+      // because that difference is exactly what the matcher had to be
+      // tolerant of — and the witness line, on the older records that still
+      // carry one.
       const bits = [];
       if (p.apps && p.apps.length) bits.push(p.apps.join(' · '));
       if (!p.on_schedule) bits.push(i18n.sigNotScheduled || '');
@@ -1288,7 +1289,7 @@
       row.appendChild(grow);
 
       // ONE BUTTON, AND IT DOES NOT DRAW ANYTHING. Adoption still means the
-      // pad, the person and a witness; this only carries the name across so
+      // pad and the person; this only carries the name across so
       // nobody types it twice and so the adoption lands under the spelling
       // the schedule uses.
       const b = document.createElement('button');
@@ -1363,10 +1364,16 @@
   //   * the check-out pad, straight after the patient has drawn one for real;
   //   * the registration sheet, sat down with them ahead of a visit.
   //
-  // Two copies of this fetch would be two places for the witness check, the
-  // empty-pad check and the refresh afterwards to drift apart, on the one
-  // feature where the refusals ARE the requirement (REQ-10.6a).
-  function postEnrolment(name, witness, done) {
+  // Two copies of this fetch would be two places for the empty-pad check and
+  // the refresh afterwards to drift apart, on a feature whose refusals are
+  // the requirement (REQ-10.6a).
+  // NO WITNESS FIELD. It asked, in front of a patient, a question whose answer
+  // was always the same two people — and a box filled in the same way every
+  // time is not a record of anything. Removed on the owner's instruction; the
+  // date, the name and the audit of every later use are what is kept, and an
+  // honest empty field beats an attestation nobody meant. The server no longer
+  // refuses an adoption for the want of one.
+  function postEnrolment(name, done) {
     if (!name.trim()) { toast(i18n.adoptNeedName || ''); return; }
     if (!pad.strokes.length) { toast(i18n.signEmpty || ''); return; }
     const rect = padCanvas().getBoundingClientRect();
@@ -1374,14 +1381,10 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: name.trim(), strokes: pad.strokes,
-                             aspect: rect.width / rect.height,
-                             witness: witness.trim() })
+                             aspect: rect.width / rect.height })
     }).then(async (r) => {
       if (!r.ok) {
-        // The server refuses an adoption that does not say who was present,
-        // and that refusal is the requirement rather than a validation nicety
-        // — so it gets its own sentence rather than a generic failure.
-        toast((r.status === 400 ? i18n.adoptNeedWitness : i18n.failed) || '');
+        toast(i18n.failed || '');
         return;
       }
       toast(i18n.adoptSaved || '');
@@ -1396,7 +1399,6 @@
 
   function adoptSave() {
     postEnrolment((document.getElementById('adopt-name') || {}).value || '',
-                  (document.getElementById('adopt-witness') || {}).value || '',
                   () => {
                     const form = document.getElementById('sign-adopt');
                     if (form) form.hidden = true;
@@ -1408,15 +1410,12 @@
   // waiting on the canvas.
   function enrolSave() {
     postEnrolment((document.getElementById('enrol-name') || {}).value || '',
-                  (document.getElementById('enrol-witness') || {}).value || '',
                   closeEnrol);
   }
 
   function closeEnrol() {
     body.classList.remove('enrolling');
     pad.strokes = [];
-    const witness = document.getElementById('enrol-witness');
-    if (witness) witness.value = '';
   }
 
   // -------------------------------------------------------------------- relay
