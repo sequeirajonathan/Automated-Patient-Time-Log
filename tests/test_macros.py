@@ -4345,3 +4345,83 @@ class TestNoMacroReferencesANameThatDoesNotExist:
             assert not missing, (
                 f"{node.name} references undefined name(s): {sorted(missing)}")
         assert checked >= 10, f"only checked {checked} macros"
+
+
+class TestSigningInMyTeamOut:
+    """Driven against a fake driver, because the two bugs this macro shipped
+    with were both invisible without one.
+
+    The first was a NameError — closed statically by
+    TestNoMacroReferencesANameThatDoesNotExist. The second was a TypeError:
+    `_tap_element` takes a DICT read out of the published tree and indexes
+    `element["b"]`, while `_the_drawer` and `_words` hand back Appium
+    WebElements. Nothing catches that but calling it.
+    """
+
+    class _El:
+        def __init__(self, name="el"):
+            self.name = name
+            self.clicked = 0
+
+        def is_displayed(self):
+            return True
+
+        def click(self):
+            self.clicked += 1
+
+    def _driver(self, drawer=True, row=True, signs_out=True):
+        drawer_el, row_el = self._El("drawer"), self._El("row")
+        state = {"out": False}
+
+        class D:
+            current_package = "com.inmyteam.inmyteam"
+
+            def find_elements(self, how, query):
+                if "content-desc" in query and "navegación" in query:
+                    return [drawer_el] if drawer else []
+                if "Cerrar sesi" in query or "Sign out" in query:
+                    return [row_el] if row else []
+                if "EditText" in query:
+                    return [self_el] if state["out"] else []
+                if "Comenzar" in query or "Get Started" in query:
+                    return [self_el] if state["out"] else []
+                return []
+
+        self_el = self._El("field")
+        d = D()
+        row_el.click = lambda: (state.__setitem__("out", signs_out),
+                                setattr(row_el, "clicked", row_el.clicked + 1))
+        return d, drawer_el, row_el
+
+    def test_it_presses_the_drawer_then_the_sign_out(self, monkeypatch):
+        driver, drawer_el, row_el = self._driver()
+        monkeypatch.setattr(macros, "_freshen", lambda *a, **k: True)
+        macros._inmyteam_sign_out(driver, lambda _s: None)
+        assert drawer_el.clicked == 1
+        assert row_el.clicked == 1
+
+    def test_no_drawer_anywhere_is_a_refusal(self, monkeypatch):
+        """A blind press in a navigation list is how the wrong menu item
+        gets chosen."""
+        driver, _, _ = self._driver(drawer=False)
+        monkeypatch.setattr(macros, "_freshen", lambda *a, **k: True)
+        monkeypatch.setattr(macros, "_back_to_the_drawer", lambda *a, **k: None)
+        with pytest.raises(RuntimeError, match="drawer"):
+            macros._inmyteam_sign_out(driver, lambda _s: None)
+
+    def test_a_drawer_with_no_sign_out_on_it_is_a_refusal(self, monkeypatch):
+        driver, _, _ = self._driver(row=False)
+        monkeypatch.setattr(macros, "_freshen", lambda *a, **k: True)
+        monkeypatch.setattr(macros, "wait_for", lambda *a, **k: False)
+        with pytest.raises(RuntimeError, match="sign-out"):
+            macros._inmyteam_sign_out(driver, lambda _s: None)
+
+    def test_it_is_not_believed_until_the_app_asks_again(self, monkeypatch):
+        """The drawer row vanishing proves the drawer closed, nothing more."""
+        driver, _, _ = self._driver(signs_out=False)
+        monkeypatch.setattr(macros, "_freshen", lambda *a, **k: True)
+        real_wait = macros.wait_for
+        monkeypatch.setattr(macros, "wait_for",
+                            lambda p, **k: real_wait(p, timeout=0.2, poll=0.05))
+        with pytest.raises(RuntimeError, match="still signed in"):
+            macros._inmyteam_sign_out(driver, lambda _s: None)
