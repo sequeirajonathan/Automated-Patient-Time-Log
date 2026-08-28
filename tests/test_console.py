@@ -307,6 +307,12 @@ class TestOperations:
             "restart_phone", "update_app", "update_hhax_uma",
             "update_mobile_caregiver", "update_inmyteam",
             "inmyteam_resend_code",
+            # Signing out takes a working app and makes it not work. Getting
+            # back in needs a carrier, a code, and a screen to type it into —
+            # and the 5am arm depends on that recovery landing. It exists to
+            # test the sign-in walk with, which is exactly the kind of button
+            # that gets pressed by somebody exploring the console.
+            "inmyteam_sign_out",
             # Writes an EVV record asserting a caregiver was at a patient's
             # home. From the portal it looks like every other button on the
             # page and it is not one of them. The SCHEDULER does not come
