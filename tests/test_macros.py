@@ -4677,3 +4677,89 @@ class TestTheAppsOwnReasonIsQuoted:
 
         assert macros._why_no_code(Broken()) == (
             "the app did not ask for a code")
+
+
+class TestTheVerifyButtonIsFoundWhereItActuallyIs:
+    """The locator contradicted its own docstring, and always returned None.
+
+    `_verify_button`'s docstring said — accurately — that "the control is a
+    clickable View carrying its caption in a child". The XPath beneath it then
+    asked the CLICKABLE node for text it does not have. So the button was
+    never found and never pressed: the walk typed the right code, waited for
+    the app to stop asking, and reported "the code was typed and the app is
+    still asking" with nothing having submitted it.
+
+    It hid because None was a documented answer ("pressing Enter on the field
+    submits too"), so a lookup that always failed read as a screen without a
+    button. `send_keys` sends no Enter.
+    """
+
+    class _Node:
+        def __init__(self, text, area, children=()):
+            self.text = text
+            self._area = area
+            self.children = children
+
+        @property
+        def rect(self):
+            return {"width": self._area, "height": 1}
+
+        def is_displayed(self):
+            return True
+
+    class _Driver:
+        """Answers the two XPath shapes this project uses, and no others.
+
+        Deliberately literal: a fake that matches any xpath would have passed
+        the broken locator too, which is how the bug reached the phone.
+        """
+
+        def __init__(self, nodes):
+            self.nodes = nodes
+
+        def find_elements(self, how, what):
+            hits = []
+            for node in self.nodes:
+                own = f'contains(@text,"{node.text}")' in what
+                child = any(f'.//*[contains(@text,"{c.text}")' in what
+                            or f'contains(@text,"{c.text}")' in what
+                            for c in node.children)
+                if own or child:
+                    hits.append(node)
+            return hits
+
+    def _screen(self):
+        """The live code screen: a big page root holding the heading, and a
+        small clickable whose caption is a child TextView."""
+        N = self._Node
+        caption = N("Verificar", 1)
+        button = N("", 100, children=[caption])
+        root = N("", 100000, children=[N("Verifique Su Cuenta", 1), caption])
+        return self._Driver([root, button])
+
+    def test_the_button_is_found(self):
+        assert macros._verify_button(self._screen()) is not None
+
+    def test_it_is_the_button_and_not_the_page(self):
+        found = macros._verify_button(self._screen())
+        assert found.rect["width"] == 100, "matched the page root, not the button"
+
+    def test_the_captions_are_cased_as_the_screen_cases_them(self):
+        """`_words` does no case folding. A lowercase list here matches
+        nothing on a screen that says "Verificar"."""
+        assert macros._VERIFY_WORDS == ("Verificar", "Verify")
+
+    def test_no_button_still_means_none(self):
+        """A screen that genuinely has none — the caller treats that as
+        'typed, now see whether it stopped asking', which is correct."""
+        empty = self._Driver([])
+        assert macros._verify_button(empty) is None
+
+    def test_the_locator_does_not_ask_a_clickable_for_a_childs_text(self):
+        """The shape of the original bug, guarded directly: any lookup for
+        these captions must consider descendants."""
+        from conftest import strip_py_comments
+
+        source = strip_py_comments(
+            Path("src/apt_log/macros.py").read_text(encoding="utf-8"))
+        assert 'translate(@text,"VERIFYCA"' not in source

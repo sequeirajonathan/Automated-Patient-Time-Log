@@ -2148,29 +2148,37 @@ def _code_box(driver):
 
 
 # What the button says, in the two languages this phone is ever in. Read off
-# the live screen: inMyTeam labels it "Verify", with "Call" beneath it as a
-# separate row — which is why this matches the word and not merely a button
-# near the bottom of the screen.
-_VERIFY_WORDS = ("verify", "verificar")
+# the live screen: inMyTeam labels it "Verify" / "Verificar", with "Call" /
+# "Llama" beneath it as a separate row — which is why this matches the word
+# and not merely a button near the bottom of the screen.
+_VERIFY_WORDS = ("Verificar", "Verify")
 
 
 def _verify_button(driver):
     """inMyTeam's own Verify, or None.
 
-    None is a real answer, not a failure: on the live screen the control is a
-    clickable View carrying its caption in a child, and pressing Enter on the
-    field submits too. The caller treats a missing button as "typed, now see
-    whether it stopped asking" rather than as an error.
+    THIS DOCSTRING DESCRIBED THE SCREEN CORRECTLY AND THE CODE BELOW IT DID
+    NOT. It said, accurately, that "the control is a clickable View carrying
+    its caption in a child" — and then matched `@clickable="true" AND
+    contains(@text, …)`, which asks the clickable node for text it does not
+    have. The button was never found and never pressed. The walk typed the
+    right code, waited for the app to stop asking, and reported "the code was
+    typed and the app is still asking", because nothing had submitted it.
+
+    It survived because None was a documented answer — "pressing Enter on the
+    field submits too" — so a locator that ALWAYS returned None looked like a
+    screen without a button rather than a broken lookup. `send_keys` sends no
+    Enter.
+
+    So it uses `_words`, which is the project's answer to exactly this and was
+    written for exactly this reason: match the caption wherever it hangs, and
+    take the SMALLEST clickable that contains it, so an English heading of
+    "Verify Your Account" yields the button and not the whole page.
+
+    None is still a real answer — a screen that genuinely has no button — and
+    the caller still treats it as "typed, now see whether it stopped asking".
     """
-    lowered = " ".join(
-        f'contains(translate(@text,"VERIFYCA","verifyca"),"{word}")'
-        for word in _VERIFY_WORDS)
-    try:
-        found = driver.find_elements(
-            "xpath", f'//*[@clickable="true" and ({lowered})]')
-    except Exception:  # noqa: BLE001
-        return None
-    return found[0] if found else None
+    return _words(driver, *_VERIFY_WORDS)
 
 
 # --------------------------------------------------------------- operations
