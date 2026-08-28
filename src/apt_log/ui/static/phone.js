@@ -1168,6 +1168,104 @@
       .catch(() => {});
   }
 
+  // ------------------------------------------------- the mapping (REQ-10.6a)
+  // WHO WILL BE ASKED TO SIGN, AND WHO IS NOT SET UP YET.
+  //
+  // Adoption used to happen in one place only — inside the pad, which opens
+  // on a signature screen — so the question worth asking BEFORE a visit had
+  // nowhere to be asked: is this patient set up, or do we find out standing in
+  // her living room?
+  //
+  // Built from the schedule rather than from the store, because the roster
+  // answers the wrong half: it lists who HAS adopted, and a list of the
+  // finished ones can never tell you what is left.
+  function renderMap(people) {
+    const list = document.getElementById('sigmap-list');
+    const empty = document.getElementById('sigmap-empty');
+    const count = document.getElementById('sigmap-count');
+    if (count) {
+      const have = (people || []).filter((p) => p.adopted).length;
+      // Drawn even at zero: nought of three is the reading worth seeing.
+      count.textContent = people && people.length
+        ? have + '/' + people.length : '';
+    }
+    if (!list) return;
+    list.textContent = '';
+    for (const p of (people || [])) {
+      if (!p || !p.name) continue;
+      const row = document.createElement('div');
+      row.className = 'sigrow ' + (p.adopted ? 'has' : 'none')
+        + (p.on_schedule ? '' : ' stray');
+
+      const grow = document.createElement('div');
+      grow.className = 'grow';
+      const who = document.createElement('div');
+      who.className = 'who';
+      // textContent everywhere below: these are patients' names.
+      who.textContent = p.name;
+      grow.appendChild(who);
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      const state = document.createElement('span');
+      state.className = 'state';
+      state.textContent = p.adopted ? (i18n.sigOnFile || '')
+        : (i18n.sigMissing || '');
+      meta.appendChild(state);
+      // What else is true about the row, in one line: which apps will put
+      // this person in front of a pad, who witnessed the adoption, and
+      // whether the adoption is filed under a different spelling than the
+      // schedule uses — which is worth saying, because that difference is
+      // exactly what the matcher had to be tolerant of.
+      const bits = [];
+      if (p.apps && p.apps.length) bits.push(p.apps.join(' · '));
+      if (!p.on_schedule) bits.push(i18n.sigNotScheduled || '');
+      if (p.adopted && p.adopted_as && p.adopted_as !== p.name) {
+        bits.push((i18n.sigFiledAs || '').replace('{as}', p.adopted_as));
+      }
+      if (p.witness) bits.push(p.witness);
+      if (bits.length) {
+        const rest = document.createElement('span');
+        rest.textContent = ' · ' + bits.join(' · ');
+        meta.appendChild(rest);
+      }
+      grow.appendChild(meta);
+      row.appendChild(grow);
+
+      // ONE BUTTON, AND IT DOES NOT DRAW ANYTHING. Adoption still means the
+      // pad, the person and a witness; this only carries the name across so
+      // nobody types it twice and so the adoption lands under the spelling
+      // the schedule uses.
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = p.adopted ? (i18n.sigReplace || '') : (i18n.sigAdopt || '');
+      b.dataset.adoptFor = p.name;
+      row.appendChild(b);
+      list.appendChild(row);
+    }
+    if (empty) empty.hidden = !!list.children.length;
+  }
+
+  function loadMap() {
+    fetch('/signature/map')
+      .then((r) => (r.ok ? r.json() : { people: [] }))
+      .then((d) => renderMap(d.people))
+      .catch(() => {});
+  }
+
+  // From a row to the pad, with the name already in the box. The pad is
+  // where an adoption has to happen — the strokes being adopted are the ones
+  // on that canvas, drawn by the person in the room — so this opens it and
+  // fills the field, and stops there.
+  function adoptFrom(name) {
+    const form = document.getElementById('sign-adopt');
+    const field = document.getElementById('adopt-name');
+    if (field) field.value = name || '';
+    if (form) form.hidden = false;
+    body.classList.add('signing');
+    padFit();
+  }
+
   function applyAdopted(name) {
     if (!driving() || !name) return;
     busy(i18n.signSending || '');
@@ -1218,6 +1316,10 @@
       if (form) form.hidden = true;
       toast(i18n.adoptSaved || '');
       loadAdopted();
+      // And the mapping, which is now one person further along. Without this
+      // the front page's count keeps saying what it said before the adoption
+      // that just happened in front of two people.
+      loadMap();
     }).catch(() => toast(i18n.failed || ''));
   }
 
@@ -1595,6 +1697,23 @@
     if (arm) arm.addEventListener('click', () => view('arm'));
     const armBack = document.getElementById('btn-arm-home');
     if (armBack) armBack.addEventListener('click', () => view('launcher'));
+
+    // Adopted signatures. Read on the way in as well as at boot: an adoption
+    // made on the pad while this view was closed has to be reflected the next
+    // time it opens, or the count on the front page lies about who is set up.
+    loadMap();
+    const sigs = document.getElementById('btn-signatures');
+    if (sigs) sigs.addEventListener('click', () => { loadMap(); view('signatures'); });
+    const sigBack = document.getElementById('btn-sig-home');
+    if (sigBack) sigBack.addEventListener('click', () => view('launcher'));
+    // Delegated: the rows are rebuilt on every read, and a handler bound to a
+    // row would go with it.
+    const sigList = document.getElementById('sigmap-list');
+    if (sigList) sigList.addEventListener('click', (ev) => {
+      const hit = ev.target.closest && ev.target.closest('[data-adopt-for]');
+      if (!hit) return;
+      adoptFrom(hit.dataset.adoptFor);
+    });
     wireArming();
     setInterval(refreshSchedule, SCHEDULE_EVERY);
   }

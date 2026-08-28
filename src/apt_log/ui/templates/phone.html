@@ -238,6 +238,18 @@
              font-size:15px; font-weight:600; color:#fff;
              background:rgba(255,255,255,.12);
              border:1px solid rgba(255,255,255,.18); }
+  /* Two of them side by side, sharing the row a single one used to have. */
+  .fullrow { display:flex; gap:10px; align-items:stretch; }
+  .fullrow .fullbtn { display:flex; align-items:center; justify-content:center;
+                      gap:7px; font-size:14px; padding:12px 10px; }
+  /* How many are on file, on the face of the button. A count that reads 0 is
+     the one worth seeing, so it is drawn the same either way and never
+     hidden. */
+  .fullbtn-n { font-size:12px; font-weight:700; letter-spacing:.02em;
+               padding:2px 7px; border-radius:8px;
+               background:rgba(255,255,255,.16);
+               color:rgba(255,255,255,.92); }
+  .fullbtn-n:empty { display:none; }
 
   /* ---------------------------------------------------------- screen view */
   #screenview { background:var(--bg); }
@@ -295,6 +307,45 @@
                                         pointer-events:none; }
   #armview .body { overflow-y:auto; -webkit-overflow-scrolling:touch;
                    padding:0 16px calc(24px + env(safe-area-inset-bottom)); }
+
+  /* ------------------------------------------------------ adopted signatures
+     Written with :not() rather than by enumerating every other view the way
+     the four above do. That pattern costs a line per pair and there are now
+     five views; the next one would need four more rules and would get three
+     of them. */
+  #signaturesview { background:var(--bg); }
+  body:not([data-view="signatures"]) #signaturesview {
+      transform:translateX(102%); opacity:0; pointer-events:none; }
+  body[data-view="signatures"] #launcher,
+  body[data-view="signatures"] #screenview,
+  body[data-view="signatures"] #scheduleview,
+  body[data-view="signatures"] #armview { transform:scale(.92); opacity:0;
+                                          pointer-events:none; }
+  #signaturesview .body { overflow-y:auto; -webkit-overflow-scrolling:touch;
+                    padding:0 16px calc(24px + env(safe-area-inset-bottom)); }
+  /* One person per row: the name, what state they are in, and the one thing
+     to do about it. */
+  .sigrow { display:flex; align-items:center; gap:12px; padding:13px 2px;
+            border-bottom:1px solid var(--line); }
+  .sigrow .grow { flex:1; min-width:0; }
+  .sigrow .who { font-size:16px; font-weight:600; line-height:1.25; }
+  .sigrow .meta { font-size:12.5px; color:var(--muted); margin-top:3px;
+                  line-height:1.35; }
+  /* GREEN MEANS ON FILE AND NOTHING ELSE MEANS IT. The state of a row is the
+     only thing this screen exists to tell you, so it is a word and a colour,
+     never a colour alone. */
+  .sigrow .state { font-size:12px; font-weight:600; }
+  .sigrow.has .state { color:#2e9c63; }
+  .sigrow.none .state { color:#b45309; }
+  /* An adoption that matches nobody on the schedule. It stays on the list —
+     an adoption is a record and must not quietly disappear — but it is not
+     part of the working set, so it says so and steps back. */
+  .sigrow.stray { opacity:.72; }
+  .sigrow button { flex:none; min-height:40px; padding:0 14px; border:none;
+                   border-radius:11px; font:inherit; font-size:13.5px;
+                   font-weight:600; cursor:pointer;
+                   background:var(--tint-soft); color:var(--tint); }
+  .sigrow.none button { background:var(--accent); color:#fff; }
   /* Said once, at the top, and not dressed up. */
   .armnote { margin:12px 0 4px; padding:12px 14px; border-radius:14px;
              background:var(--hair, rgba(128,128,128,.14));
@@ -1569,8 +1620,20 @@
           >{{ t('sched.no_entry') }}</span>{% endif %}
     </button>
 
-    <button class="fullbtn" id="btn-schedule" type="button">
-      {{ t('sched.view_full') }}</button>
+    {# TWO UP, so a second way in costs no height at all. The page was already
+       reported as crowded and a new full-width button would have spent the
+       room the code card just gave back. #}
+    <div class="fullrow">
+      <button class="fullbtn" id="btn-schedule" type="button">
+        {{ t('sched.view_full') }}</button>
+      {# Who has a signature on file. The count is the whole point of the
+         button being on this screen: "2 of 3" answers, without opening
+         anything, the question that otherwise gets answered in somebody's
+         living room. #}
+      <button class="fullbtn" id="btn-signatures" type="button">
+        <span>{{ t('sigmap.title') }}</span>
+        <span class="fullbtn-n" id="sigmap-count"></span></button>
+    </div>
 
     {# THE CODE, TO THE PHONES THAT DO NOT HAVE IT.
 
@@ -2169,6 +2232,42 @@
   </div>
 </div>
 
+{# ------------------------------------------------------- adopted signatures
+   WHO HAS ONE ON FILE, AND WHO STILL DOES NOT.
+
+   Adoption used to happen in exactly one place — inside the signature pad,
+   which only opens on a signature screen. That made the one question worth
+   asking ahead of a visit unanswerable: is this patient set up, or are we
+   going to find out at the moment she is standing in the room?
+
+   This is that list, and it is built the other way round from the roster. The
+   roster says who HAS adopted; this says who will be ASKED — every patient the
+   schedule names — and marks off the ones already done. A screen that only
+   showed the finished ones could never tell you what was left.
+
+   It does not draw anything. Adopting still means the pad, the person, and a
+   witness: this view carries the name across so nobody types it twice, and
+   REQ-10.6a is untouched. #}
+<div class="view" id="signaturesview">
+  <header class="hdr">
+    <div class="hdr-row">
+      <button id="btn-sig-home">
+        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.4"><path d="M15 5 L8 12 L15 19"/></svg>
+        {{ t('phone.home') }}</button>
+      <span class="spacer"></span>
+    </div>
+    <div class="hdr-title"><h1>{{ t('sigmap.title') }}</h1></div>
+  </header>
+  <div class="body">
+    <p class="armnote">{{ t('sigmap.note') }}</p>
+    {# Filled from /signature/map, never server-rendered: these are patient
+       names and this template is cached by a service worker. #}
+    <div id="sigmap-list"></div>
+    <p class="emptyday" id="sigmap-empty" hidden>{{ t('sigmap.nobody') }}</p>
+  </div>
+</div>
+
 {# The whole page, as a reading: the phone scrolled its own screen end to
    end and these are every line it showed, in order. Read-only on purpose. #}
 <div id="scansheet" class="sheet">
@@ -2227,6 +2326,12 @@
     adoptSaved: {{ t('sign.adopt_saved')|tojson }},
     adoptGone: {{ t('sign.adopt_gone')|tojson }},
     signWhose: {{ t('sign.whose')|tojson }},
+    sigOnFile: {{ t('sigmap.on_file')|tojson }},
+    sigMissing: {{ t('sigmap.missing')|tojson }},
+    sigAdopt: {{ t('sigmap.adopt')|tojson }},
+    sigReplace: {{ t('sigmap.replace')|tojson }},
+    sigNotScheduled: {{ t('sigmap.not_scheduled')|tojson }},
+    sigFiledAs: {{ t('sigmap.filed_as')|tojson }},
     live:    {{ t('papp.live')|tojson }},
     syncing: {{ t('papp.syncing')|tojson }},
     webTitle: {{ t('papp.web')|tojson }},

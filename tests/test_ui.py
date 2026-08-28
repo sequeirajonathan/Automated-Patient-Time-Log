@@ -4601,3 +4601,184 @@ class TestThePadNamesWhoIsSigning:
             "\n  }", 1)[0]
         assert "heading.textContent" in body
         assert "innerHTML" not in body
+
+
+class TestTheSignatureMapping:
+    """Who will be asked to sign, and who has nothing on file yet.
+
+    Adoption used to happen in one place only — inside the pad, which opens on
+    a signature screen — so the question worth asking BEFORE a visit had
+    nowhere to be asked: is this patient set up, or do we find out standing in
+    her living room?
+    """
+
+    def _plan(self, tmp_path, *patients):
+        import json as _json
+
+        from apt_log import schedule as sched
+
+        path = tmp_path / "schedule.json"
+        path.write_text(_json.dumps({
+            "zone": "America/New_York",
+            "visits": [{"patient": p, "app": "inmyteam",
+                        "days": ["mon"], "start": "09:00", "end": "10:00"}
+                       for p in patients]}), encoding="utf-8")
+        return path
+
+    def _enrol(self, tmp_path, *names):
+        from apt_log import enrolled as enrolled_mod
+
+        store = tmp_path / "sig.json"
+        for n in names:
+            enrolled_mod.enroll(
+                n, [[[0.1, 0.5], [0.3, 0.2], [0.5, 0.6]], [[0.6, 0.3], [0.9, 0.4]]],
+                witness="witnessed at the table", path=store)
+        return store
+
+    def test_it_lists_the_schedule_not_the_store(self, client, tmp_path,
+                                                 monkeypatch):
+        """The roster answers the wrong half: a list of the finished ones can
+        never tell you what is left."""
+        from apt_log import enrolled as enrolled_mod
+        from apt_log import schedule as sched
+
+        monkeypatch.setattr(sched, "SCHEDULE_PATH",
+                            self._plan(tmp_path, "Maria Garcia", "Beto Sosa"))
+        monkeypatch.setattr(enrolled_mod, "STORE_PATH",
+                            self._enrol(tmp_path, "Maria Garcia"))
+        people = client.get("/signature/map").json()["people"]
+        assert [p["name"] for p in people] == ["Maria Garcia", "Beto Sosa"]
+        assert [p["adopted"] for p in people] == [True, False]
+
+    def test_a_middle_initial_still_counts_as_adopted(self, client, tmp_path,
+                                                      monkeypatch):
+        """The schedule and the adoption are typed by different people. The
+        row must not read "not adopted" over a signature that is on file."""
+        from apt_log import enrolled as enrolled_mod
+        from apt_log import schedule as sched
+
+        monkeypatch.setattr(sched, "SCHEDULE_PATH",
+                            self._plan(tmp_path, "MARIA X GARCIA"))
+        monkeypatch.setattr(enrolled_mod, "STORE_PATH",
+                            self._enrol(tmp_path, "Maria Garcia"))
+        row = client.get("/signature/map").json()["people"][0]
+        assert row["adopted"] is True
+        assert row["adopted_as"] == "Maria Garcia"
+
+    def test_an_adoption_off_the_schedule_still_shows(self, client, tmp_path,
+                                                      monkeypatch):
+        """An adoption is a record. One that stopped matching a schedule entry
+        must not quietly vanish from the only screen that shows it."""
+        from apt_log import enrolled as enrolled_mod
+        from apt_log import schedule as sched
+
+        monkeypatch.setattr(sched, "SCHEDULE_PATH",
+                            self._plan(tmp_path, "Beto Sosa"))
+        monkeypatch.setattr(enrolled_mod, "STORE_PATH",
+                            self._enrol(tmp_path, "Maria Garcia"))
+        people = client.get("/signature/map").json()["people"]
+        stray = [p for p in people if not p["on_schedule"]]
+        assert [p["name"] for p in stray] == ["Maria Garcia"]
+
+    def test_it_never_returns_strokes(self, client, tmp_path, monkeypatch):
+        """The same rule the roster follows, and the reason those two
+        functions are separate."""
+        from apt_log import enrolled as enrolled_mod
+        from apt_log import schedule as sched
+
+        monkeypatch.setattr(sched, "SCHEDULE_PATH",
+                            self._plan(tmp_path, "Maria Garcia"))
+        monkeypatch.setattr(enrolled_mod, "STORE_PATH",
+                            self._enrol(tmp_path, "Maria Garcia"))
+        body = client.get("/signature/map").text
+        assert "strokes" not in body
+        assert "points" not in body
+
+    def test_an_unreadable_schedule_still_shows_the_store(self, client,
+                                                          tmp_path,
+                                                          monkeypatch):
+        """Saying nothing at all would read as "nobody has adopted one"."""
+        from apt_log import enrolled as enrolled_mod
+        from apt_log import schedule as sched
+
+        bad = tmp_path / "bad.json"
+        bad.write_text("{not json", encoding="utf-8")
+        monkeypatch.setattr(sched, "SCHEDULE_PATH", bad)
+        monkeypatch.setattr(enrolled_mod, "STORE_PATH",
+                            self._enrol(tmp_path, "Maria Garcia"))
+        people = client.get("/signature/map").json()["people"]
+        assert [p["name"] for p in people] == ["Maria Garcia"]
+
+    def test_nothing_at_all_is_an_empty_list(self, client, tmp_path,
+                                             monkeypatch):
+        from apt_log import enrolled as enrolled_mod
+        from apt_log import schedule as sched
+
+        monkeypatch.setattr(sched, "SCHEDULE_PATH", tmp_path / "none.json")
+        monkeypatch.setattr(enrolled_mod, "STORE_PATH", tmp_path / "no.json")
+        assert client.get("/signature/map").json()["people"] == []
+
+
+class TestTheSignatureMappingView:
+    def _js(self) -> str:
+        return strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+
+    def _html(self) -> str:
+        return Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+
+    def test_the_names_are_never_server_rendered(self):
+        """This template is cached by a service worker; patients' names are
+        not going into it."""
+        html = self._html()
+        block = html.split('id="signaturesview"', 1)[1].split("</div>", 1)[0]
+        assert "{% for" not in block
+
+    def test_the_rows_are_built_as_text(self):
+        body = self._js().split("function renderMap(", 1)[1].split(
+            "\n  }", 1)[0]
+        assert "innerHTML" not in body
+        assert "textContent = p.name" in body
+
+    def test_the_button_carries_the_name_and_draws_nothing(self):
+        """Adoption still means the pad, the person and a witness. This only
+        saves somebody typing the name a second time."""
+        js = self._js()
+        body = js.split("function adoptFrom(", 1)[1].split("\n  }", 1)[0]
+        assert "field.value = name" in body
+        assert "/signature/enroll" not in body
+        assert "strokes" not in body
+
+    def test_the_count_shows_zero_rather_than_hiding(self):
+        """Nought of three is the reading worth seeing."""
+        body = self._js().split("function renderMap(", 1)[1].split(
+            "\n  }", 1)[0]
+        assert "have + '/' + people.length" in body
+
+    def test_it_is_re_read_after_an_adoption(self):
+        """Otherwise the front page keeps reporting the state from before the
+        adoption that just happened in front of two people."""
+        js = self._js()
+        after = js.split("i18n.adoptSaved", 1)[1][:300]
+        assert "loadMap()" in after
+
+    def test_the_front_page_gains_no_height(self):
+        """The page was reported as crowded; a second full-width button would
+        have spent the room the code card just gave back."""
+        html = self._html()
+        assert '<div class="fullrow">' in html
+        assert '.fullrow { display:flex;' in html
+
+    def test_every_word_of_it_is_translated(self):
+        import json
+
+        for code in ("en", "es"):
+            catalogue = json.loads(
+                Path(f"src/apt_log/ui/locales/{code}.json").read_text(
+                    encoding="utf-8"))
+            for key in ("sigmap.title", "sigmap.note", "sigmap.nobody",
+                        "sigmap.on_file", "sigmap.missing", "sigmap.adopt",
+                        "sigmap.replace", "sigmap.not_scheduled",
+                        "sigmap.filed_as"):
+                assert catalogue[key].strip(), f"{code} {key}"

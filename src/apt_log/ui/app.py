@@ -1972,6 +1972,75 @@ def signature_roster():
     return JSONResponse({"parties": enrolled_mod.roster()})
 
 
+@app.get("/signature/map")
+def signature_map():
+    """Everybody who will be asked to sign, and whether they have adopted one.
+
+    THE ROSTER ALONE CANNOT ANSWER THIS. It lists who HAS adopted a signature,
+    which is the wrong half of the question: the useful view is who is going
+    to be asked — the patients on the schedule — and which of them still have
+    nothing on file. A list that only shows the ones already done is a list
+    that can never tell you what is left.
+
+    So the schedule supplies the names and the store supplies the state, and
+    a party in the store that is not on the schedule still appears: an
+    adoption is a record, and one that stopped matching a schedule entry must
+    not quietly vanish from the only screen that shows it.
+
+    NO STROKES, by the same rule the roster follows — `enrolled.roster` is
+    built to hold nothing re-stampable and this route must not reach past it.
+    """
+    from apt_log import enrolled as enrolled_mod
+    from apt_log import schedule as sched
+
+    roster = enrolled_mod.roster()
+    by_name = {e["name"]: e for e in roster}
+
+    people: list[dict] = []
+    seen: set = set()
+    try:
+        plan = sched.load()
+        blocks = plan.blocks
+    except Exception:  # noqa: BLE001 — an unreadable schedule is not fatal
+        # The store still has something to show, and saying nothing at all
+        # here would read as "nobody has adopted a signature".
+        blocks = []
+
+    for name in [b.patient for b in blocks]:
+        if name in seen:
+            continue
+        seen.add(name)
+        # Which apps will put this person in front of a pad. Named rather
+        # than counted: "she signs in two apps" is the fact that decides
+        # whether one adoption is enough.
+        apps = sorted({b.app for b in blocks if b.patient == name})
+        # The store's own spelling wins for the button, because that is what
+        # `who_signs` will hand the pad at the moment it matters.
+        match = enrolled_mod.who_signs(name)
+        entry = by_name.get(match, {})
+        people.append({"name": name, "apps": apps,
+                       "adopted": bool(match), "adopted_as": match,
+                       "witness": entry.get("witness", ""),
+                       "at": entry.get("at", ""),
+                       "digest": entry.get("digest", ""),
+                       "on_schedule": True})
+
+    # Adoptions that match nobody on the schedule. Last, and marked, because
+    # they are the exception rather than the working list.
+    claimed = {p["adopted_as"] for p in people if p["adopted_as"]}
+    for entry in roster:
+        if entry["name"] in claimed:
+            continue
+        people.append({"name": entry["name"], "apps": [],
+                       "adopted": True, "adopted_as": entry["name"],
+                       "witness": entry.get("witness", ""),
+                       "at": entry.get("at", ""),
+                       "digest": entry.get("digest", ""),
+                       "on_schedule": False})
+
+    return JSONResponse({"people": people})
+
+
 @app.post("/signature/enroll")
 async def signature_enroll(request: Request):
     """Adopt a signature for one party, in person.
