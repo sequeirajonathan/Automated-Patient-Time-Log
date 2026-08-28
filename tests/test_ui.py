@@ -4741,14 +4741,30 @@ class TestTheSignatureMappingView:
         assert "innerHTML" not in body
         assert "textContent = p.name" in body
 
-    def test_the_button_carries_the_name_and_draws_nothing(self):
+    def test_the_button_opens_the_registration_sheet(self):
+        """NOT the check-out pad. That pad is built around a patient signing
+        at the end of a visit — numbered steps, "Draw it on the phone", the
+        app's own confirm — and none of it applies to registering one."""
+        body = self._js().split("function adoptFrom(", 1)[1].split(
+            "\n  }", 1)[0]
+        assert "classList.add('enrolling')" in body
+        assert "classList.remove('signing')" in body
+        assert "getElementById('enrol-name')" in body
+
+    def test_it_carries_the_name_and_saves_nothing(self):
         """Adoption still means the pad, the person and a witness. This only
         saves somebody typing the name a second time."""
-        js = self._js()
-        body = js.split("function adoptFrom(", 1)[1].split("\n  }", 1)[0]
+        body = self._js().split("function adoptFrom(", 1)[1].split(
+            "\n  }", 1)[0]
         assert "field.value = name" in body
         assert "/signature/enroll" not in body
-        assert "strokes" not in body
+
+    def test_it_opens_onto_an_empty_pad(self):
+        """The two pads share one stroke list, so whatever was on the other
+        one is not this person's signature."""
+        body = self._js().split("function adoptFrom(", 1)[1].split(
+            "\n  }", 1)[0]
+        assert "pad.strokes = []" in body
 
     def test_the_count_shows_zero_rather_than_hiding(self):
         """Nought of three is the reading worth seeing."""
@@ -4877,3 +4893,116 @@ class TestStepTwoHasOneButton:
             encoding="utf-8")
         legacy = html.split('id="sign-legacyrow"', 1)[1].split("</div>", 1)[0]
         assert 'id="app-clear"' in legacy
+
+
+class TestRegisteringASignatureIsItsOwnSheet:
+    """Registering a signature and giving one are two different moments.
+
+    The check-out pad is built entirely around the second: it draws, replays
+    onto the app's canvas, and hands over to the app's own confirm. Opening it
+    to REGISTER a signature showed "Draw it on the phone", a numbered step two
+    about an app that was not in front, and a preview rehearsing a replay that
+    was never going to happen — the wrong component for the job.
+    """
+
+    def _js(self) -> str:
+        return strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+
+    def _html(self) -> str:
+        return Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+
+    def _sheet(self) -> str:
+        html = self._html()
+        return html.split('<div id="enrolsheet"', 1)[1].split(
+            "\n</div>", 1)[0]
+
+    def test_the_sheet_exists_and_has_its_own_pad(self):
+        html = self._html()
+        assert '<div id="enrolsheet" class="sheet">' in html
+        assert '<canvas id="enrolpad"' in html
+
+    def test_it_has_no_phone_in_it(self):
+        """Every part of the check-out pad that is about an app on a handset
+        has to be absent, or this is the same mistake with a new id."""
+        sheet = self._sheet()
+        for absent in ("sign-send", "sign-approw", "signstep", "signpreview",
+                       "sign-appbtns", "sign-legacyrow", "sign-hint"):
+            assert absent not in sheet, absent
+
+    def test_it_asks_for_the_two_things_the_requirement_needs(self):
+        """REQ-10.6a: whose signature it is, and who watched it drawn."""
+        sheet = self._sheet()
+        assert 'id="enrol-name"' in sheet
+        assert 'id="enrol-witness"' in sheet
+
+    def test_the_name_is_editable(self):
+        """The schedule's spelling is the right default because it is what
+        the matcher looks for. It is still a person's name, not a constant."""
+        sheet = self._sheet()
+        assert "readonly" not in sheet
+        assert "disabled" not in sheet
+
+    def test_there_is_a_way_out_that_is_not_saving(self):
+        assert 'id="enrol-cancel"' in self._sheet()
+
+    def test_both_pads_are_wired(self):
+        """A handler bound to whichever canvas happened to be in front at boot
+        leaves the other one dead."""
+        js = self._js()
+        assert "padWire(document.getElementById('signpad'))" in js
+        assert "padWire(document.getElementById('enrolpad'))" in js
+
+    def test_the_live_pad_is_the_open_one(self):
+        body = self._js().split("function padCanvas(", 1)[1].split(
+            "\n  }", 1)[0]
+        assert "classList.contains('enrolling')" in body
+        assert "'enrolpad'" in body and "'signpad'" in body
+
+    def test_the_context_follows_the_open_pad(self):
+        """A context cached from the other canvas draws into a surface nobody
+        is looking at."""
+        body = self._js().split("function padRedraw(", 1)[1].split(
+            "\n  }", 1)[0]
+        assert "pad.ctx = c.getContext('2d')" in body
+
+    def test_the_replay_preview_is_not_drawn_while_registering(self):
+        """"How this will land in the app's box" is a rehearsal for a replay,
+        and registration replays nothing."""
+        body = self._js().split("function previewRedraw(", 1)[1].split(
+            "\n  }", 1)[0]
+        assert "classList.contains('enrolling')" in body
+
+    def test_one_post_serves_both_moments(self):
+        """Two copies would be two places for the witness check, the empty-pad
+        check and the refresh afterwards to drift — on the one feature where
+        the refusals ARE the requirement."""
+        js = self._js()
+        assert "function postEnrolment(" in js
+        assert js.count("'/signature/enroll'") == 1
+
+    def test_closing_leaves_no_strokes_behind(self):
+        """The next person to register one must not find the last person's
+        signature waiting on the canvas."""
+        body = self._js().split("function closeEnrol(", 1)[1].split(
+            "\n  }", 1)[0]
+        assert "pad.strokes = []" in body
+        assert "classList.remove('enrolling')" in body
+
+    def test_the_witness_does_not_carry_over(self):
+        """Who watched one person sign is not who watched the next."""
+        body = self._js().split("function closeEnrol(", 1)[1].split(
+            "\n  }", 1)[0]
+        assert "witness.value = ''" in body
+
+    def test_every_word_of_it_is_translated(self):
+        import json
+
+        for code in ("en", "es"):
+            catalogue = json.loads(
+                Path(f"src/apt_log/ui/locales/{code}.json").read_text(
+                    encoding="utf-8"))
+            for key in ("sigmap.enrol_title", "sigmap.enrol_note",
+                        "common.cancel"):
+                assert catalogue[key].strip(), f"{code} {key}"

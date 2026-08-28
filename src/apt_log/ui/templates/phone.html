@@ -1281,6 +1281,29 @@
                    margin:2px auto 12px; }
   body.asking #sheet { transform:translateY(0); }
   body.signing #signsheet { transform:translateY(0); }
+  body.enrolling #enrolsheet { transform:translateY(0); }
+
+  /* ------------------------------------------------------- registering one
+     Its own sheet, because registering a signature and giving one are two
+     different moments and the check-out pad is built entirely around the
+     second: replay, the app's canvas, the app's confirm. None of that is
+     true here, so none of it is on this sheet. */
+  #enrolpad { width:100%; aspect-ratio:2.2/1; display:block; margin-top:12px;
+              border-radius:14px; border:1.5px dashed var(--line);
+              background:var(--bg); touch-action:none; color:var(--ink); }
+  .enroltitle { margin:0 0 8px; font-size:17px; font-weight:650;
+                color:var(--ink); }
+  .enrolnote { margin:0 0 14px; font-size:13px; line-height:1.45;
+               color:var(--muted); }
+  #enrolsheet input { width:100%; margin-top:6px; padding:11px 12px;
+                      font:inherit; font-size:16px; border-radius:10px;
+                      background:var(--card); border:1px solid var(--line);
+                      color:var(--ink); }
+  #enrolsheet .adoptlabel { display:block; margin-top:14px; font-size:12px;
+                            color:var(--muted); }
+  #enrolsheet .signsend { margin-top:16px; }
+  .enrolcancel { display:block; width:100%; margin-top:4px;
+                 color:var(--muted); }
 
   #signpad { width:100%; aspect-ratio:2.2/1; display:block; border-radius:14px;
              border:1.5px dashed var(--line); background:var(--bg);
@@ -2271,6 +2294,42 @@
     <div id="sigmap-list"></div>
     <p class="emptyday" id="sigmap-empty" hidden>{{ t('sigmap.nobody') }}</p>
   </div>
+</div>
+
+{# ------------------------------------------------------ registering one
+   A SIGNATURE BEING REGISTERED IS NOT A SIGNATURE BEING GIVEN.
+
+   The mapping screen used to open the check-out pad, and that pad is built
+   around a moment this one is not in: it draws, replays onto the app's own
+   canvas, and hands over to the app's confirm. Opening it to register a
+   signature put a caregiver in front of "Draw it on the phone", a step two
+   about an app that was not in front, and a preview rehearsing a replay that
+   was never going to happen. Reported as exactly that — the wrong component
+   for the job.
+
+   This sheet has no phone in it. A name, a pad, who watched, and save. #}
+<div id="enrolsheet" class="sheet">
+  <h2 class="enroltitle">{{ t('sigmap.enrol_title') }}</h2>
+  <p class="enrolnote">{{ t('sigmap.enrol_note') }}</p>
+  <label class="adoptlabel" for="enrol-name">{{ t('sign.adopt_who') }}</label>
+  {# Prefilled from the row she pressed, and still editable: the schedule's
+     spelling is the one the matcher will look for, so it is the right
+     default — and it is a person's name, so it is not read-only. #}
+  <input type="text" id="enrol-name" autocomplete="off" spellcheck="false">
+  <canvas id="enrolpad" width="10" height="10"></canvas>
+  <div class="padtools">
+    <button type="button" id="enrol-undo" class="padtool">
+      {{ t('signature.undo') }}</button>
+    <button type="button" id="enrol-clear" class="padtool">
+      {{ t('sign.erase') }}</button>
+  </div>
+  <label class="adoptlabel" for="enrol-witness">
+    {{ t('sign.adopt_witness') }}</label>
+  <input type="text" id="enrol-witness" autocomplete="off">
+  <button type="button" id="enrol-save" class="signsend">
+    {{ t('sign.adopt_save') }}</button>
+  <button type="button" id="enrol-cancel" class="padtool enrolcancel">
+    {{ t('common.cancel') }}</button>
 </div>
 
 {# The whole page, as a reading: the phone scrolled its own screen end to

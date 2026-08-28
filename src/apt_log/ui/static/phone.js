@@ -742,7 +742,26 @@
   // strokes onto the app's canvas. The app's save button stays her tap.
   const pad = { strokes: [], current: null, ctx: null, waitingId: '' };
 
-  function padCanvas() { return document.getElementById('signpad'); }
+  // WHICH PAD IS IN FRONT.
+  //
+  // There are two, and they are two because they are two different moments.
+  // `#signpad` belongs to a patient signing at check-out: it draws, replays
+  // onto the app's canvas, and is followed by the app's own confirm. Nothing
+  // in that sequence has anything to do with REGISTERING a signature, and
+  // reusing it for registration put a caregiver in front of "draw it on the
+  // phone" and a step two about an app that was not open — reported as
+  // exactly that.
+  //
+  // `#enrolpad` is the registration one: a name, a pad, a witness, save. No
+  // phone, no replay, no step two.
+  //
+  // The drawing machinery is shared because drawing is drawing — the same
+  // clamping, the same capture guard, the same dark-mode ink. Only one sheet
+  // can be open at a time, so one `pad` state serves both.
+  function padCanvas() {
+    return document.getElementById(
+      body.classList.contains('enrolling') ? 'enrolpad' : 'signpad');
+  }
 
   // Held inside the pad. A finger that slides a little past the edge is still
   // signing — the pointer keeps reporting while it is captured — and those
@@ -784,7 +803,11 @@
     // the last signature is on the phone.
     if (pad.strokes.length && !pad.waitingId) markDrawn(false);
     const c = padCanvas();
-    if (c && pad.ctx) {
+    // Taken from the canvas that is actually in front rather than cached at
+    // wiring time: two pads exist now, and a context held from the other one
+    // draws into a canvas nobody is looking at.
+    if (c) {
+      pad.ctx = c.getContext('2d');
       drawStrokes(pad.ctx, c, (p, cc) => [p[0] * cc.width, p[1] * cc.height]);
     }
     previewRedraw();
@@ -796,6 +819,10 @@
   // lands. This is the rehearsal for a screen there is no safe way to visit
   // outside a real clock-out.
   function previewRedraw() {
+    // "How this will land in the app's own box" is a rehearsal for a replay.
+    // Registration does not replay anything, so there is nothing to rehearse
+    // and the enrolment sheet has no preview to draw into.
+    if (body.classList.contains('enrolling')) return;
     const c = document.getElementById('signpreview');
     const padEl = padCanvas();
     if (!c || !padEl) return;
@@ -816,10 +843,10 @@
     drawStrokes(ctx, c, (p) => [ox + p[0] * dw, oy + p[1] * dh]);
   }
 
-  function padWire() {
-    const c = padCanvas();
+  // Wires ONE canvas. Called for both pads: a handler bound to whichever
+  // happened to be in front at boot would leave the other one dead.
+  function padWire(c) {
     if (!c) return;
-    pad.ctx = c.getContext('2d');
     c.addEventListener('pointerdown', (ev) => {
       ev.preventDefault();
       // Capture is an OPTIMISATION — it keeps the strokes coming while the
@@ -1286,12 +1313,22 @@
   // on that canvas, drawn by the person in the room — so this opens it and
   // fills the field, and stops there.
   function adoptFrom(name) {
-    const form = document.getElementById('sign-adopt');
-    const field = document.getElementById('adopt-name');
+    // THE REGISTRATION SHEET, NOT THE CHECK-OUT PAD.
+    //
+    // This used to open `#signsheet`, which is the pad a patient signs on at
+    // the end of a visit: numbered steps, "Draw it on the phone", the app's
+    // own confirm, a preview rehearsing the replay. Opening it to register a
+    // signature showed all of that with no app in front and nothing to
+    // replay onto — the wrong component for the job, and reported as one.
+    const field = document.getElementById('enrol-name');
     if (field) field.value = name || '';
-    if (form) form.hidden = false;
-    body.classList.add('signing');
+    // A fresh canvas every time. Strokes are shared state between the two
+    // pads, so whatever was on the other one is not this person's signature.
+    pad.strokes = [];
+    body.classList.remove('signing');
+    body.classList.add('enrolling');
     padFit();
+    padRedraw();
   }
 
   function applyAdopted(name) {
@@ -1320,9 +1357,16 @@
     }).catch(() => { unbusy(); toast(i18n.failed || ''); });
   }
 
-  function adoptSave() {
-    const name = (document.getElementById('adopt-name') || {}).value || '';
-    const witness = (document.getElementById('adopt-witness') || {}).value || '';
+  // ONE POST, FROM TWO PLACES, because there are two honest moments to adopt
+  // a signature in and only one set of rules about doing it.
+  //
+  //   * the check-out pad, straight after the patient has drawn one for real;
+  //   * the registration sheet, sat down with them ahead of a visit.
+  //
+  // Two copies of this fetch would be two places for the witness check, the
+  // empty-pad check and the refresh afterwards to drift apart, on the one
+  // feature where the refusals ARE the requirement (REQ-10.6a).
+  function postEnrolment(name, witness, done) {
     if (!name.trim()) { toast(i18n.adoptNeedName || ''); return; }
     if (!pad.strokes.length) { toast(i18n.signEmpty || ''); return; }
     const rect = padCanvas().getBoundingClientRect();
@@ -1340,15 +1384,39 @@
         toast((r.status === 400 ? i18n.adoptNeedWitness : i18n.failed) || '');
         return;
       }
-      const form = document.getElementById('sign-adopt');
-      if (form) form.hidden = true;
       toast(i18n.adoptSaved || '');
       loadAdopted();
       // And the mapping, which is now one person further along. Without this
       // the front page's count keeps saying what it said before the adoption
       // that just happened in front of two people.
       loadMap();
+      if (done) done();
     }).catch(() => toast(i18n.failed || ''));
+  }
+
+  function adoptSave() {
+    postEnrolment((document.getElementById('adopt-name') || {}).value || '',
+                  (document.getElementById('adopt-witness') || {}).value || '',
+                  () => {
+                    const form = document.getElementById('sign-adopt');
+                    if (form) form.hidden = true;
+                  });
+  }
+
+  // The registration sheet's own save. Closes the sheet and empties the pad:
+  // the next person to register one must not find the last person's strokes
+  // waiting on the canvas.
+  function enrolSave() {
+    postEnrolment((document.getElementById('enrol-name') || {}).value || '',
+                  (document.getElementById('enrol-witness') || {}).value || '',
+                  closeEnrol);
+  }
+
+  function closeEnrol() {
+    body.classList.remove('enrolling');
+    pad.strokes = [];
+    const witness = document.getElementById('enrol-witness');
+    if (witness) witness.value = '';
   }
 
   // -------------------------------------------------------------------- relay
@@ -2029,7 +2097,8 @@
       tick();
       setInterval(tick, 15000);
     }
-    padWire();
+    padWire(document.getElementById('signpad'));
+    padWire(document.getElementById('enrolpad'));
     swipeToDismiss(document.getElementById('signsheet'),
                    () => body.classList.remove('signing'));
     swipeToDismiss(document.getElementById('scansheet'),
@@ -2064,6 +2133,23 @@
     const adoptBtn = document.getElementById('adopt-save');
     if (adoptBtn) adoptBtn.addEventListener('click', adoptSave);
     loadAdopted();
+
+    // The registration sheet's own controls. Its Undo and Erase act on the
+    // same `pad.strokes` the check-out pad uses — only one sheet is ever
+    // open, so one set of strokes is the whole state either way.
+    const enrolClear = document.getElementById('enrol-clear');
+    if (enrolClear) enrolClear.addEventListener('click', () => {
+      pad.strokes = []; padRedraw();
+    });
+    const enrolUndo = document.getElementById('enrol-undo');
+    if (enrolUndo) enrolUndo.addEventListener('click', () => {
+      pad.strokes.pop(); padRedraw();
+    });
+    const enrolBtn = document.getElementById('enrol-save');
+    if (enrolBtn) enrolBtn.addEventListener('click', enrolSave);
+    const enrolCancel = document.getElementById('enrol-cancel');
+    if (enrolCancel) enrolCancel.addEventListener('click', closeEnrol);
+    swipeToDismiss(document.getElementById('enrolsheet'), closeEnrol);
 
     // The app's own Borrar/Salvar, relayed. The outcome rides the same
     // sign-status push the replay uses, so the toast comes back rendered
