@@ -5013,3 +5013,77 @@ class TestRegisteringASignatureIsItsOwnSheet:
             for key in ("sigmap.enrol_title", "sigmap.enrol_note",
                         "common.cancel"):
                 assert catalogue[key].strip(), f"{code} {key}"
+
+
+class TestNothingIsSelectableWhileSigning:
+    """A signature is a long drag, and a long drag selects text.
+
+    Watched on the caregiver's own phone: drawing highlighted the heading and
+    the note above the pad in blue, and on iOS a press that lingers on the
+    canvas raises the callout menu. Either one interrupts the stroke being
+    drawn — the exact failure this pad already has a bad history with.
+
+    `touch-action:none` stops the browser SCROLLING and says nothing about
+    selection, which is why the pad shipped like this and nobody caught it
+    until a real signature was drawn on it.
+    """
+
+    def _html(self) -> str:
+        return Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+
+    def test_both_sheets_are_unselectable(self):
+        html = self._html()
+        assert "#signsheet, #enrolsheet { -webkit-user-select:none;" in html
+        assert "user-select:none" in html
+
+    def test_the_callout_menu_is_off_too(self):
+        """On iOS the long press raises a menu over the pad, which is its own
+        interruption even when nothing gets selected."""
+        html = self._html()
+        block = html.split("#signsheet, #enrolsheet {", 1)[1].split("}", 1)[0]
+        assert "-webkit-touch-callout:none" in block
+
+    def test_both_canvases_say_it_themselves(self):
+        """Safari has historically needed the rule on the element the gesture
+        starts on, not only on an ancestor."""
+        html = self._html()
+        assert "#signpad, #enrolpad { -webkit-user-select:none;" in html
+
+    def test_the_name_field_is_still_editable(self):
+        """A typed name has to be selectable or it cannot be corrected."""
+        html = self._html()
+        assert ("#signsheet input, #enrolsheet input { -webkit-user-select:text;"
+                in html)
+
+    def test_the_canvas_still_refuses_to_scroll(self):
+        """The rule that was already right. Selection and scrolling are two
+        different behaviours and this fix must not have replaced one with the
+        other."""
+        html = self._html()
+        for pad in ("#signpad {", "#enrolpad {"):
+            block = html.split(pad, 1)[1].split("}", 1)[0]
+            assert "touch-action:none" in block, pad
+
+
+class TestTheSaveSaysWhichMachineFailed:
+    def _js(self) -> str:
+        return strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+
+    def test_an_unwritable_store_gets_its_own_sentence(self):
+        js = self._js()
+        assert "out.error === 'store_unwritable'" in js
+        assert "i18n.adoptNoStore" in js
+
+    def test_the_sentence_says_it_is_not_the_phone(self):
+        """The old one said "that didn't reach the phone" over a fault that
+        was entirely the Pi's disk — pointing her at the one thing that was
+        working."""
+        import json
+
+        for code, word in (("en", "phone"), ("es", "teléfono")):
+            catalogue = json.loads(
+                Path(f"src/apt_log/ui/locales/{code}.json").read_text(
+                    encoding="utf-8"))
+            assert word in catalogue["sign.adopt_no_store"]

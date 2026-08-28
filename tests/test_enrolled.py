@@ -353,3 +353,111 @@ class TestWhoSignsResolvesToOneOrNobody:
     def test_an_empty_roster_returns_nobody(self, tmp_path):
         assert enrolled.who_signs("MARIA GARCIA",
                                   path=tmp_path / "none.json") == ""
+
+
+class TestTheStoreLivesWhereTheServiceCanWrite:
+    """The first live registration failed, and not on anything about signatures.
+
+        PermissionError: [Errno 13] Permission denied:
+        '/etc/aptlog/signatures.tmp'
+
+    `/etc/aptlog` is root-owned and NOT writable by the service, deliberately:
+    REQ-5.4.1 turns on the service being unable to create
+    `/etc/aptlog/transport.conf` and switch off its own containment. An atomic
+    write needs a temporary file beside the target, so the store could never
+    have been written there — and loosening that directory would have traded a
+    containment guarantee for a save button.
+    """
+
+    def _source(self) -> str:
+        """Read from the file, not the module.
+
+        conftest redirects both constants to a temporary path for every test
+        — which is the isolation working, and which means the live module
+        never says where the store really goes. The declaration does."""
+        from pathlib import Path
+
+        return Path("src/apt_log/enrolled.py").read_text(encoding="utf-8")
+
+    def test_it_is_in_the_state_directory(self):
+        src = self._source()
+        assert 'STORE_PATH = Path("/var/lib/aptlog/signatures.json")' in src
+        assert 'USE_PATH = Path("/var/lib/aptlog/signings.jsonl")' in src
+
+    def test_it_is_not_in_the_config_directory(self):
+        """Which the service cannot write to, and must not be able to."""
+        assert 'STORE_PATH = Path("/etc/aptlog' not in self._source()
+
+    def test_the_file_is_still_owner_only(self, store):
+        """Moving the directory changed where it lives, not who may read a
+        stroke set. The file's own mode is what decides that."""
+        enrolled.enroll("Carmen Villalon", INK, path=store)
+        assert oct(os.stat(store).st_mode & 0o777) == oct(enrolled.STORE_MODE)
+
+    def test_the_temporary_file_lands_beside_it(self, tmp_path):
+        """The whole reason this moved. An atomic replace cannot cross a
+        filesystem, so the temporary file has to be writable in the same
+        directory as the target."""
+        store = tmp_path / "nested" / "signatures.json"
+        enrolled.enroll("Carmen Villalon", INK, path=store)
+        assert store.exists()
+        assert not list(store.parent.glob("*.tmp"))
+
+    def test_the_sanitiser_sweeps_both_paths(self):
+        """A Pi imaged today may have been registered on before the move, and
+        a signature left in the old place is still a signature."""
+        from pathlib import Path
+
+        script = Path("scripts/sanitize-for-image.sh").read_text(
+            encoding="utf-8")
+        assert "/var/lib/aptlog/signatures.json" in script
+        assert "/etc/aptlog/signatures.json" in script
+
+    def test_the_sanitiser_sweeps_the_trail_too(self):
+        """It names patients and dates. Not reproducible ink, and not
+        something to hand over either."""
+        from pathlib import Path
+
+        script = Path("scripts/sanitize-for-image.sh").read_text(
+            encoding="utf-8")
+        assert "/var/lib/aptlog/signings.jsonl" in script
+
+
+class TestAStoreThatCannotBeWritten:
+    """It answered 500, and the page said "that didn't reach the phone".
+
+    A sentence about a handset, over a fault that was entirely the Pi's own
+    disk — pointing the caregiver at the one thing that was working.
+    """
+
+    def test_it_is_not_a_bad_request(self, client, monkeypatch, tmp_path):
+        """400 would say she sent something wrong. She did not."""
+        unwritable = tmp_path / "nope" / "signatures.json"
+        monkeypatch.setattr(enrolled, "STORE_PATH", unwritable)
+        monkeypatch.setattr(enrolled, "_write", _refuse_to_write)
+        r = client.post("/signature/enroll",
+                        json={"name": "Carmen Villalon", "strokes": INK})
+        assert r.status_code != 400
+        assert r.status_code != 500
+
+    def test_it_names_the_store(self, client, monkeypatch, tmp_path):
+        """So the page can say which machine is at fault instead of guessing
+        at the phone."""
+        monkeypatch.setattr(enrolled, "STORE_PATH",
+                            tmp_path / "nope" / "signatures.json")
+        monkeypatch.setattr(enrolled, "_write", _refuse_to_write)
+        r = client.post("/signature/enroll",
+                        json={"name": "Carmen Villalon", "strokes": INK})
+        assert r.json()["error"] == "store_unwritable"
+
+    def test_nothing_is_recorded(self, client, monkeypatch, tmp_path):
+        store = tmp_path / "signatures.json"
+        monkeypatch.setattr(enrolled, "STORE_PATH", store)
+        monkeypatch.setattr(enrolled, "_write", _refuse_to_write)
+        client.post("/signature/enroll",
+                    json={"name": "Carmen Villalon", "strokes": INK})
+        assert not enrolled.enrolled("Carmen Villalon", path=store)
+
+
+def _refuse_to_write(*a, **k):
+    raise PermissionError(13, "Permission denied")

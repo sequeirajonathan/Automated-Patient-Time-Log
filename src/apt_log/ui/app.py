@@ -2081,6 +2081,21 @@ async def signature_enroll(request: Request):
                                      witness=payload.get("witness", ""))
     except (TypeError, ValueError) as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
+    except OSError as exc:
+        # A STORE THAT CANNOT BE WRITTEN IS NOT A BAD REQUEST AND IT IS NOT
+        # THE PHONE.
+        #
+        # This went uncaught, so the route answered 500 and the page toasted
+        # "That didn't reach the phone" — a sentence about a handset, over a
+        # fault that was entirely the Pi's own disk. Watched live: the first
+        # real registration died on `PermissionError:
+        # /etc/aptlog/signatures.tmp` and the caregiver was told to look at
+        # the phone.
+        #
+        # Its own status and its own sentence, and the reason in the log where
+        # somebody can act on it.
+        log.warning("could not write the signature store (%s)", exc)
+        return JSONResponse({"error": "store_unwritable"}, status_code=507)
     return JSONResponse({"ok": True, "digest": digest[:12]})
 
 

@@ -398,9 +398,12 @@ whose signature it is, when it was adopted, and every application of it afterwar
 `witness` field survives in the store and the roster still shows it, so adoptions made
 before the change keep saying what they said.
 
-Storage is `/etc/aptlog/signatures.json`, 0600, removed by `sanitize-for-image.sh`. It is
-more sensitive than the schedule, which merely names people; this reproduces their
-signatures.
+Storage is `/var/lib/aptlog/signatures.json`, 0600 and owned by the service user, removed
+by `sanitize-for-image.sh`. It is more sensitive than the schedule, which merely names
+people; this reproduces their signatures. It began in `/etc/aptlog` and could not stay:
+that directory is deliberately not writable by the service (REQ-5.4.1), so the first live
+registration failed on the temporary file an atomic write needs. The file's own 0600 is
+what decides who can read a stroke set, and that is unchanged.
 
 Enforcement lives in `tests/test_enrolled.py`, including an import-graph test that fails
 if `autoentry`, `macros`, `schedule` or `feed` can so much as see the module. Reasoning in

@@ -48,11 +48,24 @@ attestation nobody meant.
 what was drawn. This is the trail that answers an auditor, and it is the whole
 reason this is better than the caregiver signing by hand — which leaves none.
 
-WHERE IT LIVES. `/etc/aptlog/signatures.json`, 0600, beside the schedule and
-for the same reason stated at the top of `schedule.py`: it names the people
-cared for. It is more sensitive than the schedule, not less — a stroke set is
-reproducible ink — so `sanitize-for-image.sh` removes it before any image is
-taken, and nothing in this repository has ever seen one.
+WHERE IT LIVES. `/var/lib/aptlog/signatures.json`, 0600, owned by the service
+user.
+
+It was `/etc/aptlog/` first, beside the schedule, and it could not stay there.
+That directory is root-owned and NOT writable by the service on purpose — REQ
+5.4.1 turns on the service being unable to create `/etc/aptlog/transport.conf`
+and switch off its own containment — so the very first live registration died
+with `PermissionError: /etc/aptlog/signatures.tmp`, because writing a file
+atomically means creating a temporary one next to it. Loosening that directory
+to fix this would have traded a containment guarantee for a save button.
+
+`/var/lib/aptlog` is the directory the service already owns and writes every
+few seconds. The FILE stays 0600 and owned by the service user, which is what
+actually decides who can read a stroke set; the directory being listable gives
+up nothing, since the filename says only that adoptions exist. It is more
+sensitive than the schedule, not less — a stroke set is reproducible ink — so
+`sanitize-for-image.sh` removes it before any image is taken, and nothing in
+this repository has ever seen one.
 """
 
 from __future__ import annotations
@@ -69,7 +82,7 @@ from apt_log import sign as sign_mod
 
 log = logging.getLogger(__name__)
 
-STORE_PATH = Path("/etc/aptlog/signatures.json")
+STORE_PATH = Path("/var/lib/aptlog/signatures.json")
 
 # Owner-only. The schedule next to it is 0644 and can afford to be; a stroke
 # set is the thing itself, and any account on this machine reading it has a

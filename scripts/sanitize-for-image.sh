@@ -42,7 +42,17 @@ rm -f /etc/aptlog/schedule.json /etc/aptlog/site.conf 2>/dev/null || true
 # NAMES the people cared for, and this REPRODUCES THEIR SIGNATURES. A stroke set
 # is the thing itself, not a reference to it, and an image is copied, handed over
 # and archived. It goes before the image does, without exception.
-rm -f /etc/aptlog/signatures.json 2>/dev/null || true
+#
+# BOTH PATHS. The store lives in the state directory now — /etc/aptlog is root-
+# owned so the service could not write there — and the old path is still swept
+# because a Pi imaged today may have been registered on before the move.
+# Removing a file that is not there costs nothing; leaving one behind costs a
+# patient's signature.
+rm -f /var/lib/aptlog/signatures.json /etc/aptlog/signatures.json \
+      2>/dev/null || true
+# The trail of applications, which names patients and dates. Not reproducible
+# ink, and not something to hand over either.
+rm -f /var/lib/aptlog/signings.jsonl 2>/dev/null || true
 rm -rf "/home/$SERVICE_USER/.local/share/python_keyring" \
        "/home/$SERVICE_USER/.android" 2>/dev/null || true
 

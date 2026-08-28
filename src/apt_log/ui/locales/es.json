@@ -356,6 +356,7 @@
  "sign.adopt_gone": "Esa firma guardada ya no está. Firme a mano en el recuadro.",
  "sign.adopt_hint": "Para un paciente que no puede sostener el teléfono. Firma una sola vez aquí, con usted presente, y desde entonces su firma se pone con un solo toque, que él mismo da, en la visita.",
  "sign.adopt_need_name": "Primero diga de quién es esta firma.",
+ "sign.adopt_no_store": "El controlador no pudo guardar la firma en su propio archivo. No se registró nada: el problema está en la Pi, no en el teléfono.",
  "sign.adopt_open": "Guardar esta firma para alguien",
  "sign.adopt_save": "Guardar esta firma",
  "sign.adopt_saved": "Guardada. Desde ahora se puede poner con un solo toque.",

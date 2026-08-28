@@ -1384,7 +1384,13 @@
                              aspect: rect.width / rect.height })
     }).then(async (r) => {
       if (!r.ok) {
-        toast(i18n.failed || '');
+        // NAME THE FAULT. A generic failure here said "that didn't reach the
+        // phone" over a Pi that could not write its own store — a sentence
+        // pointing at the one thing that was working. The store's own answer
+        // gets the store's own sentence.
+        const out = await r.json().catch(() => ({}));
+        toast((out.error === 'store_unwritable'
+               ? i18n.adoptNoStore : i18n.failed) || '');
         return;
       }
       toast(i18n.adoptSaved || '');

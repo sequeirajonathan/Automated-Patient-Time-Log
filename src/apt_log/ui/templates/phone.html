@@ -1291,6 +1291,28 @@
   #enrolpad { width:100%; aspect-ratio:2.2/1; display:block; margin-top:12px;
               border-radius:14px; border:1.5px dashed var(--line);
               background:var(--bg); touch-action:none; color:var(--ink); }
+
+  /* A SIGNATURE IS A LONG DRAG, AND A LONG DRAG SELECTS TEXT.
+     Watched on the caregiver's own phone: drawing a signature highlighted the
+     heading and the note above the pad in blue, and on iOS a press that
+     lingers on the canvas raises the callout menu — either one interrupts the
+     stroke that is being drawn, which is the failure mode this pad already
+     has a bad history with.
+     `touch-action:none` on the canvas stops the browser SCROLLING; it does
+     nothing about selection, which is why the pad has looked like this from
+     the start and nobody caught it until a real signature was drawn.
+     Applied to both sheets and to everything in them: there is nothing on
+     either that anybody needs to select, and the name field is exempted
+     below because a typed name does need to be editable. */
+  #signsheet, #enrolsheet { -webkit-user-select:none; user-select:none;
+                            -webkit-touch-callout:none; }
+  #signsheet input, #enrolsheet input { -webkit-user-select:text;
+                                        user-select:text; }
+  /* The canvases themselves, said again and separately: a drag that begins on
+     the pad must not start a selection anywhere, and Safari has historically
+     needed the rule on the element the gesture starts on. */
+  #signpad, #enrolpad { -webkit-user-select:none; user-select:none;
+                        -webkit-touch-callout:none; }
   .enroltitle { margin:0 0 8px; font-size:17px; font-weight:650;
                 color:var(--ink); }
   .enrolnote { margin:0 0 14px; font-size:13px; line-height:1.45;
@@ -2381,6 +2403,7 @@
     codeFailed:  {{ t('code.failed')|tojson }},
     adoptNeedName: {{ t('sign.adopt_need_name')|tojson }},
     adoptSaved: {{ t('sign.adopt_saved')|tojson }},
+    adoptNoStore: {{ t('sign.adopt_no_store')|tojson }},
     adoptGone: {{ t('sign.adopt_gone')|tojson }},
     signWhose: {{ t('sign.whose')|tojson }},
     sigOnFile: {{ t('sigmap.on_file')|tojson }},

@@ -356,6 +356,7 @@
  "sign.adopt_gone": "That saved signature is gone. Sign by hand on the pad instead.",
  "sign.adopt_hint": "For a patient who cannot hold the phone steady. They sign once here, with you present, and after that their signature goes on with a single press — pressed by them, at the visit.",
  "sign.adopt_need_name": "Say whose signature this is first.",
+ "sign.adopt_no_store": "The controller could not save the signature to its own store. Nothing was recorded — this is the Pi, not the phone.",
  "sign.adopt_open": "Save this signature for someone",
  "sign.adopt_save": "Save this signature",
  "sign.adopt_saved": "Saved. It can be applied with one press from now on.",
