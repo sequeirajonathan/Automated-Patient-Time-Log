@@ -504,7 +504,16 @@ def forward_any_new(serial: str | None = None, now: float | None = None,
     # question the app asked.
     if not recipients():
         return 0
-    when, code = _newest(serial=serial, now=at)
+    # UNCLAIMED, and this is the third consumer to need saying so. The
+    # broadcast button and the page already skip a code the controller took;
+    # this poll did not, and it is the one that runs by itself.
+    #
+    # Watched live: the sign-in walk claimed a code at 16:09:19 and typed it,
+    # and four seconds later this logged "code forwarded to 3 of 3". Three
+    # people were texted a code that was already spent — the exact confusion
+    # the claim ledger was built to prevent, arriving by the one path that
+    # never consulted it.
+    when, code = newest_unclaimed(serial=serial, now=at)
     if not code:
         return 0
     return forward_code(code, when, serial=serial)

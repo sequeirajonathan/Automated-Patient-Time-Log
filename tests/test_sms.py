@@ -879,3 +879,78 @@ class TestTheBroadcastSkipsWhatTheControllerTook:
             (now - 20, "passcode from INMYTEAM: 222222")))
         sms.claim(now - 20, path=led)
         assert sms.newest_unclaimed(now=now, path=led)[1] == ""
+
+
+class TestThePollSkipsWhatTheControllerTook:
+    """The one path that texts people by itself, and it never asked.
+
+    Watched live: the sign-in walk claimed a code at 16:09:19 and typed it,
+    and four seconds later the poll logged "code forwarded to 3 of 3". Three
+    people were texted a code that was already spent — the exact confusion the
+    claim ledger exists to prevent, arriving by the only path that never
+    consulted it. The broadcast button and the page had been skipping claimed
+    codes since the ledger was added; `forward_any_new` still called `_newest`.
+    """
+
+    def _inbox(self, *msgs):
+        return lambda *a, **k: rows(*msgs)
+
+    def _people(self, monkeypatch):
+        monkeypatch.setattr(sms, "recipients",
+                            lambda: [("Sadia", "5550208328")])
+
+    def test_a_claimed_code_is_not_forwarded(self, tmp_path, monkeypatch):
+        now = time.time()
+        led = tmp_path / "claimed.json"
+        monkeypatch.setattr(sms, "_claimed_path", lambda: led)
+        monkeypatch.setattr(sms, "_forwarded_path",
+                            lambda: tmp_path / "fwd.json")
+        self._people(monkeypatch)
+        monkeypatch.setattr(sms, "_adb", self._inbox(
+            (now - 5, "passcode from INMYTEAM: 222222")))
+        sms.claim(now - 5, path=led)
+
+        sent = []
+        monkeypatch.setattr(sms, "forward_code",
+                            lambda *a, **k: sent.append(a) or 1)
+        assert sms.forward_any_new(now=now, force=True) == 0
+        assert sent == []
+
+    def test_an_unclaimed_code_still_goes_out(self, tmp_path, monkeypatch):
+        """The whole point of the poll: a code THIS machine did not ask for —
+        somebody signing in on their own phone — still reaches everybody."""
+        now = time.time()
+        monkeypatch.setattr(sms, "_claimed_path",
+                            lambda: tmp_path / "claimed.json")
+        monkeypatch.setattr(sms, "_forwarded_path",
+                            lambda: tmp_path / "fwd.json")
+        self._people(monkeypatch)
+        monkeypatch.setattr(sms, "_adb", self._inbox(
+            (now - 5, "passcode from INMYTEAM: 333333")))
+
+        sent = []
+        monkeypatch.setattr(sms, "forward_code",
+                            lambda code, *a, **k: sent.append(code) or 1)
+        assert sms.forward_any_new(now=now, force=True) == 1
+        assert sent == ["333333"]
+
+    def test_it_falls_back_to_the_code_before_the_claimed_one(
+            self, tmp_path, monkeypatch):
+        """Her code is still hers. Claiming the newer one must not silence
+        the older one somebody is still waiting on."""
+        now = time.time()
+        led = tmp_path / "claimed.json"
+        monkeypatch.setattr(sms, "_claimed_path", lambda: led)
+        monkeypatch.setattr(sms, "_forwarded_path",
+                            lambda: tmp_path / "fwd.json")
+        self._people(monkeypatch)
+        monkeypatch.setattr(sms, "_adb", self._inbox(
+            (now - 90, "passcode from INMYTEAM: 111111"),
+            (now - 5, "passcode from INMYTEAM: 222222")))
+        sms.claim(now - 5, path=led)
+
+        sent = []
+        monkeypatch.setattr(sms, "forward_code",
+                            lambda code, *a, **k: sent.append(code) or 1)
+        sms.forward_any_new(now=now, force=True)
+        assert sent == ["111111"]
