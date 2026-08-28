@@ -707,3 +707,39 @@ order to close it, which is what happened here.
 - **Whether anything confirms after `Paso 3 de 3`.** Five seconds separate the last
   signature from the schedule page, and a 0.4-second poll could have missed a brief
   dialog.
+
+### inMyTeam's navigation drawer, and the sign-out
+
+Mapped 2026-08-28, in Spanish, on the replacement handset. The drawer is the
+route to `My Work` and to signing out, and it exists only on the app's front
+page — an inner screen draws Back in the same corner.
+
+```
+drawer_layout                DrawerLayout
+  nav_view / design_navigation_view   RecyclerView
+    design_menu_item_text    Mi perfil
+    design_menu_item_text    Documentos Requeridos
+    design_menu_item_text    Mi Trabajo            ← the Checks table lives here
+    design_menu_item_text    Agencias
+    design_menu_item_text    Instalaciones
+    design_menu_item_text    Configuración
+    design_menu_item_text    Ayuda
+    design_menu_item_text    Cerrar sesión         ← sign out
+```
+
+The ids are Material's own and carry no language. The item text does, and the
+rows are not themselves clickable — the caption sits in a `CheckedTextView`
+inside a clickable row, the same shape as Mobile Caregiver+'s visit controls.
+
+**The button that OPENS it is named in the app's language**, which is how this
+came to be written down at all. `DRAWER_DESC` was one English string —
+`Open navigation drawer` — and this phone says `Abrir panel lateral de
+navegación`; the English text is nowhere in the live hierarchy. `_the_drawer`
+returned None, so `_back_to_the_drawer` and `_open_my_work` quietly stopped
+working.
+
+That is not cosmetic. `_open_my_work` is the route to the Checks table, which
+is the guard against firing an entry for a visit the caregiver already entered
+by hand — so it failed **open**, and silently, which is the worst direction.
+Now a tuple (`DRAWER_DESCS`) matched in one xpath, like every other word list
+in that module, with tests in both languages.

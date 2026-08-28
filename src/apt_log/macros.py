@@ -3333,7 +3333,25 @@ CHECK_IN_WORDS_SEEN = ("check in", "entrada")
 CHECK_LOG_APPS = ("com.inmyteam.inmyteam",)
 
 
-DRAWER_DESC = "Open navigation drawer"
+# WHAT THE HAMBURGER CALLS ITSELF, IN BOTH LANGUAGES.
+#
+# This was one English string, and it went dead the moment the app started
+# rendering Spanish: the replacement handset says `Abrir panel lateral de
+# navegación`, and the English text is not anywhere in that hierarchy — I
+# grepped the live tree for it. `_the_drawer` returned None, which made
+# `_back_to_the_drawer` and `_open_my_work` no-ops.
+#
+# That is not a cosmetic failure. `_open_my_work` is how the walk reaches the
+# Checks table, which is the guard that stops an entry being fired for a visit
+# the caregiver already entered by hand. It failed OPEN and silently.
+#
+# Every other word list in this file is a tuple for exactly this reason
+# (MY_WORK_WORDS, CHECKS_TAB_WORDS, SEARCH_WORDS). This one was the exception
+# and had no business being one.
+DRAWER_DESCS = ("Open navigation drawer",
+                "Abrir panel lateral de navegación",
+                # Without the accent, for a build that strips them.
+                "Abrir panel lateral de navegacion")
 BACKS_TO_DRAWER = 5
 
 # Fragments every Jetpack app carries, which say nothing about where the
@@ -3385,10 +3403,13 @@ def _the_drawer(driver):
     The first live run of the work-log walk failed on exactly that, from a
     visit detail, reporting the log unreachable when it was three Backs away.
     """
+    # One xpath across every spelling, rather than a query per language: the
+    # tree read is the expensive part here and this runs inside a walk that
+    # is already against the clock.
+    wanted = " or ".join(f'@content-desc="{d}"' for d in DRAWER_DESCS)
     try:
-        found = [e for e in driver.find_elements(
-            "xpath", f'//*[@content-desc="{DRAWER_DESC}"]')
-            if e.is_displayed()]
+        found = [e for e in driver.find_elements("xpath", f"//*[{wanted}]")
+                 if e.is_displayed()]
     except Exception:  # noqa: BLE001
         return None
     return found[0] if found else None

@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from apt_log import arming, autoentry, schedule as sched
+from apt_log import arming, autoentry, macros, schedule as sched
 
 ZONE = ZoneInfo("America/New_York")
 
@@ -1728,3 +1728,65 @@ class TestPickingTheRightCardInExchangePlus:
         arg = macros._evv_arg("com.hhaexchange.uma", "Ada", "20:05")
         assert macros._evv_when(arg) == "20:05"
         assert macros._evv_parts(arg) == ("com.hhaexchange.uma", "Ada")
+
+
+class TestTheDrawerIsFoundInEitherLanguage:
+    """The guard that failed open.
+
+    `_the_drawer` matched one English content-desc. The moment the app
+    rendered Spanish it returned None, and `_open_my_work` — the route to the
+    Checks table, which is what stops an entry being fired for a visit the
+    caregiver already entered by hand — became a no-op. Silently, and in the
+    direction of doing the unsafe thing.
+
+    Confirmed on the live handset: `Abrir panel lateral de navegación` is what
+    the button says, and the English string is nowhere in that hierarchy.
+    """
+
+    class _Driver:
+        """Answers an xpath the way UiAutomator2 does: matches on the
+        content-desc literals named in the query."""
+
+        def __init__(self, desc):
+            self.desc = desc
+            self.asked = []
+
+        def find_elements(self, how, query):
+            self.asked.append(query)
+            if f'@content-desc="{self.desc}"' in query:
+                return [_Shown()]
+            return []
+
+    def test_english(self):
+        d = self._Driver("Open navigation drawer")
+        assert macros._the_drawer(d) is not None
+
+    def test_spanish(self):
+        d = self._Driver("Abrir panel lateral de navegación")
+        assert macros._the_drawer(d) is not None
+
+    def test_spanish_without_the_accent(self):
+        d = self._Driver("Abrir panel lateral de navegacion")
+        assert macros._the_drawer(d) is not None
+
+    def test_a_screen_with_no_drawer_is_still_none(self):
+        d = self._Driver("Navigate up")
+        assert macros._the_drawer(d) is None
+
+    def test_it_asks_once_rather_than_once_per_language(self):
+        """This runs inside a walk against the clock, and reading the tree is
+        the expensive part."""
+        d = self._Driver("Abrir panel lateral de navegación")
+        macros._the_drawer(d)
+        assert len(d.asked) == 1
+
+    def test_every_spelling_is_in_the_one_query(self):
+        d = self._Driver("nothing")
+        macros._the_drawer(d)
+        for spelling in macros.DRAWER_DESCS:
+            assert spelling in d.asked[0]
+
+
+class _Shown:
+    def is_displayed(self):
+        return True
