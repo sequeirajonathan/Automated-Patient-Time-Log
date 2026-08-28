@@ -102,12 +102,25 @@ BLOAT=(
   # against; it is the reason this list starts here.
   com.metro.
   com.metropcs.
-  com.tmobile.
-  com.tmobile.pr.
   com.sliide
   com.dti.
   com.aura.
   com.ironsource.
+
+  # T-Mobile's telemetry collector, and ONLY that one.
+  #
+  # `com.tmobile.` as a prefix was the first draft and it is too greedy: it
+  # also takes `com.tmobile.dm.cm`, `com.tmobile.dm.ms.services` and
+  # `com.tmobile.pr.adapt`, which are carrier DEVICE MANAGEMENT and
+  # provisioning. On this handset SMS is load-bearing — the whole OTP path
+  # depends on sending and receiving it, and the phone is registered over
+  # IWLAN, which is provisioned rather than intrinsic. Removing the thing that
+  # provisions IMS to save a few megabytes would be trading the feature for
+  # the cleanup.
+  #
+  # They may well be inert. Nobody has established that, and the way to find
+  # out is not on the phone that has to text three people a code.
+  com.tmobile.echolocate
 
   # Facebook's preinstalled stubs, which reinstall the real thing on demand.
   com.facebook.appmanager
@@ -212,7 +225,14 @@ case "${1:-plan}" in
       # Re-checked here as well as in `targets`. This is the line that
       # actually removes something, and it is the one worth being paranoid on.
       if is_protected "$p"; then say "refusing to remove protected $p"; continue; fi
-      out=$($ADB shell pm uninstall -k --user 0 "$p" 2>&1 | tr -d '\r')
+      # STDIN CLOSED, OR THIS LOOP RUNS ONCE.
+      #
+      # `adb` reads from stdin, and inside a `while read` it swallows the rest
+      # of the list — the first `apply` removed exactly one package of
+      # thirty-five and reported success. Same trap as `ssh` in a read loop,
+      # and it fails quietly in the direction of doing too little, which is
+      # the only reason it was survivable.
+      out=$($ADB shell pm uninstall -k --user 0 "$p" </dev/null 2>&1 | tr -d '\r')
       case "$out" in
         Success*) printf '%s\n' "$p" >> "$RECORD"; say "removed $p"; n=$((n+1)) ;;
         *)        say "skipped $p ($out)" ;;
@@ -228,7 +248,10 @@ case "${1:-plan}" in
     [ -f "$RECORD" ] || die "nothing recorded at $RECORD"
     while read -r p; do
       [ -n "$p" ] || continue
-      out=$($ADB shell cmd package install-existing "$p" 2>&1 | tr -d '\r')
+      # </dev/null for the same reason as `apply` — restoring one package of
+      # thirty-five is the worse half of that bug, because it looks like it
+      # worked and leaves the phone half-stripped.
+      out=$($ADB shell cmd package install-existing "$p" </dev/null 2>&1 | tr -d '\r')
       say "$p: $out"
     done < "$RECORD"
     ;;

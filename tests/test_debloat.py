@@ -115,6 +115,23 @@ class TestTheScriptItself:
         body = SCRIPT.read_text(encoding="utf-8")
         assert "RECORD" in body and "restore" in body
 
+    def test_every_adb_call_in_a_read_loop_closes_stdin(self):
+        """ADB EATS THE LOOP IT IS RUNNING INSIDE.
+
+        `adb` reads stdin, so inside `while read -r p` it consumes the rest of
+        the package list. The first live `apply` removed exactly one package
+        of thirty-five and reported success — it fails in the direction of
+        doing too little, which is the only reason it was survivable.
+
+        Both loops that drive adb per package must close its stdin.
+        """
+        body = SCRIPT.read_text(encoding="utf-8")
+        for call in ("pm uninstall -k --user 0", "cmd package install-existing"):
+            line = next(ln for ln in body.splitlines() if call in ln
+                        and ln.strip().startswith("out="))
+            assert "</dev/null" in line, (
+                f"{call!r} runs in a read loop and must close stdin")
+
     def test_it_is_executable(self):
         assert stat.S_IMODE(SCRIPT.stat().st_mode) & stat.S_IXUSR, (
             "chmod +x scripts/debloat.sh")
