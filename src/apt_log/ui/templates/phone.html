@@ -1254,9 +1254,20 @@
   .codecard[hidden] { display:none; }
   .codecap { font-size:11px; letter-spacing:.09em; text-transform:uppercase;
              color:var(--muted); }
-  .codedigits { font-size:38px; font-weight:700; letter-spacing:.16em;
-                font-variant-numeric:tabular-nums; line-height:1.15;
-                color:var(--ink); }
+  /* A button that looks like the number, because the number is the target.
+     44px min-height is the tap size the rest of this page holds to. */
+  .codedigits { font:inherit; font-size:38px; font-weight:700;
+                letter-spacing:.16em; font-variant-numeric:tabular-nums;
+                line-height:1.15; color:var(--ink); background:none;
+                border:none; padding:4px 10px; min-height:44px; cursor:pointer;
+                border-radius:10px; }
+  .codedigits:active { background:var(--bg); }
+  .codedigits:focus-visible { outline:2px solid var(--accent);
+                              outline-offset:2px; }
+  /* Says the digits are pressable. Without it a number on a card reads as a
+     label and nobody touches it. */
+  .codehint { font-size:11px; color:var(--muted); }
+  .codecard.copied .codehint { color:var(--accent); font-weight:600; }
   /* The age turns amber as the code ages out, because "6 minutes ago" read
      quickly looks the same as "1 minute ago". */
   .codeage { font-size:13px; color:var(--muted); }
@@ -1554,8 +1565,14 @@
        the people reading this are not all in it. #}
     <div class="codecard" id="codecard" hidden>
       <span class="codecap">{{ t('code.latest') }}</span>
-      <span class="codedigits" id="code-digits"></span>
+      {# A BUTTON, because it does something. The digits are what she reaches
+         for, so the digits are the target — not a separate copy icon beside
+         them that has to be aimed at. Typing six digits into another phone
+         while reading them off this one is where a 6 becomes an 8. #}
+      <button type="button" class="codedigits" id="code-digits"
+              aria-label="{{ t('code.copy') }}"></button>
       <span class="codeage" id="code-age"></span>
+      <span class="codehint">{{ t('code.copy') }}</span>
     </div>
   </div>
 
@@ -2115,6 +2132,8 @@
     signSendAgain: {{ t('sign.send_again')|tojson }},
     signEmpty:   {{ t('signature.empty')|tojson }},
     signLockLapsed: {{ t('sign.lock_lapsed')|tojson }},
+    codeCopied:     {{ t('code.copied')|tojson }},
+    codeCopyFailed: {{ t('code.copy_failed')|tojson }},
     codeJustNow: {{ t('code.just_now')|tojson }},
     codeAgoOne:  {{ t('code.ago_one')|tojson }},
     codeAgoMany: {{ t('code.ago_many')|tojson }},

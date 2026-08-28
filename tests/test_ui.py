@@ -4329,3 +4329,71 @@ class TestASecondHalfDoesNotLookLikeACheckIn:
         with patch("apt_log.schedule.load", return_value=self._split()):
             page = client.get("/app", headers={"Accept-Language": "en"}).text
         assert "noentry" in page
+
+
+class TestCopyingTheSignInCode:
+    """Tapping the digits copies them.
+
+    The alternative is reading six digits off one phone while typing them
+    into another, which is where a 6 becomes an 8 — and on inMyTeam a wrong
+    code clears the field, raises a dialog the tree cannot see, and spends
+    one of a limited number of attempts.
+    """
+
+    def _js(self) -> str:
+        return Path("src/apt_log/ui/static/phone.js").read_text(
+            encoding="utf-8")
+
+    def _html(self) -> str:
+        return Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+
+    def test_the_digits_are_a_button(self):
+        """Not a span with a click handler. A button is reachable from a
+        keyboard, announces itself as pressable, and this page has a rule
+        about not drawing controls that are not controls."""
+        html = self._html()
+        assert 'class="codedigits" id="code-digits"' in html
+        assert "<button type=\"button\" class=\"codedigits\"" in html
+
+    def test_it_says_the_digits_can_be_tapped(self):
+        """A number on a card reads as a label; nobody touches it unless the
+        page says to."""
+        assert "code.copy" in self._html()
+
+    def test_there_is_a_fallback_for_an_insecure_context(self):
+        """`navigator.clipboard` needs a secure context. The portal has one
+        through `tailscale serve`, but a plain-http preview and some in-app
+        browsers do not — and a copy button that silently does nothing is
+        worse than no copy button."""
+        js = self._js()
+        assert "navigator.clipboard" in js
+        assert "isSecureContext" in js
+        assert "execCommand" in js
+
+    def test_the_fallback_pad_is_offscreen_not_hidden(self):
+        """A hidden element cannot be selected, and the copy then fails
+        silently — the exact failure the fallback exists to avoid. So the pad
+        is moved off-screen instead.
+
+        Read with the comments stripped: the first version of this test
+        searched the raw source for "display:none" and tripped over the
+        comment explaining why it is not used.
+        """
+        js = strip_js_comments(self._js())
+        body = js.split("function copyText")[1][:700]
+        assert "-1000px" in body
+        assert "position = 'fixed'" in body
+        assert "style.display" not in body
+
+    def test_a_refused_copy_says_so(self):
+        js = self._js()
+        assert "codeCopyFailed" in js
+
+    def test_both_languages_carry_every_copy_string(self):
+        for lang in ("en", "es"):
+            cat = json.loads(Path(
+                f"src/apt_log/ui/locales/{lang}.json").read_text(
+                    encoding="utf-8"))
+            for key in ("code.copy", "code.copied", "code.copy_failed"):
+                assert key in cat, f"{lang} is missing {key}"
