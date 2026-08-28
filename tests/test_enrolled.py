@@ -138,12 +138,31 @@ class TestTheStrokesNeverLeaveTheMachine:
         assert "strokes" not in json.dumps(enrolled.roster(path=store))
 
     def test_the_route_carries_no_signature(self, client, store, monkeypatch):
+        """THIS GUARD USED TO SEARCH FOR "0.1" IN THE RESPONSE TEXT, and it
+        blocked a deploy at 19:00:20 by matching its own timestamp — the
+        ".1" of `20.166373`. It had passed every run before that and would
+        have failed one at random forever, which is the worst shape a guard
+        can have: it looks strict, it is not checking what it claims, and it
+        fires on the clock rather than on a leak.
+
+        Checked by SHAPE instead. A stroke set is the only thing in this
+        store that is a list of numbers, so no value in a roster row may be a
+        list or an object at all — that catches the coordinates under any key
+        anybody invents, which the substring never did.
+        """
         monkeypatch.setattr(enrolled, "STORE_PATH", store)
         enrolled.enroll("Carmen Villalon", INK, witness=WITNESS, path=store)
-        body = client.get("/signature/roster").text
-        assert "strokes" not in body
-        # And not the numbers themselves under another name.
-        assert "0.1" not in body and "0.5" not in body
+        payload = client.get("/signature/roster").json()
+        assert "strokes" not in json.dumps(payload)
+        assert "points" not in json.dumps(payload)
+        rows = payload["parties"]
+        assert rows, "nothing was returned, so nothing was checked"
+        for row in rows:
+            for field, value in row.items():
+                assert isinstance(value, str), (
+                    "%s is %r — a roster row carries names and dates, and a "
+                    "stroke set is the only thing here shaped like anything "
+                    "else" % (field, value))
 
     def test_no_route_reads_the_store_directly(self):
         """Every route goes through `roster`/`strokes_for`. A route that
