@@ -3630,15 +3630,16 @@ def _inmyteam_sign_out(driver, report) -> None:
     5am arm depends on that recovery, which is the real cost of a stray
     press.
     """
+    package = "com.inmyteam.inmyteam"
     report("macro.step.opening")
-    _freshen(driver, report, INMYTEAM)
+    _freshen(driver, report, package)
 
     drawer = _the_drawer(driver)
     if drawer is None:
         # `_back_to_the_drawer` walks out of an inner page; if the drawer is
         # still not there afterwards this is not the app's front, and a blind
         # press in a nav list is how the wrong menu item gets chosen.
-        _back_to_the_drawer(driver, report, INMYTEAM)
+        _back_to_the_drawer(driver, report, package)
         drawer = _the_drawer(driver)
     if drawer is None:
         raise RuntimeError("the navigation drawer is not on this screen")
