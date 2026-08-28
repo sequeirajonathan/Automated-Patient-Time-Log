@@ -4563,3 +4563,54 @@ class TestAutoAuthRecognisesTheSpanishSplash:
         right in two of them."""
         for word in macros.SIGN_IN_START_WORDS:
             assert word.lower() in macros._IMT_LOGIN_WORDS
+
+
+class TestTheNumberScreensSubmitIsActuallyNamed:
+    """`Registrarse`, on a button that signs an existing caregiver in.
+
+    The fourth English-only caption list of the day, and the one that cost
+    the most: auto-auth recognised the splash, pressed it, reached the number
+    screen, typed the number — and stopped one press short of the code,
+    reporting "the sign-in button is not on this screen" while the button sat
+    there. `by_words("Sign in", "Iniciar")` was written against an English
+    handset. The Spanish build captions it "Registrarse", and the heading it
+    might otherwise have caught reads "Inicie sesión…" — "Inicie", not
+    "Iniciar". The list missed twice over.
+    """
+
+    # Verbatim from the live handset, in the order the tree gives them.
+    NUMBER_SCREEN_WORDS = ("Inicie sesión \ncon su número de teléfono",
+                           "Ingrese su número de teléfono celular",
+                           "Registrarse")
+
+    def test_the_caption_seen_on_the_live_phone_is_covered(self):
+        assert any(w in "Registrarse" for w in macros.SIGN_IN_SUBMIT_WORDS), (
+            f"'Registrarse' matches none of {macros.SIGN_IN_SUBMIT_WORDS}")
+
+    def test_english_is_still_covered(self):
+        assert any(w in "Sign in" for w in macros.SIGN_IN_SUBMIT_WORDS)
+
+    def test_the_heading_is_not_what_matches(self):
+        """"Inicie sesión" is a heading, not a control. If the list ever
+        matched it, `by_words` would return the tightest CLICKABLE node
+        containing it — which on this screen is the full-page container, and
+        pressing that does nothing at all. That failure is silent: the number
+        goes in and the walk simply stalls."""
+        heading = self.NUMBER_SCREEN_WORDS[0]
+        matches = [w for w in macros.SIGN_IN_SUBMIT_WORDS if w in heading]
+        assert matches == [], f"{matches} matches the heading, not the button"
+
+    def test_the_submit_captions_are_not_retyped(self):
+        from conftest import strip_py_comments
+
+        source = strip_py_comments(
+            Path("src/apt_log/macros.py").read_text(encoding="utf-8"))
+        assert source.count("SIGN_IN_SUBMIT_WORDS = (") == 1
+        assert 'by_words("Sign in"' not in source
+
+    def test_registrarse_is_tried_last(self):
+        """On a screen that one day carries BOTH a submit and a separate
+        sign-up link, the submit has to win. `by_words` returns on the first
+        word with any hit, so order is the whole guarantee."""
+        words = macros.SIGN_IN_SUBMIT_WORDS
+        assert words[-1] == "Registrarse"

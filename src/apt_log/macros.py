@@ -1608,6 +1608,27 @@ def _inmyteam_resend_code(driver, report) -> None:
 # press on a splash is cheap only until the splash changes.
 SIGN_IN_START_WORDS = ("Get Started", "Comencemos", "Comenzar", "Empezar")
 
+# WHAT THE NUMBER SCREEN'S BUTTON SAYS, and it is a stranger answer.
+#
+# Same discovery, one screen later, and the same shape a fourth time: the
+# submit was looked up as `by_words("Sign in", "Iniciar")`, written against an
+# English handset. The Spanish build captions that button **"Registrarse"** —
+# "Register" — even though it signs an existing caregiver in and sends her the
+# code. Nothing on the screen says "Iniciar": the heading is "Inicie sesión con
+# su número de teléfono", and "Inicie" is not "Iniciar", so the English list
+# missed it twice over.
+#
+# So auto-auth recognised the splash (fixed above), pressed it, reached the
+# number screen, typed the number — and stopped one press short of the code,
+# reporting "the sign-in button is not on this screen" while the button sat
+# there captioned in a word no list here contained.
+#
+# Ordered deliberately: the unambiguous captions are tried first and
+# "Registrarse" last, because on a screen that one day carries BOTH a submit
+# and a separate sign-up link, the submit must win. Today there is exactly one
+# control below the field and this is it.
+SIGN_IN_SUBMIT_WORDS = ("Sign in", "Iniciar", "Registrarse")
+
 
 def _inmyteam_walk(driver, report, resend: bool = False) -> None:
     """The sign-in walk. `resend` refuses to stop at a code screen.
@@ -1624,8 +1645,11 @@ def _inmyteam_walk(driver, report, resend: bool = False) -> None:
        "Let's Get Started". No id, no text on the node itself — the caption
        is a separate view inside it — so it is found by the words it
        contains.
-    2. **The number.** One EditText ("Enter your cell phone number") and a
-       "Sign in" button. The number comes from INMYTEAM_PHONE.
+    2. **The number.** One EditText ("Enter your cell phone number" /
+       "Ingrese su número de teléfono celular") and one button below it. Its
+       caption is SIGN_IN_SUBMIT_WORDS, and in Spanish that caption is
+       "Registrarse" — see the note there. The number comes from
+       INMYTEAM_PHONE.
     3. **The code.** Pressing Sign in sends a real SMS, and this macro stops
        here on purpose. The portal's type bar exists for this moment — she
        aims at the code field and types the code herself, which is the same
@@ -1748,7 +1772,7 @@ def _inmyteam_walk(driver, report, resend: bool = False) -> None:
     box.clear()
     box.send_keys(number)
 
-    submit = by_words("Sign in", "Iniciar")
+    submit = by_words(*SIGN_IN_SUBMIT_WORDS)
     if submit is None:
         raise RuntimeError("the sign-in button is not on this screen")
     # Stamped before the press, so "a code that arrived after we asked" has a

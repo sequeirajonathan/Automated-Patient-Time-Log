@@ -224,3 +224,20 @@ def strip_js_comments(source: str) -> str:
     import re
 
     return re.sub(r"/\*.*?\*/|//[^\n]*", "", source, flags=re.S)
+
+
+def strip_py_comments(source: str) -> str:
+    """The same argument as `strip_js_comments`, for Python.
+
+    Bitten again, immediately: a guard asserting that `by_words("Sign in"` no
+    longer appears in macros.py failed on the COMMENT explaining that it used
+    to. The fix is never to reword the prose — the prose is why the next
+    reader understands the constant — it is to stop the guard reading it.
+
+    Only whole-line comments are dropped, and deliberately: a `#` inside a
+    string is not a comment, and a regex clever enough to know the difference
+    is a regex that will be wrong about something else. Every guard using this
+    is looking for a CALL SITE, and a call site is never on a comment line.
+    """
+    return "\n".join(line for line in source.splitlines()
+                     if not line.lstrip().startswith("#"))
