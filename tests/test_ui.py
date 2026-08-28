@@ -4782,3 +4782,38 @@ class TestTheSignatureMappingView:
                         "sigmap.replace", "sigmap.not_scheduled",
                         "sigmap.filed_as"):
                 assert catalogue[key].strip(), f"{code} {key}"
+
+
+class TestTheMappingNamesAppsTheWayTheTilesDo:
+    """"com.hhaexchange.uma" is not an app name.
+
+    It is a package identifier, and on a caregiver's screen it is noise. The
+    schedule names an app however its author found convenient — a package on
+    one line, a tile id on another — so the row resolves whichever it got.
+    """
+
+    def test_a_package_becomes_its_brand(self):
+        from apt_log.ui.app import _app_called
+
+        assert _app_called("com.hhaexchange.uma") == "HHAeXchange+"
+        assert _app_called("com.inmyteam.inmyteam") == "inMyTeam"
+
+    def test_a_tile_id_resolves_too(self):
+        from apt_log.ui.app import _app_called
+
+        assert _app_called("inmyteam") == "inMyTeam"
+        assert _app_called("mobile_caregiver") == "Mobile Caregiver+"
+
+    def test_the_retired_app_is_still_named(self):
+        """A schedule entry written before the migration is still a schedule
+        entry somebody has to read."""
+        from apt_log.ui.app import _app_called
+
+        assert _app_called("com.hhaexchange.caregiver") == "HHAeXchange"
+
+    def test_an_unknown_reference_survives_rather_than_blanking(self):
+        """A row for an app this build does not know must stay legible."""
+        from apt_log.ui.app import _app_called
+
+        assert _app_called("com.example.new") == "com.example.new"
+        assert _app_called("") == ""

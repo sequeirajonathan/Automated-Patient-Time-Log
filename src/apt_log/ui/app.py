@@ -1972,6 +1972,21 @@ def signature_roster():
     return JSONResponse({"parties": enrolled_mod.roster()})
 
 
+def _app_called(app_ref: str) -> str:
+    """What the tiles call this app. The reference itself if nothing does.
+
+    The schedule names an app however its author found convenient — a package
+    on one line, a tile id on another — and neither is a thing to show a
+    caregiver. Falling back to the raw reference rather than to "" keeps a
+    schedule entry for an app this build does not know legible instead of
+    blank.
+    """
+    for tile in PHONE_APPS + (RETIRED_TILE,):
+        if app_ref in (tile["package"], tile["id"]):
+            return tile["name"]
+    return app_ref
+
+
 @app.get("/signature/map")
 def signature_map():
     """Everybody who will be asked to sign, and whether they have adopted one.
@@ -2012,8 +2027,11 @@ def signature_map():
         seen.add(name)
         # Which apps will put this person in front of a pad. Named rather
         # than counted: "she signs in two apps" is the fact that decides
-        # whether one adoption is enough.
-        apps = sorted({b.app for b in blocks if b.patient == name})
+        # whether one adoption is enough — and named the way the tiles name
+        # them, because "com.hhaexchange.uma" on a caregiver's screen is not
+        # an app name, it is a package identifier she has no use for.
+        apps = sorted({_app_called(b.app) for b in blocks
+                       if b.patient == name})
         # The store's own spelling wins for the button, because that is what
         # `who_signs` will hand the pad at the moment it matters.
         match = enrolled_mod.who_signs(name)
