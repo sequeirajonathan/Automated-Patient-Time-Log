@@ -1582,3 +1582,149 @@ class TestTheReplayClearsBeforeItDraws:
         body = source.split("def execute(", 1)[1]
         assert body.index("_wipe_the_canvas(") < body.index("_perform(")
         assert body.index("_wipe_the_canvas(") < body.index("build_paths(")
+
+
+class TestTheSheetWasEatingTheStrokes:
+    """Why a signature came out with letters missing.
+
+    inMyTeam draws its pad inside a `design_bottom_sheet`, and that container
+    watches every touch for a DOWNWARD DRAG, because that is how a person
+    dismisses it. A touch whose first movement is vertical is claimed by the
+    sheet before the canvas sees it — and a signature is mostly vertical.
+
+    Measured on the live pad with the ink counted off a screenshot:
+
+        pure downward diagonal, no prime .......  0 ink, LOST
+        the same stroke, primed horizontally ... 1318 ink, drawn
+        16 primed strokes, steep and shallow ... 16 of 16 drawn
+        the same, unprimed .....................  0 of 16 drawn
+    """
+
+    def _chain(self, path):
+        """The moves a stroke would inject, in order."""
+        moves = []
+
+        class Pen:
+            def move_to_location(self, x, y):
+                moves.append((x, y))
+
+            def pause(self, _s):
+                pass
+
+            def pointer_down(self):
+                moves.append("DOWN")
+
+            def pointer_up(self):
+                moves.append("UP")
+
+        class Builder:
+            pointer_action = Pen()
+
+            def perform(self):
+                pass
+
+            def clear_actions(self):
+                pass
+
+        with patch("selenium.webdriver.common.actions.action_builder"
+                   ".ActionBuilder", return_value=Builder()):
+            sign._draw(MagicMock(), path)
+        return moves
+
+    def test_the_stroke_moves_sideways_before_it_moves_down(self):
+        """The whole fix. Anything vertical before the pad owns the gesture
+        hands the stroke to the sheet."""
+        moves = self._chain([(500, 1600), (500, 1900)])
+        down = moves.index("DOWN")
+        after = [m for m in moves[down + 1:] if m != "UP"]
+        first = after[0]
+        assert first[1] == 1600, "moved vertically before claiming the gesture"
+        assert first[0] != 500, "did not move at all"
+
+    def test_it_comes_back_before_drawing(self):
+        """The signature has to be drawn from its own first point, not from
+        wherever the prime ended."""
+        path = [(500, 1600), (520, 1900)]
+        moves = self._chain(path)
+        assert path[0] in moves
+        assert moves.index(path[0]) < moves.index(path[1])
+
+    def test_the_prime_is_small(self):
+        """A visible nub beats a missing letter, but only just: 8px worked in
+        every trial and 16 is the same result with margin."""
+        moves = self._chain([(500, 1600), (500, 1900)])
+        xs = [m[0] for m in moves if m != "DOWN" and m != "UP"]
+        assert max(xs) - 500 <= sign.CLAIM_NUDGE
+
+    def test_it_leans_the_way_the_stroke_goes(self):
+        """So the lead-in lies along the mark rather than across it."""
+        left = self._chain([(500, 1600), (300, 1900)])
+        first = [m for m in left[left.index("DOWN") + 1:] if m != "UP"][0]
+        assert first[0] < 500
+
+    def test_a_stroke_with_no_sideways_travel_still_primes(self):
+        """A pure vertical is the commonest shape in a signature and the one
+        the sheet takes every time."""
+        moves = self._chain([(500, 1600), (500, 1900)])
+        first = [m for m in moves[moves.index("DOWN") + 1:] if m != "UP"][0]
+        assert first[0] > 500
+
+    def test_every_real_point_is_still_drawn(self):
+        path = [(500, 1600), (540, 1700), (520, 1820), (560, 1900)]
+        moves = self._chain(path)
+        for point in path:
+            assert point in moves, point
+
+
+class TestACaptionDrawnOverATextlessButton:
+    """inMyTeam's Borrar has no text and no id. The word sits beside it.
+
+        View      clickable=true  [686,2258][788,2295]   no text, no id
+        TextView  "Borrar"        [719,2265][770,2288]
+
+    So the caption rule could not see it, `_wipe_the_canvas` pressed nothing,
+    and a second replay landed on top of the first. The log line for the
+    signature that failed carries no `cleared=` at all.
+    """
+
+    PAD = ('<node class="android.view.View"'
+           ' resource-id="com.x:id/signature_pad"'
+           ' clickable="false" bounds="[13,1505][1067,2216]" />')
+    # Verbatim shape from the live sheet: the clickable carries nothing.
+    BARE = ('<node class="android.view.View" text="" clickable="true"'
+            ' bounds="[686,2258][788,2295]" />'
+            '<node class="android.widget.TextView" text="Borrar"'
+            ' clickable="false" bounds="[719,2265][770,2288]" />')
+    ROOT = ('<node class="android.view.ViewGroup" text="" clickable="true"'
+            ' bounds="[0,0][1080,2340]" />')
+
+    def test_the_caption_finds_its_button(self):
+        found = sign._app_buttons(self.PAD + self.BARE)
+        assert "clear" in found
+        assert found["clear"]["xy"] == [737, 2276]
+
+    def test_the_page_root_is_not_the_clear_button(self):
+        """Every ancestor encloses the caption and the root encloses them all.
+        Smallest is what makes it the control rather than the page."""
+        found = sign._app_buttons(self.ROOT + self.PAD + self.BARE)
+        assert found["clear"]["b"] == [686, 2258, 788, 2295]
+
+    def test_a_captioned_button_still_works(self):
+        """The legacy app publishes the word on the button itself, and that
+        path must not have been traded away for this one."""
+        legacy = ('<node class="android.widget.Button"'
+                  ' resource-id="com.x:id/btn_clear" text="Borrar"'
+                  ' clickable="true" bounds="[10,75][100,109]" />')
+        assert sign._app_buttons(legacy)["clear"]["txt"] == "Borrar"
+
+    def test_an_unrelated_word_is_not_a_button(self):
+        loose = ('<node class="android.widget.TextView" text="Cancel Visit"'
+                 ' clickable="false" bounds="[21,1453][37,1469]" />')
+        assert sign._app_buttons(self.PAD + loose) == {}
+
+    def test_the_wipe_now_finds_it(self):
+        d = MagicMock()
+        d.tap = MagicMock()
+        assert sign._wipe_the_canvas(d, self.PAD + self.BARE, [""]) is True
+        (points,), _ = d.tap.call_args
+        assert points == [(737, 2276)]

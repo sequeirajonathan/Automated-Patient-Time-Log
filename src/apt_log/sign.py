@@ -743,7 +743,39 @@ def _app_buttons(xml: str) -> dict:
     the button one night), it survives a redesign that moves the strip, and
     it cannot land on the drawing.
     """
+    # THE CAPTION IS OFTEN NOT ON THE BUTTON, and on this app it never is.
+    #
+    # inMyTeam's signature sheet publishes its Borrar as a clickable View with
+    # no text and no resource-id, and the word sits in a TextView beside it:
+    #
+    #   View   clickable=true  [686,2258][788,2295]   (no text, no id)
+    #   TextView  "Borrar"     [719,2265][770,2288]
+    #
+    # So the caption rule below could not see it, `_wipe_the_canvas` pressed
+    # nothing, and a second replay landed on top of the first. Watched live:
+    # the log line for the failed signature carries no `cleared=` at all.
+    #
+    # The tree here is a flat regex scan with no parent links, so containment
+    # is done by geometry: a caption belongs to the SMALLEST clickable node
+    # whose bounds enclose it. Smallest is what stops the screen's own root —
+    # which encloses every word on it — claiming to be the clear button. It is
+    # the same rule `_words` uses on the other side of this project, for the
+    # same reason.
+    captions: list[tuple[list[int], str]] = []
+    for raw in _NODE.findall(xml or ""):
+        txt = _attr(raw, "text").strip()
+        if not txt:
+            continue
+        m = _BOUNDS.search(_attr(raw, "bounds"))
+        if m:
+            captions.append(([int(g) for g in m.groups()], txt.lower()))
+
+    def _encloses(box, inner) -> bool:
+        return (box[0] <= inner[0] and box[1] <= inner[1]
+                and box[2] >= inner[2] and box[3] >= inner[3])
+
     found: dict[str, dict] = {}
+    areas: dict[str, int] = {}
     for raw in _NODE.findall(xml or ""):
         if _attr(raw, "clickable") != "true":
             continue
@@ -759,8 +791,6 @@ def _app_buttons(xml: str) -> dict:
         low = txt.lower()
         for kind, ids, words in (("confirm", _SAVE_IDS, _SAVE_WORDS),
                                  ("clear", _CLEAR_IDS, _CLEAR_WORDS)):
-            if kind in found:
-                continue                      # first match wins, in tree order
             # A CAPTION, OR AN ID THAT NAMES THE SIGNATURE SCREEN ITSELF.
             #
             # HHAeXchange+'s buttons carry no text — "Borrar" and "Enviar"
@@ -778,12 +808,28 @@ def _app_buttons(xml: str) -> dict:
             # as well as the action. `signature_screen_submit_button` does;
             # a bare `button_save` does not, and still needs its word.
             names_the_screen = any(h in rid for h in CANVAS_ID_HINTS)
-            if ((low and low in words)
+            # The node's own caption, or one drawn over it. `held` carries the
+            # word actually matched so the log and the pad say what the app
+            # says, rather than an empty string for a textless button.
+            held = low if (low and low in words) else ""
+            if not held:
+                for cbox, ctxt in captions:
+                    if ctxt in words and _encloses(b, cbox):
+                        held = ctxt
+                        break
+            if ((held)
                     or (any(i in rid for i in ids)
                         and (low or names_the_screen))):
-                found[kind] = {"rid": full, "txt": txt,
+                # SMALLEST WINS. Every ancestor of a caption encloses it, and
+                # the page root encloses all of them; taking the first in tree
+                # order would press a container the size of the screen.
+                area = max(0, b[2] - b[0]) * max(0, b[3] - b[1])
+                if kind in found and area >= areas.get(kind, 0):
+                    continue
+                found[kind] = {"rid": full, "txt": txt or held,
                                "b": b,
                                "xy": [(b[0] + b[2]) // 2, (b[1] + b[3]) // 2]}
+                areas[kind] = area
     return found
 
 
@@ -967,6 +1013,43 @@ STROKE_GAP = 0.45
 # stroke fluid without outrunning injection.
 MOVE_MS = 12
 
+# ---------------------------------------------------- claiming the gesture
+# THE BOTTOM SHEET WAS EATING THE STROKES, and this is why a signature came
+# out with letters missing.
+#
+# inMyTeam draws its pad inside a `design_bottom_sheet` — a
+# BottomSheetDialog — and that container watches every touch for a DOWNWARD
+# DRAG, because a downward drag is how a person dismisses it. A touch whose
+# first movement is vertical is claimed by the sheet before the canvas ever
+# sees it. A signature is mostly vertical movement, so most of its strokes
+# were being taken.
+#
+# Measured on the live pad, on the caregiver's own phone, with the ink counted
+# off a screenshot after each stroke:
+#
+#   pure downward diagonal, no prime .......... 0 ink,  LOST
+#   the same stroke, primed horizontally ... 1318 ink,  drawn
+#   sweep of nine horizontal strokes ....... all nine drawn
+#   16 primed strokes, steep and shallow ... 16 of 16 drawn
+#   the same, unprimed ...................... 0 of 16 drawn
+#
+# So each stroke now moves a few pixels SIDEWAYS first and comes back. That is
+# enough to make the canvas the owner of the gesture — a horizontal drag is
+# not the sheet's gesture, so it does not intercept — and everything after it
+# goes to the pad.
+#
+# THE PRICE IS A SHORT HORIZONTAL LEAD-IN at the start of each stroke, and it
+# is chosen to be as small as the phone will accept: 8px worked in every
+# trial, 16 is the same result with margin, and both are under 2% of the
+# pad's width. A visible nub beats a missing letter.
+#
+# It also explains the report this project could not reproduce for weeks: "one
+# continuous swipe gets the full signature, lifting the finger breaks it".
+# Every lift starts a new gesture, and every new gesture is another chance for
+# the sheet to take it.
+CLAIM_NUDGE = 16
+CLAIM_STEP = 5
+
 
 # The locator strategy's wire name. Spelled out rather than imported from
 # appium, which is not installed in the cloud container where this suite also
@@ -1096,10 +1179,28 @@ def _draw(driver, path) -> None:
                                                "touch"),
                             duration=MOVE_MS)
     pen = actions.pointer_action
-    pen.move_to_location(*path[0])
+    x0, y0 = path[0]
+    pen.move_to_location(x0, y0)
     pen.pause(PEN_SETTLE)
     pen.pointer_down()
     pen.pause(PEN_SETTLE)
+    # SIDEWAYS FIRST — see CLAIM_NUDGE. Without this the bottom sheet holding
+    # the pad claims the touch as a drag-to-dismiss and the stroke is never
+    # drawn at all.
+    #
+    # Toward whichever way the stroke is already travelling, so the lead-in
+    # lies along the mark rather than across it; rightward for a stroke with
+    # no horizontal travel at all. `build_paths` keeps every point inside the
+    # canvas by a margin wider than this, so neither direction leaves the pad.
+    way = 1 if path[-1][0] >= x0 else -1
+    step = CLAIM_STEP
+    while step <= CLAIM_NUDGE:
+        pen.move_to_location(x0 + way * step, y0)
+        step += CLAIM_STEP
+    pen.move_to_location(x0 + way * CLAIM_NUDGE, y0)
+    # Back to where the stroke actually starts, so the signature itself is
+    # drawn from its own first point.
+    pen.move_to_location(x0, y0)
     for x, y in path[1:]:
         pen.move_to_location(x, y)
     pen.pause(PEN_SETTLE)
