@@ -1392,6 +1392,9 @@
     // pads, so whatever was on the other one is not this person's signature.
     pad.strokes = [];
     body.classList.remove('signing');
+    // And any leftover "saved" state from the last person: opening this sheet
+    // is always the start of a registration, never the end of one.
+    body.classList.remove('enrolled');
     body.classList.add('enrolling');
     padFit();
     padRedraw();
@@ -1481,11 +1484,43 @@
   // waiting on the canvas.
   function enrolSave() {
     postEnrolment((document.getElementById('enrol-name') || {}).value || '',
-                  closeEnrol);
+                  enrolDone);
+  }
+
+  // WHAT WAS ACTUALLY SAVED, SHOWN BEFORE ANYBODY WALKS AWAY.
+  //
+  // The first registration on this machine was a test scribble stored under a
+  // patient's name, and it was found out afterwards. The moment to catch that
+  // is while both people are still sitting there.
+  //
+  // Drawn from `pad.strokes` — the strokes this browser JUST SENT, already in
+  // hand. Nothing is fetched back and no route returns a signature, which is
+  // REQ-10.6a condition 2 and is not negotiable for a picture. It is a preview
+  // of what went in, not a reading of what is on file.
+  //
+  // The pad goes inert underneath: the strokes on it are now a record of
+  // something saved, and a stray touch must not add to them.
+  function enrolDone() {
+    body.classList.add('enrolled');
+    const said = document.getElementById('enrol-saved-who');
+    const name = (document.getElementById('enrol-name') || {}).value || '';
+    if (said) {
+      said.textContent = (i18n.sigSavedFor || '').replace('{who}', name.trim());
+    }
+  }
+
+  // Not right. Straight back to a blank pad with the name still in the box —
+  // the row already carries a signature at this point, and saving again
+  // replaces it, so there is nothing to undo first.
+  function enrolAgain() {
+    body.classList.remove('enrolled');
+    pad.strokes = [];
+    padRedraw();
   }
 
   function closeEnrol() {
     body.classList.remove('enrolling');
+    body.classList.remove('enrolled');
     pad.strokes = [];
   }
 
@@ -2225,6 +2260,10 @@
     if (enrolBtn) enrolBtn.addEventListener('click', enrolSave);
     const enrolCancel = document.getElementById('enrol-cancel');
     if (enrolCancel) enrolCancel.addEventListener('click', closeEnrol);
+    const enrolAgainBtn = document.getElementById('enrol-again');
+    if (enrolAgainBtn) enrolAgainBtn.addEventListener('click', enrolAgain);
+    const enrolClose = document.getElementById('enrol-close');
+    if (enrolClose) enrolClose.addEventListener('click', closeEnrol);
     swipeToDismiss(document.getElementById('enrolsheet'), closeEnrol);
 
     // The app's own Borrar/Salvar, relayed. The outcome rides the same

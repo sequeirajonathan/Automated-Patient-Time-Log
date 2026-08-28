@@ -5177,3 +5177,99 @@ class TestWithdrawingAnAdoptionFromTheRow:
             for key in ("sigmap.forget", "sigmap.forget_sure",
                         "sigmap.forgotten"):
                 assert catalogue[key].strip(), f"{code} {key}"
+
+
+class TestSeeingWhatWasSaved:
+    """The sheet does not close on a save. It shows what went in.
+
+    The first registration on this machine was a test scribble stored under a
+    patient's name, and it was found out afterwards. The moment to catch that
+    is while both people are still sitting there.
+    """
+
+    def _js(self) -> str:
+        return strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+
+    def _html(self) -> str:
+        return Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+
+    def test_saving_shows_rather_than_closes(self):
+        js = self._js()
+        assert "postEnrolment(" in js
+        body = js.split("function enrolSave(", 1)[1].split("\n  }", 1)[0]
+        assert "enrolDone" in body
+        assert "closeEnrol" not in body
+
+    def test_the_preview_is_the_strokes_already_in_hand(self):
+        """NOTHING is fetched back. REQ-10.6a condition 2 — no route returns a
+        signature — does not bend for a picture, so the preview can only ever
+        be of what this browser just sent."""
+        body = self._js().split("function enrolDone(", 1)[1].split(
+            "\n  }", 1)[0]
+        assert "fetch(" not in body
+        assert "strokes" not in body
+
+    def test_no_route_hands_back_a_signature(self):
+        """The guard that matters. If a preview route ever appears, this is
+        what should stop it."""
+        app = Path("src/apt_log/ui/app.py").read_text(encoding="utf-8")
+        for route in ('"/signature/preview"', '"/signature/image"',
+                      '"/signature/strokes"'):
+            assert route not in app, route
+
+    def test_the_pad_goes_inert(self):
+        """The strokes on it are now a record of something stored, and a
+        stroke added here would be added to nothing."""
+        html = self._html()
+        assert "body.enrolled #enrolpad { pointer-events:none;" in html
+
+    def test_everything_that_could_change_it_stands_down(self):
+        html = self._html()
+        block = html.split("body.enrolled #enrol-save,", 1)[1].split(
+            "}", 1)[0]
+        for gone in ("#enrol-cancel", ".padtools", "input"):
+            assert gone in block, gone
+
+    def test_it_offers_a_redraw(self):
+        """"That is not her signature" has to be answerable in the room, not
+        afterwards from a shell."""
+        js = self._js()
+        assert "function enrolAgain(" in js
+        body = js.split("function enrolAgain(", 1)[1].split("\n  }", 1)[0]
+        assert "pad.strokes = []" in body
+        assert "classList.remove('enrolled')" in body
+
+    def test_opening_never_starts_in_the_saved_state(self):
+        """Opening this sheet is always the start of a registration, never the
+        end of the last one."""
+        body = self._js().split("function adoptFrom(", 1)[1].split(
+            "\n  }", 1)[0]
+        assert "classList.remove('enrolled')" in body
+
+    def test_closing_clears_it(self):
+        body = self._js().split("function closeEnrol(", 1)[1].split(
+            "\n  }", 1)[0]
+        assert "classList.remove('enrolled')" in body
+        assert "pad.strokes = []" in body
+
+    def test_it_names_who_it_was_saved_for(self):
+        """A confirmation that does not say whose it is confirms nothing —
+        the accident this exists to catch was a signature under the wrong
+        name."""
+        body = self._js().split("function enrolDone(", 1)[1].split(
+            "\n  }", 1)[0]
+        assert "i18n.sigSavedFor" in body
+        assert "said.textContent" in body
+
+    def test_it_is_said_in_both_languages(self):
+        import json
+
+        for code in ("en", "es"):
+            catalogue = json.loads(
+                Path(f"src/apt_log/ui/locales/{code}.json").read_text(
+                    encoding="utf-8"))
+            assert "{who}" in catalogue["sigmap.saved_for"]
+            for key in ("sigmap.saved_again", "sigmap.saved_ok"):
+                assert catalogue[key].strip(), f"{code} {key}"
