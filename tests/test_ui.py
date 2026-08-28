@@ -202,7 +202,15 @@ class TestWritePaths:
                          # keeps it that way, which is the invariant that
                          # actually matters here.
                          "/signature/enroll", "/signature/apply",
-                         "/signature/forget"}
+                         "/signature/forget",
+                         # The sign-in code, texted onward because somebody
+                         # pressed a button. It writes nothing to the phone's
+                         # apps and records no visit — it reads the inbox and
+                         # sends SMS — but it IS a write path in the sense
+                         # this list cares about: pressing it makes the phone
+                         # do something in the world. The digits are never in
+                         # the response; see the route.
+                         "/code/broadcast"}
 
     def test_no_route_accepts_a_raw_coordinate_or_keycode(self, client):
         """/tap takes an element from a named frame; /device takes an action
