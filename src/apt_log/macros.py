@@ -1629,6 +1629,45 @@ SIGN_IN_START_WORDS = ("Get Started", "Comencemos", "Comenzar", "Empezar")
 # control below the field and this is it.
 SIGN_IN_SUBMIT_WORDS = ("Sign in", "Iniciar", "Registrarse")
 
+# The dialog inMyTeam raises when it will not go on: a title, one line of
+# reason, and one button. Both known headings, because the app's own sign-out
+# confirmation uses the same chrome ("Advertencia!" / "¿Desea cerrar la
+# sesión?").
+REFUSAL_TITLES = ("Advertencia", "Warning", "Error")
+REFUSAL_BUTTONS = ("Aceptar", "OK", "Accept")
+
+
+def _why_no_code(driver) -> str:
+    """What the app said instead of asking for a code.
+
+    The walk pressed submit and no code screen came. "the app did not ask for
+    a code" was the whole report — true, useless, and it cost a live session
+    to get behind: the app HAD answered, in a dialog, in one sentence,
+    "El número de teléfono no está registrado". The number being typed was not
+    the number the account is on. Nothing in the macro's own words said so.
+
+    The dialog's reason line is read and quoted verbatim, in whatever language
+    the handset is in. Nobody reading a log at 5 a.m. should have to open a
+    remote screen to find out what the phone already had on it.
+    """
+    default = "the app did not ask for a code"
+    try:
+        seen = [(e.text or "").strip()
+                for e in driver.find_elements("xpath", "//*[@text!='']")]
+    except Exception:  # noqa: BLE001 — a diagnostic must never raise its own
+        return default
+
+    if not any(any(t in line for t in REFUSAL_TITLES) for line in seen):
+        return default
+    # The reason is the line that is neither the title nor the button — the
+    # only part that differs between one refusal and the next.
+    reasons = [line for line in seen
+               if not any(t in line for t in REFUSAL_TITLES)
+               and not any(b == line for b in REFUSAL_BUTTONS)]
+    if not reasons:
+        return default
+    return f"{default}; the app said: {max(reasons, key=len)}"
+
 
 def _inmyteam_walk(driver, report, resend: bool = False) -> None:
     """The sign-in walk. `resend` refuses to stop at a code screen.
@@ -1787,7 +1826,7 @@ def _inmyteam_walk(driver, report, resend: bool = False) -> None:
     # somebody to distrust it.
     report("macro.step.awaiting_code")
     if not wait_for(lambda: _asks_for_a_code(driver), timeout=25.0):
-        raise RuntimeError("the app did not ask for a code")
+        raise RuntimeError(_why_no_code(driver))
 
     # THE CODE, IF IT CAME HERE. When the number on the account belongs to
     # the phone this controller drives, the text is sitting in its inbox and

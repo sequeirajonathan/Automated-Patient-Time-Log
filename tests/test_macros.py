@@ -4614,3 +4614,66 @@ class TestTheNumberScreensSubmitIsActuallyNamed:
         word with any hit, so order is the whole guarantee."""
         words = macros.SIGN_IN_SUBMIT_WORDS
         assert words[-1] == "Registrarse"
+
+
+class TestTheAppsOwnReasonIsQuoted:
+    """"the app did not ask for a code" was true, and useless.
+
+    The walk pressed submit, no code screen came, and that sentence was the
+    whole report. The app HAD answered — in a dialog, in one line: "El número
+    de teléfono no está registrado". The number being typed was not the number
+    the account is on, and the macro's own words never said so. It cost a live
+    session to get behind a message that was already on the screen.
+    """
+
+    class _Node:
+        def __init__(self, text):
+            self.text = text
+
+    class _Driver:
+        def __init__(self, texts):
+            self._texts = texts
+
+        def find_elements(self, how, what):
+            return [TestTheAppsOwnReasonIsQuoted._Node(t) for t in self._texts]
+
+    # Verbatim from the live handset.
+    REFUSED = ["Advertencia!",
+               "El número de teléfono no esta registrado",
+               "Aceptar"]
+
+    def test_the_reason_is_quoted(self):
+        said = macros._why_no_code(self._Driver(self.REFUSED))
+        assert "El número de teléfono no esta registrado" in said
+
+    def test_the_generic_sentence_survives_for_the_log(self):
+        """The old wording still leads, so a reader who greps for it finds
+        both the old failures and the new ones."""
+        said = macros._why_no_code(self._Driver(self.REFUSED))
+        assert said.startswith("the app did not ask for a code")
+
+    def test_no_dialog_means_the_plain_sentence(self):
+        """A screen that simply never changed has nothing to quote, and
+        inventing a reason would be worse than admitting there isn't one."""
+        said = macros._why_no_code(
+            self._Driver(["Inicie sesión", "Registrarse"]))
+        assert said == "the app did not ask for a code"
+
+    def test_the_button_is_not_mistaken_for_the_reason(self):
+        said = macros._why_no_code(self._Driver(self.REFUSED))
+        assert "Aceptar" not in said
+
+    def test_english_chrome_is_read_too(self):
+        said = macros._why_no_code(self._Driver(
+            ["Warning", "The phone number is not registered", "OK"]))
+        assert "The phone number is not registered" in said
+
+    def test_a_diagnostic_never_raises_its_own_error(self):
+        """This runs on a failure path. A driver too broken to answer must
+        not turn a clear failure into a confusing one."""
+        class Broken:
+            def find_elements(self, how, what):
+                raise RuntimeError("session gone")
+
+        assert macros._why_no_code(Broken()) == (
+            "the app did not ask for a code")
