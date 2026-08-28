@@ -670,3 +670,102 @@ class TestTheCodeOnRequest:
         out = sms.broadcast_latest(provider=self._people(), now=160.0)
         assert "604820" not in json.dumps(out)
         assert set(out) == {"sent", "of", "found", "age"}
+
+
+class TestReadingTheReplyTelephonyActuallyPrints:
+    """The parcel's whitespace is not part of the answer.
+
+    `_SENT_OK` was a literal substring measured on one handset. The
+    replacement prints the same zero status word with a tab inside the parcel,
+    so the match failed on every successful send: three texts went out over
+    IMS — the phone logged `SEND_SMS ... status = 1 (Ok)` and
+    `MO_RECEIVING_202_ACCEPTED` for each — and `send` reported all three
+    failed.
+
+    That is the worst shape the bug could take. It does not lose the message,
+    it loses the knowledge that the message went, and it sent a real
+    diagnosis chasing the wrong cause.
+    """
+
+    def test_the_shape_the_old_phone_printed(self):
+        assert sms._took_it("Result: Parcel(00000000    '....')") is True
+
+    def test_the_shape_the_new_phone_prints(self):
+        """Tab inside the parcel. Seen live on the Galaxy A36, Android 16."""
+        assert sms._took_it("Result: Parcel(\t00000000    '....')") is True
+
+    def test_a_reply_split_across_lines(self):
+        assert sms._took_it("Result: Parcel(\n  00000000 '....')") is True
+
+    def test_an_exception_is_still_a_refusal(self):
+        assert sms._took_it(
+            "Result: Parcel(00000001 ffffffff 'java.lang.SecurityException')"
+        ) is False
+
+    def test_no_reply_at_all_is_a_refusal(self):
+        assert sms._took_it("") is False
+        assert sms._took_it(None) is False
+
+    def test_a_nonzero_status_is_a_refusal(self):
+        assert sms._took_it("Result: Parcel(\tffffffff    '....')") is False
+
+    def test_send_reports_true_on_the_new_phones_reply(self, monkeypatch):
+        """End to end through `send`, which is where the count comes from."""
+        monkeypatch.setattr(sms, "_adb",
+                            lambda *a, **k: "Result: Parcel(\t00000000    '....')")
+        assert sms.send("5550105276", "hi") is True
+
+
+class TestTheCodeOnThePage:
+    """The fail-safe for a text that never comes.
+
+    `broadcast_latest` deliberately withholds the digits; this one gives them
+    up, and the difference is the point. A one-time code from an ordinary
+    mobile number is the textbook shape of a smishing attempt and carriers
+    filter exactly that — the handset logged `SEND_SMS status = 1 (Ok)` for
+    all three recipients and one received nothing. A phone out of service does
+    the same.
+
+    What must NOT change is the log. That was the real half of the reasoning
+    for keeping digits out of a response, and it still holds.
+    """
+
+    def test_it_gives_the_digits_and_the_age(self, monkeypatch):
+        now = time.time()
+        monkeypatch.setattr(sms, "_newest", lambda **k: (now - 372, "604820"))
+        out = sms.latest_for_display(now=now)
+        assert out["found"] is True
+        assert out["code"] == "604820"
+        assert out["age"] == 372
+
+    def test_nothing_recent_is_an_honest_empty(self, monkeypatch):
+        monkeypatch.setattr(sms, "_newest", lambda **k: (0.0, ""))
+        assert sms.latest_for_display() == {"found": False}
+
+    def test_it_looks_further_back_than_the_typing_window(self):
+        """FRESH_WITHIN is short because a stale code TYPED burns an attempt.
+        A code READ costs nothing, and the caregiver can see its age."""
+        assert sms.SHOW_WITHIN > sms.FRESH_WITHIN
+
+    def test_it_asks_for_its_own_window(self, monkeypatch):
+        seen = {}
+
+        def fake(**kw):
+            seen.update(kw)
+            return (0.0, "")
+        monkeypatch.setattr(sms, "_newest", fake)
+        sms.latest_for_display()
+        assert seen["within"] == sms.SHOW_WITHIN
+
+    def test_the_digits_never_reach_the_log(self, monkeypatch, caplog):
+        """THE LINE THAT SURVIVES FROM THE OLD REASONING.
+
+        A journal is read over a shoulder and pasted into bug reports. The
+        age answers "was there a code" without putting a credential in it.
+        """
+        now = time.time()
+        monkeypatch.setattr(sms, "_newest", lambda **k: (now - 30, "604820"))
+        with caplog.at_level("INFO"):
+            sms.latest_for_display(now=now)
+        assert "604820" not in caplog.text
+        assert "30s old" in caplog.text or "30" in caplog.text

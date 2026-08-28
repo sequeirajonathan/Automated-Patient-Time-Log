@@ -956,6 +956,95 @@
     }
   }
 
+  // ------------------------------------------------------- the live code
+  // Polled rather than pushed. The age has to keep counting up on a page
+  // nobody is touching — she is looking at it, not interacting with it — and
+  // a code labelled "1 minute ago" that is really nine is the one failure
+  // this card exists to prevent.
+  const CODE_EVERY = 20000;
+  // Past this the code is certainly dead and the card says so loudly rather
+  // than quietly. Matches sms.SHOW_WITHIN, beyond which the server stops
+  // answering at all.
+  const CODE_STALE = 5 * 60;
+
+  // WHOLE SENTENCES OUT OF THE CATALOG, never a number glued to a noun glued
+  // to a preposition. English puts "ago" last and Spanish puts "hace" first,
+  // so a template assembled here can only be right in one of them — which is
+  // the rule test_i18n holds, and it caught this on the first run.
+  function codeAgeSays(seconds) {
+    const mins = Math.floor(seconds / 60);
+    if (mins < 1) return i18n.codeJustNow || '';
+    if (mins === 1) return i18n.codeAgoOne || '';
+    return (i18n.codeAgoMany || '').replace('{n}', mins);
+  }
+
+  // COPYING IT, because the alternative is reading six digits off one phone
+  // while typing them into another, which is where a 6 becomes an 8.
+  //
+  // Two paths on purpose. `navigator.clipboard` needs a secure context — the
+  // portal has one through `tailscale serve`, so this is the path that runs —
+  // but it is also absent in a plain-http preview and refused outright by
+  // some in-app browsers, and a copy button that silently does nothing is
+  // worse than no copy button. The textarea fallback works everywhere.
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise((resolve, reject) => {
+      const pad = document.createElement('textarea');
+      pad.value = text;
+      // Off-screen rather than hidden: a display:none element cannot be
+      // selected, and the copy silently fails.
+      pad.setAttribute('readonly', '');
+      pad.style.position = 'fixed';
+      pad.style.top = '-1000px';
+      document.body.appendChild(pad);
+      pad.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      document.body.removeChild(pad);
+      ok ? resolve() : reject(new Error('copy refused'));
+    });
+  }
+
+  function copyCode() {
+    const digits = document.getElementById('code-digits');
+    const card = document.getElementById('codecard');
+    const text = digits ? (digits.textContent || '').trim() : '';
+    if (!text) return;
+    copyText(text).then(() => {
+      toast(i18n.codeCopied || '');
+      // The card says so too, because a toast is gone in two seconds and she
+      // may be looking at the other phone by then.
+      if (card) {
+        card.classList.add('copied');
+        setTimeout(() => card.classList.remove('copied'), 4000);
+      }
+    }).catch(() => toast(i18n.codeCopyFailed || ''));
+  }
+
+  function refreshCode() {
+    const card = document.getElementById('codecard');
+    if (!card) return;
+    fetch('/code/latest')
+      .then((r) => (r.ok ? r.json() : { found: false }))
+      .then((d) => {
+        if (!d.found) { card.hidden = true; return; }
+        const digits = document.getElementById('code-digits');
+        const age = document.getElementById('code-age');
+        // textContent, never innerHTML — this is read off a phone's inbox.
+        if (digits) digits.textContent = d.code || '';
+        if (age) {
+          age.textContent = d.said
+            ? codeAgeSays(d.age) + ' · ' + d.said
+            : codeAgeSays(d.age);
+        }
+        card.classList.toggle('stale', (d.age || 0) >= CODE_STALE);
+        card.hidden = false;
+      })
+      .catch(() => {});
+  }
+
   // ---------------------------------------------------------- adopted (10.6a)
   // A party who cannot hold a stylus adopts a signature once and afterwards
   // applies it with one press of their own. The press is the whole point —
@@ -1373,6 +1462,13 @@
     // The sign-in code, to the phones that do not have it. Disabled while it
     // runs: reading the inbox is an adb round trip against a phone that is
     // usually busy, and a second press would send everybody a second text.
+    // The live code, polled so its age stays true. A code whose age is
+    // stale-by-a-minute is worse than no code: it is the one she types.
+    refreshCode();
+    setInterval(refreshCode, CODE_EVERY);
+    const digits = document.getElementById('code-digits');
+    if (digits) digits.addEventListener('click', copyCode);
+
     const code = document.getElementById('btn-code');
     if (code) code.addEventListener('click', () => {
       code.disabled = true;

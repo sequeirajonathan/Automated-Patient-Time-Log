@@ -255,6 +255,34 @@ DEFAULT_SUB_ID = "1"
 _SENT_OK = "Parcel(00000000"
 
 
+def _took_it(out: str) -> bool:
+    """Whether telephony accepted the text, whatever `service call` printed.
+
+    THE ZERO IS THE SIGNAL; THE WHITESPACE AROUND IT IS NOT.
+
+    This was a literal substring match, and it was measured on one phone. The
+    replacement handset prints the same zero status word with a TAB inside the
+    parcel —
+
+        Result: Parcel(\t00000000    '....')
+
+    — so the match failed on every successful send. Three texts went out over
+    IMS, the phone logged `SEND_SMS ... status = 1 (Ok)` and
+    `MO_RECEIVING_202_ACCEPTED` for each, and this function called all three
+    failures. The count in the portal read "sent to 0 of 3" while three people
+    had the code in their hand.
+
+    That is the worst shape this particular bug could take: it does not lose
+    the message, it loses the KNOWLEDGE that the message went, and it sent a
+    real diagnosis (Sadia is not getting texts) chasing the wrong cause.
+
+    So the reply is normalised before it is read, and the zero word is what is
+    looked for. A failure still prints differently — an exception, a wrong
+    arity, a transaction that is not this method — and still reads as false.
+    """
+    return _SENT_OK in re.sub(r"\s+", "", out or "")
+
+
 def _dialable(number: str) -> str:
     """A number as digits, with a North American country code taken off.
 
@@ -298,7 +326,7 @@ def send(number: str, body: str, serial: str | None = None,
                 "s16", "null",
                 "i32", "0",
                 "i64", "0"], serial)
-    if _SENT_OK in out:
+    if _took_it(out):
         return True
     # The number is not logged. The failure is worth a line; who it was for is
     # not this log's business, and a log on this machine is read over
@@ -512,3 +540,50 @@ def broadcast_latest(serial: str | None = None, provider=None,
              sent, len(people), max(0.0, at - when))
     return {"sent": sent, "of": len(people), "found": True,
             "age": max(0.0, at - when)}
+
+
+# ------------------------------------------------------- the code, on the page
+# HOW LONG A CODE IS WORTH SHOWING.
+#
+# Deliberately not FRESH_WITHIN. That window is three minutes because typing a
+# stale code into inMyTeam is worse than typing nothing — the app rejects it,
+# clears the field, raises a dialog the tree cannot see, and spends one of a
+# limited number of attempts. Nothing about that reasoning applies to a person
+# reading a number off a page: she can see for herself whether it works, and a
+# code shown with its age is a code she can judge.
+#
+# Fifteen minutes because past that it is certainly dead, and showing a dead
+# code with "15 minutes ago" beside it is worse than showing nothing — it
+# invites her to type it.
+SHOW_WITHIN = 15 * 60.0
+
+
+def latest_for_display(serial: str | None = None,
+                       now: float | None = None) -> dict:
+    """The newest code and how old it is, for the portal to show.
+
+    THIS RETURNS THE DIGITS, and the rest of this module deliberately does
+    not. The reasoning that kept them out of `broadcast_latest` was that a
+    code in a response is a code in a log and in a screenshot — and the log
+    half of that is real, which is why nothing here writes the code anywhere.
+
+    What changed is the delivery problem. The text is the only way the code
+    reaches a caregiver signing in on her own phone, and a text that does not
+    arrive — filtered, no service, blocked — leaves her with nothing at all.
+    The portal is on the tailnet, behind the same door as the patient names,
+    the round, and the ability to record a visit; a six-digit number that dies
+    in minutes is not what makes that page worth protecting.
+
+    So: shown on the page, never written to the log, and always with its age,
+    because a code without its age is a code somebody will type at nine
+    minutes old and blame the machine for.
+    """
+    at = time.time() if now is None else now
+    when, code = _newest(within=SHOW_WITHIN, serial=serial, now=at)
+    if not code:
+        return {"found": False}
+    # The AGE is logged, never the digits — enough to answer "was there one"
+    # from the journal without putting a credential in it.
+    log.info("a code is on the page (%.0fs old)", max(0.0, at - when))
+    return {"found": True, "code": code,
+            "age": int(max(0.0, at - when)), "at": when}
