@@ -1299,7 +1299,7 @@
       // tolerant of — and the witness line, on the older records that still
       // carry one.
       const bits = [];
-      if (p.apps && p.apps.length) bits.push(p.apps.join(' · '));
+      if (p.app) bits.push(p.app);
       if (!p.on_schedule) bits.push(i18n.sigNotScheduled || '');
       if (p.adopted && p.adopted_as && p.adopted_as !== p.name) {
         bits.push((i18n.sigFiledAs || '').replace('{as}', p.adopted_as));
@@ -1327,6 +1327,10 @@
         rm.className = 'sigforget';
         rm.textContent = i18n.sigForget || '';
         rm.dataset.forgetFor = p.adopted_as || p.name;
+        // The adoption's OWN apps, not the row's: withdrawing the mark she
+        // uses for two apps from one of their rows must take that mark, and
+        // nothing else of hers.
+        rm.dataset.forgetApps = JSON.stringify(p.adopted_for || []);
         row.appendChild(rm);
       }
 
@@ -1338,6 +1342,11 @@
       b.type = 'button';
       b.textContent = p.adopted ? (i18n.sigReplace || '') : (i18n.sigAdopt || '');
       b.dataset.adoptFor = p.name;
+      // WHICH APP THIS ROW IS FOR, carried through to the registration so the
+      // mark lands scoped to it. The caregiver signs inMyTeam one way and the
+      // other two another, so a signature saved without an app would be drawn
+      // on all three.
+      b.dataset.adoptApp = p.package || '';
       row.appendChild(b);
       list.appendChild(row);
     }
@@ -1389,10 +1398,13 @@
       return;
     }
     disarmForget();
+    let apps = [];
+    try { apps = JSON.parse(btn.dataset.forgetApps || '[]'); }
+    catch (e) { apps = []; }
     fetch('/signature/forget', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: name })
+      body: JSON.stringify({ name: name, apps: apps })
     }).then((r) => {
       if (!r.ok) { toast(i18n.failed || ''); return; }
       toast(i18n.sigForgotten || '');
@@ -1403,7 +1415,12 @@
     }).catch(() => toast(i18n.failed || ''));
   }
 
-  function adoptFrom(name) {
+  // Which app the registration in progress is for. "" means every app, which
+  // is what a row without one asks for and what every adoption made before
+  // per-app marks existed already is.
+  let adoptForApp = '';
+
+  function adoptFrom(name, forApp) {
     // THE REGISTRATION SHEET, NOT THE CHECK-OUT PAD.
     //
     // This used to open `#signsheet`, which is the pad a patient signs on at
@@ -1411,8 +1428,16 @@
     // own confirm, a preview rehearsing the replay. Opening it to register a
     // signature showed all of that with no app in front and nothing to
     // replay onto — the wrong component for the job, and reported as one.
+    adoptForApp = forApp || '';
     const field = document.getElementById('enrol-name');
     if (field) field.value = name || '';
+    const forWhat = document.getElementById('enrol-forapp');
+    if (forWhat) {
+      forWhat.textContent = adoptForApp
+        ? (i18n.sigForApp || '').replace('{app}', appNames[adoptForApp]
+                                         || adoptForApp) : '';
+      forWhat.hidden = !adoptForApp;
+    }
     // A fresh canvas every time. Strokes are shared state between the two
     // pads, so whatever was on the other one is not this person's signature.
     pad.strokes = [];
@@ -1474,7 +1499,8 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: name.trim(), strokes: pad.strokes,
-                             aspect: rect.width / rect.height })
+                             aspect: rect.width / rect.height,
+                             apps: adoptForApp ? [adoptForApp] : [] })
     }).then(async (r) => {
       if (!r.ok) {
         // NAME THE FAULT. A generic failure here said "that didn't reach the
@@ -1944,7 +1970,7 @@
       // Any other press on the list is an answer of "no" to a button left
       // armed — safer than leaving it primed behind whatever she does next.
       disarmForget();
-      adoptFrom(hit.dataset.adoptFor);
+      adoptFrom(hit.dataset.adoptFor, hit.dataset.adoptApp);
     });
     wireArming();
     setInterval(refreshSchedule, SCHEDULE_EVERY);
@@ -2190,7 +2216,22 @@
     catch (e) { /* private mode */ }
     setCoaching(!!wasCoaching);
 
-    const openPad = () => { body.classList.toggle('signing'); padFit(); };
+    // READ THE ROSTER EVERY TIME THE PAD OPENS.
+    //
+    // It was read once, at page load, and after an enrolment made in THIS
+    // browser. So a signature registered anywhere else — the other person's
+    // phone, a second tab, this page left open since before the registration
+    // — never appeared here at all: the pad opened on a check-out screen with
+    // no adopted button and no way to get one without a reload.
+    //
+    // Reported from the room, with Carmen registered on the Pi and her button
+    // missing from the pad. Two people share this portal, so "the state this
+    // tab last saw" was never a safe thing to draw a signature list from.
+    const openPad = () => {
+      body.classList.toggle('signing');
+      if (body.classList.contains('signing')) loadAdopted();
+      padFit();
+    };
     const sign = document.getElementById('btn-sign');
     if (sign) sign.addEventListener('click', openPad);
     // The canvas drawn into the page opens the same pad. Delegated, because

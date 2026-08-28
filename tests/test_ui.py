@@ -5358,8 +5358,12 @@ class TestTheCaregiverIsOnTheList:
         assert roles["Ana Ruiz"] == "staff"
         assert roles["Maria Garcia"] == "patient"
 
-    def test_she_carries_every_app_she_signs_in(self, client, tmp_path,
-                                                monkeypatch):
+    def test_she_gets_a_row_for_every_app_she_signs_in(self, client, tmp_path,
+                                                        monkeypatch):
+        """One row per app, not one row listing them. She signs two of them
+        differently, so a single row could only tell the truth about one:
+        "registered" would mean "somewhere", and the app she has not done
+        would read as done."""
         import json as _json
 
         from apt_log import enrolled as enrolled_mod
@@ -5377,8 +5381,9 @@ class TestTheCaregiverIsOnTheList:
             encoding="utf-8")
         monkeypatch.setattr(sched, "SCHEDULE_PATH", path)
         monkeypatch.setattr(enrolled_mod, "STORE_PATH", tmp_path / "none.json")
-        row = client.get("/signature/map").json()["people"][0]
-        assert row["apps"] == ["HHAeXchange+", "inMyTeam"]
+        people = client.get("/signature/map").json()["people"]
+        staff = [p for p in people if p["role"] == "staff"]
+        assert [p["app"] for p in staff] == ["HHAeXchange+", "inMyTeam"]
 
     def test_her_adoption_is_matched_like_anybody_else(self, client, tmp_path,
                                                         monkeypatch):
@@ -5418,3 +5423,100 @@ class TestTheCaregiverIsOnTheList:
                     encoding="utf-8"))
             assert catalogue["sigmap.role_patient"].strip()
             assert catalogue["sigmap.role_staff"].strip()
+
+
+class TestARowPerAppBecauseAMarkIsPerApp:
+    """The caregiver signs inMyTeam one way and the other two another.
+
+    A single row per person could only ever tell the truth about one of them:
+    "registered" would mean "somewhere", and the row for the app she has not
+    done yet would read as done — which is how somebody walks into a check-out
+    believing a signature is on file that is not.
+    """
+
+    def _js(self) -> str:
+        return strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+
+    def test_the_row_carries_its_app_into_the_registration(self):
+        js = self._js()
+        assert "b.dataset.adoptApp = p.package" in js
+        assert "adoptFrom(hit.dataset.adoptFor, hit.dataset.adoptApp)" in js
+
+    def test_the_registration_is_scoped_to_that_app(self):
+        js = self._js()
+        assert "apps: adoptForApp ? [adoptForApp] : []" in js
+
+    def test_the_sheet_says_which_app_it_is_for(self):
+        """Somebody registering the second of two marks has to be able to see
+        which one they are drawing."""
+        js = self._js()
+        assert "i18n.sigForApp" in js
+        html = Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+        assert 'id="enrol-forapp"' in html
+
+    def test_withdrawing_takes_the_adoptions_own_apps(self):
+        """Not the row's. Removing the mark she uses for two apps from one of
+        their rows must take that mark and nothing else of hers."""
+        js = self._js()
+        assert "rm.dataset.forgetApps = JSON.stringify(p.adopted_for" in js
+        body = js.split("function forgetPressed(", 1)[1].split("\n  }", 1)[0]
+        assert "btn.dataset.forgetApps" in body
+        assert "apps: apps" in body
+
+    def test_the_apply_picks_by_the_app_in_front(self):
+        """A lookup by name alone draws whichever mark was registered last
+        onto all three apps."""
+        app = Path("src/apt_log/ui/app.py").read_text(encoding="utf-8")
+        assert "strokes_for(name, package=package)" in app
+        assert "digest_for(name, package=package)" in app
+
+    def test_a_patient_still_gets_one_row(self, client, tmp_path,
+                                          monkeypatch):
+        import json as _json
+
+        from apt_log import enrolled as enrolled_mod
+        from apt_log import schedule as sched
+
+        path = tmp_path / "schedule.json"
+        path.write_text(_json.dumps({
+            "zone": "America/New_York",
+            "visits": [{"patient": "Maria Garcia", "app": "inmyteam",
+                        "days": ["mon"], "start": "09:00", "end": "10:00"}]}),
+            encoding="utf-8")
+        monkeypatch.setattr(sched, "SCHEDULE_PATH", path)
+        monkeypatch.setattr(enrolled_mod, "STORE_PATH", tmp_path / "none.json")
+        people = client.get("/signature/map").json()["people"]
+        assert len(people) == 1
+        assert people[0]["app"] == "inMyTeam"
+
+    def test_one_app_registered_does_not_mark_the_other(self, client,
+                                                        tmp_path, monkeypatch):
+        """The whole reason the rows split."""
+        import json as _json
+
+        from apt_log import enrolled as enrolled_mod
+        from apt_log import schedule as sched
+
+        path = tmp_path / "schedule.json"
+        path.write_text(_json.dumps({
+            "zone": "America/New_York",
+            "caregiver": "Ana Ruiz",
+            "visits": [
+                {"patient": "Maria Garcia", "app": "com.inmyteam.inmyteam",
+                 "days": ["mon"], "start": "09:00", "end": "10:00"},
+                {"patient": "Beto Sosa", "app": "com.hhaexchange.uma",
+                 "days": ["tue"], "start": "09:00", "end": "10:00"}]}),
+            encoding="utf-8")
+        store = tmp_path / "sig.json"
+        enrolled_mod.enroll(
+            "Ana Ruiz",
+            [[[0.1, 0.5], [0.3, 0.2], [0.5, 0.6]], [[0.6, 0.3], [0.9, 0.4]]],
+            apps=["com.inmyteam.inmyteam"], path=store)
+        monkeypatch.setattr(sched, "SCHEDULE_PATH", path)
+        monkeypatch.setattr(enrolled_mod, "STORE_PATH", store)
+        staff = {p["app"]: p["adopted"]
+                 for p in client.get("/signature/map").json()["people"]
+                 if p["role"] == "staff"}
+        assert staff == {"inMyTeam": True, "HHAeXchange+": False}

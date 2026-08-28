@@ -1335,6 +1335,10 @@
                 color:var(--ink); }
   .enrolnote { margin:0 0 14px; font-size:13px; line-height:1.45;
                color:var(--muted); }
+  .enrolfor { margin:0 0 12px; padding:9px 12px; border-radius:11px;
+              background:var(--tint-soft); color:var(--tint);
+              font-size:13.5px; font-weight:600; }
+  .enrolfor[hidden] { display:none; }
   #enrolsheet input { width:100%; margin-top:6px; padding:11px 12px;
                       font:inherit; font-size:16px; border-radius:10px;
                       background:var(--card); border:1px solid var(--line);
@@ -2372,6 +2376,10 @@
 <div id="enrolsheet" class="sheet">
   <h2 class="enroltitle">{{ t('sigmap.enrol_title') }}</h2>
   <p class="enrolnote">{{ t('sigmap.enrol_note') }}</p>
+  {# WHICH APP THIS MARK IS FOR, when the row said one. The caregiver signs
+     inMyTeam one way and the other two another, and somebody registering the
+     second of those has to be able to see which one they are drawing. #}
+  <p class="enrolfor" id="enrol-forapp" hidden></p>
   <label class="adoptlabel" for="enrol-name">{{ t('sign.adopt_who') }}</label>
   {# Prefilled from the row she pressed, and still editable: the schedule's
      spelling is the one the matcher will look for, so it is the right
@@ -2482,6 +2490,7 @@
     sigFiledAs: {{ t('sigmap.filed_as')|tojson }},
     sigRolePatient: {{ t('sigmap.role_patient')|tojson }},
     sigRoleStaff: {{ t('sigmap.role_staff')|tojson }},
+    sigForApp: {{ t('sigmap.for_app')|tojson }},
     live:    {{ t('papp.live')|tojson }},
     syncing: {{ t('papp.syncing')|tojson }},
     webTitle: {{ t('papp.web')|tojson }},

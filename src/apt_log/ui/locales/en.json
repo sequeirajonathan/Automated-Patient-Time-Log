@@ -346,6 +346,7 @@
  "sigmap.enrol_note": "Register a signature. The person it belongs to draws it here, once, in person. Afterwards they apply it themselves with a single press.",
  "sigmap.enrol_title": "Register a signature",
  "sigmap.filed_as": "filed as {as}",
+ "sigmap.for_app": "This signature is for {app}.",
  "sigmap.forget": "Remove",
  "sigmap.forget_sure": "Tap again",
  "sigmap.forgotten": "Signature removed. Nothing is left on the machine.",

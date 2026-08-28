@@ -112,6 +112,62 @@ def key(name: str) -> str:
     return _SPACE.sub(" ", folded).strip().casefold()
 
 
+# ------------------------------------------------- one person, several hands
+# A PERSON CAN SIGN MORE THAN ONE WAY, and the apps ask for different ones.
+#
+# The caregiver told us so: inMyTeam wants her full "S Amselem" and the other
+# two take her initials. A store keyed by name alone can hold one of those, so
+# whichever was registered last would have been drawn on all three — her full
+# signature onto a form that expects initials, or initials onto the one that
+# does not.
+#
+# So an adoption may name the apps it is FOR. An entry with no apps is the
+# fallback and applies anywhere, which is what every adoption made before
+# today is, and what a patient who appears in one app only ever needs.
+_SCOPE = "|"
+
+
+def entry_key(name: str, apps=()) -> str:
+    """Where one adoption lives in the store.
+
+    The name alone for an unscoped one — so nothing written before app scoping
+    moves or is lost — and the name plus its apps, sorted, for a scoped one.
+    """
+    scope = ",".join(sorted({(a or "").strip().casefold() for a in apps if a}))
+    return key(name) + (_SCOPE + scope if scope else "")
+
+
+def _entries(name: str, path: Path | None = None) -> list[dict]:
+    """Every adoption this person has, the scoped ones first.
+
+    Order is the lookup rule: an adoption naming the app in front beats the
+    fallback, and `strokes_for` walks this list and takes the first that fits.
+    """
+    want = key(name)
+    out = []
+    for stored, entry in _read(path).items():
+        if not isinstance(entry, dict):
+            continue
+        if stored != want and not stored.startswith(want + _SCOPE):
+            continue
+        out.append(entry)
+    return sorted(out, key=lambda e: 0 if e.get("apps") else 1)
+
+
+def _covers(entry: dict, package: str) -> bool:
+    """Whether this adoption is for the app in front.
+
+    An unscoped adoption covers everything. A scoped one covers only what it
+    names — deliberately, because the reason it is scoped at all is that the
+    other apps want a different mark.
+    """
+    apps = entry.get("apps") or []
+    if not apps:
+        return True
+    low = (package or "").strip().casefold()
+    return bool(low) and low in [str(a).strip().casefold() for a in apps]
+
+
 # --------------------------------------------------------------------- store
 def _read(path: Path | None = None) -> dict:
     try:
@@ -136,7 +192,7 @@ def _write(doc: dict, path: Path | None = None) -> None:
 
 
 def enroll(name: str, strokes, aspect: float = 1.0, witness: str = "",
-           path: Path | None = None) -> str:
+           path: Path | None = None, apps=()) -> str:
     """Adopt a signature for `name`. Returns its digest.
 
     Refuses a payload that is not signature-shaped — the same check the live
@@ -155,12 +211,16 @@ def enroll(name: str, strokes, aspect: float = 1.0, witness: str = "",
 
     doc = _read(path)
     digest = sign_mod.digest(strokes)
-    doc[key(display)] = {
+    kept = [str(a).strip() for a in (apps or ()) if str(a).strip()]
+    doc[entry_key(display, kept)] = {
         "name": display,
         "strokes": strokes,
         "aspect": float(aspect or 1.0),
         "digest": digest,
         "witness": (witness or "").strip(),
+        # Which apps this mark is for. Empty means all of them, which is the
+        # shape of every adoption made before a person needed two.
+        "apps": kept,
         "at": datetime.now().astimezone().isoformat(),
     }
     _write(doc, path)
@@ -170,18 +230,33 @@ def enroll(name: str, strokes, aspect: float = 1.0, witness: str = "",
     return digest
 
 
-def forget(name: str, path: Path | None = None) -> bool:
-    """Drop an adoption. True if there was one."""
+def forget(name: str, path: Path | None = None, apps=None) -> bool:
+    """Drop ONE adoption, or all of a person's. True if anything went.
+
+    `apps` names which: the list an adoption was registered for, or an empty
+    list for the unscoped one. Left as None it drops every adoption this
+    person has, which is what "withdraw my signature" meant before one person
+    could have two.
+    """
     doc = _read(path)
-    if doc.pop(key(name), None) is None:
+    if apps is None:
+        want = key(name)
+        gone = [k for k in doc if k == want or k.startswith(want + _SCOPE)]
+    else:
+        gone = [k for k in (entry_key(name, apps),) if k in doc]
+    if not gone:
         return False
+    for k in gone:
+        doc.pop(k, None)
     _write(doc, path)
-    log.info("signature adoption withdrawn")
+    log.info("signature adoption withdrawn (%d)", len(gone))
     return True
 
 
-def enrolled(name: str, path: Path | None = None) -> bool:
-    return key(name) in _read(path)
+def enrolled(name: str, path: Path | None = None,
+             package: str = "") -> bool:
+    """Whether this person has an adoption that covers the app in front."""
+    return any(_covers(e, package) for e in _entries(name, path))
 
 
 def roster(path: Path | None = None) -> list[dict]:
@@ -196,13 +271,15 @@ def roster(path: Path | None = None) -> list[dict]:
         if not isinstance(entry, dict):
             continue
         out.append({"name": entry.get("name", ""),
+                    "apps": [str(a) for a in (entry.get("apps") or [])],
                     "digest": (entry.get("digest") or "")[:12],
                     "witness": entry.get("witness", ""),
                     "at": entry.get("at", "")})
     return sorted(out, key=lambda e: e["name"].casefold())
 
 
-def strokes_for(name: str, path: Path | None = None) -> tuple | None:
+def strokes_for(name: str, path: Path | None = None,
+                package: str = "") -> tuple | None:
     """The adopted strokes and their aspect, or None.
 
     THE ONE FUNCTION THAT HANDS BACK A SIGNATURE, and the reason the module
@@ -211,21 +288,32 @@ def strokes_for(name: str, path: Path | None = None) -> tuple | None:
     be reachable from the scheduler, and `test_enrolled.py` holds a test that
     fails if `autoentry` or `macros` so much as imports this module.
     """
-    entry = _read(path).get(key(name))
-    if not isinstance(entry, dict):
-        return None
-    strokes = entry.get("strokes")
-    if not sign_mod.validate(strokes):
-        # A store that has been edited by hand into something unsignable is a
-        # refusal, not a crash and not a half-drawn signature.
-        log.warning("an adopted signature is not signature-shaped; refusing")
-        return None
-    return strokes, float(entry.get("aspect") or 1.0)
+    for entry in _entries(name, path):
+        if not _covers(entry, package):
+            continue
+        strokes = entry.get("strokes")
+        if not sign_mod.validate(strokes):
+            # A store that has been edited by hand into something unsignable
+            # is a refusal, not a crash and not a half-drawn signature.
+            log.warning("an adopted signature is not signature-shaped; "
+                        "refusing")
+            return None
+        return strokes, float(entry.get("aspect") or 1.0)
+    return None
 
 
-def digest_for(name: str, path: Path | None = None) -> str:
-    entry = _read(path).get(key(name))
-    return (entry or {}).get("digest", "") if isinstance(entry, dict) else ""
+def digest_for(name: str, path: Path | None = None,
+               package: str = "") -> str:
+    """The digest of the adoption that WOULD be applied here.
+
+    Takes the package for the same reason `strokes_for` does: a person may
+    have two marks, and the trail has to record the one actually drawn rather
+    than whichever happens to come first in the file.
+    """
+    for entry in _entries(name, path):
+        if _covers(entry, package):
+            return entry.get("digest", "")
+    return ""
 
 
 # --------------------------------------------------------------------- trail
@@ -302,7 +390,8 @@ def matches(screen_name: str, adopted_name: str) -> bool:
     return short <= long
 
 
-def who_signs(screen_name: str, path: Path | None = None) -> str:
+def who_signs(screen_name: str, path: Path | None = None,
+              package: str = "") -> str:
     """The adopted party this screen is asking for, or "".
 
     Returns the roster's OWN spelling, so the caller can point at a button by
@@ -314,6 +403,7 @@ def who_signs(screen_name: str, path: Path | None = None) -> str:
     """
     if not (screen_name or "").strip():
         return ""
-    hits = [e["name"] for e in roster(path)
-            if e.get("name") and matches(screen_name, e["name"])]
-    return hits[0] if len(hits) == 1 else ""
+    hits = {e["name"] for e in roster(path)
+            if e.get("name") and matches(screen_name, e["name"])
+            and _covers(e, package)}
+    return hits.pop() if len(hits) == 1 else ""

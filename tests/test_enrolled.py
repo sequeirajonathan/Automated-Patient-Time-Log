@@ -159,10 +159,17 @@ class TestTheStrokesNeverLeaveTheMachine:
         assert rows, "nothing was returned, so nothing was checked"
         for row in rows:
             for field, value in row.items():
-                assert isinstance(value, str), (
-                    "%s is %r — a roster row carries names and dates, and a "
-                    "stroke set is the only thing here shaped like anything "
-                    "else" % (field, value))
+                # Strings, or a list of them: a name, a date, a digest, the
+                # apps a mark is for. A stroke set is numbers, nested, and
+                # that is the shape being kept out — narrowed from "everything
+                # must be a string", which forbade the apps list the moment
+                # one person needed two signatures.
+                if isinstance(value, str):
+                    continue
+                assert isinstance(value, list) and all(
+                    isinstance(v, str) for v in value), (
+                    "%s is %r — the only thing in this store shaped like "
+                    "that is a signature" % (field, value))
 
     def test_no_route_reads_the_store_directly(self):
         """Every route goes through `roster`/`strokes_for`. A route that
@@ -480,3 +487,103 @@ class TestAStoreThatCannotBeWritten:
 
 def _refuse_to_write(*a, **k):
     raise PermissionError(13, "Permission denied")
+
+
+class TestOnePersonTwoSignatures:
+    """The caregiver signs inMyTeam one way and the other two another.
+
+    She told us: inMyTeam takes her full "S Amselem" and the other apps take
+    her initials. A store keyed by name alone holds one of those, so whichever
+    was registered last would have been drawn on all three — her full mark
+    onto a form that wants initials, or initials onto the one that does not.
+    """
+
+    OTHER = [[[0.2, 0.4], [0.4, 0.3], [0.6, 0.7]], [[0.7, 0.2], [0.8, 0.5]]]
+    IMT = "com.inmyteam.inmyteam"
+    UMA = "com.hhaexchange.uma"
+    MC = "com.tellus.evv.v2"
+
+    def _both(self, store):
+        enrolled.enroll("Sadia Amselem", INK, apps=[self.IMT], path=store)
+        enrolled.enroll("Sadia Amselem", self.OTHER, apps=[self.UMA, self.MC],
+                        path=store)
+
+    def test_each_app_gets_its_own_mark(self, store):
+        self._both(store)
+        assert enrolled.strokes_for("Sadia Amselem", path=store,
+                                    package=self.IMT)[0] == INK
+        for pkg in (self.UMA, self.MC):
+            assert enrolled.strokes_for("Sadia Amselem", path=store,
+                                        package=pkg)[0] == self.OTHER
+
+    def test_an_app_she_has_not_registered_for_gets_nothing(self, store):
+        """Rather than the other one. Drawing her initials where the form
+        wants a signature is the failure this exists to prevent, and a
+        near-miss is not better than an honest refusal."""
+        self._both(store)
+        assert enrolled.strokes_for("Sadia Amselem", path=store,
+                                    package="com.example.other") is None
+
+    def test_an_unscoped_adoption_still_covers_everything(self, store):
+        """Every adoption made before today is unscoped, and a patient who
+        appears in one app never needs more."""
+        enrolled.enroll("Carmen Villalon", INK, path=store)
+        for pkg in (self.IMT, self.UMA, ""):
+            assert enrolled.strokes_for("Carmen Villalon", path=store,
+                                        package=pkg)[0] == INK
+
+    def test_a_scoped_adoption_beats_the_fallback(self, store):
+        """Otherwise the general mark would win by being first in the file."""
+        enrolled.enroll("Sadia Amselem", self.OTHER, path=store)
+        enrolled.enroll("Sadia Amselem", INK, apps=[self.IMT], path=store)
+        assert enrolled.strokes_for("Sadia Amselem", path=store,
+                                    package=self.IMT)[0] == INK
+        assert enrolled.strokes_for("Sadia Amselem", path=store,
+                                    package=self.UMA)[0] == self.OTHER
+
+    def test_the_trail_records_the_mark_that_was_drawn(self, store):
+        """Not whichever came first in the file. An audit that names the
+        wrong signature is worse than one that names none."""
+        self._both(store)
+        imt = enrolled.digest_for("Sadia Amselem", path=store,
+                                  package=self.IMT)
+        uma = enrolled.digest_for("Sadia Amselem", path=store,
+                                  package=self.UMA)
+        assert imt and uma and imt != uma
+
+    def test_withdrawing_one_leaves_the_other(self, store):
+        self._both(store)
+        assert enrolled.forget("Sadia Amselem", path=store, apps=[self.IMT])
+        assert enrolled.strokes_for("Sadia Amselem", path=store,
+                                    package=self.IMT) is None
+        assert enrolled.strokes_for("Sadia Amselem", path=store,
+                                    package=self.UMA) is not None
+
+    def test_withdrawing_without_saying_which_takes_them_all(self, store):
+        """What "withdraw my signature" meant before one person could have
+        two, and still the right answer when nobody has said which."""
+        self._both(store)
+        assert enrolled.forget("Sadia Amselem", path=store)
+        assert enrolled.roster(path=store) == []
+
+    def test_the_roster_says_what_each_is_for(self, store):
+        self._both(store)
+        scopes = sorted(tuple(sorted(r["apps"]))
+                        for r in enrolled.roster(path=store))
+        assert scopes == sorted([(self.IMT,),
+                                 tuple(sorted((self.UMA, self.MC)))])
+
+    def test_who_signs_answers_per_app(self, store):
+        enrolled.enroll("Sadia Amselem", INK, apps=[self.IMT], path=store)
+        assert enrolled.who_signs("S Amselem", path=store,
+                                  package=self.IMT) == "Sadia Amselem"
+        assert enrolled.who_signs("S Amselem", path=store,
+                                  package=self.UMA) == ""
+
+    def test_two_marks_for_one_person_are_not_an_ambiguity(self, store):
+        """`who_signs` returns nothing when two PEOPLE could be meant. Two
+        adoptions belonging to the same person, only one of which covers the
+        app in front, is not that."""
+        self._both(store)
+        assert enrolled.who_signs("Sadia Amselem", path=store,
+                                  package=self.IMT) == "Sadia Amselem"

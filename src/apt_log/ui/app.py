@@ -2025,7 +2025,6 @@ def signature_map():
     from apt_log import schedule as sched
 
     roster = enrolled_mod.roster()
-    by_name = {e["name"]: e for e in roster}
 
     people: list[dict] = []
     seen: set = set()
@@ -2038,6 +2037,34 @@ def signature_map():
         # here would read as "nobody has adopted a signature".
         blocks = []
 
+    def _row(name, packages, role, on_schedule=True):
+        """One row per PERSON PER APP, because a mark is per app now.
+
+        The caregiver signs three apps and signs two of them differently, so a
+        single row could only ever tell the truth about one of them: registered
+        would mean "somewhere", and the row for the app she has not done would
+        read as done. A patient appears in one app and gets one row, exactly as
+        before.
+        """
+        out = []
+        for package in packages or [""]:
+            match = enrolled_mod.who_signs(name, package=package)
+            entry = next((e for e in roster
+                          if e["name"] == match
+                          and enrolled_mod._covers(e, package)), {})
+            out.append({"name": name,
+                        "app": _app_called(package) if package else "",
+                        "package": package,
+                        "apps": [_app_called(package)] if package else [],
+                        "role": role,
+                        "adopted": bool(match), "adopted_as": match,
+                        "adopted_for": list(entry.get("apps") or []),
+                        "witness": entry.get("witness", ""),
+                        "at": entry.get("at", ""),
+                        "digest": entry.get("digest", ""),
+                        "on_schedule": on_schedule})
+        return out
+
     for name in [b.patient for b in blocks]:
         if name in seen:
             continue
@@ -2047,18 +2074,10 @@ def signature_map():
         # whether one adoption is enough — and named the way the tiles name
         # them, because "com.hhaexchange.uma" on a caregiver's screen is not
         # an app name, it is a package identifier she has no use for.
-        apps = sorted({_app_called(b.app) for b in blocks
-                       if b.patient == name})
-        # The store's own spelling wins for the button, because that is what
-        # `who_signs` will hand the pad at the moment it matters.
-        match = enrolled_mod.who_signs(name)
-        entry = by_name.get(match, {})
-        people.append({"name": name, "apps": apps, "role": "patient",
-                       "adopted": bool(match), "adopted_as": match,
-                       "witness": entry.get("witness", ""),
-                       "at": entry.get("at", ""),
-                       "digest": entry.get("digest", ""),
-                       "on_schedule": True})
+        people.extend(_row(name,
+                           sorted({b.app for b in blocks
+                                   if b.patient == name}),
+                           "patient"))
 
     # AND THE CAREGIVER, who signs every one of these and appears on none of
     # them. inMyTeam's exit asks the patient at Paso 2 de 3 and asks HER at
@@ -2069,27 +2088,27 @@ def signature_map():
     # First in the list rather than last: she is on every visit, so she is the
     # one row whose absence would break all of them.
     if getattr(plan, "caregiver", ""):
-        match = enrolled_mod.who_signs(plan.caregiver)
-        entry = by_name.get(match, {})
         seen.add(plan.caregiver)
-        people.insert(0, {
-            "name": plan.caregiver,
-            "apps": sorted({_app_called(b.app) for b in blocks}),
-            "role": "staff",
-            "adopted": bool(match), "adopted_as": match,
-            "witness": entry.get("witness", ""),
-            "at": entry.get("at", ""),
-            "digest": entry.get("digest", ""),
-            "on_schedule": True})
+        for row in reversed(_row(plan.caregiver,
+                                 sorted({b.app for b in blocks}), "staff")):
+            people.insert(0, row)
 
     # Adoptions that match nobody on the schedule. Last, and marked, because
     # they are the exception rather than the working list.
-    claimed = {p["adopted_as"] for p in people if p["adopted_as"]}
+    claimed = {(p["adopted_as"], p["digest"]) for p in people
+               if p["adopted_as"]}
     for entry in roster:
-        if entry["name"] in claimed:
+        if (entry["name"], entry["digest"]) in claimed:
             continue
-        people.append({"name": entry["name"], "apps": [], "role": "",
+        people.append({"name": entry["name"],
+                       "app": ", ".join(_app_called(a)
+                                        for a in (entry.get("apps") or [])),
+                       "package": "",
+                       "apps": [_app_called(a)
+                                for a in (entry.get("apps") or [])],
+                       "role": "",
                        "adopted": True, "adopted_as": entry["name"],
+                       "adopted_for": list(entry.get("apps") or []),
                        "witness": entry.get("witness", ""),
                        "at": entry.get("at", ""),
                        "digest": entry.get("digest", ""),
@@ -2117,7 +2136,8 @@ async def signature_enroll(request: Request):
         digest = enrolled_mod.enroll(payload.get("name", ""),
                                      payload.get("strokes"),
                                      aspect=float(payload.get("aspect") or 1.0),
-                                     witness=payload.get("witness", ""))
+                                     witness=payload.get("witness", ""),
+                                     apps=payload.get("apps") or ())
     except (TypeError, ValueError) as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
     except OSError as exc:
@@ -2145,7 +2165,12 @@ async def signature_forget(request: Request):
     from apt_log import enrolled as enrolled_mod
 
     payload = await request.json()
-    return JSONResponse({"ok": enrolled_mod.forget(payload.get("name", ""))})
+    # `apps` absent means "all of hers", which is what withdrawing a signature
+    # meant before one person could have two; a list — including an empty one,
+    # for the unscoped adoption — names exactly which to drop.
+    apps = payload.get("apps", None)
+    return JSONResponse({"ok": enrolled_mod.forget(payload.get("name", ""),
+                                                   apps=apps)})
 
 
 @app.post("/signature/apply")
@@ -2170,13 +2195,19 @@ async def signature_apply(request: Request):
 
     payload = await request.json()
     name = payload.get("name", "")
-    found = enrolled_mod.strokes_for(name)
+    # THE APP IN FRONT DECIDES WHICH OF HER MARKS THIS IS. inMyTeam asks the
+    # caregiver for her full signature and the other two take her initials, so
+    # a lookup by name alone would draw whichever was registered last onto all
+    # three.
+    package = str(payload.get("package") or "")
+    found = enrolled_mod.strokes_for(name, package=package)
     if found is None:
         return JSONResponse({"error": "not_enrolled"}, status_code=404)
     strokes, aspect = found
     rid = sign_mod.request(strokes, aspect=aspect)
-    enrolled_mod.record_use(name, enrolled_mod.digest_for(name),
-                            package=str(payload.get("package") or ""))
+    enrolled_mod.record_use(name,
+                            enrolled_mod.digest_for(name, package=package),
+                            package=package)
     log.info("adopted signature queued for replay (%s)", rid)
     return JSONResponse({"ok": True, "id": rid})
 

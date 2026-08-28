@@ -346,6 +346,7 @@
  "sigmap.enrol_note": "Registre una firma. La persona a quien pertenece la dibuja aquí, una sola vez, en persona. Después la aplicará ella misma con un solo toque.",
  "sigmap.enrol_title": "Registrar una firma",
  "sigmap.filed_as": "registrada como {as}",
+ "sigmap.for_app": "Esta firma es para {app}.",
  "sigmap.forget": "Quitar",
  "sigmap.forget_sure": "Toque otra vez",
  "sigmap.forgotten": "Firma quitada. No queda nada en la máquina.",
