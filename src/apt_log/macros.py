@@ -1836,17 +1836,27 @@ def _fill_in_the_code(driver, report, sent: float) -> bool:
     from apt_log import sms
 
     report("macro.step.reading_the_code")
-    code = sms.wait_for_code(after=sent, timeout=CODE_WAIT)
+    claimed_at, code = sms.newest_after(after=sent, timeout=CODE_WAIT)
     if not code:
         return False
 
-    # PASSED ON BEFORE IT IS TYPED, and before anything that can fail. The
-    # people on that list are the fallback for this walk going wrong, so
-    # forwarding after a successful sign-in would send the code only in the
-    # case where nobody needed it. Forced past the poll interval because a
-    # code has demonstrably just landed; the dedup still holds, so the tick
-    # behind this will not send it a second time.
-    _pass_the_code_on()
+    # CLAIMED, NOT BROADCAST — and this reverses what used to happen here.
+    #
+    # The old comment argued for texting the code out BEFORE typing it, on the
+    # grounds that the people on that list are the fallback for this walk
+    # going wrong. That reasoning is sound and is kept below, in the failure
+    # paths. What it missed is the success case: one phone holds the SIM and
+    # three people sign in against it, so a code this walk consumed and then
+    # texted onward is a SPENT code arriving on three phones. Somebody types
+    # it, inMyTeam refuses it, the field clears, a dialog the tree cannot see
+    # appears, and one of a limited number of attempts is gone. The person who
+    # actually needed a code is left worse off than if nothing had been sent.
+    #
+    # So the claim is staked here and the text is not. Every failure path from
+    # this point releases it, which is what preserves the original property:
+    # while the walk is going right the code is the controller's, and the
+    # moment it is not, the code becomes theirs again.
+    sms.claim(claimed_at)
 
     box = _code_box(driver)
     if box is None:
@@ -1854,6 +1864,7 @@ def _fill_in_the_code(driver, report, sent: float) -> bool:
         # hand back to the human path than to type six digits at whatever is
         # in front now.
         log.warning("a code arrived but the code box is gone")
+        _hand_the_code_back(claimed_at)
         return False
 
     report("macro.step.signing_in")
@@ -1862,6 +1873,7 @@ def _fill_in_the_code(driver, report, sent: float) -> bool:
         box.send_keys(code)
     except Exception as exc:  # noqa: BLE001
         log.warning("could not type the code (%s)", exc)
+        _hand_the_code_back(claimed_at)
         return False
 
     _push_the_code(code)
@@ -1877,6 +1889,7 @@ def _fill_in_the_code(driver, report, sent: float) -> bool:
         report("macro.step.finished")
         return True
     log.warning("the code was typed and the app is still asking")
+    _hand_the_code_back(claimed_at)
     return False
 
 
@@ -1884,6 +1897,26 @@ def _fill_in_the_code(driver, report, sent: float) -> bool:
 # can take half a minute on a bad day, and the cost of giving up early is
 # falling back to the human path, which is where this started.
 CODE_WAIT = 75.0
+
+
+def _hand_the_code_back(when: float) -> None:
+    """Release a claimed code and text it out, because the walk failed.
+
+    THIS IS THE HALF THAT KEEPS THE OLD SAFETY PROPERTY. Suppressing the text
+    only makes sense while the walk is going right; the people on that list
+    are precisely the fallback for it going wrong. So a failure gives the code
+    back — released first, so the forwarder can see it, then sent.
+
+    Never fatal. A walk that has already failed must not fail harder because a
+    carrier was slow.
+    """
+    try:
+        from apt_log import sms
+
+        sms.release(when)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not release the claimed code (%s)", exc)
+    _pass_the_code_on()
 
 
 def _pass_the_code_on() -> None:
@@ -3333,7 +3366,25 @@ CHECK_IN_WORDS_SEEN = ("check in", "entrada")
 CHECK_LOG_APPS = ("com.inmyteam.inmyteam",)
 
 
-DRAWER_DESC = "Open navigation drawer"
+# WHAT THE HAMBURGER CALLS ITSELF, IN BOTH LANGUAGES.
+#
+# This was one English string, and it went dead the moment the app started
+# rendering Spanish: the replacement handset says `Abrir panel lateral de
+# navegación`, and the English text is not anywhere in that hierarchy — I
+# grepped the live tree for it. `_the_drawer` returned None, which made
+# `_back_to_the_drawer` and `_open_my_work` no-ops.
+#
+# That is not a cosmetic failure. `_open_my_work` is how the walk reaches the
+# Checks table, which is the guard that stops an entry being fired for a visit
+# the caregiver already entered by hand. It failed OPEN and silently.
+#
+# Every other word list in this file is a tuple for exactly this reason
+# (MY_WORK_WORDS, CHECKS_TAB_WORDS, SEARCH_WORDS). This one was the exception
+# and had no business being one.
+DRAWER_DESCS = ("Open navigation drawer",
+                "Abrir panel lateral de navegación",
+                # Without the accent, for a build that strips them.
+                "Abrir panel lateral de navegacion")
 BACKS_TO_DRAWER = 5
 
 # Fragments every Jetpack app carries, which say nothing about where the
@@ -3385,10 +3436,13 @@ def _the_drawer(driver):
     The first live run of the work-log walk failed on exactly that, from a
     visit detail, reporting the log unreachable when it was three Backs away.
     """
+    # One xpath across every spelling, rather than a query per language: the
+    # tree read is the expensive part here and this runs inside a walk that
+    # is already against the clock.
+    wanted = " or ".join(f'@content-desc="{d}"' for d in DRAWER_DESCS)
     try:
-        found = [e for e in driver.find_elements(
-            "xpath", f'//*[@content-desc="{DRAWER_DESC}"]')
-            if e.is_displayed()]
+        found = [e for e in driver.find_elements("xpath", f"//*[{wanted}]")
+                 if e.is_displayed()]
     except Exception:  # noqa: BLE001
         return None
     return found[0] if found else None

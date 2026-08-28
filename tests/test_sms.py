@@ -14,6 +14,7 @@ from __future__ import annotations
 import importlib
 import json
 import time
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -169,18 +170,35 @@ class TestWhenTheProviderWillNotAnswer:
 class TestWaitingForOneThatHasNotArrivedYet:
     """`after` is what makes this safe to call twice. Without it, a second run
     finds the FIRST run's code still in the inbox, types a code the app has
-    already rejected, and reports success."""
+    already rejected, and reports success.
+
+    These patch `_newest` rather than `latest_code`. The seam moved when the
+    caller began needing the message's TIMESTAMP as well as its digits — a
+    code that gets typed now also has to be claimed, so it is not then texted
+    to three people who cannot use it — and `latest_code` became the thin
+    wrapper rather than the primitive. Patching the old seam did not fail
+    loudly: the loop simply polled the real (stubbed-empty) inbox until it
+    timed out, which is a test suite that hangs rather than one that reports.
+    """
 
     def test_it_returns_the_code_once_it_lands(self):
-        codes = ["", "", "604820"]
-        with patch.object(sms, "latest_code",
-                          side_effect=lambda *a, **k: codes.pop(0)), \
+        answers = [(0.0, ""), (0.0, ""), (1234.0, "604820")]
+        with patch.object(sms, "_newest",
+                          side_effect=lambda *a, **k: answers.pop(0)), \
                 patch.object(sms.time, "sleep", lambda _s: None):
             assert sms.wait_for_code(timeout=30.0) == "604820"
 
+    def test_it_hands_back_the_timestamp_too(self):
+        """Which is the whole reason this function exists: the claim is keyed
+        on the message, and the timestamp was being computed and thrown away
+        one frame before it was needed."""
+        with patch.object(sms, "_newest", lambda *a, **k: (1234.0, "604820")), \
+                patch.object(sms.time, "sleep", lambda _s: None):
+            assert sms.newest_after(timeout=30.0) == (1234.0, "604820")
+
     def test_it_gives_up_rather_than_hanging(self):
         clock = iter([0.0] + [float(i) for i in range(1, 200)])
-        with patch.object(sms, "latest_code", lambda *a, **k: ""), \
+        with patch.object(sms, "_newest", lambda *a, **k: (0.0, "")), \
                 patch.object(sms.time, "sleep", lambda _s: None), \
                 patch.object(sms.time, "monotonic", lambda: next(clock)):
             assert sms.wait_for_code(timeout=5.0) == ""
@@ -192,9 +210,9 @@ class TestWaitingForOneThatHasNotArrivedYet:
         def fake(sender=sms.INMYTEAM_SENDER, within=0.0, serial=None,
                  now=None):
             seen["within"] = within
-            return "604820"
+            return 1234.0, "604820"
 
-        with patch.object(sms, "latest_code", fake):
+        with patch.object(sms, "_newest", fake):
             sms.wait_for_code(after=time.time() - 10)
         # The window is how long ago the caller started, not the default.
         assert 9 <= seen["within"] <= 12
@@ -769,3 +787,95 @@ class TestTheCodeOnThePage:
             sms.latest_for_display(now=now)
         assert "604820" not in caplog.text
         assert "30s old" in caplog.text or "30" in caplog.text
+
+
+class TestACodeThisMachineTook:
+    """Whose code is it.
+
+    One phone holds the SIM and three people sign in against it. A code the
+    controller consumed and then texted onward is a SPENT code arriving on
+    three phones: somebody types it, inMyTeam refuses it, the field clears, a
+    dialog the tree cannot see appears, and one of a limited number of
+    attempts is gone. The person who actually needed a code ends up worse off
+    than if the feature did not exist.
+
+    Cross-device claims are unknowable — nothing tells this phone that another
+    handset consumed a message. The controller's OWN claims are knowable,
+    because the controller is the thing typing them, and that is the half
+    tracked here.
+    """
+
+    def test_a_claim_is_remembered(self, tmp_path):
+        led = tmp_path / "claimed.json"
+        sms.claim(1000.0, path=led)
+        assert sms.was_claimed(1000.0, path=led) is True
+        assert sms.was_claimed(2000.0, path=led) is False
+
+    def test_claiming_twice_is_not_two_claims(self, tmp_path):
+        led = tmp_path / "claimed.json"
+        sms.claim(1000.0, path=led)
+        sms.claim(1000.0, path=led)
+        assert json.loads(led.read_text())["claimed"] == [1000.0]
+
+    def test_releasing_gives_it_back(self, tmp_path):
+        """The people on the list are the fallback for the walk going wrong.
+        Suppressing the text only makes sense while it is going right."""
+        led = tmp_path / "claimed.json"
+        sms.claim(1000.0, path=led)
+        sms.release(1000.0, path=led)
+        assert sms.was_claimed(1000.0, path=led) is False
+
+    def test_a_missing_ledger_claims_nothing(self, tmp_path):
+        assert sms.was_claimed(1000.0, path=tmp_path / "absent.json") is False
+
+    def test_an_unreadable_ledger_claims_nothing(self, tmp_path):
+        """Failing closed here would mean silently never broadcasting."""
+        led = tmp_path / "claimed.json"
+        led.write_text("{ not json")
+        assert sms.was_claimed(1000.0, path=led) is False
+
+    def test_a_claim_that_cannot_be_written_does_not_raise(self):
+        """A sign-in one keystroke from done must not fail over a log file."""
+        sms.claim(1000.0, path=Path("/proc/nope/claimed.json"))
+
+
+class TestTheBroadcastSkipsWhatTheControllerTook:
+    def _inbox(self, *msgs):
+        return lambda *a, **k: rows(*msgs)
+
+    def test_a_claimed_code_is_passed_over_for_the_one_before_it(
+            self, tmp_path, monkeypatch):
+        """Sadia's sign-in produced one code; the controller's own sign-in
+        produced a newer one and consumed it. She must be shown hers."""
+        led = tmp_path / "claimed.json"
+        now = time.time()
+        monkeypatch.setattr(sms, "_claimed_path", lambda: led)
+        monkeypatch.setattr(sms, "_adb", self._inbox(
+            (now - 90, "passcode from INMYTEAM: 111111"),
+            (now - 20, "passcode from INMYTEAM: 222222")))
+        sms.claim(now - 20, path=led)
+        when, code = sms.newest_unclaimed(now=now, path=led)
+        assert code == "111111"
+        assert when == pytest.approx(now - 90, abs=1)
+
+    def test_with_nothing_claimed_the_newest_still_wins(self, tmp_path,
+                                                        monkeypatch):
+        now = time.time()
+        led = tmp_path / "claimed.json"
+        monkeypatch.setattr(sms, "_claimed_path", lambda: led)
+        monkeypatch.setattr(sms, "_adb", self._inbox(
+            (now - 90, "passcode from INMYTEAM: 111111"),
+            (now - 20, "passcode from INMYTEAM: 222222")))
+        assert sms.newest_unclaimed(now=now, path=led)[1] == "222222"
+
+    def test_every_code_claimed_means_nothing_to_send(self, tmp_path,
+                                                      monkeypatch):
+        """And that is the right answer: there is no code outside the system
+        waiting for anybody."""
+        now = time.time()
+        led = tmp_path / "claimed.json"
+        monkeypatch.setattr(sms, "_claimed_path", lambda: led)
+        monkeypatch.setattr(sms, "_adb", self._inbox(
+            (now - 20, "passcode from INMYTEAM: 222222")))
+        sms.claim(now - 20, path=led)
+        assert sms.newest_unclaimed(now=now, path=led)[1] == ""

@@ -179,15 +179,30 @@ def wait_for_code(sender: str = INMYTEAM_SENDER,
     when the caller says it does, which is the moment before Sign in was
     pressed.
     """
+    return newest_after(sender, timeout, poll, after, serial)[1]
+
+
+def newest_after(sender: str = INMYTEAM_SENDER,
+                 timeout: float = 90.0,
+                 poll: float = 3.0,
+                 after: float | None = None,
+                 serial: str | None = None) -> tuple[float, str]:
+    """`wait_for_code`, keeping the timestamp it already had.
+
+    The caller that types a code now also has to CLAIM it, so that a code
+    this machine consumed is not then texted to three people who cannot use
+    it — and a claim is keyed on the message's arrival time. That timestamp
+    was being computed and thrown away one frame before it was needed.
+    """
     started = time.time() if after is None else after
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        code = latest_code(sender, within=max(time.time() - started, 1.0),
-                           serial=serial)
+        when, code = _newest(sender, within=max(time.time() - started, 1.0),
+                             serial=serial)
         if code:
-            return code
+            return when, code
         time.sleep(poll)
-    return ""
+    return 0.0, ""
 
 
 # ============================================================== SENDING ONE
@@ -526,7 +541,7 @@ def broadcast_latest(serial: str | None = None, provider=None,
     people = recipients(provider)
     if not people:
         return {"sent": 0, "of": 0, "found": False, "age": 0.0}
-    when, code = _newest(serial=serial, now=at)
+    when, code = newest_unclaimed(serial=serial, now=at)
     if not code:
         return {"sent": 0, "of": len(people), "found": False, "age": 0.0}
     # Marked even though this send ignores the mark. The standing poll runs a
@@ -579,7 +594,7 @@ def latest_for_display(serial: str | None = None,
     minutes old and blame the machine for.
     """
     at = time.time() if now is None else now
-    when, code = _newest(within=SHOW_WITHIN, serial=serial, now=at)
+    when, code = newest_unclaimed(within=SHOW_WITHIN, serial=serial, now=at)
     if not code:
         return {"found": False}
     # The AGE is logged, never the digits — enough to answer "was there one"
@@ -587,3 +602,134 @@ def latest_for_display(serial: str | None = None,
     log.info("a code is on the page (%.0fs old)", max(0.0, at - when))
     return {"found": True, "code": code,
             "age": int(max(0.0, at - when)), "at": when}
+
+
+# ======================================================= CODES THIS MACHINE TOOK
+# WHOSE CODE IS IT.
+#
+# One phone holds the SIM and three people can be signing in against it. When
+# the controller signs ITSELF in, the code it consumes is spent — and texting
+# a spent code to three people is worse than texting nothing: they type it, it
+# is refused, and on inMyTeam a refusal clears the field, raises a dialog the
+# tree cannot see, and burns one of a limited number of attempts. The person
+# who actually needed a code is now worse off than if the feature did not
+# exist.
+#
+# Cross-device claims are unknowable — nothing tells this phone that Sadia's
+# handset consumed a message. But the controller's OWN claims are perfectly
+# knowable, because the controller is the thing typing them. So that half is
+# tracked, and the broadcast and the page both answer "the newest code THIS
+# MACHINE did not take", which is the one a person outside the system is
+# waiting for.
+#
+# Keyed on the message's arrival timestamp, the same key `already_forwarded`
+# uses: unique per message, stable across reads, and — unlike the digits —
+# incapable of colliding when two codes happen to repeat.
+CLAIM_KEEPS = 6 * 3600.0
+
+
+def _claimed_path() -> Path:
+    """Resolved on the call, not bound at import, so a test can move it."""
+    from apt_log.ui.state import STATE_DIR
+
+    return Path(STATE_DIR) / "code-claimed.json"
+
+
+def _claimed(path: Path | None = None) -> list:
+    try:
+        doc = json.loads((path or _claimed_path()).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    return [float(w) for w in doc.get("claimed", [])
+            if isinstance(w, (int, float))]
+
+
+def claim(when: float, path: Path | None = None) -> None:
+    """Mark the message that arrived at `when` as taken by this machine."""
+    target = path or _claimed_path()
+    kept = [w for w in _claimed(target) if time.time() - w < CLAIM_KEEPS]
+    if when not in kept:
+        kept.append(when)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"claimed": kept}), encoding="utf-8")
+        tmp.replace(target)
+        log.info("the controller claimed a code")
+    except OSError as exc:
+        # A claim that cannot be written means the code may be broadcast to
+        # people who cannot use it. Worth a line; never worth failing a
+        # sign-in that is one keystroke from done.
+        log.warning("could not record the claim (%s)", exc)
+
+
+def release(when: float, path: Path | None = None) -> None:
+    """Give a claimed code back, because the walk that took it failed.
+
+    THIS IS WHAT KEEPS THE ORIGINAL SAFETY PROPERTY. The people on the list
+    are the fallback for the sign-in walk going wrong; suppressing the text
+    only makes sense while the walk is going right. When it is not, the code
+    stops being the controller's and becomes theirs again.
+    """
+    target = path or _claimed_path()
+    kept = [w for w in _claimed(target) if w != when]
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"claimed": kept}), encoding="utf-8")
+        tmp.replace(target)
+        log.info("a claimed code was released — the walk did not finish")
+    except OSError as exc:
+        log.warning("could not release the claim (%s)", exc)
+
+
+def was_claimed(when: float, path: Path | None = None) -> bool:
+    return any(abs(w - when) < 0.001 for w in _claimed(path))
+
+
+def newest_unclaimed(sender: str = INMYTEAM_SENDER,
+                     within: float = FRESH_WITHIN,
+                     serial: str | None = None,
+                     now: float | None = None,
+                     path: Path | None = None) -> tuple[float, str]:
+    """The newest code this machine did NOT take, as (timestamp, code).
+
+    What the broadcast sends and the page shows. A code the controller
+    claimed is spent, and a spent code handed to somebody signing in is not a
+    neutral non-event — it is a refusal, a cleared field and a burnt attempt.
+    """
+    at = time.time() if now is None else now
+    # Keywords, not positions: this is the seam the display and broadcast
+    # tests patch, and a positional call there breaks fakes that take the
+    # arguments by name.
+    when, code = _newest(sender=sender, within=within, serial=serial,
+                         now=at)
+    if code and was_claimed(when, path):
+        # Look again, ignoring everything from this one back. Cheap: the
+        # provider read is already done and the window is minutes wide.
+        return _newest_before(sender, within, serial, at, when, path)
+    return when, code
+
+
+def _newest_before(sender, within, serial, at, ceiling, path):
+    """The newest unclaimed code strictly older than `ceiling`."""
+    digits = "".join(c for c in sender if c.isdigit())
+    if not digits:
+        return 0.0, ""
+    where = shlex.quote(f"address LIKE '%{digits[-10:]}%'")
+    out = _adb(["shell", "content", "query", "--uri", "content://sms/inbox",
+                "--projection", "date:body", "--where", where], serial)
+    best_at, best = 0.0, ""
+    for row in _rows(out):
+        try:
+            when = float(row.get("date", "0")) / 1000.0
+        except (TypeError, ValueError):
+            continue
+        if at - when > within or when > at + 60 or when >= ceiling:
+            continue
+        if was_claimed(when, path):
+            continue
+        code = code_from(row.get("body", ""))
+        if code and when > best_at:
+            best_at, best = when, code
+    return best_at, best
