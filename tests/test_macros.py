@@ -7,6 +7,14 @@ scripting with a friendlier label.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import re
+
+import builtins
+
+import ast
+
 import json
 import time
 from unittest.mock import MagicMock, PropertyMock, patch
@@ -4266,3 +4274,74 @@ class TestBackToTheAppsOwnFirstPage:
         second press in front of it."""
         assert "app_home" in macros.MACROS
         assert "app_home" not in macros.CONFIRM
+
+
+class TestNoMacroReferencesANameThatDoesNotExist:
+    """A NameError should not have to reach the phone to be found.
+
+    `inmyteam_sign_out` shipped referencing an `INMYTEAM` constant that does
+    not exist. Everything passed — the suite never calls that macro against a
+    driver — and it failed on the live handset with `NameError` and nothing
+    else, because the runner records `type(exc).__name__` and discards the
+    message. Two separate holes lining up: an unexercised path, and a failure
+    report that names the class of the mistake without naming the mistake.
+
+    This closes the first one statically, for every macro at once. It does
+    not need a driver, a phone, or a walk to run.
+    """
+
+    def _unresolved(self, fn: ast.FunctionDef, module: ast.Module) -> set:
+        known = set(dir(builtins))
+        # Module-level names: assignments, defs, classes, imports.
+        for node in ast.walk(module):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                 ast.ClassDef)):
+                known.add(node.name)
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                known.add(node.id)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                for alias in node.names:
+                    known.add((alias.asname or alias.name).split(".")[0])
+        # Everything the function itself introduces: arguments, locals,
+        # comprehension targets, with/except/for bindings, nested defs.
+        args = fn.args
+        for a in (args.posonlyargs + args.args + args.kwonlyargs):
+            known.add(a.arg)
+        for a in (args.vararg, args.kwarg):
+            if a:
+                known.add(a.arg)
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                known.add(node.id)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                known.add(node.name)
+                for a in (node.args.posonlyargs + node.args.args
+                          + node.args.kwonlyargs):
+                    known.add(a.arg)
+            elif isinstance(node, ast.ExceptHandler) and node.name:
+                known.add(node.name)
+            elif isinstance(node, ast.arg):
+                known.add(node.arg)
+
+        used = {n.id for n in ast.walk(fn)
+                if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
+        return used - known
+
+    def test_every_registered_macro_resolves(self):
+        source = Path("src/apt_log/macros.py").read_text(encoding="utf-8")
+        module = ast.parse(source)
+        # The functions the catalogue actually hands to the runner.
+        registered = set(re.findall(r"Macro\(\s*\"[^\"]+\",\s*\"[^\"]+\",\s*(\w+)",
+                                    source))
+        assert registered, "no macros found in the catalogue"
+        checked = 0
+        for node in ast.walk(module):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            if node.name not in registered:
+                continue
+            checked += 1
+            missing = self._unresolved(node, module)
+            assert not missing, (
+                f"{node.name} references undefined name(s): {sorted(missing)}")
+        assert checked >= 10, f"only checked {checked} macros"
