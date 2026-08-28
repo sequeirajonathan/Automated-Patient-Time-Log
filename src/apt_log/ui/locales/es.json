@@ -355,6 +355,8 @@
  "sigmap.note": "Todas las personas a quienes el horario pedirá una firma, y si ya la han registrado. El registro se hace con la persona presente, dibujándola ella misma.",
  "sigmap.on_file": "Registrada",
  "sigmap.replace": "Reemplazar",
+ "sigmap.role_patient": "Paciente",
+ "sigmap.role_staff": "Cuidadora",
  "sigmap.saved_again": "Dibujar de nuevo",
  "sigmap.saved_for": "Guardada para {who}. Esto es lo que se registró.",
  "sigmap.saved_ok": "Está correcta",

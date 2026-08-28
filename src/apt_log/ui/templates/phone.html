@@ -331,6 +331,15 @@
   .sigrow .who { font-size:16px; font-weight:600; line-height:1.25; }
   .sigrow .meta { font-size:12.5px; color:var(--muted); margin-top:3px;
                   line-height:1.35; }
+  /* Patient or caregiver. Every check-out collects both, and a list of bare
+     names cannot say which row is which. */
+  .sigrole { display:inline-block; margin-left:7px; padding:1px 7px;
+             border-radius:7px; font-size:10.5px; font-weight:700;
+             letter-spacing:.03em; text-transform:uppercase;
+             vertical-align:middle;
+             background:var(--hair, rgba(128,128,128,.16));
+             color:var(--muted); }
+  .sigrole.staff { background:rgba(58,163,110,.18); color:#2e9c63; }
   /* GREEN MEANS ON FILE AND NOTHING ELSE MEANS IT. The state of a row is the
      only thing this screen exists to tell you, so it is a word and a colour,
      never a colour alone. */
@@ -2471,6 +2480,8 @@
     sigSavedFor: {{ t('sigmap.saved_for')|tojson }},
     sigNotScheduled: {{ t('sigmap.not_scheduled')|tojson }},
     sigFiledAs: {{ t('sigmap.filed_as')|tojson }},
+    sigRolePatient: {{ t('sigmap.role_patient')|tojson }},
+    sigRoleStaff: {{ t('sigmap.role_staff')|tojson }},
     live:    {{ t('papp.live')|tojson }},
     syncing: {{ t('papp.syncing')|tojson }},
     webTitle: {{ t('papp.web')|tojson }},

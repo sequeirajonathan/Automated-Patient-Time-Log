@@ -1272,6 +1272,17 @@
       who.className = 'who';
       // textContent everywhere below: these are patients' names.
       who.textContent = p.name;
+      // WHICH SIGNATURE THIS IS. Every check-out collects two — the
+      // patient's and the caregiver's — and a list of bare names cannot say
+      // which row is which, on the one screen where confusing them means a
+      // signature registered against the wrong party.
+      if (p.role) {
+        const tag = document.createElement('span');
+        tag.className = 'sigrole ' + p.role;
+        tag.textContent = p.role === 'staff' ? (i18n.sigRoleStaff || '')
+                                             : (i18n.sigRolePatient || '');
+        who.appendChild(tag);
+      }
       grow.appendChild(who);
 
       const meta = document.createElement('div');

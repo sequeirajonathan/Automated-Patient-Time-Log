@@ -2029,6 +2029,7 @@ def signature_map():
 
     people: list[dict] = []
     seen: set = set()
+    plan = None
     try:
         plan = sched.load()
         blocks = plan.blocks
@@ -2052,12 +2053,34 @@ def signature_map():
         # `who_signs` will hand the pad at the moment it matters.
         match = enrolled_mod.who_signs(name)
         entry = by_name.get(match, {})
-        people.append({"name": name, "apps": apps,
+        people.append({"name": name, "apps": apps, "role": "patient",
                        "adopted": bool(match), "adopted_as": match,
                        "witness": entry.get("witness", ""),
                        "at": entry.get("at", ""),
                        "digest": entry.get("digest", ""),
                        "on_schedule": True})
+
+    # AND THE CAREGIVER, who signs every one of these and appears on none of
+    # them. inMyTeam's exit asks the patient at Paso 2 de 3 and asks HER at
+    # Paso 3 de 3, so a list built only from `visits` left the second
+    # signature of every check-out with nothing behind it — reported as
+    # exactly that risk before it happened.
+    #
+    # First in the list rather than last: she is on every visit, so she is the
+    # one row whose absence would break all of them.
+    if getattr(plan, "caregiver", ""):
+        match = enrolled_mod.who_signs(plan.caregiver)
+        entry = by_name.get(match, {})
+        seen.add(plan.caregiver)
+        people.insert(0, {
+            "name": plan.caregiver,
+            "apps": sorted({_app_called(b.app) for b in blocks}),
+            "role": "staff",
+            "adopted": bool(match), "adopted_as": match,
+            "witness": entry.get("witness", ""),
+            "at": entry.get("at", ""),
+            "digest": entry.get("digest", ""),
+            "on_schedule": True})
 
     # Adoptions that match nobody on the schedule. Last, and marked, because
     # they are the exception rather than the working list.
@@ -2065,7 +2088,7 @@ def signature_map():
     for entry in roster:
         if entry["name"] in claimed:
             continue
-        people.append({"name": entry["name"], "apps": [],
+        people.append({"name": entry["name"], "apps": [], "role": "",
                        "adopted": True, "adopted_as": entry["name"],
                        "witness": entry.get("witness", ""),
                        "at": entry.get("at", ""),

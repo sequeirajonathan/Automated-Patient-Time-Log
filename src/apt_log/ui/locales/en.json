@@ -355,6 +355,8 @@
  "sigmap.note": "Everyone the schedule will ask to sign, and whether they have registered a signature. Registering one is done with the person there, drawing it themselves.",
  "sigmap.on_file": "On file",
  "sigmap.replace": "Replace",
+ "sigmap.role_patient": "Patient",
+ "sigmap.role_staff": "Caregiver",
  "sigmap.saved_again": "Draw it again",
  "sigmap.saved_for": "Saved for {who}. This is what was stored.",
  "sigmap.saved_ok": "That's right",

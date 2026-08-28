@@ -5292,3 +5292,129 @@ class TestSeeingWhatWasSaved:
             assert "{who}" in catalogue["sigmap.saved_for"]
             for key in ("sigmap.saved_again", "sigmap.saved_ok"):
                 assert catalogue[key].strip(), f"{code} {key}"
+
+
+class TestTheCaregiverIsOnTheList:
+    """She signs every check-out and appeared on none of them.
+
+    inMyTeam's exit asks the PATIENT at Paso 2 de 3 and asks HER at Paso 3 de
+    3. The mapping was built from `visits`, and every visit names a patient
+    while none names her — she is the same person on all of them — so the
+    second signature of every exit had nothing behind it.
+    """
+
+    def _plan(self, tmp_path, patients, caregiver=None):
+        import json as _json
+
+        path = tmp_path / "schedule.json"
+        doc = {"zone": "America/New_York",
+               "visits": [{"patient": p, "app": "inmyteam", "days": ["mon"],
+                           "start": "09:00", "end": "10:00"} for p in patients]}
+        if caregiver is not None:
+            doc["caregiver"] = caregiver
+        path.write_text(_json.dumps(doc), encoding="utf-8")
+        return path
+
+    def _enrol(self, tmp_path, *names):
+        from apt_log import enrolled as enrolled_mod
+
+        store = tmp_path / "sig.json"
+        for n in names:
+            enrolled_mod.enroll(
+                n, [[[0.1, 0.5], [0.3, 0.2], [0.5, 0.6]], [[0.6, 0.3], [0.9, 0.4]]],
+                path=store)
+        return store
+
+    def _map(self, client, tmp_path, monkeypatch, patients, caregiver=None,
+             enrolled_names=()):
+        from apt_log import enrolled as enrolled_mod
+        from apt_log import schedule as sched
+
+        monkeypatch.setattr(sched, "SCHEDULE_PATH",
+                            self._plan(tmp_path, patients, caregiver))
+        monkeypatch.setattr(enrolled_mod, "STORE_PATH",
+                            self._enrol(tmp_path, *enrolled_names))
+        return client.get("/signature/map").json()["people"]
+
+    def test_she_is_on_it(self, client, tmp_path, monkeypatch):
+        people = self._map(client, tmp_path, monkeypatch,
+                           ["Maria Garcia"], caregiver="Ana Ruiz")
+        assert "Ana Ruiz" in [p["name"] for p in people]
+
+    def test_she_is_first(self, client, tmp_path, monkeypatch):
+        """She is on every visit, so hers is the one row whose absence would
+        break all of them."""
+        people = self._map(client, tmp_path, monkeypatch,
+                           ["Maria Garcia", "Beto Sosa"], caregiver="Ana Ruiz")
+        assert people[0]["name"] == "Ana Ruiz"
+
+    def test_the_rows_say_which_is_which(self, client, tmp_path, monkeypatch):
+        """A list of bare names cannot say which signature a row is for, on
+        the one screen where confusing them registers a signature against the
+        wrong party."""
+        people = self._map(client, tmp_path, monkeypatch,
+                           ["Maria Garcia"], caregiver="Ana Ruiz")
+        roles = {p["name"]: p["role"] for p in people}
+        assert roles["Ana Ruiz"] == "staff"
+        assert roles["Maria Garcia"] == "patient"
+
+    def test_she_carries_every_app_she_signs_in(self, client, tmp_path,
+                                                monkeypatch):
+        import json as _json
+
+        from apt_log import enrolled as enrolled_mod
+        from apt_log import schedule as sched
+
+        path = tmp_path / "schedule.json"
+        path.write_text(_json.dumps({
+            "zone": "America/New_York",
+            "caregiver": "Ana Ruiz",
+            "visits": [
+                {"patient": "Maria Garcia", "app": "inmyteam",
+                 "days": ["mon"], "start": "09:00", "end": "10:00"},
+                {"patient": "Beto Sosa", "app": "com.hhaexchange.uma",
+                 "days": ["tue"], "start": "09:00", "end": "10:00"}]}),
+            encoding="utf-8")
+        monkeypatch.setattr(sched, "SCHEDULE_PATH", path)
+        monkeypatch.setattr(enrolled_mod, "STORE_PATH", tmp_path / "none.json")
+        row = client.get("/signature/map").json()["people"][0]
+        assert row["apps"] == ["HHAeXchange+", "inMyTeam"]
+
+    def test_her_adoption_is_matched_like_anybody_else(self, client, tmp_path,
+                                                        monkeypatch):
+        people = self._map(client, tmp_path, monkeypatch, ["Maria Garcia"],
+                           caregiver="ANA X RUIZ",
+                           enrolled_names=("Ana Ruiz",))
+        assert people[0]["adopted"] is True
+        assert people[0]["adopted_as"] == "Ana Ruiz"
+
+    def test_a_schedule_without_one_has_no_staff_row(self, client, tmp_path,
+                                                     monkeypatch):
+        """Every schedule written before today looks like this, and none of
+        them should grow an empty row."""
+        people = self._map(client, tmp_path, monkeypatch, ["Maria Garcia"])
+        assert [p["role"] for p in people] == ["patient"]
+
+    def test_a_blank_caregiver_is_the_same_as_none(self, client, tmp_path,
+                                                   monkeypatch):
+        people = self._map(client, tmp_path, monkeypatch, ["Maria Garcia"],
+                           caregiver="   ")
+        assert [p["name"] for p in people] == ["Maria Garcia"]
+
+    def test_she_is_not_repeated_as_a_stray(self, client, tmp_path,
+                                            monkeypatch):
+        """Her adoption matches her schedule row, so it must not also appear
+        in the "not on the schedule" tail."""
+        people = self._map(client, tmp_path, monkeypatch, ["Maria Garcia"],
+                           caregiver="Ana Ruiz", enrolled_names=("Ana Ruiz",))
+        assert [p["name"] for p in people].count("Ana Ruiz") == 1
+
+    def test_the_chip_is_said_in_both_languages(self):
+        import json
+
+        for code in ("en", "es"):
+            catalogue = json.loads(
+                Path(f"src/apt_log/ui/locales/{code}.json").read_text(
+                    encoding="utf-8"))
+            assert catalogue["sigmap.role_patient"].strip()
+            assert catalogue["sigmap.role_staff"].strip()

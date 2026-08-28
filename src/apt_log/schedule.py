@@ -287,9 +287,23 @@ def _block(entry: dict) -> Block:
 class Schedule:
     """The week, and the arithmetic for asking questions of it."""
 
-    def __init__(self, blocks: list[Block], zone: ZoneInfo | None = None):
+    def __init__(self, blocks: list[Block], zone: ZoneInfo | None = None,
+                 caregiver: str = ""):
         self.blocks = list(blocks)
         self.zone = zone or ZoneInfo(DEFAULT_ZONE)
+        # WHO WORKS THE VISITS, and it is not derivable from them.
+        #
+        # Every block names a patient and no block names her, because she is
+        # the same person on all of them. That was fine until signatures: at
+        # check-out inMyTeam asks the PATIENT to sign and then asks HER, and a
+        # list built only from `visits` could never offer her a row to
+        # register one on — so the second signature of every exit had nothing
+        # behind it.
+        #
+        # Optional, and empty by default: a deployment that has not written it
+        # simply has no staff row, which is what every schedule written before
+        # today looks like.
+        self.caregiver = (caregiver or "").strip()
 
     def __len__(self) -> int:
         return len(self.blocks)
@@ -430,7 +444,8 @@ def parse(doc: dict) -> Schedule:
     if not isinstance(entries, list):
         raise BadSchedule('the schedule needs a "visits" list')
     zone = _zone(str(doc.get("zone") or DEFAULT_ZONE))
-    return Schedule([_block(e) for e in entries], zone)
+    return Schedule([_block(e) for e in entries], zone,
+                    caregiver=str(doc.get("caregiver") or ""))
 
 
 def load(path: Path | None = None) -> Schedule:

@@ -1738,3 +1738,50 @@ class TestACaptionDrawnOverATextlessButton:
         assert sign._wipe_the_canvas(d, self.PAD + self.BARE, [""]) is True
         (points,), _ = d.tap.call_args
         assert points == [(737, 2276)]
+
+
+class TestARoleIsNotAName:
+    """"Firma del Paciente" says WHICH signature, not WHOSE.
+
+    Caught on the live sheet: the pad announced it was asking for "l
+    Paciente's signature" — the article eaten by a shorter marker matching
+    first, and a role word standing where a person should be. Both were mine,
+    and both were on screen during a real check-out.
+    """
+
+    def named(self, text):
+        return sign.signer_named({"statics": [{"txt": text}]})
+
+    def test_the_live_title_names_nobody(self):
+        assert self.named("Firma del Paciente") == ""
+
+    def test_nor_does_the_caregivers(self):
+        assert self.named("Firma del Cuidador") == ""
+
+    def test_nor_in_english(self):
+        assert self.named("Signature of the Patient") == ""
+
+    def test_the_article_is_not_part_of_a_name(self):
+        """"firma de" is a prefix of "firma del", so a shorter marker tried
+        first hands back the rest of the word."""
+        assert not self.named("Firma de la Paciente").startswith("la ")
+
+    def test_one_line_is_decided_once(self):
+        """Rejecting a role under the long marker and then letting the short
+        marker have its own turn on the SAME line is how "l Paciente"
+        happened."""
+        assert self.named("Firma del Paciente") == ""
+
+    def test_a_real_name_still_comes_through(self):
+        assert self.named("MARIA X GARCIA Firma de") == "MARIA X GARCIA"
+        assert self.named("Firma de Ana Ruiz") == "Ana Ruiz"
+
+    def test_a_role_beside_a_name_sheds(self):
+        """"Firma del Paciente Ana Ruiz" is asking Ana Ruiz; the word before
+        her name is a label."""
+        assert self.named("Firma del Paciente Ana Ruiz") == "Ana Ruiz"
+
+    def test_a_patient_actually_called_something_role_like_is_not_lost(self):
+        """Only whole words are roles. A surname that merely contains one is
+        a surname."""
+        assert self.named("Firma de Ana Pacientes") == "Ana Pacientes"

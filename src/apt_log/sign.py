@@ -35,6 +35,7 @@ import logging
 import os
 import re
 import time
+import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -1489,31 +1490,74 @@ def execute(payload: dict, status_path: Path | None = None) -> Status:
 # «name»* as `«NAME» Firma de`, with the name as the PREFIX. Both orders are
 # accepted because the correct one is one bug-fix release away, and a build
 # that fixed it would otherwise silently stop naming anybody.
-_SIGNS_FOR = ("firma de", "signature of", "firma del", "firma de la")
+# LONGEST FIRST. "firma de" is a prefix of "firma del", so a shorter marker
+# tried first eats the article and hands back the rest of the word: the live
+# sheet titled "Firma del Paciente" was read as a person called "l Paciente".
+_SIGNS_FOR = ("firma de la", "firma del", "firma de", "signature of the",
+              "signature of")
+
+# A ROLE IS NOT A NAME, and these screens are titled with roles far more often
+# than with people. "Firma del Paciente" says WHICH signature the sheet wants,
+# not whose; putting it where a name goes produced a pad announcing it was
+# asking for "l Paciente's signature", on a real check-out.
+#
+# Rejected rather than tidied, because there is nothing here to recover: a
+# title that names a role names nobody, and "" is the answer that makes the
+# pad say nothing instead of something wrong.
+_ROLE_WORDS = frozenset((
+    "paciente", "patient", "cliente", "client",
+    "cuidador", "cuidadora", "caregiver", "personal", "staff",
+    "empleado", "empleada", "employee", "trabajador", "trabajadora",
+    "testigo", "witness", "representante", "representative",
+))
 
 
 def signer_named(doc: dict) -> str:
     """Whose signature this screen is asking for, or "".
 
     "" is a real answer and the common one: every screen that is not a
-    signature pad, and any pad whose title this does not recognise. The caller
-    treats it as "say nothing", never as "assume the patient" — a wrong name
-    here is worse than no name, because the whole point of reading it is to
-    stop somebody's signature going on under another person's heading.
+    signature pad, any pad titled with a ROLE rather than a person, and any
+    pad whose title this does not recognise. The caller treats it as "say
+    nothing", never as "assume the patient" — a wrong name here is worse than
+    no name, because the whole point of reading it is to stop somebody's
+    signature going on under another person's heading.
     """
     for entry in (doc.get("statics") or []):
         text = (entry.get("txt") or "").strip()
         if not text or len(text) > 120:
             continue
-        low = text.casefold()
+        low = _fold(text)
+        # THE LONGEST MATCHING MARKER, AND THEN THE LINE IS DECIDED.
+        #
+        # Trying markers in turn and moving to the next one when a match came
+        # back unusable is how "Firma del Paciente" was read as a person: the
+        # role was correctly rejected under "firma del", and then "firma de"
+        # got its own turn on the same line and produced "l Paciente".
+        best = ""
         for marker in _SIGNS_FOR:
-            at = low.find(marker)
-            if at < 0:
-                continue
-            # Whichever side the name is on. The app puts it before today.
-            name = (text[:at] or text[at + len(marker):]).strip(" \t:·-–—,")
-            # A title that is ONLY the phrase names nobody, and a remainder
-            # with no letter in it is punctuation, not a person.
-            if name and any(c.isalpha() for c in name):
-                return name
+            if marker in low and len(marker) > len(best):
+                best = marker
+        if not best:
+            continue
+        at = low.find(best)
+        name = (text[:at] or text[at + len(best):]).strip(" \t:·-–—,")
+        # Role words shed from either end: "Firma del Paciente Ana Ruiz" is
+        # asking Ana Ruiz, and the word before her name is a label.
+        words = name.split()
+        while words and _fold(words[0]) in _ROLE_WORDS:
+            words.pop(0)
+        while words and _fold(words[-1]) in _ROLE_WORDS:
+            words.pop()
+        name = " ".join(words)
+        # A title that is ONLY the phrase, or only roles, names nobody; and a
+        # remainder with no letter in it is punctuation, not a person.
+        if name and any(c.isalpha() for c in name):
+            return name
     return ""
+
+
+def _fold(text: str) -> str:
+    """Lowercase and unaccented, for comparing a word against a fixed list."""
+    stripped = unicodedata.normalize("NFKD", text or "")
+    stripped = "".join(c for c in stripped if not unicodedata.combining(c))
+    return " ".join(stripped.casefold().split())
