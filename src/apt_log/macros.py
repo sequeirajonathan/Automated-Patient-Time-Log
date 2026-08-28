@@ -3614,6 +3614,19 @@ def _asks_to_sign_in(driver) -> bool:
 # walk that works on one phone.
 SIGN_OUT_WORDS = ("Cerrar sesión", "Cerrar sesion", "Sign out", "Log out")
 
+# AND THEN IT ASKS. Pressing the drawer's row does not sign the app out; it
+# raises "Advertencia! / ¿Desea cerrar la sesión?" with No and Sí. Found by
+# running the macro and having it REFUSE — the walk verifies sign-out by the
+# app asking to sign in again, so the dialog could not be mistaken for
+# success. A version that trusted the drawer row disappearing would have
+# reported done with this sitting on the screen.
+#
+# "Sí" is two characters and one of them is an accent, which is exactly the
+# shape that matches half a screen if it is looked for loosely. `_words` takes
+# the SMALLEST clickable containing the word, which is what keeps this off the
+# dialog's own container.
+SIGN_OUT_YES = ("Sí", "Si", "Yes", "OK")
+
 
 def _inmyteam_sign_out(driver, report) -> None:
     """Sign inMyTeam out, so the next launch has to do the whole OTP dance.
@@ -3659,6 +3672,15 @@ def _inmyteam_sign_out(driver, report) -> None:
 
     report("macro.step.signing_out")
     row.click()
+
+    # The confirmation, if this build asks. Not required: the words list is
+    # tried for a few seconds and a build that signs out directly simply has
+    # no dialog to find.
+    if wait_for(lambda: _words(driver, *SIGN_OUT_YES) is not None, timeout=6.0):
+        yes = _words(driver, *SIGN_OUT_YES)
+        if yes is not None:
+            report("macro.step.confirming")
+            yes.click()
 
     # SIGNED OUT MEANS THE APP ASKS AGAIN. The drawer's own row disappearing
     # proves only that the drawer closed. What settles it is the sign-in

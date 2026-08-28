@@ -4393,6 +4393,56 @@ class TestSigningInMyTeamOut:
                                 setattr(row_el, "clicked", row_el.clicked + 1))
         return d, drawer_el, row_el
 
+    def test_it_answers_the_confirmation_dialog(self, monkeypatch):
+        """`Advertencia! / ¿Desea cerrar la sesión?` with No and Sí.
+
+        Found by running the macro and having it REFUSE: the walk verifies
+        sign-out by the app asking to sign in again, so the dialog could not
+        be mistaken for success. A version that trusted the drawer row
+        disappearing would have reported done with it on screen.
+        """
+        pressed = []
+        state = {"asked": False, "out": False}
+
+        class D:
+            current_package = "com.inmyteam.inmyteam"
+
+            def find_elements(self, how, query):
+                if "navegación" in query:
+                    return [Yes("drawer")]
+                if "Cerrar sesi" in query or "Sign out" in query:
+                    return [Yes("row")]
+                if "Sí" in query or "Yes" in query:
+                    return [Yes("yes")] if state["asked"] else []
+                if "EditText" in query or "Comenzar" in query:
+                    return [Yes("field")] if state["out"] else []
+                return []
+
+        class Yes:
+            def __init__(self, name):
+                self.name = name
+
+            def is_displayed(self):
+                return True
+
+            def click(self):
+                pressed.append(self.name)
+                if self.name == "row":
+                    state["asked"] = True
+                if self.name == "yes":
+                    state["out"] = True
+
+        monkeypatch.setattr(macros, "_freshen", lambda *a, **k: True)
+        macros._inmyteam_sign_out(D(), lambda _s: None)
+        assert pressed == ["drawer", "row", "yes"]
+
+    def test_a_build_that_does_not_ask_still_signs_out(self, monkeypatch):
+        """The dialog is looked for, not required."""
+        driver, drawer_el, row_el = self._driver()
+        monkeypatch.setattr(macros, "_freshen", lambda *a, **k: True)
+        macros._inmyteam_sign_out(driver, lambda _s: None)
+        assert row_el.clicked == 1
+
     def test_it_presses_the_drawer_then_the_sign_out(self, monkeypatch):
         driver, drawer_el, row_el = self._driver()
         monkeypatch.setattr(macros, "_freshen", lambda *a, **k: True)
