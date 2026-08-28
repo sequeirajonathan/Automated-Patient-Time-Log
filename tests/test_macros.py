@@ -4475,3 +4475,30 @@ class TestSigningInMyTeamOut:
                             lambda p, **k: real_wait(p, timeout=0.2, poll=0.05))
         with pytest.raises(RuntimeError, match="still signed in"):
             macros._inmyteam_sign_out(driver, lambda _s: None)
+
+
+class TestTheSplashButtonIsActuallyNamed:
+    """`Comencemos`, which is not `Comenzar`.
+
+    The list said "Comenzar" and the button says "Comencemos" — and
+    `contains(@text, "Comenzar")` does not match it. So the sign-in walk
+    could not press its own first screen, and nothing noticed, because the
+    app had been signed in for as long as the walk had existed. It surfaced
+    the moment a sign-out macro existed to put the phone back on that splash.
+    """
+
+    def test_the_caption_seen_on_the_live_phone_is_covered(self):
+        seen = "Comencemos"
+        assert any(w in seen for w in macros.SIGN_IN_START_WORDS), (
+            f"{seen!r} matches none of {macros.SIGN_IN_START_WORDS}")
+
+    def test_the_walk_and_the_signed_out_test_share_one_list(self):
+        """Two copies drift, and the drift is silent — the sign-out check
+        and the sign-in walk would disagree about whether the app is
+        signed in."""
+        source = Path("src/apt_log/macros.py").read_text(encoding="utf-8")
+        assert source.count("SIGN_IN_START_WORDS = (") == 1
+        assert 'by_words("Get Started"' not in source
+
+    def test_english_is_still_covered(self):
+        assert any(w in "Get Started" for w in macros.SIGN_IN_START_WORDS)

@@ -1595,6 +1595,20 @@ def _inmyteam_resend_code(driver, report) -> None:
     _inmyteam_walk(driver, report, resend=True)
 
 
+# WHAT THE SPLASH'S BUTTON SAYS, and it is not what this list said first.
+#
+# The caption on the live handset is "Comencemos" — and `contains(@text,
+# "Comenzar")` does not match it. The sign-in walk could not press its own
+# first screen, and nothing noticed, because the app had been signed in for
+# as long as this walk had existed. It surfaced the moment a sign-out macro
+# existed to put the phone back on that splash.
+#
+# Enumerated rather than shortened to a stem: "Comen" would match this and
+# also whatever else an app decides to call a button next year, and a wrong
+# press on a splash is cheap only until the splash changes.
+SIGN_IN_START_WORDS = ("Get Started", "Comencemos", "Comenzar", "Empezar")
+
+
 def _inmyteam_walk(driver, report, resend: bool = False) -> None:
     """The sign-in walk. `resend` refuses to stop at a code screen.
 
@@ -1668,7 +1682,7 @@ def _inmyteam_walk(driver, report, resend: bool = False) -> None:
         return None
 
     def start_button():
-        return by_words("Get Started", "Comenzar", "Empezar")
+        return by_words(*SIGN_IN_START_WORDS)
 
     # A freshly launched app exposes almost nothing for a second or two, and
     # an empty tree must never read as "signed in" — the trap the
@@ -3595,9 +3609,6 @@ def _already_entered(driver, report, package: str, patient: str) -> str:
 # nothing else; what settles it is the app asking again — which is the same
 # pair of screens `_inmyteam_walk` waits for on the way in, read here in
 # reverse.
-SIGN_IN_START_WORDS = ("Get Started", "Comenzar", "Empezar")
-
-
 def _asks_to_sign_in(driver) -> bool:
     """Whether inMyTeam is showing its splash or its number field."""
     if _words(driver, *SIGN_IN_START_WORDS) is not None:
