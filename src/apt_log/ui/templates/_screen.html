@@ -285,6 +285,22 @@
       {% elif it.kind == 'text' and it.aim %}
         <button type="button" class="a-link" data-aim='{{ it.aim | tojson }}'
           >{{ it.txt or '' }}</button>
+      {% elif it.kind == 'summary' %}
+        {# WHAT THIS PAGE IS ABOUT, said once at the top. The app hands this
+           over as one generated sentence with the patient's name in square
+           brackets and the visit's state at the far end of it; drawn whole
+           it was three lines of grey with nothing to catch the eye. Who,
+           when, and a state that carries its own colour. #}
+        <span class="a-summary">
+          <span class="a-sum-top">
+            <span class="a-sum-name">{{ it.name }}</span>
+            {% if it.status %}<span
+              class="a-status{% if it.status_tone %} {{ it.status_tone }}{% endif %}"
+              >{{ it.status }}</span>{% endif %}
+          </span>
+          {% if it.when %}<span class="a-sum-when">{{ it.when }}</span>{% endif %}
+          {% if it.window %}<span class="a-sum-win">{{ it.window }}</span>{% endif %}
+        </span>
       {% elif it.kind == 'kv' %}
         {# A field: caption over value, stacked tight. Reads as one datum,
            not two floating headers. #}

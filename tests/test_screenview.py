@@ -1109,6 +1109,16 @@ class TestGeneratedDescriptions:
     def test_a_short_label_is_never_reshaped(self):
         assert screenview._shape_description("Sin empezar") is None
 
+    def test_the_list_form_still_drops_the_date(self):
+        """A list states the day once as a section header; repeating it on
+        every row is noise. The parts underneath keep it — see
+        TestTheVisitDetailIsNotAParagraph."""
+        assert screenview._describe(self.SENTENCE)["when"] == \
+            "martes, 18 de agosto de 2026"
+        assert "agosto" not in " ".join(
+            screenview._shape_description(self.SENTENCE))
+
+
     def test_the_row_renders_as_title_and_details(self):
         m = screenview.build(doc(
             elements=[el("", "View", [0, 146, 720, 185])],
@@ -1119,6 +1129,122 @@ class TestGeneratedDescriptions:
         assert cell["lines"][0] == "ATANASIO MEDEROS TORRIEN"
         assert cell["lines"][1] == "9:05 AM – 11:05 AM"
 
+
+class TestTheVisitDetailIsNotAParagraph:
+    """Mobile Caregiver+'s completed visit, read off the phone 2026-08-29.
+    Bounds verbatim; the patient's name replaced.
+
+    Reported as the layout being "really bad", and it was: the page opened
+    with three lines of grey prose — the patient's name in square brackets
+    mid-clause, the window buried after it, and the visit's state, the one
+    word the page exists to report, last in the run and in the same grey as
+    the rest. The shaping that fixes exactly this had existed for a while
+    and only ever ran inside a tappable row.
+    """
+
+    SENTENCE = ("La visita está programada para [ROSA EJEMPLO PRUEBA] en "
+                "sábado, 29 de agosto de 2026 de 9:10 AM a 12:10 PM y su "
+                "estado es Completada")
+
+    def _model(self):
+        return screenview.build(doc(
+            size=(1080, 2340),
+            elements=[
+                el("", "android.view.View", [30, 605, 1050, 665]),
+                el("", "android.view.View", [30, 653, 288, 713]),
+            ],
+            statics=[
+                st([30, 211, 1050, 359], self.SENTENCE),
+                st([30, 380, 468, 418], "Hora de inicio real - 9:10:13 AM"),
+                st([30, 526, 60, 556], "Servicio Completada"),
+                st([60, 522, 1050, 560], "T1019 (Personal care ser per 15 min)"),
+                st([30, 616, 68, 653], "Dirección"),
+                st([73, 616, 877, 654],
+                   "350 NE 141ST ST APT 202, NORTH MIAMI, FL 331612852"),
+                st([30, 664, 68, 702], "Número de teléfono"),
+                st([73, 664, 288, 702], "(786) 352-1207"),
+            ],
+        ))
+
+    def _only(self, kind):
+        return [i for r in self._model()["rows"] for i in r["items"]
+                if i["kind"] == kind]
+
+    def test_the_opening_sentence_becomes_a_heading(self):
+        (card,) = self._only("summary")
+        assert card["name"] == "ROSA EJEMPLO PRUEBA"
+        assert card["window"] == "9:10 AM – 12:10 PM"
+
+    def test_the_brackets_the_app_puts_round_the_name_do_not_survive(self):
+        (card,) = self._only("summary")
+        assert "[" not in card["name"] and "]" not in card["name"]
+
+    def test_the_date_is_kept_because_this_page_states_it_nowhere_else(self):
+        (card,) = self._only("summary")
+        assert card["when"] == "sábado, 29 de agosto de 2026"
+
+    def test_the_state_is_a_chip_and_carries_its_colour(self):
+        (card,) = self._only("summary")
+        assert card["status"] == "Completada"
+        assert card["status_tone"] == "ok"
+
+    def test_the_sentence_is_not_also_left_lying_about_as_prose(self):
+        """Shaped INSTEAD OF drawn, not as well as."""
+        assert not [i for i in self._only("label")
+                    if i["txt"].startswith("La visita está programada")]
+
+    def test_the_address_and_the_phone_read_the_same_way(self):
+        """Three icons in a column — a pin, a handset, a tick — each
+        captioned for a screen reader in a box far too small to draw it.
+        The per-character rule caught two and let "Dirección" through on
+        the strength of being a shorter word, so the address row wore it as
+        a heading and the phone row beside it, built identically, had none.
+        """
+        rows = self._only("row")
+        assert [r["lines"] for r in rows] == [
+            ["350 NE 141ST ST APT 202, NORTH MIAMI, FL 331612852"],
+            ["(786) 352-1207"]]
+
+    def test_a_caption_that_is_all_a_control_has_still_names_it(self):
+        """The other half of the same rule, and the reason it cannot live
+        where the annotation test lives: this shape is ALSO what NAMES an
+        unlabelled control. An icon button carries nothing but the word hung
+        on it for a screen reader, in a box the size of the icon; take that
+        away and the row renders as an anonymous bubble.
+
+        Taken away only from a row with something better to say — which is
+        what the two rows above have and this one does not.
+        """
+        m = screenview.build(doc(
+            elements=[el("filter_button", "View", [620, 68, 645, 93])],
+            statics=[st([620, 68, 645, 93], "Filtro")],
+        ))
+        assert self._named(m, "Filtro"), \
+            "an icon caption standing alone is the control's name"
+
+    @staticmethod
+    def _named(m, word):
+        """Every item the model draws, wherever it put it — a control at the
+        top of a screen is lifted into the nav bar rather than listed."""
+        found = [i for r in m["rows"] for i in r["items"]]
+        if m.get("nav"):
+            found += ([m["nav"]["back"]] if m["nav"]["back"] else []) \
+                + (m["nav"]["trailing"] or [])
+        return [i for i in found if word in ((i or {}).get("lines") or [])]
+
+    def test_the_apps_own_back_arrow_is_still_recognised_by_its_caption(self):
+        """The same shape, on the control this most nearly broke. "Atrás" in
+        a 25px square is the only thing identifying HHAeXchange+'s back
+        arrow, and it is recognised in order to be SUPPRESSED — the pill
+        already has a Back, and two of them three inches apart in different
+        words is a question the caregiver has to stop and answer. Losing the
+        caption put the app's arrow back in the title bar."""
+        m = screenview.build(doc(
+            elements=[el("menu_top_bar_back_button", "View", [6, 68, 31, 93]),
+                      el("title_bar", "View", [40, 60, 700, 100], "Visitas")],
+            statics=[st([6, 68, 31, 93], "Atrás")],
+        ))
+        assert not self._named(m, "Atrás")
 
 class TestTabBarFurniture:
     """Mobile Caregiver+ labels each tab cell with a description as well as

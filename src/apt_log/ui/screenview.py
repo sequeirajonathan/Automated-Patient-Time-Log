@@ -183,12 +183,52 @@ NAV_TITLE_MAX_CHARS = 48
 ANNOTATION_WIDTH_PER_CHAR = 0.002
 ANNOTATION_MIN_CHARS = 4
 
-
 def _is_annotation(txt: str, b: list[int], screen_w: int) -> bool:
     txt = txt.strip()
     if len(txt) < ANNOTATION_MIN_CHARS or not screen_w:
         return False
     return (b[2] - b[0]) / len(txt) < screen_w * ANNOTATION_WIDTH_PER_CHAR
+
+
+# AN ICON'S BOX IS SQUARE; A WORD'S BOX IS NOT.
+#
+# The width-per-character rule above catches a description hung on an icon
+# only when the word is long enough to be obviously too big for its box, so
+# it splits a set of identical icons by how long their captions happen to
+# be. Mobile Caregiver+'s completed visit draws three in a column — a pin, a
+# handset, a tick — each captioned for a screen reader:
+#
+#     "Dirección"            38px wide,  9 chars -> 4.2 per char, KEPT
+#     "Número de teléfono"   38px wide, 18 chars -> 2.1 per char, dropped
+#     "Servicio Completada"  30px wide, 19 chars -> 1.6 per char, dropped
+#
+# So the address row wore "Dirección" as a heading — a word the phone draws
+# nowhere — while the phone row beside it, built identically, had none.
+# Two identical rows, rendered two different ways.
+#
+# But this cannot be decided where that rule lives, and trying cost four
+# tests: the SAME kind of description is what NAMES a control. HHAeXchange+'s
+# back arrow is an empty button captioned "Atrás" in a 25px square, and that
+# caption is the only thing identifying it as the up-arrow — drop it and the
+# app's own Back rides into the title bar beside the portal's.
+#
+# What separates them is not the box, it is what else is in the row. A
+# square description beside real text is decoration on an icon; a square
+# description that is ALL a control has is that control's name. So the test
+# is applied where containment is known, and only ever to take a caption
+# away from a row that has something better to say.
+ICON_CAPTION_MAX_ASPECT = 1.4
+
+
+def _is_icon_caption(s: dict) -> bool:
+    """Whether this label is a description hung on an icon, judged by the
+    shape of the box it claims to be drawn in."""
+    b = s.get("b") or []
+    txt = (s.get("txt") or "").strip()
+    if len(b) != 4 or len(txt) < ANNOTATION_MIN_CHARS:
+        return False
+    width, height = b[2] - b[0], b[3] - b[1]
+    return height > 0 and width / height <= ICON_CAPTION_MAX_ASPECT
 
 
 def _is_spelled_out(txt: str) -> bool:
@@ -308,8 +348,45 @@ _DESC_STATUS = (" y su estado es ", " y el estado es ",
                 " and its status is ", " and the status is ")
 
 
-def _shape_description(text: str) -> list[str] | None:
-    """A generated description as the lines of a list cell, or None."""
+# The words that join the name to the date, and the date to the first clock.
+# Stripped off the slice between them so what is left is the date alone.
+_WHEN_EDGE = ("en", "on", "de", "del", "from", "a", "to", "para")
+
+
+def _when_between(text: str, name: str) -> str:
+    """The date phrase sitting between the patient's name and the first
+    clock — "sábado, 29 de agosto de 2026".
+
+    Taken as the slice between two things already located rather than
+    matched by a date pattern, because the pattern would have to know every
+    month in two languages to earn its keep, and a slice that comes out
+    wrong comes out as prose rather than as a wrong date. Empty when
+    anything is out of place, and an empty date is simply not drawn.
+    """
+    cut = text.find(name)
+    clock = _DESC_CLOCK.search(text, cut + len(name) if cut != -1 else 0)
+    if cut == -1 or clock is None:
+        return ""
+    middle = text[cut + len(name):clock.start()]
+    # The app brackets the name on the detail page and not on the list, so
+    # the bracket is stripped here rather than assumed away.
+    middle = middle.strip().lstrip("]").strip()
+    words = middle.replace(",", " ,").split()
+    while words and words[0].strip(",").lower() in _WHEN_EDGE:
+        words.pop(0)
+    while words and words[-1].strip(",").lower() in _WHEN_EDGE:
+        words.pop()
+    return " ".join(words).replace(" ,", ",").strip(" ,")
+
+
+def _describe(text: str) -> dict | None:
+    """A generated description broken into its parts, or None.
+
+    Shaped ONLY when the sentence accounts for itself — a name, a time
+    range and a status. Anything less and the caller leaves it exactly as
+    written, because a rule that drops half a sentence it did not
+    understand is worse than a long line.
+    """
     if len(text) < DESC_MIN_CHARS:
         return None
     names = _DESC_NAME.findall(text)
@@ -328,7 +405,24 @@ def _shape_description(text: str) -> list[str] | None:
     # The longest run of capitals is the name; a shorter one is an initialism
     # somewhere else in the sentence.
     name = max(names, key=len).strip()
-    return [name, f"{clocks[0]} – {clocks[1]}", status]
+    return {"name": name,
+            "when": _when_between(text, name),
+            "window": f"{clocks[0]} – {clocks[1]}",
+            "status": status}
+
+
+def _shape_description(text: str) -> list[str] | None:
+    """A generated description as the lines of a list cell, or None.
+
+    The date is dropped here and only here: in a LIST the page states it
+    once above as a section header, so repeating it on every row is noise.
+    A detail page has no such header, which is why `_describe` keeps it and
+    this does not.
+    """
+    parts = _describe(text)
+    if parts is None:
+        return None
+    return [parts["name"], parts["window"], parts["status"]]
 
 
 # WHAT A VISIT'S STATUS MEANS, as a colour.
@@ -1130,6 +1224,15 @@ def build(doc: dict) -> dict | None:
                             and lines[k].strip().isupper()):
                         lines.pop(k)
                         break
+            # An icon's caption, once the row has real words of its own —
+            # see `_is_icon_caption`. Taken away only when something is left
+            # to say: the same kind of caption standing ALONE is what names
+            # an unlabelled control, and the app's back arrow has nothing
+            # else. Order is kept; only the decoration goes.
+            captions = {(s.get("txt") or "").strip() for s in own
+                        if _is_icon_caption(s)}
+            if captions and any(ln not in captions for ln in lines):
+                lines = [ln for ln in lines if ln not in captions]
             # A cell whose whole content is one generated sentence becomes
             # the list row that sentence describes. Only when the sentence
             # accounts for itself — see _shape_description.
@@ -1318,6 +1421,30 @@ def build(doc: dict) -> dict | None:
             field["value"] = nxt["txt"]
             items.append(field)
             j += 2
+            continue
+        # THE SENTENCE A DETAIL PAGE OPENS WITH IS THAT PAGE'S HEADING.
+        #
+        # A list row's generated description already becomes a shaped cell;
+        # the same sentence standing alone did not, because that shaping
+        # only ever ran inside a tappable row. So Mobile Caregiver+'s visit
+        # detail opened with three lines of grey prose — the patient's name
+        # in square brackets mid-clause, the window buried after it, and the
+        # visit's state, the one word the page exists to report, last in the
+        # run and in the same grey as everything else.
+        #
+        # Broken into what it says: who, when, and a state that carries its
+        # own colour. The date stays here (a detail page has no section
+        # header stating it) and the status becomes a chip, for the reason
+        # the list rows already give — three of this app's five states are
+        # the outcomes this project exists to prevent, and they must not
+        # read as one more muted line.
+        summary = _describe(s["txt"])
+        if summary:
+            card = _item(s, "summary")
+            card.update(summary)
+            card["status_tone"] = status_tone(summary["status"])
+            items.append(card)
+            j += 1
             continue
         label = _item(s, "label")
         # Short reads as a heading; longer is prose and must never wear the
