@@ -1671,17 +1671,20 @@ class TestPerAppDensity:
     UMA_SCHEDULE = "com.hhaexchange.uma/.HomeActivity"
     IMT = "com.inmyteam.inmyteam/.MainActivity"
 
+    # 172 is what an unmeasured uma page asks for on this phone, so it is
+    # what the device is standing at when these start.
     def test_the_apps_density_is_applied_when_it_comes_forward(self):
-        sets = self._run([self.UMA, self.IMT])
+        sets = self._run([self.UMA, self.IMT], current="172")
         assert sets == [["shell", "wm", "density", "105"]]
 
     def test_an_already_right_density_is_left_alone(self):
-        assert self._run([self.UMA, self.UMA]) == []
+        assert self._run([self.UMA, self.UMA], current="172") == []
 
     def test_a_measured_screen_is_applied_the_same_way(self):
         """A page's own number travels the same path as an app's: applied as
         it comes forward, once."""
-        assert self._run([self.UMA_SCHEDULE, self.UMA_SCHEDULE]) == [
+        assert self._run([self.UMA_SCHEDULE, self.UMA_SCHEDULE],
+                         current="172") == [
             ["shell", "wm", "density", "300"]]
 
     def test_never_mid_scan(self):
@@ -2949,7 +2952,7 @@ class TestTheDensityIsHandedBack:
 
     def test_a_care_app_still_gets_its_density(self):
         assert feed._density_wanted(
-            "com.hhaexchange.uma/.MainActivity") == feed.DEFAULT_DENSITY
+            "com.hhaexchange.uma/.MainActivity") == 172
         assert feed._density_wanted(
             "com.inmyteam.inmyteam/.MainActivity") == 105
 
@@ -3038,10 +3041,10 @@ class TestDensityIsMeasuredPerScreen:
 
     def test_an_unmeasured_screen_is_left_alone(self):
         """Applying an unmeasured value everywhere is the thing this table
-        exists to stop."""
+        exists to stop. An unmeasured uma page keeps the app's own value."""
         assert feed._density_wanted(
             "com.hhaexchange.uma/com.hhaexchange.carehub.ui.activities"
-            ".VisitActivity") == feed.DEFAULT_DENSITY
+            ".VisitActivity") == feed.APP_DENSITY["com.hhaexchange.uma"]
 
     def test_another_app_is_untouched(self):
         assert feed._density_wanted(
@@ -3060,3 +3063,24 @@ class TestDensityIsMeasuredPerScreen:
                             lambda app, page="", **k: 210)
         assert feed._density_wanted(
             "com.hhaexchange.uma/HomeActivity") == 210
+
+    def test_an_app_override_hides_the_measurement_and_that_is_by_design(
+            self, monkeypatch):
+        """Why the app value moved into the code rather than staying an
+        override.
+
+        An APP-level override outranks this table too — the ordering does not
+        care that one is broader than the other — so while uma carried a
+        stored 172, the schedule screen went on being laid out at 172 and the
+        measurement reached the phone as nothing at all. The fix is not to
+        reorder the steps (a person's setting should win) but to stop keeping
+        the app's own value somewhere that outranks its pages."""
+        # An app-level override answers for every page of that app, which is
+        # exactly how `density_for` resolves one: page key first, app key
+        # next, and the app key catches everything.
+        monkeypatch.setattr(prefs, "density_for", lambda app, page="", **k: 172)
+        assert feed._density_wanted(
+            "com.hhaexchange.uma/HomeActivity") == 172
+        monkeypatch.setattr(prefs, "density_for", lambda app, page="", **k: None)
+        assert feed._density_wanted(
+            "com.hhaexchange.uma/HomeActivity") == 300

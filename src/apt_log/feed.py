@@ -743,6 +743,16 @@ def _shade_has_focus(serial: str | None = None) -> bool:
 DEFAULT_DENSITY = 84
 APP_DENSITY = {
     "com.inmyteam.inmyteam": 105,
+    # 172, not 84, and not a guess: it is the value that was already in force
+    # on this phone, set by hand from the console as an app-level override
+    # once 84 turned out to be unreadable at 1080x2340. It is written here
+    # because an override outranks every table below it (`_density_wanted`
+    # step 2 beats step 3), so while it stood, no measured per-screen value
+    # could ever reach the phone -- the schedule screen kept 172 and the
+    # measurement had no effect. Promoting it into the code keeps the choice
+    # it records for every unmeasured uma page and lets the override be
+    # cleared, which is what uncovers PAGE_DENSITY below.
+    "com.hhaexchange.uma": 172,
 }
 
 # PER SCREEN, MEASURED, ON THIS PHONE.
