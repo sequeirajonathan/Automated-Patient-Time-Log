@@ -36,7 +36,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, time as dtime, timedelta
+from datetime import date, datetime, time as dtime, timedelta
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -3581,7 +3581,24 @@ def _freshen(driver, report, package: str, max_age: float = 0.0) -> bool:
 # Past, each a count — and the rows are one tap further in.
 EVV_TODAY_WORDS = {
     "com.inmyteam.inmyteam": ("Today", "Hoy"),
-    "com.tellus.evv.v2": (),
+    # Walked live 2026-08-29, and it is not a bucket: this app has a PERIOD
+    # SPINNER (`spinnerPeriod`) whose selection is printed beside it in
+    # `visits_scheduleperiod`. Its five options, read off the phone:
+    #
+    #     Hoy                  <- the default, and what is wanted
+    #     La semana Pasada
+    #     Esta semana
+    #     La semana que viene
+    #     Últimos 45 días
+    #
+    # Selecting "Hoy" is what narrows the week list to one day, so the word
+    # belongs here after all — the empty tuple this replaces was written
+    # when nobody had found the control.
+    #
+    # The LABEL is how to tell which period is showing without opening the
+    # spinner: on today it reads "Hoy - sáb, ago 29", and on any week it is
+    # a bare date range ("sept 6 - sept 12") with no "Hoy" in it.
+    "com.tellus.evv.v2": ("Hoy",),
 }
 
 
@@ -3624,10 +3641,54 @@ def _row_from_the_list(driver, report, package: str, patient: str):
     return _row_for(driver, patient)
 
 
-def _says_not_today(driver) -> bool:
-    """Whether the open visit is one the app says is not today's."""
-    page = (driver.page_source or "").lower()
-    return any(w in page for w in NOT_TODAY_WORDS)
+# The months as this app writes them, because it is the app that has to be
+# read: its rows and its visit detail both carry one sentence naming the
+# patient, the weekday, THE DATE and the status, and that sentence is the
+# only thing on the screen that knows which day a visit belongs to.
+_MC_MONTHS = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+              "agosto", "septiembre", "octubre", "noviembre", "diciembre")
+_MC_SCHEDULED_ON = re.compile(
+    r"(\d{1,2})\s+de\s+([a-záéíóúñ]+)\s+de\s+(\d{4})", re.IGNORECASE)
+
+
+def _mc_scheduled_date(page: str):
+    """The date Mobile Caregiver+ says an open visit is for, or None.
+
+    Read out of the app's own sentence — "…en domingo, 6 de septiembre de
+    2026…" — which is on the row and on the detail alike.
+    """
+    found = _MC_SCHEDULED_ON.search(page or "")
+    if not found:
+        return None
+    day, month, year = found.groups()
+    try:
+        return date(int(year), _MC_MONTHS.index(month.lower()) + 1, int(day))
+    except (ValueError, IndexError):
+        return None
+
+
+def _says_not_today(driver, package: str = "") -> bool:
+    """Whether the open visit is one that is NOT today's.
+
+    MOBILE CAREGIVER+ NEVER SAYS SO, and that is the finding this exists for.
+    A visit EIGHT DAYS AWAY was opened on the live phone and it offered
+    `Comenzar Visita` exactly as today's would, with no refusal wording
+    anywhere on the page. So for that app the wording check below is not
+    merely unhelpful, it is a guard that always passes — the day check would
+    have waved through a check-in against the wrong visit, which is the one
+    class of mistake this project exists to prevent.
+
+    The app does know. It prints the date in its own sentence, on the row and
+    on the detail, so the date is read and compared instead of waiting to be
+    refused. A page that does not carry a date at all falls through to the
+    wording, which is the honest answer for the apps that do say it.
+    """
+    page = (driver.page_source or "")
+    if package == "com.tellus.evv.v2":
+        when = _mc_scheduled_date(page)
+        if when is not None:
+            return when != datetime.now().date()
+    return any(w in page.lower() for w in NOT_TODAY_WORDS)
 
 
 def _open_todays_visit(driver, report, package: str, patient: str) -> None:
@@ -3653,7 +3714,7 @@ def _open_todays_visit(driver, report, package: str, patient: str) -> None:
     row.click()
     time.sleep(EVV_SETTLE)
     _answer_the_permission_dialog(driver, report)
-    if not _says_not_today(driver):
+    if not _says_not_today(driver, package):
         return
     # Wrong day. Go to the list properly and take the row from there.
     row = _row_from_the_list(driver, report, package, patient)
@@ -3662,7 +3723,7 @@ def _open_todays_visit(driver, report, package: str, patient: str) -> None:
     row.click()
     time.sleep(EVV_SETTLE)
     _answer_the_permission_dialog(driver, report)
-    if _says_not_today(driver):
+    if _says_not_today(driver, package):
         raise RuntimeError("the app says this visit is not today's")
 
 

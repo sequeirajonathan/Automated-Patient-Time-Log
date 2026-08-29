@@ -114,7 +114,95 @@ screen changed", and REQ-4's *verify after acting* requires it.
 
 Not yet measured across a cold start. The arm lead stays at the default until it is.
 
+### Walked again 2026-08-29, on this phone
+
+The 2026-08-20 walk above was done on the old 720x1600 handset, and this app
+then spent weeks unable to sign in. With that fixed, the list below was worked
+through on the live device. Seven of the nine blanks are filled; the two that
+are not need a visit that is actually running, and are named as such.
+
+**The day, and the hole it was hiding.** The period control is a spinner,
+`spinnerPeriod`, whose current selection is printed beside it in
+`visits_scheduleperiod`. Five options, read off the phone:
+
+```
+Hoy                  <- the default
+La semana Pasada
+Esta semana
+La semana que viene
+Últimos 45 días
+```
+
+The label is how to tell which one is showing without opening it: on today it
+reads `Hoy - sáb, ago 29`; on any week it is a bare range, `sept 6 - sept 12`,
+with no "Hoy" in it.
+
+**A visit eight days away offers `Comenzar Visita`.** Opened deliberately, on
+next week's period, and the detail drew the check-in control exactly as
+today's would — no "not scheduled for today", no refusal of any kind. So
+`NOT_TODAY_WORDS` never matches here and the day guard *always passed*. The
+app does know the date: it is in its own sentence, on the row and on the
+detail alike, and `_says_not_today` now parses it for this package rather than
+waiting to be refused.
+
+**The two screens, one activity.** Told apart by shape, since the atlas cannot
+name them:
+
+| | week list | visit detail |
+|---|---|---|
+| ids | `visits_menu`, `spinnerPeriod`, `visits_event<D>_<N>` | `main_back_button`, `action_edit_note` |
+| title | `Visitas` | `Detalles de la visita` |
+
+**No work log.** The nav drawer holds Mi perfil, Notificaciones, Cambiar
+contraseña, Centro de ayuda, Agencias vinculadas, Lenguaje, the two policy
+links and Cerrar sesión — and nothing else. There is no day view to walk, so
+`evv_checks` has nothing to reach and `CHECK_LOG_APPS` is right to omit this
+app. The visit detail's own `Hora de inicio real` / `Hora de finalización
+real` **is** the record. Written down so nobody looks again.
+
+`textVersionNavDrawer` carries the installed version, and
+`menu_linked_agencies` says this app has more than one agency too — the same
+shape as HHAeXchange+, not yet explored.
+
+**No duties.** A completed visit's detail carries the service code, the
+address, the phone and the note control. Nothing resembling HHAeXchange+'s
+Funciones, and nothing that gates a check-out.
+
+**Density: 200.** At the inherited 84 a row is 46 px on a 2340 px screen and
+the passcode keys are 34 px wide — a keypad no thumb can use, on the screen a
+person is most likely to have to answer by hand. At 200 the same row is 111 px
+and the page still sits above the tab bar at 2239. 200 rather than the 300 its
+sibling got, because what has to fit is different: the default period is "Hoy",
+one to three rows, and the detail is a short list.
+
+**Two incidental findings, both worth knowing.**
+
+- The passcode keypad draws under `DashboardActivity`, not under a
+  `pinactivity`. The atlas entry naming `pinactivity` is not what saves this;
+  the keypad-outranks-the-atlas rule in `screen_for` is.
+- Opening the period spinner makes the published document report
+  `landscape: True`. The popup is its own window, wider than it is tall, and
+  `screen_extent` measures the tree it is given. Harmless today — only the
+  legacy app's signature gate reads that flag — but it is a way for any popup
+  to look sideways.
+
 ### Still to discover
+
+Two, and both need a visit that is actually **in progress**. Today's was
+already completed by hand before this walk reached it, and starting one to
+find out is not something this pass will do.
+
+1. **The check-out.** `EVV_ENTRY_WORDS` and `EVV_STARTED_WORDS` are known;
+   the exit control and what the screen says once it lands are not.
+2. **The signature.** `sign.APP_PACKAGES` permits replay here and nothing else
+   about it is known — no canvas id, no class, no idea whether it is a sheet
+   or a page. inMyTeam's pad sits in a `design_bottom_sheet` that steals any
+   touch whose first movement is vertical, and that cost five of six strokes
+   before it was found. Assume none of it carries over.
+
+Cold start to the dashboard measured at about 15 s, macro request included.
+
+### Originally listed, for the record
 
 The walk above was done on 2026-08-20, on the OLD handset (720x1600). This app has
 had the least attention of the four, and the gaps below are not opinions about what

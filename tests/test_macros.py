@@ -5290,3 +5290,81 @@ class TestTheGateHonoursTheStop:
         with patch.object(runner, "execute") as execute:
             assert runner.maybe_auto_auth() is True
         assert execute.call_args.args[0] == "hhax_uma_login"
+
+
+class TestTheDayMobileCaregiverWillNotVouchFor:
+    """MOBILE CAREGIVER+ NEVER SAYS "not today", and the guard assumed it did.
+
+    Walked live on 2026-08-29: a visit EIGHT DAYS away was opened and it
+    offered `Comenzar Visita` exactly as today's would, with no refusal
+    wording anywhere on the page. `_says_not_today` matched nothing, returned
+    False, and the day check waved it through — so the one guard standing
+    between the scheduler and a check-in against the wrong visit was, for
+    this app, a guard that always passed.
+
+    The app does know which day a visit is for. It prints it, in its own
+    sentence, on the row and on the detail alike.
+    """
+
+    SENTENCE = ("La visita está programada para [UN PACIENTE] en {weekday}, "
+                "{day} de {month} de {year} de 9:00 AM a 12:00 PM y su estado "
+                "es Sin empezar")
+    MC = "com.tellus.evv.v2"
+
+    def _driver(self, page):
+        driver = MagicMock()
+        driver.page_source = page
+        return driver
+
+    def _page_for(self, when):
+        months = ("enero", "febrero", "marzo", "abril", "mayo", "junio",
+                  "julio", "agosto", "septiembre", "octubre", "noviembre",
+                  "diciembre")
+        return self.SENTENCE.format(weekday="sábado", day=when.day,
+                                    month=months[when.month - 1],
+                                    year=when.year)
+
+    def test_a_visit_for_another_day_is_refused(self):
+        """The live case: eight days out, and the app happy to start it."""
+        from datetime import date, timedelta
+
+        later = date.today() + timedelta(days=8)
+        driver = self._driver(self._page_for(later))
+        assert macros._says_not_today(driver, self.MC) is True
+
+    def test_todays_visit_is_allowed(self):
+        from datetime import date
+
+        driver = self._driver(self._page_for(date.today()))
+        assert macros._says_not_today(driver, self.MC) is False
+
+    def test_yesterdays_visit_is_refused(self):
+        """The near miss matters more than the far one: a visit a day old is
+        the one somebody could plausibly open by hand and leave open."""
+        from datetime import date, timedelta
+
+        driver = self._driver(self._page_for(date.today() - timedelta(days=1)))
+        assert macros._says_not_today(driver, self.MC) is True
+
+    def test_a_page_with_no_date_falls_back_to_the_wording(self):
+        """The honest answer for the apps that DO say it, and for a page of
+        this app's that carries no date at all."""
+        driver = self._driver("no está programada para hoy")
+        assert macros._says_not_today(driver, self.MC) is True
+        assert macros._says_not_today(self._driver("nothing here"),
+                                      self.MC) is False
+
+    def test_the_other_apps_are_untouched(self):
+        """They say it in words, and those words still decide."""
+        driver = self._driver("This visit is not scheduled for today")
+        assert macros._says_not_today(driver, "com.inmyteam.inmyteam") is True
+        assert macros._says_not_today(
+            self._driver("a perfectly ordinary visit"),
+            "com.inmyteam.inmyteam") is False
+
+    def test_the_date_is_read_from_the_apps_own_sentence(self):
+        from datetime import date
+
+        assert macros._mc_scheduled_date(
+            "en domingo, 6 de septiembre de 2026") == date(2026, 9, 6)
+        assert macros._mc_scheduled_date("no date here at all") is None

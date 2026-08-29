@@ -826,11 +826,19 @@ class TestGettingToTheVisitBeforePressingAnything:
     """
 
     def test_the_two_walked_apps_know_where_their_visits_live(self):
+        """Both apps need a word now, and Mobile Caregiver+'s was missing
+        rather than unnecessary.
+
+        This asserted an EMPTY tuple, with a comment explaining that the app
+        lands on its week list so no bucket needs opening. That was written
+        when nobody had found the control: walking it live turned up
+        `spinnerPeriod`, a period selector whose options include "Hoy", and
+        selecting it is what narrows the list to one day. The empty tuple was
+        a gap wearing the clothes of a decision.
+        """
         from apt_log import macros
 
-        # Mobile Caregiver+ lands on its week list, so the row is already
-        # there and no bucket needs opening.
-        assert macros.EVV_TODAY_WORDS["com.tellus.evv.v2"] == ()
+        assert "Hoy" in macros.EVV_TODAY_WORDS["com.tellus.evv.v2"]
         # inMyTeam lands on buckets; today's rows are one tap further in.
         assert "Today" in macros.EVV_TODAY_WORDS["com.inmyteam.inmyteam"]
 

@@ -743,6 +743,18 @@ def _shade_has_focus(serial: str | None = None) -> bool:
 DEFAULT_DENSITY = 84
 APP_DENSITY = {
     "com.inmyteam.inmyteam": 105,
+    # Measured on this phone 2026-08-29, when the app could finally be signed
+    # into. At the inherited DEFAULT_DENSITY of 84 its rows are 46 px tall on
+    # a 2340 px screen and its passcode keys are 34 px wide — a keypad no
+    # thumb can use, on the one screen a person is most likely to have to
+    # answer by hand. At 200 the same row is 111 px and the whole page still
+    # sits above the tab bar at 2239.
+    #
+    # 200 rather than the 300 its sibling got, because what has to fit is
+    # different: this app's default period is "Hoy", which is one to three
+    # rows, and its visit detail is a short list. Nothing here needs the
+    # room a six-day schedule needs.
+    "com.tellus.evv.v2": 200,
     # 172, not 84, and not a guess: it is the value that was already in force
     # on this phone, set by hand from the console as an app-level override
     # once 84 turned out to be unreadable at 1080x2340. It is written here
