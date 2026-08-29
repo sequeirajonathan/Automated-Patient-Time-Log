@@ -2273,7 +2273,26 @@ def statics(xml: str) -> list[dict]:
         if x2 <= x1 or y2 <= y1:
             continue
         entry = {"cls": cls, "b": [x1, y1, x2, y2], "txt": text}
-        if not text:
+        # THE ID IS IDENTITY, AND IT WAS BEING THROWN AWAY WHENEVER A NODE
+        # HAD WORDS. It used to ride only on textless nodes, because the only
+        # reader was the mark table — but the stitch identifies an item by
+        # (class, id, text, left, right), so every row saying the same thing
+        # in the same column had the SAME identity, and its dedupe drops a
+        # match within 150 virtual pixels seen in another capture.
+        #
+        # A week of one patient's visits is exactly that: six rows reading
+        # "NIEVES C MASTRAPA" at the same x. Two of them vanished from the
+        # portal — septiembre 3 and septiembre 5 kept their times and lost
+        # their names — and the schedule quietly showed visits belonging to
+        # nobody. The app had drawn all six; it names each one
+        # `schedule_screen_accordion_title_<uuid>`, which is unique per
+        # visit and was the one thing that could have told them apart.
+        #
+        # Carried for text nodes too, now. The two readers of this field ask
+        # about textless nodes first (see `_mark_for`, `_mark_key`), so
+        # nothing that looks at a mark can see a difference; only the
+        # stitch's notion of "the same thing twice" gets sharper.
+        if rid or not text:
             entry["rid"] = rid
         out.append(entry)
         if len(out) >= STATICS_CEILING:

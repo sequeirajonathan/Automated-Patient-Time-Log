@@ -204,3 +204,52 @@ class TestAPageThatDidNotScroll:
         both_prev = first["elements"] + first["statics"]
         both_cur = second["elements"] + second["statics"]
         assert stitch._shift(both_prev, both_cur) == 400
+
+
+class TestARepeatedNameIsNotOneName:
+    """A WEEK OF ONE PATIENT'S VISITS, and two of them vanished.
+
+    Reported from the phone as a density problem on the HHAeXchange+
+    schedule: septiembre 3 and septiembre 5 showed a time and no patient.
+    The app had drawn all six rows — it names each
+    `schedule_screen_accordion_title_<uuid>`, unique per visit — but a
+    static's resource-id used to be carried only when the node had NO text.
+    So every row reading "NIEVES C MASTRAPA" in the same column arrived with
+    the same identity, and the dedupe below drops a match seen within
+    DEDUP_VY_TOLERANCE virtual pixels in another capture.
+
+    The schedule then showed visits belonging to nobody, which is worse than
+    showing nothing: a time with no name reads as a gap in the round.
+    """
+
+    def _week(self, rid_a, rid_b):
+        """Two captures, each carrying a row for the same patient, landing
+        close enough in virtual space to collide."""
+        return [
+            {"elements": [el("anchor", "View", [0, 1000, 100, 1060])],
+             "statics": [{"cls": "TextView", "rid": rid_a,
+                          "b": [69, 1800, 567, 1868],
+                          "txt": "NIEVES C MASTRAPA"}]},
+            {"elements": [el("anchor", "View", [0, 900, 100, 960])],
+             "statics": [{"cls": "TextView", "rid": rid_b,
+                          "b": [69, 1750, 567, 1818],
+                          "txt": "NIEVES C MASTRAPA"}]},
+        ]
+
+    def test_two_visits_are_two_rows_when_the_app_names_them_apart(self):
+        doc = stitch.stitch(
+            self._week("schedule_screen_accordion_title_aaa",
+                       "schedule_screen_accordion_title_bbb"),
+            nominal_dy=100)
+        names = [s for s in doc["statics"] if s["txt"] == "NIEVES C MASTRAPA"]
+        assert len(names) == 2, "a visit lost its patient"
+
+    def test_the_same_row_seen_twice_is_still_one_row(self):
+        """The other half of the rule, and the reason the dedupe exists:
+        overlapping captures really do show one item twice."""
+        doc = stitch.stitch(
+            self._week("schedule_screen_accordion_title_aaa",
+                       "schedule_screen_accordion_title_aaa"),
+            nominal_dy=100)
+        names = [s for s in doc["statics"] if s["txt"] == "NIEVES C MASTRAPA"]
+        assert len(names) == 1

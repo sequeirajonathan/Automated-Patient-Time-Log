@@ -3149,3 +3149,40 @@ class TestDensityIsMeasuredPerScreen:
         monkeypatch.setattr(prefs, "density_for", lambda app, page="", **k: None)
         assert feed._density_wanted(
             "com.hhaexchange.uma/HomeActivity") == 300
+
+
+class TestAStaticKeepsItsName:
+    """The id is IDENTITY, and it used to be dropped whenever a node had
+    words — carried only for textless nodes, because the only reader was the
+    mark table.
+
+    The stitch identifies an item by (class, id, text, left, right), so a
+    week of one patient's visits arrived as six rows with ONE identity, and
+    two of them were deduped out of the portal. See TestARepeatedNameIsNotOneName.
+    """
+
+    def _xml(self, rid, text):
+        return ('<node class="android.widget.TextView" '
+                f'resource-id="com.hhaexchange.uma:id/{rid}" text="{text}" '
+                'clickable="false" bounds="[69,1800][567,1868]"/>')
+
+    def test_a_row_with_words_keeps_its_id(self):
+        got = feed.statics(self._xml("schedule_screen_accordion_title_aaa",
+                                     "NIEVES C MASTRAPA"))
+        assert got and got[0]["rid"] == "schedule_screen_accordion_title_aaa"
+        assert got[0]["txt"] == "NIEVES C MASTRAPA"
+
+    def test_two_rows_saying_the_same_thing_are_told_apart(self):
+        rows = feed.statics(
+            self._xml("schedule_screen_accordion_title_aaa", "NIEVES C MASTRAPA")
+            + self._xml("schedule_screen_accordion_title_bbb", "NIEVES C MASTRAPA"))
+        assert len({r["rid"] for r in rows}) == 2
+
+    def test_a_nameless_row_still_arrives(self):
+        """Most nodes have no id at all, and they must still be published —
+        with an empty one rather than none, so every reader sees one shape."""
+        got = feed.statics('<node class="android.widget.TextView" '
+                           'text="agosto 29" clickable="false" '
+                           'bounds="[24,245][553,313]"/>')
+        assert got and got[0]["txt"] == "agosto 29"
+        assert got[0].get("rid", "") == ""
