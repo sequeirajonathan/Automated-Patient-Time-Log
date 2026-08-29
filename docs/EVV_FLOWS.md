@@ -114,6 +114,64 @@ screen changed", and REQ-4's *verify after acting* requires it.
 
 Not yet measured across a cold start. The arm lead stays at the default until it is.
 
+### Still to discover
+
+The walk above was done on 2026-08-20, on the OLD handset (720x1600). This app has
+had the least attention of the four, and the gaps below are not opinions about what
+would be nice — each one names a constant that is **empty or absent in the code
+today**, so the walk is a list of blanks to fill rather than a screen to admire.
+
+Ordered by what blocks what. Nothing here can start until the account signs in
+again; see `AUTH_STOP_PATH` and the note on refused credentials.
+
+1. **Reaching today at all.** `macros.EVV_TODAY_WORDS["com.tellus.evv.v2"]` is an
+   empty tuple — the only app of the three with nothing in it. The week list is one
+   run of `visits_event<D>_<N>` rows with no "today" bucket of the kind inMyTeam
+   has, so `_open_todays_visit` currently has no way in. What is needed: whatever
+   the app itself marks today with (a header style, a `content-desc` fragment, a
+   selected state), or a decision that this app is walked by DATE out of the row's
+   own `content-desc` string instead. The date is already in there.
+
+2. **Telling the two screens apart.** One activity is both the week list and the
+   visit detail, so `feed.ACTIVITY_SCREENS` can never name the second one — its
+   entry has `dashboardactivity` mapped to `home` and nothing else, which means the
+   detail page renders as "home" and the console cannot say where it is. Needs a
+   page-shape rule, the way `screen_for` already special-cases uma's picker.
+
+3. **The check-OUT.** `EVV_ENTRY_WORDS` and `EVV_STARTED_WORDS` both have entries
+   for this app; there is no exit vocabulary anywhere. `Comenzar Visita` is known;
+   its counterpart on a visit already running is not, and neither is what the screen
+   says once the exit lands. Walk a visit that is in progress and read both.
+
+4. **Whether there is a work log.** `CHECK_LOG_APPS` is `("com.inmyteam.inmyteam",)`
+   — one app. `evv_checks` refuses here, so "did the entry actually record" has no
+   answer for this app except the visit detail's own `Hora de inicio real`. Find out
+   whether a day view exists; if it does not, say so here so nobody looks again.
+
+5. **The signature.** The package is listed in `sign.APP_PACKAGES`, so replay is
+   permitted, and NOTHING else about it is known — no canvas id, no class name, no
+   idea whether the pad is a sheet like inMyTeam's or a page like the legacy app's.
+   That matters more than it looks: inMyTeam's pad sits in a `design_bottom_sheet`
+   that steals any touch whose first movement is vertical, and that cost five of six
+   strokes before it was found. Assume nothing carries over.
+
+6. **Duties or tasks**, if this app has them, and whether they gate the check-out
+   the way HHAeXchange+'s Funciones do.
+
+7. **Density.** There is no entry in `APP_DENSITY` or `PAGE_DENSITY`, so this app
+   gets `DEFAULT_DENSITY` — 84, tuned against the old 720x1600 handset for a job
+   that was HHAeXchange+'s six-day schedule. On this phone (1080x2340, physical 450)
+   that is the same unusable value uma had before it was measured. Measure it on the
+   week list and again on the visit detail, and write the numbers down beside the
+   table like the others.
+
+8. **`NOT_TODAY_WORDS` is global, not per-app.** It carries the wording of the other
+   apps. Confirm this app refuses a wrong-day visit in words that list recognises,
+   or the day check silently passes here.
+
+9. **Load time across a cold start**, per the section above, so the arm lead can stop
+   being a default.
+
 ---
 
 ## HHAeXchange+ (Exchange+) — `com.hhaexchange.uma`
