@@ -17,6 +17,7 @@ import ast
 
 import json
 import time
+from contextlib import contextmanager
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
@@ -5535,49 +5536,142 @@ class TestTodayStaysOpenUntilSheClosesIt:
         return macros.Runner(status_path=tmp_path / "status.json",
                              screen_path=doc, viewers_path=viewers)
 
+    @staticmethod
+    @contextmanager
+    def _fresh_clock():
+        """The record of when today's cards were last opened is module-level
+        — one clock for the walker and the Rescan button both — so a test
+        starts it from nothing and leaves it that way."""
+        was = macros._FOLDS_OPENED_AT[0]
+        macros._FOLDS_OPENED_AT[0] = 0.0
+        try:
+            yield
+        finally:
+            macros._FOLDS_OPENED_AT[0] = was
+
+    @staticmethod
+    def _stub_walk(seen):
+        """Stand in for the walk, stamping the shared clock exactly as the
+        real one does when it takes the licence to unfold."""
+        def walk(_d, assume_top=False, expand=None):
+            want = assume_top if expand is None else expand
+            seen.setdefault("top", assume_top)
+            seen.setdefault("expand", want)
+            if want:
+                macros._FOLDS_OPENED_AT[0] = time.time()
+            return True
+        return walk
+
     def _walk(self, runner):
         """Run one look and report whether it was allowed to expand."""
         seen = {}
+
         def run(fn):
             fn(MagicMock())
             return True
+
         with patch("apt_log.resident.run", side_effect=run), \
              patch.object(macros, "_stitch_walk",
-                          side_effect=lambda _d, assume_top=False:
-                          seen.setdefault("top", assume_top) or True):
+                          side_effect=self._stub_walk(seen)):
             runner.maybe_stitch()
         return seen.get("top")
 
     def test_the_first_look_at_a_page_expands(self, tmp_path):
-        runner = self._runner(tmp_path, self.DAYS + self.SHUT)
-        assert self._walk(runner) is True
+        with self._fresh_clock():
+            runner = self._runner(tmp_path, self.DAYS + self.SHUT)
+            assert self._walk(runner) is True
 
     def test_a_card_the_app_forgot_is_opened_again(self, tmp_path):
         """Same page, cards shut again, and nothing was sent to the phone in
         between — so nobody closed them."""
-        runner = self._runner(tmp_path, self.DAYS + self.SHUT)
-        assert self._walk(runner) is True
-        runner._stitch_next_at = None          # let the next look through
-        assert self._walk(runner) is True
+        with self._fresh_clock():
+            runner = self._runner(tmp_path, self.DAYS + self.SHUT)
+            assert self._walk(runner) is True
+            runner._stitch_next_at = None      # let the next look through
+            assert self._walk(runner) is True
 
     def test_a_card_she_closed_is_left_closed(self, tmp_path):
         """One tap of hers and this stops claiming to know. The poke file is
         the record of something being sent to the phone."""
-        runner = self._runner(tmp_path, self.DAYS + self.SHUT)
-        assert self._walk(runner) is True
         from apt_log import feed as feed_mod
 
-        poke = tmp_path / feed_mod.POKE_NAME
-        poke.write_text("touched", encoding="utf-8")
-        runner._stitch_next_at = None
-        runner._folds_opened_wall -= 60        # her tap lands after ours
-        # Either it does not walk at all, or it walks without licence to
-        # open anything. What it must never do is reopen her card.
-        assert self._walk(runner) is not True
+        with self._fresh_clock():
+            runner = self._runner(tmp_path, self.DAYS + self.SHUT)
+            assert self._walk(runner) is True
+            poke = tmp_path / feed_mod.POKE_NAME
+            poke.write_text("touched", encoding="utf-8")
+            runner._stitch_next_at = None
+            # Her tap lands after ours.
+            macros._FOLDS_OPENED_AT[0] -= 60
+            # Either it does not walk at all, or it walks without licence to
+            # open anything. What it must never do is reopen her card.
+            assert self._walk(runner) is not True
 
     def test_a_page_with_nothing_shut_is_not_rewalked_for_folds(self, tmp_path):
         """Nothing to reopen is not a reason to walk again."""
-        runner = self._runner(tmp_path, self.DAYS)
-        assert self._walk(runner) is True
-        runner._stitch_next_at = None
-        assert self._walk(runner) is not True
+        with self._fresh_clock():
+            runner = self._runner(tmp_path, self.DAYS)
+            assert self._walk(runner) is True
+            runner._stitch_next_at = None
+            assert self._walk(runner) is not True
+
+
+class TestRescanReadsTodayOpenToo:
+    """Rescan means "what I am looking at is not what the phone is showing".
+
+    It threw away the stitched page and walked again with the default — no
+    expansion — so pressing it on the schedule rebuilt today COLLAPSED,
+    every time. The walker had already been fixed not to do that; the
+    button was a second door onto the same fault.
+    """
+
+    def _rescan(self):
+        seen = {}
+
+        def walk(_d, assume_top=False, expand=None):
+            seen["top"] = assume_top
+            seen["expand"] = expand
+            return True
+
+        with patch.object(macros, "_stitch_walk", side_effect=walk), \
+             patch.object(macros, "_forget_stitched"), \
+             patch.object(macros, "_front_package", return_value="uma"):
+            macros._rescan(MagicMock(), lambda _s: None)
+        return seen
+
+    def test_it_opens_today(self, tmp_path, monkeypatch):
+        """Nothing sent to the phone since we last opened them."""
+        monkeypatch.setattr(macros, "_last_tap_at", lambda: 100.0)
+        was = macros._FOLDS_OPENED_AT[0]
+        macros._FOLDS_OPENED_AT[0] = 200.0
+        try:
+            assert self._rescan()["expand"] is True
+        finally:
+            macros._FOLDS_OPENED_AT[0] = was
+
+    def test_it_leaves_a_card_she_closed_alone(self, monkeypatch):
+        """Her tap is newer than our last opening: her hand wins, even here."""
+        monkeypatch.setattr(macros, "_last_tap_at", lambda: 300.0)
+        was = macros._FOLDS_OPENED_AT[0]
+        macros._FOLDS_OPENED_AT[0] = 200.0
+        try:
+            assert self._rescan()["expand"] is False
+        finally:
+            macros._FOLDS_OPENED_AT[0] = was
+
+    def test_with_no_record_at_all_it_still_opens_today(self, monkeypatch):
+        """A restart leaves no baseline. The button was pressed by a person
+        asking for the page to be read again, and reading it again includes
+        today — refusing made Rescan reliably wrong instead of rarely."""
+        monkeypatch.setattr(macros, "_last_tap_at", lambda: 300.0)
+        was = macros._FOLDS_OPENED_AT[0]
+        macros._FOLDS_OPENED_AT[0] = 0.0
+        try:
+            assert self._rescan()["expand"] is True
+        finally:
+            macros._FOLDS_OPENED_AT[0] = was
+
+    def test_it_still_probes_for_the_top(self):
+        """Unfolding and scrolling are separate questions: the page may have
+        been left scrolled, so the probe is still paid."""
+        assert self._rescan()["top"] is False

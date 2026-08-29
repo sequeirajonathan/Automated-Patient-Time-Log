@@ -226,6 +226,15 @@ EXPAND_MIN_DATE_HEADERS = 3
 _DATE_HEADER = re.compile(r"\d{1,2},\s*20\d{2}")
 # How the schedule marks today's header, in the app's two locales.
 _TODAY_MARKS = ("hoy", "today")
+# WALL CLOCK OF THE LAST TIME ANYTHING HERE OPENED TODAY'S CARDS.
+#
+# One record, shared by both things that walk the schedule — the watcher's
+# periodic look and the Rescan button — because they answer the same
+# question and must not answer it differently. Compared against the poke
+# file's mtime (the record of a tap SHE sent), it separates "the app forgot
+# the card" from "she closed it", which is the whole of the rule. Wall clock,
+# not monotonic, because an mtime is what it is weighed against.
+_FOLDS_OPENED_AT = [0.0]
 
 # Cache-warming: right after a sign-in, the app's other tabs have never
 # been opened, so their virtualized lists have never been materialised and
@@ -1292,6 +1301,51 @@ def _chevron_count(statics: list[dict]) -> int:
                if (s.get("txt") or "").strip() == EXPAND_GLYPH)
 
 
+def _last_tap_at() -> float:
+    """When the portal last sent a tap to the phone, as a wall clock.
+
+    The feed stamps this file on every gesture it forwards; the expansion
+    taps here go straight out over adb and do not touch it, so what it
+    records is HER hand and nothing else. 0.0 when nothing has been sent.
+    """
+    from apt_log import feed as feed_mod
+    from apt_log.ui import state as state_mod
+
+    try:
+        return (state_mod.STATE_DIR / feed_mod.POKE_NAME).stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _folds_are_ours_to_reopen(unknown: bool = False,
+                              poked: float | None = None) -> bool:
+    """Whether reopening today's cards would restore our own state rather
+    than override hers.
+
+    True when this process opened them at some point and nothing has been
+    sent to the phone since. One tap of hers and this stops claiming to
+    know — the conservative answer, which leaves the card shut.
+
+    ``unknown`` is the answer when this process has never opened them and
+    so has no baseline to weigh her taps against. The watcher says no: it
+    runs unasked, and a periodic scan is never the place to guess. Rescan
+    says yes: a person pressed a button meaning "read this page again",
+    which is the same intent as arriving at it, and refusing left that
+    button republishing today collapsed every single time — a certain,
+    repeating fault traded against a card reopening once after a restart,
+    on a press of her own.
+
+    ``poked`` supplies the last-tap stamp when the caller has already read
+    it — the watcher reads the poke file beside the screen document it was
+    handed, which is not always the live state directory.
+    """
+    if not _FOLDS_OPENED_AT[0]:
+        return unknown
+    if poked is None:
+        poked = _last_tap_at()
+    return poked <= _FOLDS_OPENED_AT[0]
+
+
 def _tap_xy(x: int, y: int) -> None:
     """A coordinate tap over plain adb — same channel the portal's own taps
     use, and immune to the driver's W3C moods that _swipe falls back from."""
@@ -1362,7 +1416,8 @@ def _scroll_to_top(driver, cx: int, y_top: int, y_bot: int) -> None:
         time.sleep(STITCH_SETTLE)
 
 
-def _stitch_walk(driver, assume_top: bool = False) -> bool:
+def _stitch_walk(driver, assume_top: bool = False,
+                 expand: bool | None = None) -> bool:
     """Walk the current page and write the stitched whole-page document.
 
     Swipes move the page and can press nothing; the page is returned to
@@ -1374,6 +1429,16 @@ def _stitch_walk(driver, assume_top: bool = False) -> bool:
     its top, and the probe swipe plus its settle was pure latency on the
     common case. A re-scan of a page that may have been left scrolled
     still pays it.
+
+    ``expand`` says whether today's folded cards may be opened, and is a
+    SEPARATE question from where the page is scrolled to — it defaults to
+    ``assume_top`` only because arriving at a page is the common reason to
+    unfold it. Rescan is the case that proves they are different: it must
+    still probe for the top (the page may be left scrolled) yet it is a
+    deliberate re-read of the page in front, so it opens today too when
+    nothing of hers is being overridden. Passing them as one flag left the
+    Rescan button republishing today collapsed, which is the same symptom
+    the periodic re-walk used to have.
     """
     from apt_log import feed as feed_mod
     from apt_log import stitch as stitch_mod
@@ -1452,7 +1517,13 @@ def _stitch_walk(driver, assume_top: bool = False) -> bool:
         # arriving at a page, never part of watching one.
         size = driver.get_window_size()
         taps_left = EXPAND_MAX_TAPS
-        expanding = assume_top and (driver.current_package or "") in EXPAND_APPS
+        want_folds = assume_top if expand is None else expand
+        expanding = want_folds and (driver.current_package or "") in EXPAND_APPS
+        if expanding:
+            # Stamped on the licence, not on the outcome: a walk that found
+            # today already open still means "this is where our state came
+            # from", and the next look must not read that as her doing.
+            _FOLDS_OPENED_AT[0] = time.time()
         opened = 0
 
         def open_folds(cap: dict) -> dict:
@@ -3031,7 +3102,12 @@ def _rescan(driver, report) -> None:
     report("macro.step.clearing")
     _forget_stitched(_front_package())
     report("macro.step.reading")
-    _stitch_walk(driver)
+    # Reading the page again includes today's cards. This walked with the
+    # default — no expansion — so pressing Rescan on the schedule threw away
+    # a document that had today open and rebuilt it collapsed: the exact
+    # thing the walker was fixed not to do, still reachable by a button. It
+    # obeys the same rule the walker does, so one tap of hers still wins.
+    _stitch_walk(driver, expand=_folds_are_ours_to_reopen(unknown=True))
 
 
 def _clear_screen(driver, report) -> None:
@@ -4909,10 +4985,13 @@ class Runner:
         # even when the activity name never changes (Compose keeps every
         # page in one activity). None until first observed.
         self._seen_folds: dict = {}
-        # When this walker last opened today's cards, so a
-        # later look can tell the app forgetting them from her
-        # closing them. See the `forgot` check.
-        self._folds_opened_wall: float = 0.0
+        # When today's cards were last opened, so a later look can tell the
+        # app forgetting them from her closing them. See the `forgot` check.
+        # Kept in a module-level cell rather than on the instance because
+        # Rescan walks the same page without going through this object, and
+        # two clocks would let the two paths disagree about whose state the
+        # page is in.
+        _FOLDS_OPENED_AT[0] = 0.0
         # An app whose tabs are worth pre-scanning: set the moment a
         # sign-in finishes, cleared once its tabs are warmed (or the sweep
         # was pre-empted). None means nothing to warm.
@@ -5279,7 +5358,7 @@ class Runner:
             # The sweep left the phone on a fresh page; let the normal scan
             # own it rather than treating the warmed landing as seen.
             self._stitch_last_page = None
-            self._folds_opened_wall = 0.0
+            _FOLDS_OPENED_AT[0] = 0.0
             return bool(warmed)
         except Exception as exc:  # noqa: BLE001
             log.warning("tab warm failed: %s", exc)
@@ -5390,14 +5469,14 @@ class Runner:
         # restoring our own state, not overriding hers. One tap of hers,
         # and this stops claiming to know.
         forgot = False
-        if page == self._stitch_last_page and self._folds_opened_wall:
-            if poked <= self._folds_opened_wall:
-                try:
-                    forgot = bool(_collapsed_rows(
-                        doc.get("elements") or [], statics,
-                        (doc.get("size") or [0, 0])[0]))
-                except Exception:  # noqa: BLE001
-                    forgot = False
+        if (page == self._stitch_last_page
+                and _folds_are_ours_to_reopen(poked=poked)):
+            try:
+                forgot = bool(_collapsed_rows(
+                    doc.get("elements") or [], statics,
+                    (doc.get("size") or [0, 0])[0]))
+            except Exception:  # noqa: BLE001
+                forgot = False
         fresh = (page != self._stitch_last_page
                  or (was_folds is not None and folds_now != was_folds)
                  or forgot)
@@ -5414,12 +5493,10 @@ class Runner:
         try:
             # A freshly-entered page is already at its top; only a re-scan
             # of the same page pays the scroll-to-top probe.
+            # The walk stamps _FOLDS_OPENED_AT itself when it takes the
+            # licence to unfold, so the record follows the app it applies to
+            # rather than every page this happens to walk.
             ok = bool(resident.run(lambda d: _stitch_walk(d, assume_top=fresh)))
-            if fresh:
-                # When this walker last had licence to open today's cards.
-                # Wall clock, because the tap record it is compared against
-                # is a file's mtime.
-                self._folds_opened_wall = time.time()
         except Exception as exc:  # noqa: BLE001
             # Transient — a session mid-rebuild, an adb hiccup. NOT latched:
             # the next loop may find the session back, and latching here
