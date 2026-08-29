@@ -4909,6 +4909,10 @@ class Runner:
         # even when the activity name never changes (Compose keeps every
         # page in one activity). None until first observed.
         self._seen_folds: dict = {}
+        # When this walker last opened today's cards, so a
+        # later look can tell the app forgetting them from her
+        # closing them. See the `forgot` check.
+        self._folds_opened_wall: float = 0.0
         # An app whose tabs are worth pre-scanning: set the moment a
         # sign-in finishes, cleared once its tabs are warmed (or the sweep
         # was pre-empted). None means nothing to warm.
@@ -5275,6 +5279,7 @@ class Runner:
             # The sweep left the phone on a fresh page; let the normal scan
             # own it rather than treating the warmed landing as seen.
             self._stitch_last_page = None
+            self._folds_opened_wall = 0.0
             return bool(warmed)
         except Exception as exc:  # noqa: BLE001
             log.warning("tab warm failed: %s", exc)
@@ -5360,6 +5365,7 @@ class Runner:
             self._seen_folds[app] = folds_now
         else:
             folds_now = was_folds = self._seen_folds.get(app)
+        poked = 0.0
         try:
             poked = (target.parent / feed_mod.POKE_NAME).stat().st_mtime
             if time.time() - poked < STITCH_TAP_QUIET:
@@ -5368,8 +5374,33 @@ class Runner:
             pass
         page = (doc.get("app"), doc.get("activity"))
         now = time.monotonic()
+        # THE APP FORGETS, AND THE RE-SCAN WAS PUBLISHING THAT FORGETTING.
+        #
+        # Expansion runs only on a fresh entry, and rightly: a re-scan that
+        # reopened a card SHE closed would be the phone fighting her hand.
+        # But the periodic re-walk of the same page then republished today
+        # collapsed over the document that had it open, so "expand today
+        # before the page is loaded" held for one walk and was undone by the
+        # next — which is what kept being reported.
+        #
+        # The rule can be honoured exactly rather than approximately,
+        # because taps are observable. If today's cards are shut again and
+        # NOTHING has been sent to the phone since this walker last opened
+        # them, the app forgot them; nobody closed them. Re-opening then is
+        # restoring our own state, not overriding hers. One tap of hers,
+        # and this stops claiming to know.
+        forgot = False
+        if page == self._stitch_last_page and self._folds_opened_wall:
+            if poked <= self._folds_opened_wall:
+                try:
+                    forgot = bool(_collapsed_rows(
+                        doc.get("elements") or [], statics,
+                        (doc.get("size") or [0, 0])[0]))
+                except Exception:  # noqa: BLE001
+                    forgot = False
         fresh = (page != self._stitch_last_page
-                 or (was_folds is not None and folds_now != was_folds))
+                 or (was_folds is not None and folds_now != was_folds)
+                 or forgot)
         if (not fresh
                 and self._stitch_next_at is not None
                 and now < self._stitch_next_at):
@@ -5384,6 +5415,11 @@ class Runner:
             # A freshly-entered page is already at its top; only a re-scan
             # of the same page pays the scroll-to-top probe.
             ok = bool(resident.run(lambda d: _stitch_walk(d, assume_top=fresh)))
+            if fresh:
+                # When this walker last had licence to open today's cards.
+                # Wall clock, because the tap record it is compared against
+                # is a file's mtime.
+                self._folds_opened_wall = time.time()
         except Exception as exc:  # noqa: BLE001
             # Transient — a session mid-rebuild, an adb hiccup. NOT latched:
             # the next loop may find the session back, and latching here

@@ -5495,3 +5495,89 @@ class TestOpeningTodayDoesNotLookLikeLeaving:
             macros._stitch_walk(driver, assume_top=True)
         assert tapped.call_count == 2, "the second patient was left folded"
         assert state["folded"] == set()
+
+
+class TestTodayStaysOpenUntilSheClosesIt:
+    """"Expand the patient cards for today before we consider the page
+    loaded" — it held for exactly one walk and the next one undid it.
+
+    Expansion runs only on a fresh entry, and rightly: a re-scan that
+    reopened a card SHE closed would be the phone fighting her hand. But the
+    periodic re-walk of the same page then republished today COLLAPSED over
+    the document that had it open, because this app forgets an opened card.
+
+    The rule can be honoured exactly rather than approximately, because taps
+    are observable: if today's cards are shut again and nothing has been
+    sent to the phone since this walker opened them, the app forgot them and
+    nobody closed them.
+    """
+
+    UMA = "com.hhaexchange.uma"
+    DAYS = [{"cls": "TextView", "txt": f"agosto {29 + i}, 2026" + (
+        " (Hoy)" if i == 0 else ""), "b": [24, 245 + i * 400, 553, 313 + i * 400]}
+        for i in range(3)]
+    SHUT = [{"cls": "TextView", "txt": "",
+             "b": [1043, 259, 1056, 280]}]
+
+    # The row the chevron sits in: full width, enclosing it vertically.
+    ROW = [{"cls": "View", "rid": "", "b": [31, 256, 1056, 318]}]
+
+    def _runner(self, tmp_path, statics):
+        viewers = tmp_path / "viewers.json"
+        viewers.write_text(json.dumps({"n": 1}), encoding="utf-8")
+        doc = tmp_path / "screen.json"
+        doc.write_text(json.dumps({
+            "id": "f1", "app": self.UMA, "screen": "home", "blocked": "",
+            "activity": "homeactivity", "scrollable": True, "full": False,
+            "size": [1080, 2340], "elements": self.ROW,
+            "statics": statics,
+        }), encoding="utf-8")
+        return macros.Runner(status_path=tmp_path / "status.json",
+                             screen_path=doc, viewers_path=viewers)
+
+    def _walk(self, runner):
+        """Run one look and report whether it was allowed to expand."""
+        seen = {}
+        def run(fn):
+            fn(MagicMock())
+            return True
+        with patch("apt_log.resident.run", side_effect=run), \
+             patch.object(macros, "_stitch_walk",
+                          side_effect=lambda _d, assume_top=False:
+                          seen.setdefault("top", assume_top) or True):
+            runner.maybe_stitch()
+        return seen.get("top")
+
+    def test_the_first_look_at_a_page_expands(self, tmp_path):
+        runner = self._runner(tmp_path, self.DAYS + self.SHUT)
+        assert self._walk(runner) is True
+
+    def test_a_card_the_app_forgot_is_opened_again(self, tmp_path):
+        """Same page, cards shut again, and nothing was sent to the phone in
+        between — so nobody closed them."""
+        runner = self._runner(tmp_path, self.DAYS + self.SHUT)
+        assert self._walk(runner) is True
+        runner._stitch_next_at = None          # let the next look through
+        assert self._walk(runner) is True
+
+    def test_a_card_she_closed_is_left_closed(self, tmp_path):
+        """One tap of hers and this stops claiming to know. The poke file is
+        the record of something being sent to the phone."""
+        runner = self._runner(tmp_path, self.DAYS + self.SHUT)
+        assert self._walk(runner) is True
+        from apt_log import feed as feed_mod
+
+        poke = tmp_path / feed_mod.POKE_NAME
+        poke.write_text("touched", encoding="utf-8")
+        runner._stitch_next_at = None
+        runner._folds_opened_wall -= 60        # her tap lands after ours
+        # Either it does not walk at all, or it walks without licence to
+        # open anything. What it must never do is reopen her card.
+        assert self._walk(runner) is not True
+
+    def test_a_page_with_nothing_shut_is_not_rewalked_for_folds(self, tmp_path):
+        """Nothing to reopen is not a reason to walk again."""
+        runner = self._runner(tmp_path, self.DAYS)
+        assert self._walk(runner) is True
+        runner._stitch_next_at = None
+        assert self._walk(runner) is not True
