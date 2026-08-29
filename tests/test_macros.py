@@ -1651,10 +1651,17 @@ class TestThePickerThatOpensSlowly:
     starts against a screen nobody expects.
     """
 
-    def _run(self, opens_after: float):
+    PICKER = '<node text="Seleccionar un proveedor"/>'
+    ELSEWHERE = '<node text="Programación"/>'
+
+    def _run(self, opens_after: float, published=None):
         """Drive the walk with a picker that appears `opens_after` seconds in.
 
-        The clock is fictional (fast_clock), so this is about the BUDGET the
+        `published` is what the FEED's file says — frozen, because the feed
+        stops reading the phone while a macro holds the driver. The driver's
+        own `page_source` is what actually moves.
+
+        The clock is fictional (fast_clock), so this is about the budget the
         walk allows, not about real seconds.
         """
         from apt_log import feed as feed_mod
@@ -1662,14 +1669,22 @@ class TestThePickerThatOpensSlowly:
         driver = MagicMock()
         seen = {"n": 0}
 
-        def screen_for(_focus, _tree):
-            # Each poll is one tick of the same 0.5s fake clock the wait uses.
+        def page_source(_self):
+            # Each read is one tick of the same 0.5s fake clock the wait uses.
             seen["n"] += 1
-            return "agency" if seen["n"] * 0.5 >= opens_after else "home"
+            return (self.PICKER if seen["n"] * 0.5 >= opens_after
+                    else self.ELSEWHERE)
+        type(driver).page_source = property(page_source)
+
+        def screen_for(_focus, tree):
+            return "agency" if "Seleccionar un proveedor" in (tree or "") \
+                else "home"
 
         with patch("apt_log.macros._front_package",
                    return_value="com.hhaexchange.uma"), \
-             patch("apt_log.macros._tree", return_value="<hierarchy/>"), \
+             patch("apt_log.macros._tree",
+                   return_value=self.ELSEWHERE if published is None
+                   else published), \
              patch("apt_log.macros._words", return_value=MagicMock()), \
              patch("apt_log.macros._by_id", return_value=MagicMock()), \
              patch.object(feed_mod, "screen_for", side_effect=screen_for), \
@@ -1677,14 +1692,31 @@ class TestThePickerThatOpensSlowly:
              patch("apt_log.macros.time.sleep"), fast_clock():
             macros._walk_to_agency_picker(driver, lambda _k: None)
 
+    def test_the_picker_it_opened_itself_is_seen(self):
+        """THE ACTUAL BUG, and the timeout was not it.
+
+        The wait read the hierarchy the FEED publishes, and the feed stops
+        reading the phone while a macro holds the driver. So the tree could
+        not change during the walk: the check could only ever pass for a
+        picker that was already open before the macro started, and reported
+        "did not open" about every picker the walk opened itself — twice,
+        with the picker plainly on screen.
+
+        The feed's file here says the phone is somewhere else, for the whole
+        walk, exactly as a frozen file would.
+        """
+        self._run(opens_after=3.0, published=self.ELSEWHERE)
+
     def test_a_picker_that_takes_its_time_is_still_waited_for(self):
-        """Twenty seconds was the old budget and it expired on a picker that
-        was opening. Twenty-five must not be a failure."""
+        """Twenty seconds was the old budget, and changing provider makes the
+        app drop its whole schedule and re-ask the server. Twenty-five must
+        not be a failure."""
         self._run(opens_after=25.0)
 
     def test_a_picker_that_never_opens_still_fails(self):
-        """The wait is longer, not absent. A navigation that genuinely did
-        not happen must still say so rather than run on."""
+        """The wait is longer and looks in a better place; it is not absent.
+        A navigation that genuinely did not happen must still say so rather
+        than let the next step run against a screen nobody expects."""
         with pytest.raises(RuntimeError, match="picker did not open"):
             self._run(opens_after=10_000.0)
 

@@ -2814,7 +2814,8 @@ def _walk_to_agency_picker(driver, report) -> None:
     # Already there? The picker IS this app's other front page, and walking a
     # four-tap route to arrive where we started would be four chances to end
     # up somewhere else.
-    if feed_mod.screen_for(feed_mod.current_focus() or "", _tree()) == "agency":
+    if feed_mod.screen_for(feed_mod.current_focus() or "",
+                           _live_tree(driver)) == "agency":
         return
 
     def press(finder, what):
@@ -2828,18 +2829,21 @@ def _walk_to_agency_picker(driver, report) -> None:
     press(lambda: _by_id(driver, UMA_AGENCIES_ID), "Agencias")
     time.sleep(BACK_SETTLE)
     press(lambda: _by_id(driver, UMA_CHANGE_ID), "the change-provider button")
-    # THIRTY, not twenty. Twenty gave up on a picker that was opening: the
-    # macro raised "the provider picker did not open" and the picker was on
-    # screen when the failure was read, a second or two later. Changing
-    # provider makes the app drop its whole schedule and re-ask the server,
-    # and on the newer phone that lands slower rather than faster.
+    # Asked of the live session, not of the feed's file — see `_live_tree`.
+    # This wait polled a hierarchy that cannot change while this macro is
+    # running, so it could only ever pass for a picker that was ALREADY open
+    # when the walk started, and reported "did not open" about every picker
+    # it actually opened itself.
     #
-    # A wait that is too short does not fail safely here. It reports that a
-    # navigation did not happen while it is happening, so whatever runs next
-    # starts against a screen nobody expects.
+    # THIRTY, not twenty, as well: changing provider makes the app drop its
+    # whole schedule and re-ask the server, and on this phone that lands
+    # slower rather than faster. A wait that is too short does not fail
+    # safely here — it reports that a navigation did not happen while it is
+    # happening, so whatever runs next starts against a screen nobody
+    # expects.
     if not wait_for(
             lambda: feed_mod.screen_for(feed_mod.current_focus() or "",
-                                        _tree()) == "agency",
+                                        _live_tree(driver)) == "agency",
             timeout=30.0):
         raise RuntimeError("the provider picker did not open")
 
@@ -2881,13 +2885,42 @@ def _words(driver, *words):
     return best
 
 
+def _live_tree(driver) -> str:
+    """The hierarchy as it is NOW, asked of the session this macro holds.
+
+    `_tree()` below reads the file the FEED writes, and the feed stops
+    reading the phone while a macro holds the driver. So inside a macro that
+    file is frozen at whatever was on screen when the macro started — and a
+    wait that polls it for a screen the macro is currently navigating TO can
+    never come true. It cost two false "the provider picker did not open"
+    failures with the picker plainly on screen, and a timeout bump that
+    treated the symptom.
+
+    The rule `_tree()` exists to keep is "never a SECOND reader" — a second
+    `uiautomator dump` wedged the instrumentation twice, and UiAutomator2
+    allows exactly one session. Reading through the session already in hand
+    breaks neither: it is the same one reader, asked directly.
+    """
+    try:
+        return driver.page_source or ""
+    except Exception:  # noqa: BLE001
+        # A driver that will not answer is not a reason to fail here; the
+        # published file is stale but it is not wrong about a screen nothing
+        # has navigated away from.
+        return _tree()
+
+
 def _tree() -> str:
     """The published hierarchy, read from disk rather than from the phone.
 
-    The feed writes one every time it reads one. Asking the device directly
-    from here would either spawn a second `uiautomator dump` — which wedged
-    the instrumentation hard enough to need a restart, twice — or open a
-    second Appium session, and UiAutomator2 allows exactly one.
+    For callers with no driver of their own. The feed writes one every time
+    it reads one. Asking the device directly from here would either spawn a
+    second `uiautomator dump` — which wedged the instrumentation hard enough
+    to need a restart, twice — or open a second Appium session, and
+    UiAutomator2 allows exactly one.
+
+    Inside a macro, prefer `_live_tree(driver)`: this file does not move
+    while a macro is running.
     """
     from apt_log import feed as feed_mod
     from apt_log.ui import state as state_mod
