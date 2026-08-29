@@ -750,6 +750,34 @@ APP_DENSITY = {
 # patient draw with a finger on the physical phone. 105 is the density
 # the one proven signature landed at; the sweet spot is tuned here.
 SIGNATURE_DENSITY = 105
+
+# HANDING THE PHONE BACK AT ITS OWN SIZE.
+#
+# `wm density` is a DISPLAY setting, not an app setting — Android has no
+# per-app density and this comment used to say as much in passing: "each
+# application re-lays-out every app on the phone". So while a care app was in
+# front the launcher, Settings, the dialer and every system dialog were laid
+# out at 84 too, and nothing ever put them back. Leaving a care app left the
+# phone shrunk.
+#
+# That is the opposite of what the density is for. The owner's rule: she has
+# to be able to drive the phone by hand to intervene when something goes
+# wrong, and buttons she cannot press are what make that impossible. A
+# density that helps the automation read a schedule and costs her the ability
+# to recover is a bad trade in exactly the moment it matters.
+#
+# So the density belongs to the care apps and is given back on the way out.
+# `wm density reset` restores the panel's own physical value, which is the
+# only correct "what it was" — a remembered number would be a guess about a
+# phone that can change under us.
+DENSITY_RESET = -2
+
+# ...but not on the way THROUGH. Switching apps crosses the launcher, and a
+# re-layout of every app on the phone is not free; done on each crossing it
+# would thrash the device during the exact sequences that matter. So the
+# hand-back waits for her to actually be out.
+HANDBACK_DWELL = 4.0
+_left_at = [0.0]
 # THE WINDOW'S OWN SHAPE, not a number that happens to be true on one phone.
 #
 # This used to hunt for an x-coordinate of 800 or more, which reads as
@@ -825,15 +853,45 @@ def _density_wanted(focus: str, hierarchy: str | None = None) -> int | None:
         # being laid out at the value that is known to work.
         chosen = None
     if pkg in CARE_APPS:
+        _left_at[0] = 0.0
         if pkg == "com.hhaexchange.caregiver" and _looks_landscape(hierarchy):
             return SIGNATURE_DENSITY
         return APP_DENSITY.get(pkg, DEFAULT_DENSITY)
+    # Outside the care apps. A density somebody set deliberately for the whole
+    # phone still wins — that is a person saying what they want — but with no
+    # such override the phone goes back to its own size. See DENSITY_RESET.
     try:
         from apt_log import prefs
 
-        return prefs.global_density()
+        chosen = prefs.global_density()
     except Exception:  # noqa: BLE001
+        chosen = None
+    if chosen is not None:
+        _left_at[0] = 0.0
+        return chosen
+    now = time.time()
+    if not _left_at[0]:
+        _left_at[0] = now
         return None
+    if now - _left_at[0] < HANDBACK_DWELL:
+        return None
+    return DENSITY_RESET
+
+
+def _physical_density(serial: str | None = None) -> int:
+    """What the panel is actually built at, or -1 if it will not say.
+
+    -1 rather than a number, because every caller compares it against a
+    wanted value and an invented default would compare EQUAL to something —
+    silently skipping a change that was needed.
+    """
+    try:
+        out = _adb(["shell", "wm", "density"], serial).stdout.decode(
+            "utf-8", "replace")
+    except (OSError, subprocess.SubprocessError):
+        return -1
+    m = re.search(r"Physical density: (\d+)", out)
+    return int(m.group(1)) if m else -1
 
 
 def _watch_density(focus: str, serial: str | None = None,
@@ -864,6 +922,17 @@ def _watch_density(focus: str, serial: str | None = None,
             _density_now[0] = -1
         if _density_now[0] == want:
             return
+    if want == DENSITY_RESET:
+        log.info("density handed back to the phone (left %s)", pkg or "?")
+        try:
+            _adb(["shell", "wm", "density", "reset"], serial)
+            # Read back rather than assumed: the point of `reset` is that the
+            # panel decides, and a value invented here would be the guess the
+            # reset exists to avoid.
+            _density_now[0] = _physical_density(serial)
+        except (OSError, subprocess.SubprocessError) as exc:
+            log.warning("could not hand the density back (%s)", exc)
+        return
     log.info("density %d for %s", want, pkg)
     try:
         _adb(["shell", "wm", "density", str(want)], serial)

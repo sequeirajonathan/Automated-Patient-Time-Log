@@ -14,7 +14,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from apt_log import feed
+from pathlib import Path
+
+from apt_log import feed, prefs
 
 HOME = "com.hhaexchange.caregiver/com.hhaexchange.caregiver.HomeActivity"
 SIGNIN = "com.hhaexchange.caregiver/com.hhaexchange.caregiver.SignInActivity"
@@ -2907,3 +2909,81 @@ class TestTheTreeIsWrittenDownWithoutWhatWasTyped:
                                  hierarchy=self.TYPED)
             except OSError:
                 pytest.fail("a write failure must not reach the caller")
+
+
+class TestTheDensityIsHandedBack:
+    """`wm density` is a DISPLAY setting, and nothing ever put it back.
+
+    Android has no per-app density — the code's own comment said so in
+    passing: "each application re-lays-out every app on the phone". So while
+    a care app was in front the launcher, Settings, the dialer and every
+    system dialog were laid out at 84 as well, and leaving the app left the
+    phone shrunk.
+
+    That is the opposite of what the density is for. The caregiver has to be
+    able to drive the phone by hand when something goes wrong, and buttons she
+    cannot press are what make that impossible — in exactly the moment it
+    matters most.
+    """
+
+    def setup_method(self):
+        feed._left_at[0] = 0.0
+
+    # `prefs` is imported INSIDE the function under test, so the name to
+    # patch is the module's own, not an attribute of `feed` — which does not
+    # have one, and said so the first time this ran.
+
+    def test_a_care_app_still_gets_its_density(self):
+        assert feed._density_wanted(
+            "com.hhaexchange.uma/.MainActivity") == feed.DEFAULT_DENSITY
+        assert feed._density_wanted(
+            "com.inmyteam.inmyteam/.MainActivity") == 105
+
+    def test_leaving_hands_it_back(self, monkeypatch):
+        monkeypatch.setattr(prefs, "global_density", lambda: None)
+        feed._density_wanted("com.android.launcher/.Home")     # arms the dwell
+        feed._left_at[0] -= feed.HANDBACK_DWELL + 1
+        assert feed._density_wanted(
+            "com.android.launcher/.Home") == feed.DENSITY_RESET
+
+    def test_it_does_not_thrash_on_the_way_through(self, monkeypatch):
+        """Switching apps crosses the launcher, and a re-layout of every app
+        on the phone is not free. Done on each crossing it would thrash the
+        device during the exact sequences that matter."""
+        monkeypatch.setattr(prefs, "global_density", lambda: None)
+        assert feed._density_wanted("com.android.launcher/.Home") is None
+        assert feed._density_wanted("com.android.launcher/.Home") is None
+
+    def test_going_back_into_an_app_cancels_the_hand_back(self, monkeypatch):
+        monkeypatch.setattr(prefs, "global_density", lambda: None)
+        feed._density_wanted("com.android.launcher/.Home")
+        assert feed._left_at[0]
+        feed._density_wanted("com.inmyteam.inmyteam/.MainActivity")
+        assert feed._left_at[0] == 0.0
+
+    def test_a_deliberate_global_override_still_wins(self, monkeypatch):
+        """A person setting a density for the whole phone is a person saying
+        what they want, and the hand-back must not argue with them."""
+        monkeypatch.setattr(prefs, "global_density", lambda: 120)
+        assert feed._density_wanted("com.android.launcher/.Home") == 120
+
+    def test_the_reset_asks_the_phone_rather_than_guessing(self):
+        """`wm density reset` exists because the panel decides. A remembered
+        number would be a guess about a device that can change under us."""
+        from conftest import strip_py_comments
+
+        source = strip_py_comments(
+            Path("src/apt_log/feed.py").read_text(encoding="utf-8"))
+        body = source.split("def _watch_density(", 1)[1]
+        assert '"wm", "density", "reset"' in body
+        assert "_density_now[0] = _physical_density(serial)" in body
+
+    def test_an_unreadable_physical_density_is_minus_one(self, monkeypatch):
+        """Not a plausible default: every caller compares it against a wanted
+        value, and an invented number would compare EQUAL to something and
+        silently skip a change that was needed."""
+        def boom(*a, **k):
+            raise OSError("no device")
+
+        monkeypatch.setattr(feed, "_adb", boom)
+        assert feed._physical_density() == -1
