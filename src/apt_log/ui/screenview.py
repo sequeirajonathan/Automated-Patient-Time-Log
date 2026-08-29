@@ -330,6 +330,46 @@ def _shape_description(text: str) -> list[str] | None:
     name = max(names, key=len).strip()
     return [name, f"{clocks[0]} – {clocks[1]}", status]
 
+
+# WHAT A VISIT'S STATUS MEANS, as a colour.
+#
+# Mobile Caregiver+ ends its description sentence with the visit's state, and
+# the five it uses were all seen in one week of real data:
+#
+#     Sin empezar            not started, and not yet late
+#     Completada             done
+#     Completadas, Tarde     done, outside the window
+#     No Empezadas, Tarde    never started, window passed
+#     Perdida                missed
+#
+# Three of those are the outcomes this whole project exists to prevent, and
+# the reflow was drawing all five as one more muted line under the times —
+# the same grey as the clock, easy to read straight past. A status is not a
+# detail about a visit; on this screen it is the point of the row.
+_STATUS_TONES = (
+    ("perdida", "bad"),
+    ("missed", "bad"),
+    ("tarde", "warn"),
+    ("late", "warn"),
+    ("completad", "ok"),
+    ("complete", "ok"),
+)
+
+
+def status_tone(words: str) -> str:
+    """"ok", "warn", "bad", or "" for a status with no colour of its own.
+
+    Ordered worst-first: "Completadas, Tarde" is a visit that happened
+    outside its window, and the thing worth seeing about it is the Tarde.
+    """
+    low = (words or "").strip().lower()
+    if not low:
+        return ""
+    for mark, tone in _STATUS_TONES:
+        if mark in low:
+            return tone
+    return ""
+
 # Text the app itself presents as a PRIMARY BUTTON \u2014 the filled calls to
 # action a screen is built around. Matched at the start of a label so
 # "Continuar visitando", "Iniciar visita no programada", "Guardar
@@ -1096,7 +1136,14 @@ def build(doc: dict) -> dict | None:
             if len(lines) == 1:
                 shaped = _shape_description(lines[0])
                 if shaped:
-                    lines = shaped
+                    # The sentence accounted for itself, so its last part is
+                    # the visit's STATE — lifted out of the stack of muted
+                    # lines and onto the row as a chip. Only from a shaped
+                    # description: a third line anywhere else is just a
+                    # third line, and eating it would lose content.
+                    lines = shaped[:-1]
+                    item["status"] = shaped[-1]
+                    item["status_tone"] = status_tone(shaped[-1])
             item["lines"] = lines
             item["badge"] = badge
             # A row whose only content is a KNOWN glyph is named by it —
@@ -1674,7 +1721,7 @@ def build(doc: dict) -> dict | None:
             # enough that sharing a word would be a bug waiting to happen.
             # Empty for any app that does not publish one, and an empty trail
             # renders as nothing at all rather than as "you are nowhere".
-            "crumbs": _crumbs(doc),
+            "crumbs": _crumbs(doc, (nav or {}).get("title", "")),
             "permission": permission,
             # A modal the app raised, drawn as an alert above the page it is
             # blocking rather than scattered through it — or dropped.
@@ -1689,7 +1736,49 @@ def build(doc: dict) -> dict | None:
             "full": bool(doc.get("full"))}
 
 
-def _crumbs(doc: dict) -> list[dict]:
+# WHAT EACH SCREEN CALLS ITSELF, learned by standing on it.
+#
+# The trail arrives as FRAGMENT CLASS NAMES, and prettifying one gives
+# "Visits Route" — English, inside a Spanish app, in a word the app never
+# uses and nobody but its developers has ever seen. Reported from the phone
+# as a breadcrumb with no direction, and that is exactly right: it is not
+# the app's language and it is not even the app's vocabulary.
+#
+# The app does say what a screen is called. It writes it in the title bar of
+# that screen, in her language, and the portal already reads it. So every
+# time a screen is rendered, the title is remembered against the fragment
+# standing on it, and the trail is spelled with those words afterwards.
+#
+# Learned rather than mapped, for the same reason the trail itself is: a
+# table of fragment names would be one more thing to maintain against apps
+# that rename their internals, and it would be wrong the first time one did.
+# Fragment names are per-package — two apps can each have a `HomeFragment`
+# meaning quite different things — so the memory is keyed by both.
+_screen_names: dict[str, dict[str, str]] = {}
+# Bounded, because this grows with every screen ever visited and nothing
+# else prunes it. Generous next to any real app's page count.
+NAMES_REMEMBERED = 200
+
+
+def remember_screen_name(package: str, fragment: str, title: str) -> None:
+    """Note that this fragment calls itself `title`, in the app's own words."""
+    title = (title or "").strip()
+    if not package or not fragment or not title:
+        return
+    known = _screen_names.setdefault(package, {})
+    if known.get(fragment) == title:
+        return
+    if len(known) >= NAMES_REMEMBERED and fragment not in known:
+        known.pop(next(iter(known)), None)
+    known[fragment] = title
+
+
+def screen_name(package: str, fragment: str) -> str:
+    """The app's own word for this screen, or "" if it has never been seen."""
+    return (_screen_names.get(package) or {}).get(fragment, "")
+
+
+def _crumbs(doc: dict, title: str = "") -> list[dict]:
     """The app's own trail through itself, as a row of steps.
 
     Each step carries `back`: how many pops separate it from where the phone
@@ -1698,20 +1787,46 @@ def _crumbs(doc: dict) -> list[dict]:
     log were swallowed undoing its tab selection and popped nothing, while
     the screen's own Back arrow popped cleanly. So a step is something to
     walk towards, checking after each press, never a count to fire blindly.
+
+    Spelled in the app's own words wherever the portal has stood on that
+    screen and read its title — see `remember_screen_name`. A step it has
+    never visited keeps the prettified class name, which is ugly but honest;
+    it turns into the app's word the first time she goes there.
     """
     nav = doc.get("nav") or {}
     trail = nav.get("trail") or []
     says = nav.get("says") or []
+    package = (doc.get("app") or "")
+    if trail and title:
+        remember_screen_name(package, trail[-1], title)
     if len(trail) < 2:
         # One step is not a trail, it is just where you are. The nav bar
         # already says that, and a breadcrumb of length one is furniture.
         return []
     last = len(trail) - 1
-    return [{"at": name,
-             "says": says[i] if i < len(says) else name,
-             "back": last - i,
-             "here": i == last}
-            for i, name in enumerate(trail)]
+    out = []
+    for i, name in enumerate(trail):
+        # The screen she is standing on is titled above; use that same word
+        # rather than a second, different name for one place.
+        known = title if i == last and title else screen_name(package, name)
+        if not known and i != last:
+            # A STEP NOBODY HAS EVER STOOD ON. The stack carries container
+            # fragments that are not screens — a "route" holding the pages
+            # inside it — and they have no title because they were never
+            # drawn as a place. They are what made this trail read "Visits
+            # Route › Visits": a developer's word for a thing that is not a
+            # destination. Left out rather than printed under its class
+            # name; dropping it changes no other step's `back`, which is
+            # counted from the stack, not from what is shown.
+            continue
+        out.append({"at": name,
+                    "says": known or (says[i] if i < len(says) else name),
+                    "back": last - i,
+                    "here": i == last})
+    if len(out) < 2:
+        # What is left is only "you are here", which the title already says.
+        return []
+    return out
 
 
 def _fold_tab_captions(band: list[dict]) -> list[dict]:

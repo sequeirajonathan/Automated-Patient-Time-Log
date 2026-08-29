@@ -27,9 +27,15 @@
        one thing on that page she has to know BEFORE she signs. #}
     {% if m.nav.step %}<span class="a-step">{{ m.nav.step }}</span>{% endif %}
     <span class="a-trail">
+      {# THE WORD IS OFTEN NOT ON THE BUTTON. These apps hang a caption on a
+         non-clickable child, and the fold puts it in `lines` rather than in
+         `txt` — so a control the app labels "Menú" was drawn as "···", a
+         nameless dot-dot-dot in the corner of the screen with no way to
+         guess what it opens. Reported from the phone. The ellipsis is the
+         last resort it was always meant to be, not the usual case. #}
       {% for b in ([m.nav.back] if m.nav.back else []) + m.nav.trailing %}
       <button type="button" class="a-navbtn" data-aim='{{ b.aim | tojson }}'
-        >{{ b.txt or '···' }}</button>
+        >{{ b.txt or (b.lines[0] if b.lines else '') or '···' }}</button>
       {% endfor %}
     </span>
   </div>
@@ -254,6 +260,14 @@
             {% for m in it.marks %}<span class="a-mark {{ m.tone }}{% if m.txt %} named{% endif %}"
               >{{ m.sym }}{% if m.txt %}<span class="a-mark-t">{{ m.txt }}</span>{% endif %}</span>{% endfor %}
           </span>
+          {% endif %}
+          {% if it.status %}
+          {# THE POINT OF THE ROW, not a detail about it. A visit's state was
+             rendering as one more muted line under the times, in the same
+             grey as the clock — and three of the five states this app uses
+             are the outcomes the whole project exists to prevent. #}
+          <span class="a-status{% if it.status_tone %} {{ it.status_tone }}{% endif %}"
+            >{{ it.status }}</span>
           {% endif %}
           {% if it.badge %}<span class="a-badge">{{ it.badge }}</span>{% endif %}
           {% if not it.cta %}

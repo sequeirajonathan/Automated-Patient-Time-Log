@@ -4005,21 +4005,69 @@ class TestTheAppsOwnTrail:
         assert screenview._crumbs(
             self._doc(["VisitsFragment"], ["Visits"], 0)) == []
 
+    def _walked(self, screenview):
+        """Stand on the list, then open the work log — which is how the
+        portal learns what each screen calls itself. See
+        `screenview.remember_screen_name`."""
+        screenview._crumbs(self._doc(["VisitsFragment"], ["Visits"], 0),
+                           "Visitas")
+        return screenview._crumbs(
+            self._doc(["VisitsFragment", "MyWorksFragment"],
+                      ["Visits", "My Works"], 1), "Mis trabajos")
+
     def test_each_step_says_how_many_pops_away_it_is(self):
         from apt_log.ui import screenview
 
-        crumbs = screenview._crumbs(self._doc(
-            ["VisitsFragment", "MyWorksFragment"], ["Visits", "My Works"], 1))
+        crumbs = self._walked(screenview)
         assert [c["back"] for c in crumbs] == [1, 0]
-        assert [c["says"] for c in crumbs] == ["Visits", "My Works"]
 
     def test_the_last_step_is_where_she_is(self):
         """Nothing should offer to take her where she already stands."""
         from apt_log.ui import screenview
 
-        crumbs = screenview._crumbs(self._doc(
-            ["VisitsFragment", "MyWorksFragment"], ["Visits", "My Works"], 1))
-        assert [c["here"] for c in crumbs] == [False, True]
+        assert [c["here"] for c in self._walked(screenview)] == [False, True]
+
+    def test_the_trail_is_spelled_in_the_apps_own_words(self):
+        """IT WAS SPELLED IN CLASS NAMES, and that is what a fragment stack
+        gives you: "Visits Route › Visits", English, inside a Spanish app, in
+        a word the app never uses and only its developers have ever seen.
+        Reported from the phone as a breadcrumb with no direction.
+
+        The app does say what a screen is called — it writes it in the title
+        bar — so the title is remembered against the fragment standing on it
+        and the trail is spelled with those words afterwards.
+        """
+        from apt_log.ui import screenview
+
+        assert [c["says"] for c in self._walked(screenview)] == [
+            "Visitas", "Mis trabajos"]
+
+    def test_a_step_nobody_ever_stood_on_is_left_out(self):
+        """The stack carries container fragments that are not screens — a
+        "route" holding the pages inside it. They have no title because they
+        were never drawn as a place, and printing their class name is the
+        thing being fixed. Dropping one changes no other step's `back`,
+        which is counted from the stack, not from what is shown."""
+        from apt_log.ui import screenview
+
+        screenview._crumbs(self._doc(["VisitsFragment"], ["Visits"], 0),
+                           "Visitas")
+        crumbs = screenview._crumbs(
+            self._doc(["VisitsRouteFragment", "VisitsFragment",
+                       "MyWorksFragment"],
+                      ["Visits Route", "Visits", "My Works"], 2),
+            "Mis trabajos")
+        assert [c["says"] for c in crumbs] == ["Visitas", "Mis trabajos"]
+        # The pops still count the whole stack, container included.
+        assert [c["back"] for c in crumbs] == [1, 0]
+
+    def test_one_app_never_borrows_another_apps_words(self):
+        """Fragment names are per-package: two apps can each have a
+        `HomeFragment` meaning quite different things."""
+        from apt_log.ui import screenview
+
+        screenview.remember_screen_name("com.a", "HomeFragment", "Inicio")
+        assert screenview.screen_name("com.b", "HomeFragment") == ""
 
     def test_an_app_that_publishes_nothing_shows_no_trail(self):
         """Two of the three care apps are not built this way, and a missing

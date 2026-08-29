@@ -791,6 +791,20 @@
   .a-tab:active { transform:scale(.9); color:var(--tint);
                   background:var(--tint-soft); transition-duration:.06s; }
 
+  /* A VISIT'S STATE, as a chip rather than a fourth grey line. It sits on
+     the row's own line under the title, not floated to the right like a
+     count: the states this app uses are words, not numbers ("No Empezadas,
+     Tarde"), and a word pinned to the right edge either wraps badly or
+     collides with the chevron. Toned, because three of the five mean
+     something went wrong. */
+  .a-status { display:inline-block; align-self:flex-start; margin-top:3px;
+              font-size:11px; font-weight:700; letter-spacing:.02em;
+              text-transform:uppercase; padding:2px 8px; border-radius:999px;
+              background:var(--track); color:var(--muted); }
+  .a-status.ok   { background:hsl(142 71% 40% / .16); color:var(--ok); }
+  .a-status.warn { background:hsl(38 92% 50% / .16); color:var(--unknown); }
+  .a-status.bad  { background:hsl(0 72% 51% / .14); color:var(--bad); }
+
   /* Counts ride in bubbles, the way every native list draws them. */
   .a-badge { position:absolute; right:14px; top:50%;
              transform:translateY(-50%); background:var(--bad);
