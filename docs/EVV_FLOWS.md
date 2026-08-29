@@ -405,6 +405,12 @@ Three of its screens answer that question and only one of them is right.**
 
 `My Work` → **Checks** is the record. Everything else is a partial view of it.
 
+The drawer spells it **`Mi Trabajo`** in Spanish — capital T, read off the phone
+on 2026-08-29. That capital cost a working walk: the code asked for `Mi trabajo`
+and XPath's `contains()` compares byte for byte, so the row was invisible and the
+macro reported the log unreachable while it sat on screen. Control lookups fold
+case now, so the spelling here is a note rather than a dependency.
+
 Established live on 2026-08-21, on one visit that ended up carrying four events —
 the caregiver's real `Check in 05:00 AM` and `Check out 06:00 AM` from her own phone,
 and two accidental check-ins made from this device at `09:54` and `10:00`:
