@@ -1634,7 +1634,14 @@ class TestPerAppDensity:
     needs 84 so its week fits one capture, while inMyTeam's sparse pages
     gain nothing from tiny text — and during the signature moment humans
     handle the physical phone, where bigger is a better pen. Density
-    follows the app in front, never mid-scan, never mid-macro."""
+    follows the app in front, never mid-scan, never mid-macro.
+
+    The app-level value is what an UNMEASURED page of that app gets. The
+    schedule screen no longer takes it — it was measured on this phone and
+    carries its own number (TestDensityIsMeasuredPerScreen) — so these use a
+    page with no measurement of its own, which is what the app-level value is
+    for. `.HomeActivity` was the example here until that measurement existed.
+    """
 
     def _run(self, focuses, current="84", scan=False, macro="idle"):
         feed._density_now[0] = 0
@@ -1660,7 +1667,8 @@ class TestPerAppDensity:
         return [c for c in calls if c[:3] == ["shell", "wm", "density"]
                 and len(c) == 4]
 
-    UMA = "com.hhaexchange.uma/.HomeActivity"
+    UMA = "com.hhaexchange.uma/.VisitActivity"
+    UMA_SCHEDULE = "com.hhaexchange.uma/.HomeActivity"
     IMT = "com.inmyteam.inmyteam/.MainActivity"
 
     def test_the_apps_density_is_applied_when_it_comes_forward(self):
@@ -1669,6 +1677,12 @@ class TestPerAppDensity:
 
     def test_an_already_right_density_is_left_alone(self):
         assert self._run([self.UMA, self.UMA]) == []
+
+    def test_a_measured_screen_is_applied_the_same_way(self):
+        """A page's own number travels the same path as an app's: applied as
+        it comes forward, once."""
+        assert self._run([self.UMA_SCHEDULE, self.UMA_SCHEDULE]) == [
+            ["shell", "wm", "density", "300"]]
 
     def test_never_mid_scan(self):
         assert self._run([self.IMT], scan=True) == []
@@ -2987,3 +3001,62 @@ class TestTheDensityIsHandedBack:
 
         monkeypatch.setattr(feed, "_adb", boom)
         assert feed._physical_density() == -1
+
+
+class TestDensityIsMeasuredPerScreen:
+    """The blanket value was tuned for a different phone and a different job.
+
+    84 was chosen against the OLD handset — 720x1600 — and the comment beside
+    it says what for: HHAeXchange+'s SIX-DAY schedule, which "only fits one
+    capture that small". This phone is 1080x2340 at a physical density of 450,
+    and what has to fit now is TODAY, fanned out in one view.
+
+    Measured live, reading how far down the page the next day's header lands
+    with today holding two visits and the first expanded:
+
+        450 (physical) .. today runs off the screen, one card visible
+        400 ............. still off
+        340 ............. next day at 1725 — fits
+        300 ............. next day at 1538 — fits, ~800px spare
+        200 ............. next day at  973 — fits, and small
+    """
+
+    def setup_method(self):
+        feed._left_at[0] = 0.0
+
+    def test_the_schedule_screen_uses_its_measured_value(self):
+        assert feed._density_wanted(
+            "com.hhaexchange.uma/com.hhaexchange.carehub.ui.activities"
+            ".HomeActivity") == 300
+
+    def test_it_is_below_the_ceiling_that_was_measured(self):
+        """340 was the largest value where today still fit. The choice sits
+        under it so a day with three or four visits still fits, rather than
+        today's two."""
+        for _mark, value in feed.PAGE_DENSITY["com.hhaexchange.uma"]:
+            assert value <= 340
+
+    def test_an_unmeasured_screen_is_left_alone(self):
+        """Applying an unmeasured value everywhere is the thing this table
+        exists to stop."""
+        assert feed._density_wanted(
+            "com.hhaexchange.uma/com.hhaexchange.carehub.ui.activities"
+            ".VisitActivity") == feed.DEFAULT_DENSITY
+
+    def test_another_app_is_untouched(self):
+        assert feed._density_wanted(
+            "com.inmyteam.inmyteam/.MainActivity") == 105
+
+    def test_the_match_ignores_case(self):
+        """The key is a fragment of the activity, and the activity's own
+        capitalisation is the app's business."""
+        assert feed._density_wanted(
+            "com.hhaexchange.uma/HOMEACTIVITY") == 300
+
+    def test_a_page_override_still_outranks_it(self, monkeypatch):
+        """Somebody setting a value for this page means it for this page —
+        the tuned table is a default, not a ceiling on her judgement."""
+        monkeypatch.setattr(prefs, "density_for",
+                            lambda app, page="", **k: 210)
+        assert feed._density_wanted(
+            "com.hhaexchange.uma/HomeActivity") == 210

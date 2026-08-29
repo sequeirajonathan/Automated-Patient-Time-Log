@@ -744,6 +744,43 @@ DEFAULT_DENSITY = 84
 APP_DENSITY = {
     "com.inmyteam.inmyteam": 105,
 }
+
+# PER SCREEN, MEASURED, ON THIS PHONE.
+#
+# The numbers above were tuned against the OLD handset — 720x1600 — and the
+# comment beside them says what for: HHAeXchange+'s SIX-DAY schedule, which
+# "only fits one capture that small". This phone is 1080x2340 at a physical
+# density of 450, and the requirement changed with it: what has to fit now is
+# TODAY, fanned out in one view, not the week.
+#
+# Those are very different bars, and a blanket value cannot serve both. So a
+# screen that has been measured gets its own number and the rest keep the
+# app's default until somebody measures them — applying an unmeasured value
+# everywhere is the thing this table exists to stop.
+#
+# Measured live on the schedule screen, with today holding two visits and the
+# first one expanded, reading how far down the page the NEXT day's header
+# lands (past 2340 means today is cut off and the app scrolls):
+#
+#     density 450 (physical) .. today runs off the screen, one card visible
+#     density 400 ............. still off the screen
+#     density 340 ............. next day at 1725 — fits
+#     density 300 ............. next day at 1538 — fits, ~800px to spare
+#     density 200 ............. next day at  973 — fits, and small
+#
+# 340 is the ceiling and 300 is the choice: the most legible value that still
+# leaves room for a day with three or four visits rather than today's two.
+# Legibility is the tie-breaker because this screen is also the one she reads
+# over somebody's shoulder.
+#
+# Keyed on a fragment of the activity, matched case-insensitively, because
+# that is what `_density_wanted` has in hand and it is stable across the
+# app's own renames of everything else.
+PAGE_DENSITY = {
+    "com.hhaexchange.uma": (
+        ("homeactivity", 300),
+    ),
+}
 # The signature moment gets its own value, found by its fingerprint: the
 # legacy app is the only care app that goes LANDSCAPE, and it does so for
 # exactly one thing — the signature canvas, where the sister and then the
@@ -856,6 +893,11 @@ def _density_wanted(focus: str, hierarchy: str | None = None) -> int | None:
         _left_at[0] = 0.0
         if pkg == "com.hhaexchange.caregiver" and _looks_landscape(hierarchy):
             return SIGNATURE_DENSITY
+        # A measured screen beats the app's blanket value — see PAGE_DENSITY.
+        low = (page or "").casefold()
+        for mark, value in PAGE_DENSITY.get(pkg, ()):
+            if mark in low:
+                return value
         return APP_DENSITY.get(pkg, DEFAULT_DENSITY)
     # Outside the care apps. A density somebody set deliberately for the whole
     # phone still wins — that is a person saying what they want — but with no
