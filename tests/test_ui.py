@@ -4061,6 +4061,71 @@ class TestTheAppsOwnTrail:
         # The pops still count the whole stack, container included.
         assert [c["back"] for c in crumbs] == [1, 0]
 
+    def test_the_sign_in_is_not_somewhere_to_walk_back_to(self):
+        """READ OFF THE LIVE PHONE: inMyTeam's back stack was TWENTY-TWO
+        entries deep and began with the whole sign-in — Visits, Intro,
+        Intro, Intro, …, Login, Verify Code, Schedule, Schedule Visit
+        Detail. Not a parsing mistake; the app really does push every step
+        and never pops one. So the trail was factually right and completely
+        useless, and it offered to walk her back into the passcode screen
+        and the one where the texted code goes.
+
+        A breadcrumb is how to step back, not everything since launch.
+        """
+        from apt_log.ui import screenview
+
+        whole = ["VisitsFragment", "IntroFragment", "LoginFragment",
+                 "VerifyCodeFragment", "ScheduleFragment",
+                 "ScheduleVisitDetailFragment"]
+        says = ["Visits", "Intro", "Login", "Verify Code", "Schedule",
+                "Schedule Visit Detail"]
+        pkg = "com.inmyteam.inmyteam"
+        screenview._crumbs(
+            {"id": "f", "app": pkg,
+             "nav": {"trail": whole[:5], "says": says[:5]}}, "Programación")
+        crumbs = screenview._crumbs(
+            {"id": "f", "app": pkg, "nav": {"trail": whole, "says": says}},
+            "Detalle de la Visita")
+        assert [c["says"] for c in crumbs] == ["Programación",
+                                               "Detalle de la Visita"]
+        assert not any(w in c["says"].lower()
+                       for c in crumbs
+                       for w in ("login", "verify", "código", "intro"))
+
+    def test_the_pops_still_count_the_whole_stack(self):
+        """What is SHOWN is a question of usefulness; what a step costs to
+        walk back to is a fact about the phone. Confusing the two would send
+        Back the wrong number of times — and this trail hides four steps."""
+        from apt_log.ui import screenview
+
+        whole = ["VisitsFragment", "IntroFragment", "LoginFragment",
+                 "VerifyCodeFragment", "ScheduleFragment",
+                 "ScheduleVisitDetailFragment"]
+        pkg = "com.inmyteam.inmyteam"
+        screenview._crumbs(
+            {"id": "f", "app": pkg, "nav": {"trail": whole[:5], "says": []}},
+            "Programación")
+        crumbs = screenview._crumbs(
+            {"id": "f", "app": pkg, "nav": {"trail": whole, "says": []}},
+            "Detalle de la Visita")
+        # Schedule is one pop from the detail, not one from the front of a
+        # shortened list.
+        assert [c["back"] for c in crumbs] == [1, 0]
+
+    def test_a_trail_is_short_by_nature(self):
+        from apt_log.ui import screenview
+
+        deep = [f"Step{i}Fragment" for i in range(12)]
+        pkg = "com.deep.app"
+        for i, name in enumerate(deep):
+            screenview.remember_screen_name(pkg, name, f"Paso {i}")
+        crumbs = screenview._crumbs(
+            {"id": "f", "app": pkg, "nav": {"trail": deep, "says": []}},
+            "Paso 11")
+        assert len(crumbs) == screenview.CRUMB_MAX
+        assert crumbs[-1]["back"] == 0
+        assert crumbs[0]["back"] == screenview.CRUMB_MAX - 1
+
     def test_one_app_never_borrows_another_apps_words(self):
         """Fragment names are per-package: two apps can each have a
         `HomeFragment` meaning quite different things."""

@@ -1778,6 +1778,35 @@ def screen_name(package: str, fragment: str) -> str:
     return (_screen_names.get(package) or {}).get(fragment, "")
 
 
+# SCREENS THAT ARE BEHIND HER, NOT AHEAD OF HER.
+#
+# inMyTeam's back stack, read on the live phone, was TWENTY-TWO entries deep
+# and began with the whole sign-in: Visits, Intro, Intro, Intro, …, Login,
+# Verify Code, Schedule, Schedule Visit Detail. That is not a parsing
+# mistake — the app really does push every step and never pops one — so the
+# trail was factually right and completely useless, and it offered to walk
+# her back into the passcode screen and the one where the texted code goes.
+#
+# A breadcrumb is how to step back, not everything since launch. Anything at
+# or before the last sign-in screen is history she cannot return to and must
+# not be invited to.
+AUTH_FRAGMENT_MARKS = ("login", "signin", "verifycode", "verify", "otp",
+                       "passcode", "intro", "splash", "onboard", "welcome")
+# And a trail is short by nature. Four is the deepest any of these apps
+# actually nests; beyond that it stops being a path and becomes a log.
+CRUMB_MAX = 4
+
+
+def _after_the_sign_in(trail: list[str]) -> list[str]:
+    """The trail from just after the last sign-in screen, or all of it."""
+    cut = -1
+    for i, name in enumerate(trail[:-1]):     # never the screen she is on
+        low = name.lower()
+        if any(mark in low for mark in AUTH_FRAGMENT_MARKS):
+            cut = i
+    return trail[cut + 1:]
+
+
 def _crumbs(doc: dict, title: str = "") -> list[dict]:
     """The app's own trail through itself, as a row of steps.
 
@@ -1794,11 +1823,20 @@ def _crumbs(doc: dict, title: str = "") -> list[dict]:
     it turns into the app's word the first time she goes there.
     """
     nav = doc.get("nav") or {}
-    trail = nav.get("trail") or []
-    says = nav.get("says") or []
+    whole = nav.get("trail") or []
+    says_all = nav.get("says") or []
     package = (doc.get("app") or "")
-    if trail and title:
-        remember_screen_name(package, trail[-1], title)
+    if whole and title:
+        remember_screen_name(package, whole[-1], title)
+    # The pops are counted from the WHOLE stack, always: what is shown is a
+    # question of usefulness, what a step costs to walk back to is a fact
+    # about the phone, and confusing the two would send Back the wrong
+    # number of times.
+    depth_of = {name: i for i, name in enumerate(whole)}
+    last_of_all = len(whole) - 1
+    trail = _after_the_sign_in(whole)[-CRUMB_MAX:]
+    says = [says_all[depth_of[n]] if depth_of.get(n, -1) < len(says_all)
+            else n for n in trail]
     if len(trail) < 2:
         # One step is not a trail, it is just where you are. The nav bar
         # already says that, and a breadcrumb of length one is furniture.
@@ -1821,7 +1859,7 @@ def _crumbs(doc: dict, title: str = "") -> list[dict]:
             continue
         out.append({"at": name,
                     "says": known or (says[i] if i < len(says) else name),
-                    "back": last - i,
+                    "back": last_of_all - depth_of.get(name, last_of_all),
                     "here": i == last})
     if len(out) < 2:
         # What is left is only "you are here", which the title already says.
