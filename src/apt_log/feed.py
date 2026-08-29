@@ -786,6 +786,31 @@ APP_DENSITY = {
 # Keyed on a fragment of the activity, matched case-insensitively, because
 # that is what `_density_wanted` has in hand and it is stable across the
 # app's own renames of everything else.
+#
+# NOT KEYED HERE: THE FUNCIONES (plan-of-care) PAGE, and the measurement is
+# written down because the reason is the answer, not a gap.
+#
+# It was asked for on the same terms as the schedule — every checkbox in one
+# view, no scrolling — and it was measured live on a fourteen-task plan:
+#
+#     14 task rows, pitch 314 px at density 300 (390 for the two whose
+#     category label wraps to two lines), a header block of 279 px, and
+#     Guardar/Cancelar PINNED to the bottom taking 337 px that no amount of
+#     shrinking gives back.
+#
+#     content 4757 px against 1795 px of room. Fitting it needs ~132.
+#
+# 132 is not a smaller version of the same trade. Each row carries two
+# controls a person presses by hand — "Se realizó" and "No realizado" — and
+# at 132 they are about fifty pixels wide. The rule this whole table serves
+# is that she has to be able to drive the phone by hand when something goes
+# wrong; a density that costs her that is the trade the hand-back exists to
+# refuse. And the page is not read by eye in the first place: `check_tasks`
+# ticks the starred rows and scrolls to reach them, which is what a list this
+# long wants.
+#
+# So the page keeps the app's value until somebody decides that trade
+# deliberately. This comment is here so the next person measures nothing.
 PAGE_DENSITY = {
     "com.hhaexchange.uma": (
         ("homeactivity", 300),

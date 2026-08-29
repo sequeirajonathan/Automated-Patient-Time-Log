@@ -2828,10 +2828,19 @@ def _walk_to_agency_picker(driver, report) -> None:
     press(lambda: _by_id(driver, UMA_AGENCIES_ID), "Agencias")
     time.sleep(BACK_SETTLE)
     press(lambda: _by_id(driver, UMA_CHANGE_ID), "the change-provider button")
+    # THIRTY, not twenty. Twenty gave up on a picker that was opening: the
+    # macro raised "the provider picker did not open" and the picker was on
+    # screen when the failure was read, a second or two later. Changing
+    # provider makes the app drop its whole schedule and re-ask the server,
+    # and on the newer phone that lands slower rather than faster.
+    #
+    # A wait that is too short does not fail safely here. It reports that a
+    # navigation did not happen while it is happening, so whatever runs next
+    # starts against a screen nobody expects.
     if not wait_for(
             lambda: feed_mod.screen_for(feed_mod.current_focus() or "",
                                         _tree()) == "agency",
-            timeout=20.0):
+            timeout=30.0):
         raise RuntimeError("the provider picker did not open")
 
 

@@ -1640,6 +1640,55 @@ class TestAliveSessionSurvivesTheColdResume:
                 macros.MACROS["hhax_uma_login"].run(driver, lambda _k: None)
 
 
+class TestThePickerThatOpensSlowly:
+    """Changing provider makes HHAeXchange+ drop its whole schedule and
+    re-ask the server, and on this phone that lands slower than the old wait
+    allowed: the macro raised "the provider picker did not open" and the
+    picker was on screen when the failure was read, seconds later.
+
+    A wait that is too short does not fail safely here — it reports that a
+    navigation did not happen while it is happening, so whatever runs next
+    starts against a screen nobody expects.
+    """
+
+    def _run(self, opens_after: float):
+        """Drive the walk with a picker that appears `opens_after` seconds in.
+
+        The clock is fictional (fast_clock), so this is about the BUDGET the
+        walk allows, not about real seconds.
+        """
+        from apt_log import feed as feed_mod
+
+        driver = MagicMock()
+        seen = {"n": 0}
+
+        def screen_for(_focus, _tree):
+            # Each poll is one tick of the same 0.5s fake clock the wait uses.
+            seen["n"] += 1
+            return "agency" if seen["n"] * 0.5 >= opens_after else "home"
+
+        with patch("apt_log.macros._front_package",
+                   return_value="com.hhaexchange.uma"), \
+             patch("apt_log.macros._tree", return_value="<hierarchy/>"), \
+             patch("apt_log.macros._words", return_value=MagicMock()), \
+             patch("apt_log.macros._by_id", return_value=MagicMock()), \
+             patch.object(feed_mod, "screen_for", side_effect=screen_for), \
+             patch.object(feed_mod, "current_focus", return_value="uma/x"), \
+             patch("apt_log.macros.time.sleep"), fast_clock():
+            macros._walk_to_agency_picker(driver, lambda _k: None)
+
+    def test_a_picker_that_takes_its_time_is_still_waited_for(self):
+        """Twenty seconds was the old budget and it expired on a picker that
+        was opening. Twenty-five must not be a failure."""
+        self._run(opens_after=25.0)
+
+    def test_a_picker_that_never_opens_still_fails(self):
+        """The wait is longer, not absent. A navigation that genuinely did
+        not happen must still say so rather than run on."""
+        with pytest.raises(RuntimeError, match="picker did not open"):
+            self._run(opens_after=10_000.0)
+
+
 class TestTheFormThatIsStillLoading:
     """The wait ends when the email field APPEARS; the page goes on settling
     behind it. The node seen a frame ago can be replaced before anything is
