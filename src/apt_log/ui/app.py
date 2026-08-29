@@ -1975,6 +1975,45 @@ def latest_code_on_the_page():
     return JSONResponse(out)
 
 
+@app.get("/auth/stopped")
+def auth_stopped():
+    """Which apps have had automatic sign-in stood down, and why.
+
+    A STOP NOBODY CAN SEE LOOKS LIKE A BROKEN APP. The automation going quiet
+    is the correct behaviour after a refused password — and from the outside
+    it is indistinguishable from the automation being dead, which is how
+    somebody starts pressing the tile by hand at five in the morning without
+    knowing the account is one attempt from a lockout.
+    """
+    from apt_log import macros as macros_mod
+
+    runner = macros_mod.Runner()
+    out = []
+    for tile in PHONE_APPS:
+        stop = runner.auth_stopped(tile["macro"])
+        if stop:
+            out.append({"app": tile["name"], "id": tile["id"],
+                        "macro": tile["macro"],
+                        "why": stop.get("why", ""),
+                        "at": stop.get("at", 0)})
+    return JSONResponse({"stopped": out})
+
+
+@app.post("/auth/resume")
+async def auth_resume(request: Request):
+    """Let automatic sign-in try again, once the credentials are seen to.
+
+    Deliberately a press by a person: the stop exists because only a person
+    can fix what caused it, so only a person can say it is fixed.
+    """
+    from apt_log import macros as macros_mod
+
+    payload = await request.json()
+    runner = macros_mod.Runner()
+    return JSONResponse(
+        {"ok": runner.resume_auth(str(payload.get("macro") or ""))})
+
+
 @app.get("/signature/roster")
 def signature_roster():
     """Who has adopted a signature. NEVER the signatures themselves.

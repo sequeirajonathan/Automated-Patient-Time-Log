@@ -94,6 +94,42 @@ PREPARE_EVERY = 20.0
 AUTO_AUTH_APP = "com.hhaexchange.caregiver"
 AUTO_AUTH_MACRO = "hhax_legacy_login"
 AUTO_AUTH_COOLDOWN = 90.0
+
+# ------------------------------------------------------ when to STOP trying
+# A COOLDOWN IS NOT A CAP, AND WRONG CREDENTIALS ARE NOT A TRANSIENT FAULT.
+#
+# Watched on the live phone: Mobile Caregiver+ rejected the sign-in at
+# 23:20:36, auto-auth fired again unprompted at 23:20:46, was rejected at
+# 23:21:12, fired again at 23:22:16, and was rejected again at 23:22:42.
+# Three attempts in two minutes, and the app's own dialog said:
+#
+#     "La cuenta del usuario será bloqueada después de 2 intentos."
+#
+# The ninety-second cooldown was doing exactly what it was written to do and
+# it is the wrong instrument. Retrying a password the app has already refused
+# cannot succeed, and here it walks a caregiver's account into a lockout that
+# would stop EVV entry altogether — which is worse than any sign-in failure.
+#
+# So a refusal STOPS the automation for that app until a person clears it.
+# Not a longer cooldown: a stop. The only thing that can fix wrong
+# credentials is somebody typing the right ones.
+AUTH_STOP_PATH = STATE_DIR / "auth-stopped.json"
+
+# What an app says when it will not take the credentials. Matched on the
+# screen's own words in either language, because the reason matters: this is
+# the difference between "try later" and "never again until somebody looks".
+CREDENTIALS_REJECTED = (
+    "usuario o contraseña", "contraseña que ingresó es incorrect",
+    "usuario o clave", "credenciales", "no coinciden",
+    "username or password", "incorrect password", "invalid credentials",
+    "will be locked", "sera bloqueada", "será bloqueada",
+)
+
+# The belt, for a refusal worded in a way the list above does not know. Any
+# auth macro that fails this many times in a row stops on the same terms —
+# because a sign-in that has failed three times running is not about to
+# succeed on the fourth, whatever it says.
+AUTH_MAX_TRIES = 3
 # And how long before a macro that TEXTS SOMEBODY may try again. Fifteen
 # minutes rather than ninety seconds, because the cost of a retry here is not
 # a wasted second, it is another message on a real person's phone. The common
@@ -102,6 +138,12 @@ AUTO_AUTH_COOLDOWN = 90.0
 # number screen with nobody answering.
 SMS_AUTH_COOLDOWN = 15 * 60.0
 SENDS_A_MESSAGE = ("inmyteam_login",)
+
+# The macros that put credentials into an app. Only these are counted toward
+# the cap and only these can be stopped by it: a failing Refresh or Back is
+# somebody's bad afternoon, not an account walking toward a lockout.
+AUTH_MACROS = ("mobile_caregiver_pin", "hhax_uma_login", "inmyteam_login",
+               "hhax_legacy_login")
 # Screens flash through login on their own during app startup; only a login
 # screen the feed has seen *recently and still* is a real landing.
 AUTO_AUTH_FRESH = 6.0
@@ -4279,6 +4321,30 @@ def expiry_on_screen(doc: dict) -> bool:
     return any(m in words for m in markers)
 
 
+def credentials_refused(doc: dict | None) -> bool:
+    """Whether the screen is saying the username or password was wrong.
+
+    Read off the live handset, which put it twice — once as a banner and once
+    in a titled ERROR block:
+
+        "El nombre de usuario o contraseña que ingresó es incorrecto.
+         La cuenta del usuario será bloqueada después de 2 intentos."
+
+    That sentence is the whole reason this function exists. A refusal is not
+    a transient failure to be retried; it is the app telling us that trying
+    again costs the account.
+    """
+    if not doc:
+        return False
+    words = " ".join(
+        (entry.get("txt") or "")
+        for entry in list(doc.get("statics") or []) + list(doc.get("elements") or [])
+    ).casefold()
+    if not words:
+        return False
+    return any(mark in words for mark in CREDENTIALS_REJECTED)
+
+
 def auth_macro_for(app: str, provider=None, doc: dict | None = None) -> str | None:
     """The auth macro for a foreground package — if its secrets exist.
 
@@ -4512,6 +4578,11 @@ class Runner:
         self._auto_auth_at: float | None = None
         # Per macro, so one app's cooldown never gates another's.
         self._auto_auth_seen: dict[str, float] = {}
+        # Consecutive auth failures per macro, in memory only: a restart is a
+        # fair reason to try once more, and the STOP itself is what persists.
+        # Here rather than in `start`, because `execute` is reachable without
+        # ever starting the loop — which is how every test uses it.
+        self._auth_fails: dict[str, int] = {}
         # The frame a stitch walk failed on: not retried until the screen
         # changes, or a stubborn page would be walked forever.
         self._stitch_failed_for: str = ""
@@ -4552,6 +4623,70 @@ class Runner:
         self._thread = threading.Thread(target=self._loop, daemon=True,
                                         name="aptlog-macros")
         self._thread.start()
+
+    # ------------------------------------------------------- the auth stop
+    def _auth_stop_path(self) -> Path:
+        if self._status_path is not None:
+            return self._status_path.parent / AUTH_STOP_PATH.name
+        return AUTH_STOP_PATH
+
+    def _read_stops(self) -> dict:
+        try:
+            stored = json.loads(
+                self._auth_stop_path().read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, ValueError):
+            return {}
+        return stored if isinstance(stored, dict) else {}
+
+    def _write_stops(self, stops: dict) -> None:
+        """Never fatal, and for once that cuts the other way: failing to
+        record a stop means the automation keeps trying, so it is logged
+        loudly rather than swallowed."""
+        try:
+            target = self._auth_stop_path()
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp = target.with_suffix(".tmp")
+            tmp.write_text(json.dumps(stops), encoding="utf-8")
+            os.replace(tmp, target)
+        except OSError as exc:
+            log.error("CANNOT RECORD THE AUTH STOP (%s) — automatic sign-in "
+                      "for this app may keep retrying", exc)
+
+    def auth_stopped(self, macro_name: str) -> dict:
+        """Why automatic sign-in is standing down for this macro, or {}."""
+        entry = self._read_stops().get(macro_name)
+        return entry if isinstance(entry, dict) else {}
+
+    def stop_auth(self, macro_name: str, why: str, tries: int = 0) -> None:
+        """Stand automatic sign-in down for one app until somebody clears it.
+
+        There is no timer on this and there deliberately is not one. The
+        thing that fixes a refused password is a person typing the right one,
+        and a stop that expires by itself would put the account back in front
+        of the same wall — at 3am, with nobody watching.
+        """
+        stops = self._read_stops()
+        if stops.get(macro_name, {}).get("why") == why:
+            return
+        stops[macro_name] = {"at": time.time(), "why": why, "tries": tries}
+        self._write_stops(stops)
+        log.error("automatic sign-in STOPPED for %s: %s", macro_name, why)
+
+    def resume_auth(self, macro_name: str = "") -> bool:
+        """Clear a stop, once the credentials have been seen to."""
+        stops = self._read_stops()
+        if macro_name:
+            if stops.pop(macro_name, None) is None:
+                return False
+        elif stops:
+            stops = {}
+        else:
+            return False
+        self._write_stops(stops)
+        self._auth_fails.pop(macro_name, None) if macro_name else \
+            self._auth_fails.clear()
+        log.info("automatic sign-in resumed (%s)", macro_name or "all")
+        return True
 
     def _auth_seen_path(self) -> Path:
         """Beside the status file, wherever that is — so a test that
@@ -5070,6 +5205,18 @@ class Runner:
                 and not expiry_on_screen(doc)
                 and not wants_to_sign_in(doc)):
             return False
+        # STOPPED MEANS STOPPED. Checked before anything else that could let
+        # an attempt through, because the cost of one more attempt here is a
+        # locked account and no EVV entry at all.
+        if self.auth_stopped(macro_name):
+            return False
+        # And if the app is SAYING it refused the credentials, this is the
+        # moment to stand down — the dialog is on screen and there is no
+        # ambiguity about why. Recorded even though the attempt below would
+        # be blocked anyway, so the portal can say what happened.
+        if credentials_refused(doc):
+            self.stop_auth(macro_name, "credentials_refused")
+            return False
         try:
             age = (datetime.now()
                    - datetime.fromisoformat(doc["at"])).total_seconds()
@@ -5105,6 +5252,22 @@ class Runner:
         self.execute(macro_name, f"auto-{uuid.uuid4().hex[:8]}")
         return True
 
+    def _auth_failed(self, name: str) -> None:
+        """Count a failed sign-in, and stop at the cap.
+
+        The cap is the belt; `credentials_refused` is the braces. A refusal
+        worded in a way that list does not know still ends the same way,
+        because a sign-in that has failed three times running is not about to
+        succeed on the fourth — and on this app the fourth is the one that
+        locks the account.
+        """
+        if name not in AUTH_MACROS:
+            return
+        tries = self._auth_fails.get(name, 0) + 1
+        self._auth_fails[name] = tries
+        if tries >= AUTH_MAX_TRIES:
+            self.stop_auth(name, "too_many_failures", tries=tries)
+
     def execute(self, name: str, rid: str, arg: str = "") -> Status:
         from apt_log import resident
         from apt_log.ui import mirror as mirror_mod
@@ -5136,6 +5299,7 @@ class Runner:
             status.error = type(exc).__name__
             status.at = datetime.now().isoformat()
             write_status(status, self._status_path)
+            self._auth_failed(name)
             return status
 
         status.state = "done"
@@ -5143,6 +5307,11 @@ class Runner:
         status.at = datetime.now().isoformat()
         write_status(status, self._status_path)
         log.info("macro %s finished", name)
+        # A sign-in that WORKED clears the count. Three failures in a row is
+        # the signal; three failures spread across a fortnight of successes
+        # is not, and a counter that never resets would eventually stop a
+        # working app for having had a bad week.
+        self._auth_fails.pop(name, None)
         # A sign-in just landed on the app's home tab; its other tabs have
         # never been opened, so nothing about them is cached. Arm the warm
         # sweep to pre-scan them before she navigates.

@@ -210,7 +210,16 @@ class TestWritePaths:
                          # this list cares about: pressing it makes the phone
                          # do something in the world. The digits are never in
                          # the response; see the route.
-                         "/code/broadcast"}
+                         "/code/broadcast",
+                         # Letting automatic sign-in try again after it stood
+                         # itself down. It writes one short file on the
+                         # CONTROLLER and cannot reach the app, the phone or
+                         # the record — the most it can do is allow a future
+                         # attempt, which is why it is a press by a person
+                         # rather than a timer: the stop exists because only
+                         # a person can fix what caused it, so only a person
+                         # can say it is fixed.
+                         "/auth/resume"}
 
     def test_no_route_accepts_a_raw_coordinate_or_keycode(self, client):
         """/tap takes an element from a named frame; /device takes an action

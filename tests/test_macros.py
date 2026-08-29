@@ -4763,3 +4763,183 @@ class TestTheVerifyButtonIsFoundWhereItActuallyIs:
         source = strip_py_comments(
             Path("src/apt_log/macros.py").read_text(encoding="utf-8"))
         assert 'translate(@text,"VERIFYCA"' not in source
+
+
+class TestARefusedPasswordStopsTheAutomation:
+    """A cooldown is not a cap, and wrong credentials are not transient.
+
+    Watched on the live phone: Mobile Caregiver+ refused the sign-in at
+    23:20:36, auto-auth fired again unprompted at 23:20:46, was refused at
+    23:21:12, fired again at 23:22:16, was refused again at 23:22:42. Three
+    attempts in two minutes, while the app's own dialog said:
+
+        "La cuenta del usuario será bloqueada después de 2 intentos."
+
+    The ninety-second cooldown was doing exactly what it was written to do,
+    and it is the wrong instrument. Retrying a password the app has already
+    refused cannot succeed, and here it walks a caregiver's account into a
+    lockout that stops EVV entry altogether.
+    """
+
+    REFUSAL = ("El nombre de usuario o contraseña que ingresó es incorrecto. "
+               "La cuenta del usuario será bloqueada después de 2 intentos.")
+
+    def _runner(self, tmp_path):
+        return macros.Runner(status_path=tmp_path / "status.json")
+
+    def test_the_live_dialog_is_recognised(self):
+        assert macros.credentials_refused(
+            {"statics": [{"txt": self.REFUSAL}]}) is True
+
+    def test_english_is_recognised_too(self):
+        assert macros.credentials_refused({"statics": [
+            {"txt": "The username or password you entered is incorrect."}]})
+
+    def test_an_ordinary_login_screen_is_not_a_refusal(self):
+        assert macros.credentials_refused({"statics": [
+            {"txt": "Iniciar sesión"}, {"txt": "Contraseña"}]}) is False
+
+    def test_nothing_at_all_is_not_a_refusal(self):
+        assert macros.credentials_refused(None) is False
+        assert macros.credentials_refused({}) is False
+
+    def test_a_stop_is_recorded_and_read_back(self, tmp_path):
+        runner = self._runner(tmp_path)
+        assert runner.auth_stopped("mobile_caregiver_pin") == {}
+        runner.stop_auth("mobile_caregiver_pin", "credentials_refused")
+        assert runner.auth_stopped("mobile_caregiver_pin")["why"] == \
+            "credentials_refused"
+
+    def test_it_survives_a_restart(self, tmp_path):
+        """The point of writing it down. A stop that a service restart clears
+        is a stop that ends at the next deploy, which is nightly."""
+        self._runner(tmp_path).stop_auth("mobile_caregiver_pin", "refused")
+        assert self._runner(tmp_path).auth_stopped("mobile_caregiver_pin")
+
+    def test_it_stops_one_app_and_not_the_others(self, tmp_path):
+        runner = self._runner(tmp_path)
+        runner.stop_auth("mobile_caregiver_pin", "credentials_refused")
+        assert runner.auth_stopped("inmyteam_login") == {}
+        assert runner.auth_stopped("hhax_uma_login") == {}
+
+    def test_there_is_no_timer_on_it(self, tmp_path):
+        """Deliberately. What fixes a refused password is a person typing the
+        right one; a stop that expired by itself would put the account back in
+        front of the same wall at 3am with nobody watching."""
+        runner = self._runner(tmp_path)
+        runner.stop_auth("mobile_caregiver_pin", "credentials_refused")
+        assert runner.auth_stopped("mobile_caregiver_pin")
+        assert runner.resume_auth("mobile_caregiver_pin") is True
+        assert runner.auth_stopped("mobile_caregiver_pin") == {}
+
+    def test_three_failures_in_a_row_stop_it_too(self, tmp_path):
+        """The belt, for a refusal worded in a way the list does not know."""
+        runner = self._runner(tmp_path)
+        for _ in range(macros.AUTH_MAX_TRIES):
+            runner._auth_failed("mobile_caregiver_pin")
+        assert runner.auth_stopped("mobile_caregiver_pin")["why"] == \
+            "too_many_failures"
+
+    def test_two_failures_do_not(self, tmp_path):
+        runner = self._runner(tmp_path)
+        for _ in range(macros.AUTH_MAX_TRIES - 1):
+            runner._auth_failed("mobile_caregiver_pin")
+        assert runner.auth_stopped("mobile_caregiver_pin") == {}
+
+    def test_only_the_sign_in_macros_are_counted(self, tmp_path):
+        """A failing Refresh is somebody's bad afternoon, not an account
+        walking toward a lockout."""
+        runner = self._runner(tmp_path)
+        for _ in range(macros.AUTH_MAX_TRIES + 2):
+            runner._auth_failed("open_mobile_caregiver")
+        assert runner.auth_stopped("open_mobile_caregiver") == {}
+
+    def test_the_cap_counts_macros_that_type_credentials(self):
+        for name in macros.AUTH_MACROS:
+            assert name in macros.MACROS, name
+
+    def test_a_success_clears_the_count(self):
+        """Three failures in a row is the signal. Three failures spread over
+        a fortnight of successes is not, and a counter that never reset would
+        eventually stop a working app for having had a bad week."""
+        from conftest import strip_py_comments
+
+        source = strip_py_comments(
+            Path("src/apt_log/macros.py").read_text(encoding="utf-8"))
+        body = source.split("def execute(", 1)[1]
+        assert 'self._auth_fails.pop(name, None)' in body
+
+
+class TestTheGateHonoursTheStop:
+    """A stop that nothing consults is not a stop.
+
+    Written after an injection test removed the check from
+    `maybe_auto_auth` and the whole suite still passed: everything about
+    recording, persisting and clearing a stop was covered, and the one
+    behaviour the feature exists for — the gate refusing to fire — was not.
+    """
+
+    def _doc(self, tmp_path, app="com.hhaexchange.uma", screen="login",
+             words=()):
+        import datetime as dt
+
+        path = tmp_path / "screen.json"
+        path.write_text(json.dumps({
+            "app": app, "screen": screen, "blocked": "",
+            "statics": [{"txt": w} for w in words],
+            "at": dt.datetime.now().isoformat()}))
+        return path
+
+    def _runner(self, tmp_path):
+        from apt_log.secrets import (UMA_PASSWORD, UMA_USERNAME,
+                                     MemorySecretProvider)
+
+        (tmp_path / "viewers.json").write_text(json.dumps({"n": 1}))
+        return macros.Runner(
+            tmp_path / "req.json", tmp_path / "status.json",
+            screen_path=tmp_path / "screen.json",
+            viewers_path=tmp_path / "viewers.json",
+            secrets=MemorySecretProvider(**{UMA_USERNAME: "u",
+                                            UMA_PASSWORD: "p"}))
+
+    def test_a_stopped_app_does_not_sign_in(self, tmp_path):
+        """The whole feature. Every attempt past a refusal costs one of the
+        two the app said were left."""
+        self._doc(tmp_path)
+        runner = self._runner(tmp_path)
+        runner.stop_auth("hhax_uma_login", "credentials_refused")
+        with patch.object(runner, "execute") as execute:
+            assert runner.maybe_auto_auth() is False
+        execute.assert_not_called()
+
+    def test_it_signs_in_again_once_the_stop_is_cleared(self, tmp_path):
+        self._doc(tmp_path)
+        runner = self._runner(tmp_path)
+        runner.stop_auth("hhax_uma_login", "credentials_refused")
+        runner.resume_auth("hhax_uma_login")
+        with patch.object(runner, "execute") as execute:
+            assert runner.maybe_auto_auth() is True
+        execute.assert_called_once()
+
+    def test_a_refusal_on_screen_stops_it_there_and_then(self, tmp_path):
+        """The dialog is up and there is no ambiguity about why. Standing
+        down at that moment is what keeps the next attempt from happening at
+        all."""
+        self._doc(tmp_path, words=(
+            "El nombre de usuario o contraseña que ingresó es incorrecto.",))
+        runner = self._runner(tmp_path)
+        with patch.object(runner, "execute") as execute:
+            assert runner.maybe_auto_auth() is False
+        execute.assert_not_called()
+        assert runner.auth_stopped("hhax_uma_login")["why"] == \
+            "credentials_refused"
+
+    def test_stopping_one_app_leaves_another_signing_in(self, tmp_path):
+        """Mobile Caregiver+ being stopped must not park HHAeXchange+ — the
+        exact shape of the bug the per-macro cooldown was written for."""
+        self._doc(tmp_path)
+        runner = self._runner(tmp_path)
+        runner.stop_auth("mobile_caregiver_pin", "credentials_refused")
+        with patch.object(runner, "execute") as execute:
+            assert runner.maybe_auto_auth() is True
+        assert execute.call_args.args[0] == "hhax_uma_login"
