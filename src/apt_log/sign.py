@@ -1040,16 +1040,27 @@ MOVE_MS = 12
 # goes to the pad.
 #
 # THE PRICE IS A SHORT HORIZONTAL LEAD-IN at the start of each stroke, and it
-# is chosen to be as small as the phone will accept: 8px worked in every
-# trial, 16 is the same result with margin, and both are under 2% of the
-# pad's width. A visible nub beats a missing letter.
+# is now four pixels rather than sixteen, because a second round of trials
+# found the MECHANISM rather than a threshold. The sheet decides on the
+# DIRECTION of the first movement, not on how far it travels:
+#
+#     prime  0px .... 0 of 5 landed
+#     prime  2px .... 5 of 5
+#     prime  4px .... 5 of 5      8px .... 5 of 5      16px .... 5 of 5
+#
+# Nothing between 2 and 16 behaves differently, so sixteen was buying no
+# margin at all — only a visible tick at the start of every stroke, which is
+# what the caregiver's eye went to. Four is twice the smallest that works and
+# a quarter of what it was: 0.4% of the pad's width, narrower than the ink.
+#
+# Re-checked at 4px across four stroke shapes on the live pad — straight down,
+# up and to the left, down and right, and a tight loop — 20 of 20.
 #
 # It also explains the report this project could not reproduce for weeks: "one
 # continuous swipe gets the full signature, lifting the finger breaks it".
 # Every lift starts a new gesture, and every new gesture is another chance for
 # the sheet to take it.
-CLAIM_NUDGE = 16
-CLAIM_STEP = 5
+CLAIM_NUDGE = 4
 
 # A DOT IS NOT A DRAG, AND MUST NOT BE GIVEN ONE.
 #
@@ -1221,18 +1232,14 @@ def _draw(driver, path) -> None:
     # NOT FOR A DOT — see DOT_MARK. There is no drag to be stolen, and the
     # nudge is what turned two tittles into two straight lines.
     way = 1 if path[-1][0] >= x0 else -1
-    if len(path) > 1:
-        step = CLAIM_STEP
-        while step <= CLAIM_NUDGE:
-            pen.move_to_location(x0 + way * step, y0)
-            step += CLAIM_STEP
-        pen.move_to_location(x0 + way * CLAIM_NUDGE, y0)
-        # Back to where the stroke actually starts, so the signature itself is
-        # drawn from its own first point.
-        pen.move_to_location(x0, y0)
-    else:
-        pen.move_to_location(x0 + DOT_MARK, y0)
-        pen.move_to_location(x0, y0)
+    # One step out and one back. It used to walk out in five-pixel steps
+    # because it had sixteen pixels to cover; at four there is nothing to
+    # walk, and the loop was emitting its last point twice.
+    lead = CLAIM_NUDGE if len(path) > 1 else DOT_MARK
+    pen.move_to_location(x0 + way * lead, y0)
+    # Back to where the stroke actually starts, so the signature itself is
+    # drawn from its own first point.
+    pen.move_to_location(x0, y0)
     for x, y in path[1:]:
         pen.move_to_location(x, y)
     pen.pause(PEN_SETTLE)

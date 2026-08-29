@@ -1660,8 +1660,10 @@ class TestTheSheetWasEatingTheStrokes:
         assert moves.index(path[0]) < moves.index(path[1])
 
     def test_the_prime_is_small(self):
-        """A visible nub beats a missing letter, but only just: 8px worked in
-        every trial and 16 is the same result with margin."""
+        """It is the DIRECTION of the first move that matters, not the
+        distance: 0px lands nothing and 2px lands everything, with no
+        difference anywhere up to 16. So the lead-in is as short as it can be
+        while still being twice the smallest that works."""
         moves = self._chain([(500, 1600), (500, 1900)])
         xs = [m[0] for m in moves if m != "DOWN" and m != "UP"]
         assert max(xs) - 500 <= sign.CLAIM_NUDGE
@@ -1835,12 +1837,26 @@ class TestADotIsNotADrag:
             sign._draw(MagicMock(), path)
         return moves
 
-    def _travel(self, moves):
-        points = [m for m in moves if m not in ("DOWN", "UP")]
-        return max(abs(x - points[0][0]) for x, _ in points)
+    def _lead_in(self, moves):
+        """How far sideways the pen goes BEFORE it starts the real stroke.
+
+        Measured up to the point where the path itself resumes, not across
+        every move: once the lead-in shrank to four pixels the stroke's own
+        first step was further than it, and "max travel" stopped describing
+        the thing under test.
+        """
+        origin = moves[0]                      # where the pen went down
+        lead = []
+        for m in moves[moves.index("DOWN") + 1:]:
+            if m == "UP":
+                break
+            lead.append(m)
+            if m == origin:
+                break            # back at the start: the lead-in is over
+        return max(abs(x - origin[0]) for x, _ in lead)
 
     def test_a_dot_does_not_get_the_lead_in(self):
-        assert self._travel(self._chain([(500, 1600)])) <= sign.DOT_MARK
+        assert self._lead_in(self._chain([(500, 1600)])) <= sign.DOT_MARK
 
     def test_a_dot_still_marks_something(self):
         """A pad that draws on move events renders a bare down-up as nothing,
@@ -1857,13 +1873,13 @@ class TestADotIsNotADrag:
     def test_a_real_stroke_still_gets_the_lead_in(self):
         """The dots were the artefact; the strokes were the reason it exists,
         and 0 of 16 landed without it."""
-        assert self._travel(self._chain(
+        assert self._lead_in(self._chain(
             [(500, 1600), (500, 1900)])) == sign.CLAIM_NUDGE
 
     def test_a_two_point_stroke_counts_as_a_stroke(self):
         """The boundary is one point, not "short". Two points is a drag and a
         drag can be stolen."""
-        assert self._travel(self._chain(
+        assert self._lead_in(self._chain(
             [(500, 1600), (505, 1900)])) == sign.CLAIM_NUDGE
 
     def test_the_dot_lands_where_it_was_drawn(self):
