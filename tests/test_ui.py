@@ -5671,3 +5671,58 @@ class TestARowPerAppBecauseAMarkIsPerApp:
                  for p in client.get("/signature/map").json()["people"]
                  if p["role"] == "staff"}
         assert staff == {"inMyTeam": True, "HHAeXchange+": False}
+
+
+class TestBackNeverLeavesTheAppBehind:
+    """Reported: pressing Back on Exchange+ landed in another app.
+
+    The refusal that exists for this only fires on an app that ANSWERS.
+    HHAeXchange+ does not — it is Compose, publishes no fragment stack, and
+    `nav_state` returns nothing for it. Nor can the task be read instead:
+    that app keeps its schedule AND its visit detail in one activity and
+    swallows Back itself, so "one activity, root of its task" is just as
+    true on the page where Back correctly goes back.
+
+    Unpredictable is not the same as unrecoverable.
+    """
+
+    UMA = "com.hhaexchange.uma"
+
+    def _feed(self, monkeypatch, focuses):
+        import sys
+
+        from apt_log import feed as feed_mod
+
+        ui = sys.modules["apt_log.ui.app"]
+        seen = list(focuses)
+        sent = []
+        monkeypatch.setattr(feed_mod, "current_focus",
+                            lambda: seen.pop(0) if len(seen) > 1 else seen[0])
+        monkeypatch.setattr(feed_mod, "_adb",
+                            lambda args, *a, **k: sent.append(args))
+        monkeypatch.setattr(ui, "BACK_SETTLE", 0)
+        return ui, sent
+
+    def test_a_back_that_left_brings_the_app_straight_back(self, monkeypatch):
+        ui, sent = self._feed(monkeypatch, [
+            "com.inmyteam.inmyteam/.MainActivity"])
+        assert ui._return_if_back_left(self.UMA) is True
+        assert any("monkey" in a and self.UMA in a for a in sent)
+
+    def test_a_back_that_stayed_is_left_alone(self, monkeypatch):
+        """Re-launching an app that never left would throw away the screen
+        she was on."""
+        ui, sent = self._feed(monkeypatch, [
+            self.UMA + "/com.hhaexchange.carehub.ui.activities.HomeActivity"])
+        assert ui._return_if_back_left(self.UMA) is False
+        assert sent == []
+
+    def test_a_press_is_given_a_moment_to_land(self, monkeypatch):
+        """A Back does not take effect instantly, and reading the focus too
+        early would call every press an escape."""
+        ui, sent = self._feed(monkeypatch, [
+            "",                                   # nothing focused yet
+            self.UMA + "/HomeActivity",           # ...and it was there
+            self.UMA + "/HomeActivity"])
+        assert ui._return_if_back_left(self.UMA) is False
+        assert sent == []

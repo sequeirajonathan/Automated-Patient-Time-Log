@@ -5404,3 +5404,94 @@ class TestTheDayMobileCaregiverWillNotVouchFor:
         assert macros._mc_scheduled_date(
             "en domingo, 6 de septiembre de 2026") == date(2026, 9, 6)
         assert macros._mc_scheduled_date("no date here at all") is None
+
+
+class TestOpeningTodayDoesNotLookLikeLeaving:
+    """"Expand the patient cards for today before we consider the page
+    loaded" — asked for repeatedly, and today's SECOND patient was never
+    opened on any walk.
+
+    The guard after a fold tap reused `_page_folds`, which demands a RUN of
+    date headers because its real job is "may I trust a row tap on this
+    page at all". Opening a card pushes the rest of the week down, and at
+    density 300 that put the third date header off the viewport — so the
+    guard read its own success as a navigation, gave up, and left the rest
+    of today folded.
+    """
+
+    def _dates(self, n):
+        return [{"cls": "TextView", "txt": f"agosto {20 + i}, 2026",
+                 "b": [9, 347 + i * 300, 98, 363 + i * 300]} for i in range(n)]
+
+    def test_one_date_is_enough_to_say_we_are_still_here(self):
+        """A card that grew can push every other day off the screen, and the
+        page is still the schedule."""
+        assert macros._still_the_schedule(self._dates(1)) is True
+
+    def test_a_page_with_no_dates_at_all_is_somewhere_else(self):
+        """A visit detail carries none — that is what going somewhere looks
+        like."""
+        assert macros._still_the_schedule(
+            [{"cls": "TextView", "txt": "Detalles de la visita",
+              "b": [0, 0, 10, 10]}]) is False
+
+    def test_the_stricter_test_still_guards_the_first_tap(self):
+        """The two ask different questions and must keep different answers:
+        one date is still not a page to go tapping rows on."""
+        assert macros._page_folds(self._dates(1)) is False
+        assert macros._page_folds(self._dates(3)) is True
+
+    def test_every_folded_card_in_today_is_opened(self, tmp_path, monkeypatch):
+        """The whole point: two patients today, both opened before anything
+        is captured.
+
+        The fake grows when a card opens, and the viewport does not — which
+        is the real mechanism. At density 300 the third date header went off
+        the bottom the moment today's first visit expanded.
+        """
+        monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
+        VIEW, GROW = 1600, 600
+
+        def page(folded):
+            opened = 2 - len(folded)
+            out = ('<node class="android.widget.TextView" '
+                   'text="agosto 29, 2026 (Hoy)" clickable="false" '
+                   'bounds="[9,300][98,316]"/>')
+            for i in range(2):
+                y = 401 + i * 120
+                out += (f'<node class="android.view.View" clickable="true" '
+                        f'bounds="[25,{y}][700,{y + 32}]"/>'
+                        f'<node class="android.widget.TextView" '
+                        f'text="PACIENTE {i}" clickable="false" '
+                        f'bounds="[25,{y}][142,{y + 16}]"/>')
+                shut = i in folded
+                out += ('<node class="android.widget.TextView" text="\uf054" '
+                        f'clickable="false" bounds="[694,{y + 3}][700,{y + 14}]"/>'
+                        if shut else
+                        '<node class="android.widget.TextView" text="\uf054" '
+                        f'clickable="false" bounds="[692,{y + 6}][703,{y + 12}]"/>')
+            # The days after today, shoved down by whatever has opened, and
+            # gone from the tree once they leave the screen.
+            for n, label in enumerate(("agosto 31, 2026", "septiembre 1, 2026")):
+                y = 700 + n * 300 + opened * GROW
+                if y < VIEW:
+                    out += ('<node class="android.widget.TextView" '
+                            f'text="{label}" clickable="false" '
+                            f'bounds="[9,{y}][98,{y + 16}]"/>')
+            return out
+
+        state = {"folded": {0, 1}}
+        driver = MagicMock()
+        driver.get_window_size.return_value = {"width": 720, "height": VIEW}
+        driver.current_package = "com.hhaexchange.uma"
+        driver.current_activity = ".HomeActivity"
+        type(driver).page_source = property(lambda _s: page(state["folded"]))
+
+        def tap(_x, y):
+            state["folded"] = {i for i in state["folded"]
+                               if not (401 + i * 120 <= y <= 433 + i * 120)}
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
+             patch("apt_log.macros._tap_xy", side_effect=tap) as tapped:
+            macros._stitch_walk(driver, assume_top=True)
+        assert tapped.call_count == 2, "the second patient was left folded"
+        assert state["folded"] == set()

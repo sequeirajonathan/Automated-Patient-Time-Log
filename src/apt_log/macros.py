@@ -1217,6 +1217,25 @@ def _page_folds(statics: list[dict]) -> bool:
     return dates >= EXPAND_MIN_DATE_HEADERS
 
 
+def _still_the_schedule(statics: list[dict]) -> bool:
+    """Whether a tap left us on the schedule at all.
+
+    DELIBERATELY WEAKER THAN `_page_folds`, and the difference is the bug it
+    was written for. That one asks "may I trust a row tap here", and demands
+    a RUN of dates so a details page can never qualify. Reused afterwards it
+    asks something else entirely — and gets it wrong, because opening a card
+    pushes the rest of the week down: at density 300 expanding today's first
+    visit put the third date header off the viewport, the guard read its own
+    success as a navigation, and it stopped. Today's second patient was never
+    opened, on every walk, which is what "expand the cards for today" kept
+    meaning and not getting.
+
+    Going somewhere loses the dates ENTIRELY — a visit detail has none at
+    all — so one is enough to say we are still here.
+    """
+    return any(_DATE_HEADER.search(s.get("txt") or "") for s in statics)
+
+
 def _today_span(statics: list[dict]) -> tuple[int, int] | None:
     """The y-range of TODAY's section: from its marked header ("agosto 17,
     2026 (Hoy)") down to the next date header, or None when today is not
@@ -1463,7 +1482,7 @@ def _stitch_walk(driver, assume_top: bool = False) -> bool:
                 # An unfolded card keeps the page's date headers and its
                 # chevrons (one merely rotated); a page missing them is
                 # wherever the tap navigated to instead.
-                if (not _page_folds(fresh["statics"])
+                if (not _still_the_schedule(fresh["statics"])
                         or _chevron_count(fresh["statics"]) < before - 2):
                     expanding = False
                     return _back_out_of_the_fold(driver, was, capture)

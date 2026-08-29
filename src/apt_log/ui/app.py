@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request, Response, WebSocket, WebSocketDisconnect
@@ -1737,6 +1738,37 @@ def _back_would_leave() -> bool:
         return False
 
 
+BACK_SETTLE = 0.7
+BACK_RETURN_TRIES = 3
+
+
+def _return_if_back_left(package: str) -> bool:
+    """Put the app back if the Back press popped it. True if it had to.
+
+    Nothing about pressing Back means leaving the app she is working in —
+    that is Home's job, and it has its own button. Given a moment because a
+    press does not land instantly, and re-read rather than assumed: an app
+    that is still in front needs nothing, and re-launching one that never
+    left would throw away the screen she was on.
+    """
+    from apt_log import feed as feed_mod
+
+    for _ in range(BACK_RETURN_TRIES):
+        time.sleep(BACK_SETTLE)
+        focus = feed_mod.current_focus() or ""
+        if not focus:
+            continue
+        if focus.split("/")[0] == package:
+            return False
+    log.warning("back left %s — bringing it back", package)
+    try:
+        feed_mod._adb(["shell", "monkey", "-p", package,
+                       "-c", "android.intent.category.LAUNCHER", "1"])
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not bring %s back (%s)", package, exc)
+    return True
+
+
 async def _do_device(msg: dict) -> dict:
     """Back, Home, Recents, Wake — over the socket rather than a form post.
 
@@ -1760,6 +1792,32 @@ async def _do_device(msg: dict) -> dict:
         # before it is sent. Leaving an app is Home's job.
         log.info("back refused: the app is on its own first page")
         return {"type": "device_result", "ok": False, "rooted": True}
+    # WHERE WE WERE, so a Back that leaves can be undone at once.
+    #
+    # The refusal above only fires on an app that ANSWERS. HHAeXchange+ does
+    # not: it is Compose, its task holds a single activity, and it publishes
+    # no fragment stack at all — `nav_state` returns nothing for it. Nor can
+    # the task be read instead, because that app keeps its schedule AND its
+    # visit detail in the one activity and swallows Back itself, so "one
+    # activity, root of its task" is just as true on the page where Back
+    # correctly goes back.
+    #
+    # So on that app the press is a guess, and at the schedule's root the
+    # guess costs the app: reported as pressing Back on Exchange+ and
+    # landing in another app entirely. Unpredictable is not the same as
+    # unrecoverable — where it cannot be foreseen it is checked afterwards,
+    # which takes one adb round trip rather than the containment watchdog's
+    # five-second dwell.
+    was = ""
+    if action == "back":
+        try:
+            from apt_log import feed as feed_mod
+
+            focus = await asyncio.to_thread(feed_mod.current_focus) or ""
+            here = focus.split("/")[0]
+            was = here if here in feed_mod.CARE_APPS else ""
+        except Exception:  # noqa: BLE001 — not knowing is not a reason to refuse
+            was = ""
     try:
         # adb round trip. On the event loop it would stall every viewer's
         # frames, the same reason a tap does not run there.
@@ -1768,6 +1826,9 @@ async def _do_device(msg: dict) -> dict:
         log.warning("device action refused: %s", exc)
         return {"type": "device_result", "ok": False}
     log.info("device action %s sent over the socket", action)
+
+    if was:
+        await asyncio.to_thread(_return_if_back_left, was)
 
     # Back and Home change the screen; wake the hierarchy watcher so the
     # wireframe follows without waiting out its interval.
