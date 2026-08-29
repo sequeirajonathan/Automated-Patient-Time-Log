@@ -1645,20 +1645,19 @@
   /* Every button that reaches the phone carries the phone. The words are the
      app's own — they name the app's buttons — and this is what makes them
      unmistakably not hers. */
-  .padrow.onphone button { position:relative; padding-left:34px; }
-  /* The mark that says "this one presses the PHONE, not the portal". It was
-     a bare 11x18 rounded rectangle, which is not a phone — it is an empty
-     box, and it was reported as one: "those two icons next to Borrar and
-     Enviar are broken, they don't show anything".
-     The screen line and the home bar are what make it read as a handset at
-     this size. Drawn rather than a glyph so no font has to have it. */
-  .padrow.onphone button::before { content:""; position:absolute;
-              left:13px; top:50%; margin-top:-10px; width:13px; height:20px;
-              border:1.6px solid currentColor; border-radius:3px;
-              opacity:.75; }
-  .padrow.onphone button::after { content:""; position:absolute;
-              left:16px; top:50%; margin-top:5px; width:7px; height:1.6px;
-              border-radius:1px; background:currentColor; opacity:.75; }
+  /* NO HANDSET GLYPH HERE ANY MORE.
+     It was a 13x20 outline with a home bar, drawn to say "this one presses
+     the PHONE". It has been reported as broken twice — "those two icons next
+     to Borrar and Enviar are broken, they don't show anything", and then
+     again as "the icon is broke in the hecho button" — because at that size
+     an outlined rectangle with a dash in it is an empty box, whatever it was
+     meant to be. The row already carries the heading "2 — then finish on the
+     phone", which says the same thing in words that cannot be misdrawn. */
+  /* The app's own clear. Not the filled pill — it wipes the signature
+     already on the phone, and that is not a thing to press by reaching for
+     the button that finishes. */
+  .padrow .wipe { background:hsl(0 72% 51% / .12); color:var(--bad);
+                  font-weight:600; }
   #sign-appbtns button { min-height:46px; }
   .approw-label { flex:0 1 auto; font-size:13px; }
   .padrow button { flex:1; padding:12px; border-radius:13px;
@@ -2626,7 +2625,6 @@
       patient: {{ t('sign.waiting.patient')|tojson }},
       staff: {{ t('sign.waiting.staff')|tojson }},
     },
-    signNotThisOne: {{ t('sign.not_this_one')|tojson }},
     switchingAgency: {{ t('macro.step.opening_the_agencies')|tojson }},
     coachOn:   {{ t('papp.coach_on')|tojson }},
     coachOff:  {{ t('papp.coach_off')|tojson }},

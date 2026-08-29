@@ -1008,15 +1008,29 @@ def _code_screen(doc: dict) -> bool:
         return False
 
 
-def _role_signer(role: str) -> str:
-    """The person who fills this signature role on today's round.
+def _role_signer(role: str, doc: dict) -> str:
+    """The person who fills this signature role, or "".
 
-    The patient comes from the visit in hand and the caregiver from the
-    schedule's own record of whose round it is — neither is guessed from the
-    screen, because the screen is precisely what does not say.
+    THE PATIENT COMES FROM THE SCREEN, NOT FROM THE CLOCK.
 
-    "" when the schedule cannot answer, which keeps the pad's rule intact:
-    a name it is not sure of is worse than no name at all.
+    The first version asked the schedule for the visit in hand — the one
+    running now, else the next one up. It named the wrong person within the
+    hour: at 18:37, with a patient's check-out sheet open, her visit had
+    ended, so "the next visit" was somebody else's and the pad announced
+    "this screen is asking for <the next patient>'s signature" over the
+    wrong patient's record. Reported immediately: "Wrong patient. This is
+    not Marina."
+
+    A signature belongs to the visit whose sheet is open, and the clock does
+    not know which that is. The screen does: the visit detail carries its
+    patient's name, and the check-out sheet is that same page. So the
+    schedule is used only as the list of names this round can legitimately
+    involve, and the SCREEN has to corroborate — exactly one of them
+    present, or the answer is "".
+
+    "" is a real answer and the safe one: the pad then says which ROLE it is
+    waiting for and names nobody, which is what it did before this existed.
+    A name it is not sure of is worse than no name at all.
     """
     from apt_log import schedule as schedule_mod
 
@@ -1025,18 +1039,16 @@ def _role_signer(role: str) -> str:
     except Exception:  # noqa: BLE001
         return ""
     if role == "staff":
+        # One caregiver on this round, named in the schedule itself. No
+        # corroboration to do and nobody to confuse her with.
         return plan.caregiver or ""
     if role != "patient":
         return ""
-    from datetime import datetime
-
-    try:
-        now = datetime.now(plan.zone)
-        visit = plan.current(now) or next(iter(plan.upcoming(now, limit=1)),
-                                          None)
-    except Exception:  # noqa: BLE001
-        return ""
-    return getattr(visit, "patient", "") or ""
+    words = " ".join((s.get("txt") or "") for s in (doc.get("statics") or []))
+    folded = " ".join(words.casefold().split())
+    seen = {b.patient for b in getattr(plan, "blocks", []) or []
+            if b.patient and " ".join(b.patient.casefold().split()) in folded}
+    return seen.pop() if len(seen) == 1 else ""
 
 
 def _sheet_actions(doc: dict, model: dict | None) -> list[dict]:
@@ -1514,7 +1526,7 @@ async def live(ws: WebSocket):
                 # wrong signature was one mis-tap away.
                 _role = sign.signer_role(screen_doc)
                 if not _signer and _role:
-                    _signer = _role_signer(_role)
+                    _signer = _role_signer(_role, screen_doc)
                 payload["screen"] = {
                     "id": screen_doc.get("id", ""),
                     "name": screen_doc.get("screen", "unknown"),

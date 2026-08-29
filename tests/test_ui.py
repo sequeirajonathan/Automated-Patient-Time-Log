@@ -2062,9 +2062,20 @@ class TestThePadSaysWhereEachButtonActs:
         body = client.get("/app").text
         assert 'id="sign-send" class="signsend"' in body
 
-    def test_every_button_that_reaches_the_phone_carries_the_phone(self):
+    def test_the_words_say_where_each_row_acts_without_a_glyph(self):
+        """The row that presses the PHONE carried a drawn handset. It was
+        reported as broken twice — as icons that "don't show anything", and
+        again as "the icon is broke in the hecho button" — because at 13 by
+        20 pixels an outlined rectangle with a dash in it is an empty box
+        whatever it was meant to be.
+
+        The heading above the row says the same thing in words, which is
+        what it was doing the work of anyway. Dropped rather than redrawn a
+        third time."""
         css = self._css()
-        assert ".padrow.onphone button::before" in css
+        assert ".padrow.onphone button::before" not in css
+        assert ".padrow.onphone button::after" not in css
+        assert "sign.step_phone" in self.PAGE.read_text(encoding="utf-8")
 
     def test_the_phone_step_is_across_a_rule(self, client):
         css = self._css()
@@ -4063,14 +4074,14 @@ class TestThePadsButtonDoesNotLookLikeTheFinish:
         js = self._js()
         assert "markDrawn(false)" in js
 
-    def test_the_phone_mark_looks_like_a_phone(self):
-        """It was a bare rounded rectangle — an empty box, and reported as
-        one. A screen line and a home bar are what make it read as a handset
-        at 13 by 20 pixels."""
+    def test_there_is_no_handset_glyph_left_to_break(self):
+        """Two attempts at drawing one, two reports of it rendering as an
+        empty box. The row's own heading says to finish on the phone, and a
+        sentence cannot be misdrawn."""
         css = Path("src/apt_log/ui/templates/phone.html").read_text(
             encoding="utf-8")
-        assert ".padrow.onphone button::before" in css
-        assert ".padrow.onphone button::after" in css
+        assert ".padrow.onphone button::before" not in css
+        assert ".padrow.onphone button::after" not in css
 
     def test_step_two_is_the_one_emphasised_once_the_ink_has_landed(self):
         css = Path("src/apt_log/ui/templates/phone.html").read_text(
@@ -4618,18 +4629,84 @@ class TestThePadKnowsWhoseSignatureItIsCollecting:
         assert "function openPad()" in js
         assert "if (body.classList.contains('signing')) return;" in js
 
-    def test_the_wrong_party_is_marked_and_asks_before_it_applies(self):
-        """"If it says firma del paciente the pencil drawer should know that
-        it's not Sadia Amselem." Marked, not removed: a match this got wrong
-        must still be correctable by the person who can see the room."""
+    def test_the_wrong_party_is_not_offered_at_all(self):
+        """Dimming it was the first answer and it was not enough: "I clicked
+        on patient, why is Sadia Amselem auto signature button still
+        rendered?" A button on the screen can be pressed, and what it
+        presses is one person's signature onto another person's record."""
         js = self._js()
-        assert "b.classList.toggle('notthisone', wrong)" in js
-        assert "wrongArmed = b.dataset.name;" in js
-        assert "signNotThisOne" in js
+        assert "const wrong = !!signerAdopted && !mine;" in js
+        assert "b.hidden = wrong;" in js
 
-    def test_an_armed_press_does_not_survive_a_change_of_signature(self):
+    def test_a_hidden_party_cannot_be_applied_by_a_stray_press(self):
+        """The row is delegated, so the guard belongs at the handler too and
+        not only in the drawing."""
         js = self._js()
-        assert "if (signerRole !== wasRole) wrongArmed = '';" in js
+        assert "if (!b || !b.dataset.name || b.hidden) return;" in js
+
+    def test_the_patient_comes_from_the_screen_and_not_from_the_clock(self):
+        """THE BUG THAT REACHED THE ROOM. The first version asked the
+        schedule for the visit in hand — running now, else next up. At 18:37,
+        with a patient's check-out sheet open, her visit had ended, so "next"
+        was somebody else's and the pad announced it was asking for the wrong
+        person's signature over the right person's record. "Wrong patient.
+        This is not Marina."
+
+        A signature belongs to the visit whose sheet is open, and the clock
+        does not know which that is. The screen does.
+        """
+        import importlib
+        from types import SimpleNamespace
+
+        uiapp = importlib.import_module("apt_log.ui.app")
+        plan = SimpleNamespace(
+            caregiver="A Caregiver",
+            blocks=[SimpleNamespace(patient="ROSA EJEMPLO"),
+                    SimpleNamespace(patient="OTRA PERSONA")])
+        onscreen = {"statics": [{"txt": "ROSA EJEMPLO"},
+                                {"txt": "Firma del Paciente"}]}
+        with patch("apt_log.schedule.load", return_value=plan):
+            assert uiapp._role_signer("patient", onscreen) == "ROSA EJEMPLO"
+
+    def test_a_patient_the_screen_does_not_name_is_not_guessed(self):
+        """The whole failure in one line: no corroboration, no name. The pad
+        then says which ROLE it waits for and names nobody, which is what it
+        did before any of this existed."""
+        import importlib
+        from types import SimpleNamespace
+
+        uiapp = importlib.import_module("apt_log.ui.app")
+        plan = SimpleNamespace(
+            caregiver="A Caregiver",
+            blocks=[SimpleNamespace(patient="ROSA EJEMPLO"),
+                    SimpleNamespace(patient="OTRA PERSONA")])
+        with patch("apt_log.schedule.load", return_value=plan):
+            assert uiapp._role_signer(
+                "patient", {"statics": [{"txt": "Firma del Paciente"}]}) == ""
+
+    def test_two_patients_on_one_screen_name_nobody(self):
+        import importlib
+        from types import SimpleNamespace
+
+        uiapp = importlib.import_module("apt_log.ui.app")
+        plan = SimpleNamespace(
+            caregiver="A Caregiver",
+            blocks=[SimpleNamespace(patient="ROSA EJEMPLO"),
+                    SimpleNamespace(patient="OTRA PERSONA")])
+        both = {"statics": [{"txt": "ROSA EJEMPLO"}, {"txt": "OTRA PERSONA"}]}
+        with patch("apt_log.schedule.load", return_value=plan):
+            assert uiapp._role_signer("patient", both) == ""
+
+    def test_the_caregiver_needs_no_corroboration(self):
+        """One caregiver on the round, named in the schedule itself, and
+        nobody to confuse her with."""
+        import importlib
+        from types import SimpleNamespace
+
+        uiapp = importlib.import_module("apt_log.ui.app")
+        plan = SimpleNamespace(caregiver="A Caregiver", blocks=[])
+        with patch("apt_log.schedule.load", return_value=plan):
+            assert uiapp._role_signer("staff", {"statics": []}) == "A Caregiver"
 
     def test_the_pad_no_longer_offers_to_register_a_signature(self):
         """"That's why we have our signature mapping page, we don't need
@@ -4671,7 +4748,6 @@ class TestThePadKnowsWhoseSignatureItIsCollecting:
                     encoding="utf-8"))
             assert words["sign.waiting.patient"]
             assert words["sign.waiting.staff"]
-            assert "{who}" in words["sign.not_this_one"]
 
 
 class TestEveryHourSaysWhichZoneItIsIn:
@@ -5343,33 +5419,42 @@ class TestTheMappingNamesAppsTheWayTheTilesDo:
 
 
 class TestStepTwoHasOneButton:
-    """The pencil drawer's back-and-forth, removed at the source.
+    """Step two carries the app's own buttons, and BOTH of them.
 
-    Borrar and Hecho sat side by side as equal peers because a second replay
-    lands on top of the first. Now the replay wipes the canvas itself, so
-    redrawing is pressing Send again and the clear has nothing left to do —
-    which leaves the affirmative alone in the row.
+    The clear was filtered out of this row on the grounds that the replay
+    wipes the canvas itself, so redrawing is pressing Send again and the
+    clear has nothing left to do. True for redrawing, and it left the other
+    case with no answer at all: a signature already on the phone that should
+    not be there, which the app's Borrar undoes and nothing else does.
+    Reported from the room — "what happens to the borrar button for the
+    signature? I only see Hecho" — so it comes through, dressed as what it
+    is rather than as a second way to finish.
     """
 
     def _js(self) -> str:
         return strip_js_comments(
             Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
 
-    def test_the_clear_is_filtered_out_of_the_row(self):
+    def test_the_clear_reaches_the_row(self):
         js = self._js()
-        assert "const CLEAR_WORDS = /^(borrar|clear|limpiar)$/i;" in js
-        assert "!CLEAR_WORDS.test((a.txt || '').trim())" in js
+        assert "const sheetActions = (meta.sheet_actions || []);" in js
+        assert "CLEAR_WORDS.test((a.txt" not in js
 
-    def test_it_is_filtered_before_the_row_is_measured(self):
-        """The cache key, the emphasis pass and the decision to show step two
-        at all must all see what is actually going on screen — an app
-        publishing ONLY a clear must not leave step two headed and empty."""
+    def test_it_is_not_dressed_as_the_finish(self):
+        """Wiping the signature on the phone is not a thing to press by
+        reaching for the button that finishes, so only the affirmative is
+        filled and the clear takes the warning colour."""
         js = self._js()
-        head = js.split("const sheetActions =", 1)[1]
-        assert "filter(" in head[:200]
-        # Read ONCE, at the declaration, and never again: a second reader
-        # downstream is a reader that sees the clear the row is hiding.
-        assert js.count("meta.sheet_actions") == 1
+        assert "b.classList.add('wipe')" in js
+        assert "CLEAR_WORDS.test(word)" in js
+        css = Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+        assert ".padrow .wipe" in css and "var(--bad)" in css
+
+    def test_the_payload_is_read_once(self):
+        """A second reader downstream is a reader that could see a different
+        row from the one drawn."""
+        assert self._js().count("meta.sheet_actions") == 1
 
     def test_the_caption_must_be_the_whole_word(self):
         """Dropping a button on a substring match is how an affirmative with

@@ -485,8 +485,16 @@
     // cache key, its emphasis pass and the decision to show step two at all
     // are all made against what is actually going to be on screen — an app
     // publishing ONLY a clear must not leave step two headed and empty.
-    const sheetActions = (meta.sheet_actions || []).filter(
-      (a) => !CLEAR_WORDS.test((a.txt || '').trim()));
+    // The app's own buttons, ALL of them. Its Clear used to be filtered out
+    // here on the grounds that the pad has a Clear of its own — but they
+    // clear different things: "Borrar todo" wipes the drawing in this
+    // drawer, and the app's Borrar wipes what has already landed in the
+    // signature box on the phone. Losing the second one meant a signature
+    // sent by mistake could only be undone by switching to the phone view.
+    // "What happens to the borrar button for the signature? I only see
+    // Hecho." They sit under different headings, which is what tells them
+    // apart: this row is step two, on the phone.
+    const sheetActions = (meta.sheet_actions || []);
     // Out here rather than inside the block below, because the pencil's own
     // gate needs it too and a const scoped to that `if` is invisible from
     // there — the kind of thing that throws at exactly the moment a signature
@@ -514,9 +522,15 @@
           // button and left Done looking secondary. A word this does not
           // recognise simply gets no emphasis, which is the safe direction.
           for (const b of slot.children) {
+            const word = (b.textContent || '').trim();
             if (/^(done|save|salvar|guardar|confirm|confirmar|ok|aceptar|enviar|submit|send)$/i
-                .test((b.textContent || '').trim())) {
+                .test(word)) {
               b.classList.add('primary');
+            } else if (CLEAR_WORDS.test(word)) {
+              // Its own dress rather than the filled pill. It wipes the
+              // signature already on the phone, which is not a thing to
+              // press by reaching for the button that finishes.
+              b.classList.add('wipe');
             }
           }
           bindAims(slot);
@@ -668,7 +682,6 @@
     signerNamed = meta.signer || '';
     signerAdopted = meta.signer_adopted || '';
     signerRole = meta.signer_role || '';
-    if (signerRole !== wasRole) wrongArmed = '';
     markSigner();
     // THE PAD IS THE POINT OF THIS SCREEN, SO IT OPENS ITSELF.
     //
@@ -1201,9 +1214,6 @@
   // for, read off its own heading. The name may be unknown while this is
   // not, and it is what holds back the party this screen is NOT for.
   let signerRole = '';
-  // The wrong-party pill asks once before it applies. Cleared whenever the
-  // screen changes, so an armed press cannot survive into another signature.
-  let wrongArmed = '';
 
   function renderAdopted(parties) {
     const wrap = document.getElementById('sign-adopted');
@@ -1282,18 +1292,18 @@
     for (const b of row.children) {
       const mine = !!signerAdopted && b.dataset.name === signerAdopted;
       b.classList.toggle('primary', mine);
-      // THE PARTY THIS SHEET IS NOT ASKING FOR.
+      // THE PARTY THIS SHEET IS NOT ASKING FOR IS NOT OFFERED.
       //
-      // Marked, not removed. The screen says which signature it wants and
-      // the roster says who that is, but a match this got wrong still has to
-      // be correctable by the person looking at it — REQ-10.6a rests on the
-      // press belonging to the person it belongs to, and only she can see
-      // the room. So the wrong one dims, says so when pressed, and applies
-      // on a second press. "The pencil drawer needs to be aware of who it's
-      // signing to", without becoming the only opinion that counts.
+      // Dimming it was the first answer and it was not enough: "I clicked on
+      // patient, why is Sadia Amselem auto signature button still rendered?"
+      // A button that is on the screen can be pressed, and what it presses
+      // is one person's signature onto another person's record. When the
+      // sheet has named exactly one party, hers is the only one drawn.
+      //
+      // Hidden rather than deleted, so the row rebuilds without a fetch the
+      // moment the sheet asks for somebody else.
       const wrong = !!signerAdopted && !mine;
-      b.classList.toggle('notthisone', wrong);
-      b.classList.toggle('armed', wrong && wrongArmed === b.dataset.name);
+      b.hidden = wrong;
       if (mine) b.setAttribute('aria-current', 'true');
       else b.removeAttribute('aria-current');
     }
@@ -2414,18 +2424,7 @@
     const adoptedRow = document.getElementById('sign-adopted-row');
     if (adoptedRow) adoptedRow.addEventListener('click', (ev) => {
       const b = ev.target.closest('button');
-      if (!b || !b.dataset.name) return;
-      // One question, on the party this sheet is not asking for. It arms
-      // rather than refuses: the reading can be wrong and she is the one who
-      // can see whose hand is on the phone.
-      if (b.classList.contains('notthisone')
-          && wrongArmed !== b.dataset.name) {
-        wrongArmed = b.dataset.name;
-        markSigner();
-        toast((i18n.signNotThisOne || '').replace('{who}', b.dataset.name));
-        return;
-      }
-      wrongArmed = '';
+      if (!b || !b.dataset.name || b.hidden) return;
       applyAdopted(b.dataset.name);
     });
     // The pad's own adoption form is gone — the mapping page owns
