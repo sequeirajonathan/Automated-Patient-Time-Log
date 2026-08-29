@@ -2830,6 +2830,44 @@ class TestMobileCaregiverExpiredSession:
                    side_effect=itertools.count(step=0.5)):
             macros.MACROS["mobile_caregiver_pin"].run(driver, lambda _k: None)
 
+    def test_a_form_still_drawing_is_waited_for_not_blamed(self):
+        """THE ACTIVITY ARRIVES BEFORE ITS FIELDS DO.
+
+        `on_login_screen` is satisfied by the activity's NAME, which Android
+        reports the moment the activity starts — before its views are
+        inflated. The password lookup asked once, a few milliseconds later,
+        found nothing, and reported "the sign-in form is not where it was
+        walked" — which reads like the app changed its ids.
+
+        It had not. Every id was verified present and unchanged on the live
+        phone at version 26.17. The misdiagnosis is the cost of the missing
+        wait: the failure blamed the app and hid a plain race.
+        """
+        from apt_log.secrets import MC_PASSWORD
+
+        driver, state = self._driver(self.FORM)
+        typed, looks = [], {"n": 0}
+
+        def find_elements(_by, selector):
+            if "login_password_input" in selector:
+                looks["n"] += 1
+                if looks["n"] < 4:      # the activity is up; the views are not
+                    return []
+                box = MagicMock()
+                box.send_keys.side_effect = lambda v: typed.append(v)
+                return [box]
+            if "login_button" in selector:
+                button = MagicMock()
+
+                def signed_in():
+                    state["activity"] = "com.tellus.evv.activities.MainActivity"
+                button.click.side_effect = signed_in
+                return [button]
+            return []
+        driver.find_elements.side_effect = find_elements
+        self._run(driver, **{MC_PASSWORD: "pw"})
+        assert typed == ["pw"], "the form was blamed instead of waited for"
+
     def test_the_password_is_typed_into_the_form(self):
         from apt_log.secrets import MC_PASSWORD
 

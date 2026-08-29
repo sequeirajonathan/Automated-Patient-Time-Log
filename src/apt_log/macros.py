@@ -897,6 +897,10 @@ def update_wall_on_screen(doc: dict | None) -> bool:
 # So: one read, and only once every digit the code needs is on it.
 MC_KEYPAD_DIGITS = 10
 MC_KEYPAD_READY = 25.0
+# The sign-in form's own draw, for the same reason as the keypad's: the
+# activity's name arrives before its views are inflated, and a lookup that
+# does not wait blames the app for a race.
+MC_FORM_READY = 20.0
 
 
 def _mc_keypad(driver) -> dict:
@@ -1059,8 +1063,25 @@ def _mobile_caregiver_pin(driver, report) -> None:
             "Mobile Caregiver+ wants its password and none is stored")
 
     report("macro.step.signing_in")
-    fields = driver.find_elements("xpath", _MC_PASSWORD_BOX)
-    if not fields:
+    # THE ACTIVITY ARRIVES BEFORE ITS FIELDS DO, and this asked once.
+    #
+    # `on_login_screen` is satisfied by the activity's NAME, which Android
+    # reports the moment the activity starts — before its views are inflated.
+    # A single lookup a few milliseconds later finds nothing and reports "the
+    # sign-in form is not where it was walked", which reads like the app
+    # changed its ids. It had not: every id here was verified present and
+    # unchanged on the live phone at version 26.17.
+    #
+    # The wait is what was missing, and the misdiagnosis is the cost of not
+    # having it — the failure blamed the app and hid a plain race.
+    fields: list = []
+
+    def password_box_drawn() -> bool:
+        nonlocal fields
+        fields = driver.find_elements("xpath", _MC_PASSWORD_BOX)
+        return bool(fields)
+
+    if not wait_for(password_box_drawn, timeout=MC_FORM_READY, poll=0.5):
         raise RuntimeError("the sign-in form is not where it was walked")
     # The username is remembered between sessions; it is only typed when the
     # app has forgotten it, and only if one is stored.
