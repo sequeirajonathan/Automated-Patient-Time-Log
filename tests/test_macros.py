@@ -3694,6 +3694,51 @@ class TestAnsweringTheUpdateWall:
         ])
         assert macros._store_update_button(driver) is None
 
+    # The listing of an app that is NOT installed: no Update, no Uninstall,
+    # one Install for this app — and then the rows of other apps the Store
+    # suggests, each with an Install of its own.
+    ABSENT_PAGE = [
+        ("", True, (831, 93, 306, 25)),          # this app's Install button
+        ("Instalar", False, (972, 100, 24, 11)),
+        ("Mobile Caregiver+", False, (571, 49, 104, 17)),
+        ("", True, (831, 400, 200, 20)),         # a SUGGESTED app's button
+        ("Instalar", False, (900, 405, 24, 11)),  # ...smaller than ours
+        ("", True, (0, 0, 1600, 720)),
+    ]
+
+    def test_a_reinstall_presses_install_not_nothing(self):
+        """An app uninstalled to clear its local state has no Update on its
+        listing, only Install — and the one moment the phone genuinely needs
+        the Store was the one it could not answer."""
+        driver, _ = self._driver(self.ABSENT_PAGE)
+        found = macros._store_install_button(driver)
+        assert found is not None, "the Store's Install button was not found"
+        assert (found["x"], found["y"]) == (831, 93)
+
+    def test_a_suggested_app_is_never_the_one_installed(self):
+        """A listing shows other apps below, each with an Install, and the
+        smallest-box rule would happily take one of those. Only the FIRST
+        label counts: the app's own button comes before the suggestions."""
+        driver, _ = self._driver(self.ABSENT_PAGE)
+        found = macros._store_install_button(driver)
+        assert found["y"] != 400, "it pressed a suggested app's Install"
+
+    def test_install_words_are_not_accepted_on_an_update(self):
+        """The two cases carry different risk and do not share a label list.
+        Nothing else on an update listing says "Update", so the update path
+        can take the smallest box; an install listing is full of Installs."""
+        driver, _ = self._driver(self.ABSENT_PAGE)
+        assert macros._store_update_button(driver) is None
+
+    def test_an_absent_package_takes_the_install_path(self):
+        """`versions.of` answers with nothing for a package the phone does
+        not have, and that is what tells the walk which word to look for."""
+        driver, _ = self._driver(self.ABSENT_PAGE)
+        self._run(driver, [{}, {"code": "981"}])
+        driver.tap.assert_called_once()
+        (point,), = driver.tap.call_args.args,
+        assert point == [(831 + 306 // 2, 93 + 25 // 2)]
+
     def test_it_waits_for_the_version_to_change_not_for_the_store_to_say_so(
             self):
         """Play's "Open" is the same button that said "Update", drawn by the

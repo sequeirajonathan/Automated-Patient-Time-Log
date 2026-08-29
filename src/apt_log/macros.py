@@ -2402,6 +2402,23 @@ STORE_PACKAGE = "com.android.vending"
 # cheapest way to be sure which word was pressed.
 STORE_UPDATE_LABELS = ("update", "actualizar", "update now", "actualizar ahora")
 
+# A REINSTALL IS THE SAME ERRAND WITH A DIFFERENT WORD ON THE BUTTON.
+#
+# An app that has been uninstalled — to clear its local state, which is a
+# real thing somebody does when an app will not sign in — has no "Update" on
+# its listing. It has "Instalar", and the macro that fetches builds could not
+# press it, so the one moment the phone genuinely needs the Store was the one
+# it could not answer.
+#
+# Kept SEPARATE from the update labels rather than merged into them, because
+# the two carry different risk. A listing page shows the app's own button and
+# then rows of OTHER apps, each with an Install of its own — and installing
+# some suggested app is a failure the update path never had, since nothing
+# else on that page says "Update". So these are only consulted when the
+# package is genuinely absent, and only the FIRST is taken: see
+# `_store_get_button`.
+STORE_INSTALL_LABELS = ("install", "instalar")
+
 # ...and the labels that read almost the same and mean something else.
 # "Update all" on a Store landing page updates eleven apps nobody asked about;
 # the settings row toggles automatic updates for the whole phone.
@@ -2457,6 +2474,21 @@ def _store_update_button(driver):
     the screen reflow already does, for the same reason — apps draw a control
     as a box with a label loose inside it.
     """
+    return _store_get_button(driver, STORE_UPDATE_LABELS)
+
+
+def _store_install_button(driver):
+    """Where to tap to INSTALL this app, as a box, or None.
+
+    The reinstall case. Only the first matching label is honoured — the
+    listing's own button comes before the rows of other apps it suggests,
+    each of which has an Install too, and installing one of those is a
+    mistake the update path could never make.
+    """
+    return _store_get_button(driver, STORE_INSTALL_LABELS, first_only=True)
+
+
+def _store_get_button(driver, wanted, first_only: bool = False):
     labels = []
     for node in driver.find_elements("xpath", "//*[@text or @content-desc]"):
         try:
@@ -2465,13 +2497,17 @@ def _store_update_button(driver):
         except Exception:  # noqa: BLE001 — a stale node is not a label
             continue
         words = words.strip().lower()
-        if words not in STORE_UPDATE_LABELS or words in STORE_NOT_UPDATE:
+        if words not in wanted or words in STORE_NOT_UPDATE:
             continue
         box = _rect(node)
         if box:
             labels.append(box)
     if not labels:
         return None
+    if first_only:
+        # Document order, which on this page is reading order: the app's own
+        # button, then the suggestions.
+        labels = labels[:1]
 
     best = None
     for node in driver.find_elements("xpath", '//*[@clickable="true"]'):
@@ -2524,6 +2560,12 @@ def _update(driver, report, package: str) -> None:
         raise RuntimeError("that app has been retired")
 
     was = versions_mod.of(package)
+    # ABSENT IS A DIFFERENT ERRAND. An app that was uninstalled to clear its
+    # local state has no Update on its listing, only Install — and the word
+    # decides which button may be pressed, so the two cases cannot share one
+    # label list. `versions_mod.of` answers with nothing for a package the
+    # phone does not have.
+    installing = not was.get("code")
     report("macro.step.opening_store")
     wake_display()
     feed_mod._adb(["shell", "am", "start", "-a", "android.intent.action.VIEW",
@@ -2532,9 +2574,10 @@ def _update(driver, report, package: str) -> None:
         raise RuntimeError("the Play Store did not open")
 
     report("macro.step.updating")
+    find = _store_install_button if installing else _store_update_button
     button = None
     for _ in range(STORE_BUTTON_TRIES):
-        button = _store_update_button(driver)
+        button = find(driver)
         if button is not None:
             break
         time.sleep(STORE_BUTTON_WAIT)
@@ -2543,7 +2586,10 @@ def _update(driver, report, package: str) -> None:
         # is a real answer — it is what a phone whose update already landed in
         # the background looks like — and it is not the same as a failure.
         _back_to(package, report)
-        raise RuntimeError("the Play Store is not offering an update for this app")
+        raise RuntimeError(
+            "the Play Store is not offering an install for this app"
+            if installing else
+            "the Play Store is not offering an update for this app")
 
     driver.tap([(button["x"] + button["w"] // 2,
                  button["y"] + button["h"] // 2)])
