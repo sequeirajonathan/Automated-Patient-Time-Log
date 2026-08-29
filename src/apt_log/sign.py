@@ -1550,6 +1550,51 @@ _ROLE_WORDS = frozenset((
 ))
 
 
+# WHICH SIGNATURE THE SHEET IS ASKING FOR, when it names a role and not a
+# person — which is what these screens do nearly always.
+#
+# `signer_named` rejects a role and returns "", correctly: a role names
+# nobody. But the role is not nothing, and throwing it away cost the pad the
+# one fact that keeps a signature off the wrong record. inMyTeam's check-out
+# asks twice, back to back — "Firma del Paciente" then "Firma del personal" —
+# and with neither answered the pad offered both parties as identical filled
+# buttons. Reported from the room: "if it says firma del paciente the pencil
+# drawer should know that it's not Sadia Amselem".
+#
+# A witness or a representative maps to neither party this project knows
+# about, so they are absent here on purpose and read as "" — the same
+# conservative answer the rest of this file gives.
+SIGNER_ROLES = {
+    "patient": ("paciente", "patient", "cliente", "client"),
+    "staff": ("cuidador", "cuidadora", "caregiver", "personal", "staff",
+              "empleado", "empleada", "employee",
+              "trabajador", "trabajadora"),
+}
+
+
+def signer_role(doc: dict) -> str:
+    """"patient", "staff", or "" — whose signature this sheet wants.
+
+    "" wherever there is no signature heading, where the heading names a
+    role this does not map, or where BOTH roles appear on one screen: two
+    answers is the same as none, and guessing between them is exactly the
+    mistake this exists to prevent.
+    """
+    found = set()
+    for entry in (doc.get("statics") or []):
+        text = (entry.get("txt") or "").strip()
+        if not text or len(text) > 120:
+            continue
+        low = _fold(text)
+        if not any(marker in low for marker in _SIGNS_FOR):
+            continue
+        words = set(low.split())
+        for role, names in SIGNER_ROLES.items():
+            if words & set(names):
+                found.add(role)
+    return found.pop() if len(found) == 1 else ""
+
+
 def signer_named(doc: dict) -> str:
     """Whose signature this screen is asking for, or "".
 

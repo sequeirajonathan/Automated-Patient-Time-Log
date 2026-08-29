@@ -1886,3 +1886,54 @@ class TestADotIsNotADrag:
         moves = self._chain([(456, 1735)])
         assert moves[-1] == "UP"
         assert (456, 1735) in moves
+
+
+class TestWhichSignatureTheSheetIsAskingFor:
+    """A role is not a name, and `signer_named` rejects one — correctly.
+
+    But the role is not nothing, and throwing it away cost the pad the one
+    fact that keeps a signature off the wrong record. inMyTeam's check-out
+    asks twice, back to back — "Firma del Paciente" then "Firma del
+    personal" — and with neither answered the pad offered both parties as
+    identical filled buttons. Read off the live phone 2026-08-29 with the
+    patient's pad open.
+    """
+
+    def doc(self, *lines):
+        return {"statics": [{"txt": t} for t in lines]}
+
+    def test_the_patients_sheet(self):
+        assert sign.signer_role(
+            self.doc("Firma del Paciente", "Hecho", "Borrar")) == "patient"
+
+    def test_the_caregivers_sheet(self):
+        assert sign.signer_role(self.doc("Firma del personal")) == "staff"
+
+    def test_english_reads_the_same_way(self):
+        assert sign.signer_role(self.doc("Signature of the Patient")) == \
+            "patient"
+        assert sign.signer_role(self.doc("Caregiver Signature")) == ""
+
+    def test_a_sheet_that_names_a_person_has_no_role(self):
+        """`signer_named` answers that one, and it answers better."""
+        assert sign.signer_role(self.doc("Firma de Ana Ruiz")) == ""
+
+    def test_both_roles_on_one_screen_is_the_same_as_none(self):
+        """Two answers is not an answer, and guessing between them is
+        exactly the mistake this exists to prevent."""
+        assert sign.signer_role(
+            self.doc("Firma del Paciente", "Firma del personal")) == ""
+
+    def test_a_page_that_is_not_a_pad_says_nothing(self):
+        assert sign.signer_role(self.doc("Detalle de la Visita", "Salida")) \
+            == ""
+
+    def test_a_witness_maps_to_neither_party(self):
+        """Not a role this project knows how to fill, so it is left alone
+        rather than resolved to the nearest person."""
+        assert sign.signer_role(self.doc("Firma del testigo")) == ""
+
+    def test_the_two_role_sets_do_not_overlap(self):
+        patient = set(sign.SIGNER_ROLES["patient"])
+        staff = set(sign.SIGNER_ROLES["staff"])
+        assert not (patient & staff)

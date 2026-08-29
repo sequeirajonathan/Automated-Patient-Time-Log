@@ -664,9 +664,21 @@
     // Whose pad this is. Kept as state rather than read at press time: the
     // sheet can be open while the screen underneath changes, and the name on
     // the heading has to change with it.
+    const wasRole = signerRole;
     signerNamed = meta.signer || '';
     signerAdopted = meta.signer_adopted || '';
+    signerRole = meta.signer_role || '';
+    if (signerRole !== wasRole) wrongArmed = '';
     markSigner();
+    // THE PAD IS THE POINT OF THIS SCREEN, SO IT OPENS ITSELF.
+    //
+    // Reaching a signature sheet and then hunting for a pencil in the
+    // toolbar is a step with no decision in it — "when I click on paciente
+    // or persona I want the pencil to trigger automatically". Opened once
+    // per arrival: `wasRole` is empty on every other screen, so this fires
+    // on the transition onto a pad and not again while she is on it. If she
+    // closes it, it stays closed until the next signature.
+    if (signerRole && !wasRole && padHere && !coaching) openPad();
 
     // The large title names what is actually in front: the screen's own
     // nav-bar title, else the app the *phone* is showing — never the last
@@ -1185,6 +1197,13 @@
   // every screen that is not a signature pad.
   let signerNamed = '';
   let signerAdopted = '';
+  // "patient" | "staff" | "" — which signature the sheet in front is asking
+  // for, read off its own heading. The name may be unknown while this is
+  // not, and it is what holds back the party this screen is NOT for.
+  let signerRole = '';
+  // The wrong-party pill asks once before it applies. Cleared whenever the
+  // screen changes, so an armed press cannot survive into another signature.
+  let wrongArmed = '';
 
   function renderAdopted(parties) {
     const wrap = document.getElementById('sign-adopted');
@@ -1220,14 +1239,40 @@
   // The matching is the server's (`enrolled.who_signs`): it is tolerant of a
   // middle initial and of case, and it returns NOTHING when more than one
   // party could be meant. This file only compares two strings it was handed.
+  // OPENING THE PAD, from the pencil and from the screen itself.
+  //
+  // Hoisted to this scope because the screen paint opens it too: arriving on
+  // a signature sheet is the one case where nobody needs to be asked whether
+  // they want the pad — it is what the screen is for.
+  function openPad() {
+    if (body.classList.contains('signing')) return;
+    body.classList.add('signing');
+    loadAdopted();
+    padFit();
+  }
+
+  function togglePad() {
+    if (body.classList.contains('signing')) {
+      body.classList.remove('signing');
+      padFit();
+      return;
+    }
+    openPad();
+  }
+
   function markSigner() {
     const row = document.getElementById('sign-adopted-row');
     const heading = document.getElementById('sign-whose');
     if (heading) {
       // textContent: the app's own rendering of somebody's legal name.
+      // With no name, the ROLE still says what the sheet is waiting for —
+      // "Esperando la firma del paciente" — which is the whole state of the
+      // screen while the drawer is what she is working in.
+      const waiting = signerRole
+        ? (i18n.signWaiting || {})[signerRole] || '' : '';
       heading.textContent = signerNamed
-        ? (i18n.signWhose || '').replace('{who}', signerNamed) : '';
-      heading.hidden = !signerNamed;
+        ? (i18n.signWhose || '').replace('{who}', signerNamed) : waiting;
+      heading.hidden = !heading.textContent;
     }
     if (!row) return;
     // Only when the server resolved exactly one party. Without it every pill
@@ -1237,8 +1282,18 @@
     for (const b of row.children) {
       const mine = !!signerAdopted && b.dataset.name === signerAdopted;
       b.classList.toggle('primary', mine);
-      // Said out loud as well as drawn, because the difference between the
-      // two buttons is which person's signature goes on a legal record.
+      // THE PARTY THIS SHEET IS NOT ASKING FOR.
+      //
+      // Marked, not removed. The screen says which signature it wants and
+      // the roster says who that is, but a match this got wrong still has to
+      // be correctable by the person looking at it — REQ-10.6a rests on the
+      // press belonging to the person it belongs to, and only she can see
+      // the room. So the wrong one dims, says so when pressed, and applies
+      // on a second press. "The pencil drawer needs to be aware of who it's
+      // signing to", without becoming the only opinion that counts.
+      const wrong = !!signerAdopted && !mine;
+      b.classList.toggle('notthisone', wrong);
+      b.classList.toggle('armed', wrong && wrongArmed === b.dataset.name);
       if (mine) b.setAttribute('aria-current', 'true');
       else b.removeAttribute('aria-current');
     }
@@ -1534,14 +1589,6 @@
       loadMap();
       if (done) done();
     }).catch(() => toast(i18n.failed || ''));
-  }
-
-  function adoptSave() {
-    postEnrolment((document.getElementById('adopt-name') || {}).value || '',
-                  () => {
-                    const form = document.getElementById('sign-adopt');
-                    if (form) form.hidden = true;
-                  });
   }
 
   // The registration sheet's own save. Closes the sheet and empties the pad:
@@ -2299,13 +2346,8 @@
     // Reported from the room, with Carmen registered on the Pi and her button
     // missing from the pad. Two people share this portal, so "the state this
     // tab last saw" was never a safe thing to draw a signature list from.
-    const openPad = () => {
-      body.classList.toggle('signing');
-      if (body.classList.contains('signing')) loadAdopted();
-      padFit();
-    };
     const sign = document.getElementById('btn-sign');
-    if (sign) sign.addEventListener('click', openPad);
+    if (sign) sign.addEventListener('click', togglePad);
     // The canvas drawn into the page opens the same pad. Delegated, because
     // the page is re-rendered from the socket and a handler bound to the
     // element itself would go with it on the first repaint.
@@ -2372,15 +2414,24 @@
     const adoptedRow = document.getElementById('sign-adopted-row');
     if (adoptedRow) adoptedRow.addEventListener('click', (ev) => {
       const b = ev.target.closest('button');
-      if (b && b.dataset.name) applyAdopted(b.dataset.name);
+      if (!b || !b.dataset.name) return;
+      // One question, on the party this sheet is not asking for. It arms
+      // rather than refuses: the reading can be wrong and she is the one who
+      // can see whose hand is on the phone.
+      if (b.classList.contains('notthisone')
+          && wrongArmed !== b.dataset.name) {
+        wrongArmed = b.dataset.name;
+        markSigner();
+        toast((i18n.signNotThisOne || '').replace('{who}', b.dataset.name));
+        return;
+      }
+      wrongArmed = '';
+      applyAdopted(b.dataset.name);
     });
-    const adoptOpen = document.getElementById('sign-adopt-open');
-    if (adoptOpen) adoptOpen.addEventListener('click', () => {
-      const form = document.getElementById('sign-adopt');
-      if (form) form.hidden = !form.hidden;
-    });
-    const adoptBtn = document.getElementById('adopt-save');
-    if (adoptBtn) adoptBtn.addEventListener('click', adoptSave);
+    // The pad's own adoption form is gone — the mapping page owns
+    // registering a signature now, and this sheet only collects one. Its
+    // wiring went with it; `postEnrolment` stays, because the registration
+    // sheet over there still calls it.
     loadAdopted();
 
     // The registration sheet's own controls. Its Undo and Erase act on the

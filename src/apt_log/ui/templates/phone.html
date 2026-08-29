@@ -1086,6 +1086,14 @@
      the same row, so it wears the warning colour and the column heading
      above says which is which. A pill reading "SE NIEGA" on all twenty-one
      rows was the first attempt and it shouted; the heading says it once. */
+  /* THE PARTY THIS SHEET IS NOT ASKING FOR. Dimmed rather than removed —
+     the reading can be wrong and only the person in the room can see whose
+     hand is on the phone. Armed after one press, so the second press is a
+     decision rather than a slip. */
+  .adopted-row .notthisone { opacity:.4; }
+  .adopted-row .notthisone.armed { opacity:1; outline:2px solid var(--bad);
+                                   outline-offset:2px; }
+
   .a-refuse { border-color:var(--bad); }
   .a-refuse.on { background:var(--bad); border-color:var(--bad); }
 
@@ -2270,27 +2278,21 @@
   {# Only after the ink has landed. Says the one thing that was missing. #}
   <p class="signhint" id="sign-hint" hidden>{{ t('sign.now_press') }}</p>
 
-  {# ADOPTION HAPPENS WHERE THE DRAWING ALREADY HAPPENS.
+  {# ADOPTION DOES NOT HAPPEN HERE ANY MORE.
 
-     A separate settings page would mean the patient signing in one place and
-     the adoption being recorded in another. Here, the strokes on the pad
-     above are the ones being adopted, and the person who drew them is in the
-     room — which is the whole of what makes this moment the right one.
+     It used to: the strokes on this canvas are the ones being adopted and
+     the person who drew them is in the room, which read as the right moment.
+     But registering a signature and collecting one are different jobs, and
+     having both on this sheet meant the question "whose signature am I
+     saving" sat three inches from "whose signature am I collecting" — on the
+     screen where getting that wrong puts one person's mark on another's
+     record.
 
-     Deliberately unhurried — two written fields and a confirm — because this
-     is the moment the agency's approval actually rests on. REQ-10.6a. #}
-  <div class="adoptwrap">
-    <button type="button" id="sign-adopt-open" class="padtool">
-      {{ t('sign.adopt_open') }}</button>
-    <div class="adoptform" id="sign-adopt" hidden>
-      <p class="adopthint">{{ t('sign.adopt_hint') }}</p>
-      <label class="adoptlabel" for="adopt-name">{{ t('sign.adopt_who') }}</label>
-      <input type="text" id="adopt-name" autocomplete="off" spellcheck="false">
-      <button type="button" id="adopt-save" class="primary">
-        {{ t('sign.adopt_save') }}</button>
-    </div>
-  </div>
-
+     The mapping page owns it now, with a registration sheet of its own: it
+     is the page that can ask BEFORE a visit whether somebody is set up,
+     which is when the question is worth asking. Removed on the owner's
+     instruction — "that's why we have our signature mapping page, we don't
+     need this feature in this context of signing". #}
   <div class="approw" id="sign-approw" hidden>
     <div class="signstep">
       <span class="signstep-n">2</span>
@@ -2620,6 +2622,11 @@
     clearingTasks: {{ t('macro.step.clearing_tasks')|tojson }},
     readingLog: {{ t('macro.step.reading_the_log')|tojson }},
     goingHome: {{ t('papp.app_home')|tojson }},
+    signWaiting: {
+      patient: {{ t('sign.waiting.patient')|tojson }},
+      staff: {{ t('sign.waiting.staff')|tojson }},
+    },
+    signNotThisOne: {{ t('sign.not_this_one')|tojson }},
     switchingAgency: {{ t('macro.step.opening_the_agencies')|tojson }},
     coachOn:   {{ t('papp.coach_on')|tojson }},
     coachOff:  {{ t('papp.coach_off')|tojson }},

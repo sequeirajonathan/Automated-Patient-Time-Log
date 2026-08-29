@@ -4534,6 +4534,146 @@ class TestTheDeselectAllIsOfferedBesideTheSelectAll:
                 assert words[key], key
 
 
+class TestThePadKnowsWhoseSignatureItIsCollecting:
+    """Four things from the room, on the screen where getting them wrong
+    puts one person's mark on another person's record.
+
+    Read off the live phone 2026-08-29 with inMyTeam's patient pad open:
+    dismiss False, `signer_named` empty, and the app's own Hecho and Borrar
+    sitting in an actions row the pad could not reach.
+    """
+
+    PAD = {"at": "2026-08-29T18:30:00", "app": "com.inmyteam.inmyteam",
+           "activity": "mainactivity", "blocked": "", "size": [1080, 2340],
+           "canvas": True,
+           "elements": [
+               {"rid": "", "cls": "View", "txt": "", "b": [292, 2258, 394, 2295],
+                "checked": False, "enabled": True, "focused": False,
+                "has_text": False},
+               {"rid": "", "cls": "View", "txt": "", "b": [686, 2258, 788, 2295],
+                "checked": False, "enabled": True, "focused": False,
+                "has_text": False}],
+           "statics": [{"cls": "TextView", "b": [13, 1484, 152, 1505],
+                        "txt": "Firma del Paciente"},
+                       {"cls": "TextView", "b": [324, 2265, 378, 2288],
+                        "txt": "Hecho"},
+                       {"cls": "TextView", "b": [719, 2265, 770, 2288],
+                        "txt": "Borrar"}]}
+
+    def _meta(self, client, tmp_path, doc):
+        (tmp_path / "screen.json").write_text(json.dumps(doc),
+                                              encoding="utf-8")
+        with patch.object(state_mod, "STATE_DIR", tmp_path):
+            with client.websocket_connect("/ws") as ws:
+                msg = ws.receive_json()
+        return msg.get("screen") or {}
+
+    def _js(self):
+        from pathlib import Path
+
+        return strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+
+    def test_the_role_reaches_the_page(self, client, tmp_path):
+        meta = self._meta(client, tmp_path, self.PAD)
+        assert meta.get("signer_role") == "patient"
+
+    def test_the_apps_own_buttons_reach_the_pad(self, client, tmp_path):
+        """THE SWITCHING THIS DRAWER EXISTS TO REMOVE. The gate asked for a
+        dismiss control, and this pad has none — so Hecho and Borrar were
+        three lines away on a page she had to switch views to reach."""
+        meta = self._meta(client, tmp_path, self.PAD)
+        words = [a.get("txt") for a in (meta.get("sheet_actions") or [])]
+        assert "Hecho" in words
+
+    def test_a_page_with_no_signature_heading_still_gets_nothing(self):
+        """The gate exists to keep Visit Detail's "Check in" and "Note &
+        Check out" out of the signature pad, and widening it must not let
+        them in. That page carries no signature heading."""
+        import importlib
+
+        uiapp = importlib.import_module("apt_log.ui.app")
+        doc = {"app": "com.inmyteam.inmyteam", "statics": [
+            {"txt": "Detalle de la Visita"}, {"txt": "Entrada"}]}
+        model = {"dismiss": None,
+                 "rows": [{"actions": True,
+                           "items": [{"txt": "Entrada",
+                                      "aim": {"rid": "", "cls": "View",
+                                              "b": [0, 0, 10, 10]}}]}]}
+        assert uiapp._sheet_actions(doc, model) == []
+
+    def test_the_pad_opens_itself_on_arrival(self):
+        """"When I click on paciente or persona I want the pencil to trigger
+        automatically" — reaching the sheet and then hunting for a pencil is
+        a step with no decision in it."""
+        js = self._js()
+        assert "if (signerRole && !wasRole && padHere && !coaching) openPad();" \
+            in js
+
+    def test_it_opens_once_per_arrival_and_not_again(self):
+        """`wasRole` is empty on every other screen, so this fires on the
+        transition ONTO a pad. If she closes it, it stays closed."""
+        js = self._js()
+        assert "const wasRole = signerRole;" in js
+        assert "function openPad()" in js
+        assert "if (body.classList.contains('signing')) return;" in js
+
+    def test_the_wrong_party_is_marked_and_asks_before_it_applies(self):
+        """"If it says firma del paciente the pencil drawer should know that
+        it's not Sadia Amselem." Marked, not removed: a match this got wrong
+        must still be correctable by the person who can see the room."""
+        js = self._js()
+        assert "b.classList.toggle('notthisone', wrong)" in js
+        assert "wrongArmed = b.dataset.name;" in js
+        assert "signNotThisOne" in js
+
+    def test_an_armed_press_does_not_survive_a_change_of_signature(self):
+        js = self._js()
+        assert "if (signerRole !== wasRole) wrongArmed = '';" in js
+
+    def test_the_pad_no_longer_offers_to_register_a_signature(self):
+        """"That's why we have our signature mapping page, we don't need
+        this feature in this context of signing." Registering and collecting
+        are different jobs, and having both on this sheet put "whose
+        signature am I saving" three inches from "whose am I collecting"."""
+        from pathlib import Path
+
+        page = Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+        pad = page[page.index('id="signpad"'):page.index('id="sign-approw"')]
+        assert "sign-adopt-open" not in pad
+        assert "adopt-name" not in pad
+
+    def test_registering_one_is_still_possible_on_the_mapping_page(self):
+        """Removed from the pad, not from the portal — the mapping page has
+        a registration sheet of its own, and it is the page that can ask
+        BEFORE a visit whether somebody is set up."""
+        from pathlib import Path
+
+        page = Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+        assert 'id="enrolsheet"' in page
+        assert 'id="enrol-name"' in page and 'id="enrol-save"' in page
+
+    def test_the_sheet_says_what_it_is_waiting_for(self):
+        """With no name, the role still says what the screen is for — and
+        the drawer is what she is working in, so the words belong there."""
+        js = self._js()
+        assert "(i18n.signWaiting || {})[signerRole]" in js
+
+    def test_both_waiting_sentences_are_written_in_both_languages(self):
+        import json as _json
+        from pathlib import Path
+
+        for code in ("en", "es"):
+            words = _json.loads(Path(
+                f"src/apt_log/ui/locales/{code}.json").read_text(
+                    encoding="utf-8"))
+            assert words["sign.waiting.patient"]
+            assert words["sign.waiting.staff"]
+            assert "{who}" in words["sign.not_this_one"]
+
+
 class TestEveryHourSaysWhichZoneItIsIn:
     """Reported from Central: "I'm getting confused with my CDT local time,
     would like to avoid any confusion on my end."

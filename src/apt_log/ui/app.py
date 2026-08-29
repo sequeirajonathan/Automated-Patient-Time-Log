@@ -1008,6 +1008,37 @@ def _code_screen(doc: dict) -> bool:
         return False
 
 
+def _role_signer(role: str) -> str:
+    """The person who fills this signature role on today's round.
+
+    The patient comes from the visit in hand and the caregiver from the
+    schedule's own record of whose round it is — neither is guessed from the
+    screen, because the screen is precisely what does not say.
+
+    "" when the schedule cannot answer, which keeps the pad's rule intact:
+    a name it is not sure of is worse than no name at all.
+    """
+    from apt_log import schedule as schedule_mod
+
+    try:
+        plan = schedule_mod.load()
+    except Exception:  # noqa: BLE001
+        return ""
+    if role == "staff":
+        return plan.caregiver or ""
+    if role != "patient":
+        return ""
+    from datetime import datetime
+
+    try:
+        now = datetime.now(plan.zone)
+        visit = plan.current(now) or next(iter(plan.upcoming(now, limit=1)),
+                                          None)
+    except Exception:  # noqa: BLE001
+        return ""
+    return getattr(visit, "patient", "") or ""
+
+
 def _sheet_actions(doc: dict, model: dict | None) -> list[dict]:
     """The app's own buttons on a signature sheet, as aims.
 
@@ -1045,7 +1076,28 @@ def _sheet_actions(doc: dict, model: dict | None) -> list[dict]:
     named = _canvas_actions(doc)
     if named:
         return named
-    if not model or not model.get("dismiss"):
+    # THE DISMISS GATE WAS TOO NARROW, AND THE PAD PAID FOR IT.
+    #
+    # It stands in for "a sheet is in front", which is right on the pads that
+    # have a way out drawn on them — and inMyTeam's does not. Read off the
+    # live phone with the patient's pad open: dismiss False, and the app's own
+    # Hecho and Borrar sitting in an actions row three lines away, unreachable
+    # from the pad. So she had to close the drawer and switch to the phone
+    # view to finish a signature, which is the switching this drawer exists to
+    # remove — "why do I have to switch eye views to the front end to borrar
+    # and hecho".
+    #
+    # A SIGNATURE HEADING IS THE BETTER GATE. It is what the screen says it
+    # is, it does not flicker the way `canvas` does, and it is the same
+    # reading that tells the pad WHOSE signature this is. Visit Detail — the
+    # page whose "Check in" / "Note & Check out" this gate exists to keep
+    # out — carries no such heading, so it is still refused.
+    if not model:
+        return []
+    from apt_log import sign as sign_mod
+
+    if not (model.get("dismiss")
+            or sign_mod.signer_role(doc) or sign_mod.signer_named(doc)):
         return []
     for row in model.get("rows") or ():
         if not row.get("actions"):
@@ -1453,6 +1505,16 @@ async def live(ws: WebSocket):
                 # reads a file. Both are cheap and neither is free, and this
                 # runs on every screen change.
                 _signer = sign.signer_named(screen_doc)
+                # WHEN THE SHEET NAMES A ROLE INSTEAD OF A PERSON, which is
+                # what these screens do nearly always. The role is not a
+                # name, but the schedule knows who fills it — so "Firma del
+                # Paciente" resolves to the patient of the visit in hand and
+                # "Firma del personal" to the caregiver. Without this the pad
+                # offered both parties as identical filled buttons and the
+                # wrong signature was one mis-tap away.
+                _role = sign.signer_role(screen_doc)
+                if not _signer and _role:
+                    _signer = _role_signer(_role)
                 payload["screen"] = {
                     "id": screen_doc.get("id", ""),
                     "name": screen_doc.get("screen", "unknown"),
@@ -1508,6 +1570,11 @@ async def live(ws: WebSocket):
                     "signer": _signer,
                     "signer_adopted": (enrolled.who_signs(_signer)
                                        if _signer else ""),
+                    # Which of the two the sheet is asking for, so the pad
+                    # can say "waiting for the patient's signature" even when
+                    # nobody is named — and so it can hold back the party
+                    # this screen is NOT for.
+                    "signer_role": _role,
                     # WHETHER THE LEGACY COORDINATE PAIR CAN PRESS ANYTHING.
                     #
                     # It presses a point derived from the canvas on a page the
