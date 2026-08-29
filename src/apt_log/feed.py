@@ -790,10 +790,12 @@ APP_DENSITY = {
 #     density 300 ............. next day at 1538 — fits, ~800px to spare
 #     density 200 ............. next day at  973 — fits, and small
 #
-# 340 is the ceiling and 300 is the choice: the most legible value that still
-# leaves room for a day with three or four visits rather than today's two.
-# Legibility is the tie-breaker because this screen is also the one she reads
-# over somebody's shoulder.
+# 340 was the ceiling and 300 was the choice, on the reading that legibility
+# on the HANDSET was the tie-breaker. SUPERSEDED — see the note above the
+# table: the bar became the whole week with today opened, which is a question
+# about captures rather than about type size, and the portal draws its own
+# type anyway. The sweep is kept because it is still the honest record of
+# what fits at what size on this screen.
 #
 # Keyed on a fragment of the activity, matched case-insensitively, because
 # that is what `_density_wanted` has in hand and it is stable across the
@@ -823,9 +825,30 @@ APP_DENSITY = {
 #
 # So the page keeps the app's value until somebody decides that trade
 # deliberately. This comment is here so the next person measures nothing.
+# 130, AND THE NUMBER IS ABOUT THE PORTAL, NOT THE PHONE.
+#
+# 300 was chosen against a different bar: today's cards legible in one view
+# ON THE HANDSET. The bar changed — "expand the patient cards for today
+# before we consider the page loaded" and "render all blocks for the week" —
+# and those two together are a question about how much fits in ONE capture,
+# because everything past the first capture costs a scroll, and this app
+# FORGETS an opened card the moment it scrolls out of view. A page walked in
+# three captures cannot hold today open; a page walked in one never has to.
+#
+# Measured live, whole week, today's two visits expanded first:
+#
+#     200 .. 2 captures   7 days, 9 visits, 6 expanded rows
+#     160 .. 2 captures   7 days, 9 visits, 6 expanded rows
+#     130 .. 1 CAPTURE    7 days, 9 visits, 6 expanded rows
+#
+# The portal draws its own type from the tree, so shrinking the phone does
+# not shrink what she reads — it only decides how much arrives at once. 130
+# is 29% of this panel's native size, which is where the old 720x1600
+# handset ran for months (84 of 320, 26%), so it is not new territory for a
+# thumb either.
 PAGE_DENSITY = {
     "com.hhaexchange.uma": (
-        ("homeactivity", 300),
+        ("homeactivity", 130),
     ),
 }
 # The signature moment gets its own value, found by its fingerprint: the

@@ -1685,7 +1685,7 @@ class TestPerAppDensity:
         it comes forward, once."""
         assert self._run([self.UMA_SCHEDULE, self.UMA_SCHEDULE],
                          current="172") == [
-            ["shell", "wm", "density", "300"]]
+            ["shell", "wm", "density", "130"]]
 
     def test_never_mid_scan(self):
         assert self._run([self.IMT], scan=True) == []
@@ -3095,14 +3095,25 @@ class TestDensityIsMeasuredPerScreen:
     def test_the_schedule_screen_uses_its_measured_value(self):
         assert feed._density_wanted(
             "com.hhaexchange.uma/com.hhaexchange.carehub.ui.activities"
-            ".HomeActivity") == 300
+            ".HomeActivity") == 130
 
-    def test_it_is_below_the_ceiling_that_was_measured(self):
-        """340 was the largest value where today still fit. The choice sits
-        under it so a day with three or four visits still fits, rather than
-        today's two."""
+    def test_the_whole_week_fits_one_capture(self):
+        """THE BAR MOVED, and it moved from type size to captures.
+
+        340 was once the ceiling, on the reading that what had to fit was
+        today, legible on the handset. Then: expand today's cards before the
+        page counts as loaded, and render every block of the week. Those two
+        together are a question about ONE CAPTURE, because everything past
+        the first costs a scroll and this app forgets an opened card the
+        moment it scrolls out of view.
+
+        Measured live with today's two visits expanded: 200 and 160 each
+        needed two captures; 130 needed one. The portal draws its own type
+        from the tree, so this is not a legibility trade — it decides how
+        much arrives at once.
+        """
         for _mark, value in feed.PAGE_DENSITY["com.hhaexchange.uma"]:
-            assert value <= 340
+            assert value <= 130
 
     def test_an_unmeasured_screen_is_left_alone(self):
         """Applying an unmeasured value everywhere is the thing this table
@@ -3119,7 +3130,7 @@ class TestDensityIsMeasuredPerScreen:
         """The key is a fragment of the activity, and the activity's own
         capitalisation is the app's business."""
         assert feed._density_wanted(
-            "com.hhaexchange.uma/HOMEACTIVITY") == 300
+            "com.hhaexchange.uma/HOMEACTIVITY") == 130
 
     def test_a_page_override_still_outranks_it(self, monkeypatch):
         """Somebody setting a value for this page means it for this page —
@@ -3148,7 +3159,7 @@ class TestDensityIsMeasuredPerScreen:
             "com.hhaexchange.uma/HomeActivity") == 172
         monkeypatch.setattr(prefs, "density_for", lambda app, page="", **k: None)
         assert feed._density_wanted(
-            "com.hhaexchange.uma/HomeActivity") == 300
+            "com.hhaexchange.uma/HomeActivity") == 130
 
 
 class TestAStaticKeepsItsName:
