@@ -4727,6 +4727,83 @@ class TestBackToTheAppsOwnFirstPage:
         assert "app_home" not in macros.CONFIRM
 
 
+class TestAFailedWorkLogReadDoesNotLeaveTheDrawerOpen:
+    """Reported mid-check-out, in the middle of a live visit: "the side bar
+    showed up for no reason!!"
+
+    It had a reason, and the reason was ours. The work-log route opens the
+    nav drawer and then returned False from two places without shutting it,
+    so a read that could not finish left the sidebar standing open over the
+    app — on a phone in another state, with nobody in the room to close it.
+    The button that failed says nothing about a drawer, so from where she is
+    sitting it appears out of nowhere.
+    """
+
+    def _driver(self):
+        return MagicMock()
+
+    def _run(self, found_my_work, landed_on_my_work=True):
+        """Walk the route with the drawer reached, and report whether Back
+        was pressed to put it away.
+
+        The drawer stands open throughout, which is what its Cerrar sesión
+        row says — that row is on inMyTeam's drawer and on no page under it,
+        which is what makes it the proof that the drawer is still in front.
+        """
+        backs = []
+        drawer = MagicMock()
+
+        def words(_d, *wanted):
+            wanted = {w.lower() for w in wanted}
+            if wanted & {w.lower() for w in macros.MY_WORK_WORDS}:
+                return MagicMock() if found_my_work else None
+            if wanted & {w.lower() for w in macros.SEARCH_WORDS}:
+                return MagicMock() if landed_on_my_work else None
+            if wanted & {w.lower() for w in macros.SIGN_OUT_WORDS}:
+                return MagicMock()      # the drawer is open
+            return None
+
+        with patch.object(macros, "_back_to_the_drawer",
+                          return_value=drawer), \
+             patch.object(macros, "_words", side_effect=words), \
+             patch.object(macros, "_where_in_app", return_value=""), \
+             patch("apt_log.device.send_ui_action",
+                   side_effect=lambda *a, **k: backs.append(1)), \
+             patch("apt_log.macros.time.sleep"):
+            ok = macros._open_my_work(self._driver(), lambda _s: None)
+        return ok, backs
+
+    def test_a_drawer_with_no_my_work_on_it_is_put_away(self):
+        ok, backs = self._run(found_my_work=False)
+        assert ok is False
+        assert backs, "the drawer was opened and left standing"
+
+    def test_a_press_that_did_not_land_puts_the_drawer_away_too(self):
+        """The row was pressed and the app is not where it should be — the
+        drawer may still be over it."""
+        ok, backs = self._run(found_my_work=True, landed_on_my_work=False)
+        assert ok is False
+        assert backs
+
+    def test_a_successful_walk_presses_no_back_at_all(self):
+        """Nothing to recover from, and a stray Back here would walk off the
+        screen the caller just asked for."""
+        ok, backs = self._run(found_my_work=True, landed_on_my_work=True)
+        assert ok is True
+        assert backs == []
+
+    def test_it_does_not_press_back_at_a_screen_with_no_drawer(self):
+        """`_close_the_drawer` presses Back only while the drawer's own
+        contents are still on screen. A Back pressed anywhere else is a
+        navigation nobody asked for."""
+        backs = []
+        with patch.object(macros, "_words", return_value=None), \
+             patch("apt_log.device.send_ui_action",
+                   side_effect=lambda *a, **k: backs.append(1)), \
+             patch("apt_log.macros.time.sleep"):
+            macros._close_the_drawer(MagicMock())
+        assert backs == []
+
 class TestNoMacroReferencesANameThatDoesNotExist:
     """A NameError should not have to reach the phone to be found.
 

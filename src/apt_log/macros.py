@@ -4005,8 +4005,20 @@ def _open_my_work(driver, report) -> bool:
         return False
     drawer.click()
     time.sleep(EVV_SETTLE)
+    # EVERY WAY OUT FROM HERE CLOSES THE DRAWER AGAIN.
+    #
+    # This opened the nav drawer and then returned False from two places
+    # without shutting it, so a work-log read that could not finish left the
+    # sidebar standing open over the app — on the phone, with nobody in the
+    # room to close it. Reported mid-check-out as "the side bar showed up for
+    # no reason", and from where she is sitting that is exactly what it is:
+    # the button that failed says nothing about a drawer.
+    #
+    # A macro that cannot do its job must still leave the phone where it
+    # found it.
     item = _words(driver, *MY_WORK_WORDS)
     if item is None:
+        _close_the_drawer(driver)
         return False
     item.click()
     time.sleep(EVV_SETTLE)
@@ -4015,9 +4027,34 @@ def _open_my_work(driver, report) -> bool:
     # exactly one. Only when the phone will not say at all does this fall
     # back to looking for the control.
     where = _where_in_app(package)
-    if where:
-        return where.lower().startswith("mywork")
-    return bool(_words(driver, *SEARCH_WORDS))
+    landed = (where.lower().startswith("mywork") if where
+              else bool(_words(driver, *SEARCH_WORDS)))
+    if not landed:
+        # The row was pressed and the app is not where it should be — the
+        # drawer may still be over it, and Back is what closes one.
+        _close_the_drawer(driver)
+    return landed
+
+
+def _close_the_drawer(driver) -> None:
+    """Put the nav drawer away, if it is what is in front.
+
+    Best effort by construction: this runs on the failure path, where the
+    thing being recovered from is already "the app is not where I thought".
+    Back closes a drawer on all three apps, and a Back pressed at a screen
+    with no drawer open is the cheapest wrong guess available — which is why
+    it is only pressed when the drawer's own contents are still on screen.
+    """
+    from apt_log import device as device_mod
+
+    try:
+        if _words(driver, *MY_WORK_WORDS) is None \
+                and _words(driver, *SIGN_OUT_WORDS) is None:
+            return
+        device_mod.send_ui_action("back")
+        time.sleep(BACK_SETTLE)
+    except Exception as exc:  # noqa: BLE001
+        log.info("could not close the drawer (%s)", exc)
 
 
 def _back_to_the_drawer(driver, report, package: str):
