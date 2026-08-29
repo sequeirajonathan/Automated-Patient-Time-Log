@@ -1075,6 +1075,20 @@
   .a-switch .knob { width:27px; height:27px; border-radius:50%; background:#fff;
                     box-shadow:0 2px 5px rgb(0 0 0 / .25); }
 
+  /* THE OPPOSITE ANSWER, AND IT MUST NOT LOOK LIKE THE SWITCH BESIDE IT.
+     Ticking this records that the patient REFUSED the treatment on the same
+     row. Drawn as an outlined word rather than a switch, in the colour of a
+     warning, and never with margin-left:auto — it sits beside the task's
+     own control, not at the far edge where a lone switch lives, because the
+     two belong to one question and are read together. */
+  .a-refuse { flex:none; border:1.5px solid var(--bad); border-radius:999px;
+              background:none; color:var(--bad); cursor:pointer;
+              padding:4px 11px; font-size:11px; font-weight:700;
+              letter-spacing:.03em; text-transform:uppercase;
+              white-space:nowrap; transition:background .2s ease; }
+  .a-refuse.on { background:var(--bad); color:#fff; }
+  .a-refuse:active { opacity:.55; }
+
   .a-icon { flex:none; width:38px; height:38px; border:none; border-radius:11px;
             background:var(--track); color:var(--tint); cursor:pointer;
             font-size:16px; }

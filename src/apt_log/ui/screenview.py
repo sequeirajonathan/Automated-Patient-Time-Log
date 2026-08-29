@@ -1825,6 +1825,8 @@ def build(doc: dict) -> dict | None:
                    if not (n.get("aim") and _is_up_affordance(n))]
     bands = [band for band in bands if band]
 
+    _fold_refusals(bands)
+
     rows = []
     for band in bands:
         shape = _band_shape(band, h)
@@ -2371,6 +2373,65 @@ def _band_shape(band: list[dict], height: int) -> dict:
                     for i in interactive)):
         return {"actions": True}
     return {}
+
+
+# WHAT A REFUSAL CONTROL SAYS, in both locales.
+#
+# inMyTeam's check-out sheet gives every task TWO checkboxes: the left one
+# records that the treatment was given, the right one records that the
+# patient REFUSED it. They are opposite answers to the same question and
+# they carry the same consequence if confused — a refusal on the record is a
+# treatment not delivered.
+REFUSAL_WORDS = ("el paciente se niega", "el paciente rehusa",
+                 "patient refuses", "patient refused", "patient declined")
+
+
+def _is_refusal(text: str) -> bool:
+    return (text or "").strip().lower().rstrip(".") in REFUSAL_WORDS
+
+
+def _fold_refusals(bands: list[list[dict]]) -> None:
+    """Put a task's refusal control on the task's own row.
+
+    THE FAILURE THIS EXISTS TO PREVENT, reported from a live check-out:
+    "one check is for the actual treatment, the other is for denying that
+    same treatment". The app staggers the pair — the done box beside the
+    task's name, the refusal box lower and to the right — so the reflow
+    banded them separately and drew:
+
+        [ ] Asistente de ambulación
+        [ ] El paciente se niega
+
+    Two identical unlabelled switches on two rows, and nothing on either
+    saying which answer it gives. Whichever way that is misread, the record
+    is wrong about whether a person was cared for.
+
+    So the refusal rides on the row it belongs to, carrying its own word and
+    its own styling. A refusal band with no task above it is left exactly
+    where it is: a control nobody can place is not one to move.
+    """
+    for i in range(len(bands) - 1, 0, -1):
+        band = bands[i]
+        toggles = [n for n in band if n.get("kind") == "toggle"]
+        labels = [n for n in band if n.get("kind") == "label"]
+        if len(toggles) != 1 or not labels:
+            continue
+        if not all(_is_refusal(n.get("txt", "")) for n in labels):
+            continue
+        host = bands[i - 1]
+        # Only onto a row that is itself a task: one toggle and a name. A
+        # section header ("Personal Care (3 H)") has no toggle and must not
+        # collect the refusal belonging to the task under it.
+        if len([n for n in host if n.get("kind") == "toggle"]) != 1:
+            continue
+        if not [n for n in host if n.get("kind") == "label"
+                and not _is_refusal(n.get("txt", ""))]:
+            continue
+        toggles[0]["refuses"] = True
+        host.append(toggles[0])
+        bands[i] = [n for n in band
+                    if n is not toggles[0] and n not in labels]
+    bands[:] = [b for b in bands if b]
 
 
 def _pair_segments(band: list[dict], width: int) -> None:

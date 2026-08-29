@@ -222,6 +222,16 @@
           ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor"
                 stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"
             ><path d="M3.5 8.5 L6.5 11.5 L12.5 4.5"/></svg></button>
+      {% elif it.kind == 'toggle' and it.refuses %}
+        {# THE OPPOSITE ANSWER TO THE SAME QUESTION, and it must never be
+           mistakable for the switch beside it. A refusal on the record says
+           a treatment was not delivered. So it rides on the task's own row,
+           says what it is in words, and is drawn in the colour of a warning
+           rather than as one more identical grey switch. #}
+        <button type="button" class="a-refuse{% if it.checked %} on{% endif %}"
+                data-aim='{{ it.aim | tojson }}'
+                aria-label="{{ t('papp.refused') }}"
+          ><span class="a-refuse-t">{{ t('papp.refused') }}</span></button>
       {% elif it.kind == 'toggle' %}
         <button type="button" class="a-switch{% if it.checked %} on{% endif %}"
                 data-aim='{{ it.aim | tojson }}'

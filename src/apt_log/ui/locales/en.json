@@ -269,6 +269,7 @@
  "papp.opening": "Opening {app}…",
  "papp.peek": "Photo",
  "papp.photo_taken": "Photo from {time}",
+ "papp.refused": "Refused",
  "papp.resending": "Asking for a new code…",
  "papp.scan": "Read the whole page",
  "papp.scanning": "Reading the whole page…",

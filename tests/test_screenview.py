@@ -1246,6 +1246,135 @@ class TestTheVisitDetailIsNotAParagraph:
         ))
         assert not self._named(m, "Atrás")
 
+class TestARefusalIsNotTheSameAnswerAsDone:
+    """inMyTeam's check-out sheet gives every task TWO checkboxes: the left
+    one records that the treatment was given, the right one records that the
+    patient REFUSED it.
+
+    Reported from a live check-out, mid-visit: "one check is for the actual
+    treatment, the other is for denying that same treatment". The app
+    staggers the pair — done box beside the name, refusal box lower and to
+    the right — so the reflow banded them separately and drew two identical
+    unlabelled switches on two rows with nothing on either saying which
+    answer it gave. Whichever way that is misread, the record is wrong about
+    whether a person was cared for.
+
+    Geometry verbatim from the phone, 2026-08-29: done boxes at x 26-58,
+    refusal boxes at x 868-900, each pair 27px apart vertically.
+    """
+
+    TASKS = ["Asistente de ambulación", "Ayudar a vestirse",
+             "Baño en silla de baño"]
+
+    def _model(self, refusals=True):
+        els = []
+        sts = [st([26, 300, 700, 330], "Seleccione las tareas completadas"),
+               st([26, 335, 400, 362], "Personal Care (3 H)")]
+        for k, name in enumerate(self.TASKS):
+            y = 369 + 62 * k
+            els.append(el("", "CheckBox", [26, y, 58, y + 32]))
+            sts.append(st([10, y + 3, 22, y + 29], "*"))
+            sts.append(st([70, y + 1, 500, y + 31], name))
+            if refusals:
+                els.append(el("", "CheckBox", [868, y + 27, 900, y + 59]))
+                sts.append(st([640, y + 28, 860, y + 58],
+                              "El paciente se niega"))
+        return screenview.build(doc(elements=els, statics=sts,
+                                    size=(1080, 2340)))
+
+    def _task_rows(self, m):
+        return [r for r in m["rows"]
+                if any(i["kind"] == "toggle" for i in r["items"])]
+
+    def test_every_task_carries_both_answers_on_its_own_row(self):
+        rows = self._task_rows(self._model())
+        assert len(rows) == len(self.TASKS)
+        for row, name in zip(rows, self.TASKS):
+            kinds = [i["kind"] for i in row["items"]]
+            assert kinds.count("toggle") == 2, "done and refused, one row"
+            assert name in [i.get("txt") for i in row["items"]]
+
+    def test_the_refusal_is_marked_as_one(self):
+        """The two controls must never be told apart by position alone."""
+        for row in self._task_rows(self._model()):
+            toggles = [i for i in row["items"] if i["kind"] == "toggle"]
+            assert [bool(t.get("refuses")) for t in toggles] == [False, True]
+
+    def test_the_words_el_paciente_se_niega_are_not_left_as_a_row(self):
+        """It was a row of its own, reading like another task."""
+        everything = [i.get("txt") for r in self._model()["rows"]
+                      for i in r["items"]]
+        assert "El paciente se niega" not in everything
+
+    def test_a_task_with_no_refusal_control_is_untouched(self):
+        """HHAeXchange+ and the plan-of-care pages have no such column."""
+        rows = self._task_rows(self._model(refusals=False))
+        assert len(rows) == len(self.TASKS)
+        for row in rows:
+            toggles = [i for i in row["items"] if i["kind"] == "toggle"]
+            assert len(toggles) == 1 and not toggles[0].get("refuses")
+
+    def test_a_section_header_never_collects_a_refusal(self):
+        """"Personal Care (3 H)" has no toggle of its own, so a refusal
+        must not fold onto it — that would hand the header an answer about
+        a task it is not."""
+        m = self._model()
+        for row in m["rows"]:
+            if any(i.get("txt") == "Personal Care (3 H)" for i in row["items"]):
+                assert not [i for i in row["items"] if i.get("refuses")]
+
+    def test_the_refusal_is_drawn_as_a_warning_not_as_a_switch(self):
+        """A switch identical to the one beside it is the whole fault. The
+        template gives it its own class, its own word, and the bad tone."""
+        from pathlib import Path
+
+        page = Path("src/apt_log/ui/templates/_screen.html").read_text(
+            encoding="utf-8")
+        assert "it.kind == 'toggle' and it.refuses" in page
+        assert "a-refuse" in page
+        assert "papp.refused" in page
+        css = Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+        assert ".a-refuse {" in css and "var(--bad)" in css
+
+    def test_the_word_is_written_in_both_languages(self):
+        import json
+        from pathlib import Path
+
+        for code in ("en", "es"):
+            words = json.loads(Path(
+                f"src/apt_log/ui/locales/{code}.json").read_text(
+                    encoding="utf-8"))
+            assert words["papp.refused"]
+
+
+class TestSelectAllNeverAnswersForARefusal:
+    """"Select all must just be for the tasks not for denying them" — the
+    fear on reading two identical switches. The macro behind that button
+    reads only the treatment column, and this is the test that keeps it
+    that way: `starred_tasks` is confined to ticks whose right edge falls
+    inside the first quarter of the screen, and every refusal box on this
+    sheet sits at x 868-900 on a 1080 screen."""
+
+    def test_a_refusal_box_is_never_a_pending_task(self):
+        from apt_log import macros
+
+        els, sts = [], []
+        for k in range(3):
+            y = 369 + 62 * k
+            els.append({"cls": "CheckBox", "b": [26, y, 58, y + 32],
+                        "checked": False, "enabled": True})
+            els.append({"cls": "CheckBox", "b": [868, y + 27, 900, y + 59],
+                        "checked": False, "enabled": True})
+            sts.append({"cls": "TextView", "b": [10, y + 3, 22, y + 29],
+                        "txt": "*"})
+            sts.append({"cls": "TextView", "b": [640, y + 28, 860, y + 58],
+                        "txt": "*"})
+        wanted = macros.starred_tasks(els, sts, 1080)
+        assert len(wanted) == 3
+        assert all(t["b"][0] < 540 for t in wanted), \
+            "the treatment column only, never the refusal column"
+
 class TestTabBarFurniture:
     """Mobile Caregiver+ labels each tab cell with a description as well as
     a caption, and hangs an unread count on one — so the patients list
