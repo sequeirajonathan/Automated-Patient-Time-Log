@@ -1229,6 +1229,48 @@ class TestFreshStitch:
         self._write(tmp_path)
         assert feed._fresh_stitch(tmp_path, "bbbb") is None
 
+
+    def test_the_published_page_carries_the_live_tick(self, tmp_path):
+        """THE SEAM, not just the helper. The merge is only worth anything
+        if the document the portal actually reads has the tick in it — the
+        unit tests above pass with the wiring removed, this one does not."""
+        from unittest.mock import patch
+
+        box = {"cls": "CheckBox", "rid": "", "txt": "",
+               "b": [26, 369, 58, 401], "checked": False}
+        els = [dict(e) for e in self.ELS] + [box]
+
+        def node(e):
+            on = "true" if e is box else "false"
+            return (f'<node class="android.widget.{e["cls"]}"'
+                    f' text="{e["txt"]}" resource-id="{e["rid"]}"'
+                    f' clickable="true" enabled="true" checked="{on}"'
+                    f' bounds="[{e["b"][0]},{e["b"][1]}]'
+                    f'[{e["b"][2]},{e["b"][3]}]"/>')
+
+        # She has just ticked it. The walk that built the cache above saw it
+        # empty, and the walker has had no quiet moment since.
+        xml = ('<hierarchy width="720" height="1600">'
+               + "".join(node(e) for e in els) + "</hierarchy>")
+        # The cached walk holds this page's layout and its EMPTY box, under
+        # the frame id the live viewport hashes to — which is how a walk is
+        # recognised in production: `frame_id` is rid, class and bounds, so
+        # a tick changes no identity at all.
+        self._write(tmp_path, name=feed.frame_id(els), els=els,
+                    statics=feed.statics(xml))
+        focus = "com.hhaexchange.caregiver/.MainActivity"
+        shot = tmp_path / "last-screen.jpg"
+        with patch.object(feed, "capture", return_value=(b"\x00", focus, "")), \
+             patch.object(feed, "screen_size", return_value=(720, 1600)), \
+             patch.object(feed.mirror_mod, "publish"):
+            feed.write_frame(shot, hierarchy=xml)
+
+        doc = json.loads((tmp_path / "screen.json").read_text(encoding="utf-8"))
+        assert doc.get("full"), "the whole-page document should be serving"
+        assert [e for e in doc["elements"]
+                if e.get("cls") == "CheckBox" and e.get("checked")], \
+            "the tick she put in never reached the page"
+
     def test_a_more_folded_viewport_refuses_the_unfolded_scan(self, tmp_path):
         """Coming back from the visit details re-folds today's cards. Same
         page, different STATE — and dressing the folded phone in the
@@ -2138,6 +2180,83 @@ class TestPermissionDialogIsNotWandering:
         sent = self._run("com.android.vending/.AssetBrowserActivity")
         assert any("monkey" in c for c in sent)
 
+
+class TestATickShowsUpBeforeTheWalkerGetsAQuietMoment:
+    """Reported from a live check-out: "I can't tick it won't register".
+
+    The whole-page document only rebuilds when the walker runs, and the
+    walker stands down within seconds of a tap — the right rule, and on a
+    twenty-one row checklist it locks, because every tap resets the quiet
+    window. So a tick she put in stayed invisible, she tapped the box again,
+    and the second tap took the tick back out. Measured on the phone while
+    she worked: the ticked count went DOWN.
+
+    Layout still comes from the walk. Whether a control is on comes from the
+    viewport read, which never stopped.
+    """
+
+    def _stitched(self, ticks=(False, False, False)):
+        return {"elements": [
+            {"cls": "CheckBox", "rid": "", "b": [26, 369 + 62 * k, 58,
+                                                 401 + 62 * k],
+             "checked": on, "step": 0}
+            for k, on in enumerate(ticks)]}
+
+    def _live(self, ticks):
+        return [{"cls": "CheckBox", "rid": "", "b": [26, 369 + 62 * k, 58,
+                                                     401 + 62 * k],
+                 "checked": on}
+                for k, on in enumerate(ticks)]
+
+    def test_a_tick_the_walk_never_saw_reaches_the_page(self):
+        doc = feed._merge_live_states(self._stitched(),
+                                      self._live((False, True, False)))
+        assert [e["checked"] for e in doc["elements"]] == [False, True, False]
+
+    def test_a_box_she_cleared_goes_back_to_empty(self):
+        """The same rule in reverse — the live read is the truth either
+        way, or a box she unticked would stay ticked on the page."""
+        doc = feed._merge_live_states(self._stitched((True, True, True)),
+                                      self._live((True, False, True)))
+        assert [e["checked"] for e in doc["elements"]] == [True, False, True]
+
+    def test_two_rows_on_the_same_pixels_are_left_alone(self):
+        """A stitched page holds several scroll steps, and two rows captured
+        at different steps can land on identical pixels. Guessing between
+        them would put a tick against the wrong task, so an ambiguous match
+        is skipped."""
+        doc = {"elements": [
+            {"cls": "CheckBox", "rid": "", "b": [26, 369, 58, 401],
+             "checked": False, "step": 0},
+            {"cls": "CheckBox", "rid": "", "b": [26, 369, 58, 401],
+             "checked": False, "step": 1},
+        ]}
+        out = feed._merge_live_states(doc, [
+            {"cls": "CheckBox", "rid": "", "b": [26, 369, 58, 401],
+             "checked": True}])
+        assert [e["checked"] for e in out["elements"]] == [False, False]
+
+    def test_a_row_the_viewport_cannot_see_keeps_the_walks_answer(self):
+        """Scrolled away, so the live read says nothing about it. The walk's
+        answer is the only one there is."""
+        doc = feed._merge_live_states(self._stitched((False, True, False)),
+                                      self._live((True,)))
+        assert [e["checked"] for e in doc["elements"]] == [True, True, False]
+
+    def test_layout_is_never_taken_from_the_viewport(self):
+        """Only state is merged. Bounds, text and identity stay the walk's,
+        or the whole page would collapse to what happens to be on screen."""
+        doc = self._stitched()
+        before = [list(e["b"]) for e in doc["elements"]]
+        feed._merge_live_states(doc, self._live((True, True, True)))
+        assert [list(e["b"]) for e in doc["elements"]] == before
+
+    def test_it_only_touches_the_fields_that_can_change_in_place(self):
+        assert set(feed.LIVE_STATES) == {"checked", "selected", "enabled",
+                                         "focused"}
+
+    def test_nothing_to_merge_is_not_an_error(self):
+        assert feed._merge_live_states({"elements": []}, []) == {"elements": []}
 
 class TestDisabledControls:
     """HHAeXchange+ ships the visit screen with a clock-out button that

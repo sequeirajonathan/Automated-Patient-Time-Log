@@ -1509,6 +1509,63 @@ def _fresh_stitch(directory: Path, viewport_id: str,
     return None
 
 
+# The fields of a control that change while the PAGE does not: whether a box
+# is ticked, whether a row is selected, whether a control has gone dead. A
+# stitched page is a photograph of layout, and layout is all it should be
+# trusted for.
+LIVE_STATES = ("checked", "selected", "enabled", "focused")
+
+
+def _merge_live_states(doc: dict, els: list[dict]) -> dict:
+    """The stitched page, wearing the live viewport's control states.
+
+    A WHOLE-PAGE DOCUMENT ONLY REBUILDS WHEN THE WALKER RUNS, AND THE WALKER
+    STANDS DOWN WHILE SHE IS TAPPING.
+
+    That is the right rule — nobody wants the page scrolling under their
+    fingers — but on a checklist it locks: every tap resets the quiet
+    window, so a page of twenty-one boxes never gets the pause it needs to
+    refresh. Reported from a live check-out, and the consequence is worse
+    than a stale screen. She ticks a box, the page still shows it empty, she
+    taps it again — and the second tap UNTICKS it. Measured on the phone: the
+    ticked count went down while she was trying to put ticks in.
+
+    The viewport captures never stopped; they are read every couple of
+    seconds throughout. So the layout comes from the walk, as before, and
+    whether each control is ON comes from the live read.
+
+    MATCHED ON EXACT DEVICE BOUNDS, and only where that match is UNIQUE. A
+    stitched page holds several scroll steps, and two rows captured at
+    different steps can land on the same pixels; an ambiguous match is
+    skipped rather than guessed, because guessing here would show a tick
+    against the wrong task.
+    """
+    if not els or not doc.get("elements"):
+        return doc
+    seen: dict[tuple, list[dict]] = {}
+    for e in doc["elements"]:
+        seen.setdefault(
+            (e.get("cls", ""), e.get("rid", ""), tuple(e.get("b") or ())),
+            []).append(e)
+    live: dict[tuple, list[dict]] = {}
+    for e in els:
+        live.setdefault(
+            (e.get("cls", ""), e.get("rid", ""), tuple(e.get("b") or ())),
+            []).append(e)
+    fresh = 0
+    for key, mine in live.items():
+        theirs = seen.get(key)
+        if len(mine) != 1 or not theirs or len(theirs) != 1:
+            continue
+        for field in LIVE_STATES:
+            if field in mine[0] and theirs[0].get(field) != mine[0][field]:
+                theirs[0][field] = mine[0][field]
+                fresh += 1
+    if fresh:
+        log.info("refreshed %d control state(s) from the live viewport", fresh)
+    return doc
+
+
 def write_screen(target: Path, frame: dict, screen: str, reason: str,
                  hierarchy: str | None, focus: str = "",
                  hierarchy_at: float = 0.0, hierarchy_focus: str = "",
@@ -1710,6 +1767,12 @@ def write_frame(path: Path, serial: str | None = None,
                               app=(focus or "").split("/")[0],
                               sts=statics(hierarchy) if hierarchy else [])
                 if not reason and not _has_canvas(hierarchy) else None)
+    # Layout from the walk, control states from the live read — see
+    # `_merge_live_states`. Without this a tick she puts in is invisible
+    # until the walker gets a quiet moment, and her second tap takes it
+    # back out.
+    if stitched is not None:
+        stitched = _merge_live_states(stitched, els)
     frame = {
         "id": frame_id(els),
         # Why there is no picture, so the page can say something better than
