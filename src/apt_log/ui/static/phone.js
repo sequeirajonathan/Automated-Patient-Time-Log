@@ -1780,7 +1780,24 @@
       cap.appendChild(document.createTextNode(
         v.running ? i18n.schedNow : i18n.schedUpcoming));
     }
-    if (who) who.textContent = v.patient;
+    // The app's mark, beside the name, in the app's own colour — the same
+    // one the springboard tile carries, so the card and the tile match by
+    // sight. Rebuilt rather than left alone because the visit on this card
+    // changes, and with it the app: a badge that stayed put would say iMT
+    // over a patient who is now on Exchange+.
+    if (who) {
+      who.textContent = '';
+      if (v.mark) {
+        const badge = document.createElement('span');
+        badge.className = 'appbadge';
+        badge.style.background = v.accent || '#666';
+        badge.textContent = v.mark;
+        who.appendChild(badge);
+      }
+      // textContent for the name itself: a patient's name is somebody
+      // else's words and this page has no business reading them as markup.
+      who.appendChild(document.createTextNode(v.patient));
+    }
     if (when) {
       when.textContent = v.fires + ' – ' + v.ends;
       if (v.buffered) {
@@ -1821,20 +1838,25 @@
     if (!v) return;
     const who = card.querySelector('.who');
     const sub = card.querySelector('.sub');
-    const chip = card.querySelector('.chip');
     // textContent throughout: a patient's name is somebody else's words and
     // this page has no business interpreting them as markup.
-    if (who) who.textContent = v.patient;
-    if (chip) {
-      chip.textContent = v.mark || '';
-      chip.style.background = v.accent || '#666';
+    // The badge rides the NAME here too, as it does on the card above — it
+    // used to lead this card's grey sub-line, and two cards putting the same
+    // fact in two different places is something that has to be learned
+    // rather than seen.
+    if (who) {
+      who.textContent = '';
+      if (v.mark) {
+        const badge = document.createElement('span');
+        badge.className = 'appbadge';
+        badge.style.background = v.accent || '#666';
+        badge.textContent = v.mark;
+        who.appendChild(badge);
+      }
+      who.appendChild(document.createTextNode(v.patient));
     }
     if (sub) {
-      // The chip is inside .sub, so the text after it is replaced rather than
-      // the whole node — otherwise the badge is destroyed on every refresh.
-      while (sub.lastChild && sub.lastChild !== chip) sub.removeChild(sub.lastChild);
-      sub.appendChild(document.createTextNode(
-        ' ' + v.day + ' · ' + v.fires + ' – ' + v.ends));
+      sub.textContent = v.day + ' · ' + v.fires + ' – ' + v.ends;
     }
     card.dataset.package = v.package || '';
     card.dataset.macro = v.macro || '';

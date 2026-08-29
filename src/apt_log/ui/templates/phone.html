@@ -185,6 +185,15 @@
                  color:rgba(255,255,255,.58); }
   .upnext .who { font-size:20px; font-weight:600; margin-top:3px;
                  line-height:1.2; }
+  /* THE APP'S MARK, ON THE NAME. Sized off the text rather than in pixels so
+     it keeps its place against the name on either card, and given a fixed
+     line-height so a two-character mark ("MC") and a three ("HX+") sit at
+     the same height instead of nudging the name up and down. Not a button:
+     the whole card is already the way into that app. */
+  .appbadge { display:inline-block; font-size:.55em; font-weight:700;
+              letter-spacing:.02em; line-height:1.5; border-radius:6px;
+              padding:1px 6px; margin-right:8px; vertical-align:middle;
+              color:#fff; white-space:nowrap; }
   .upnext .when { font-size:15px; color:rgba(255,255,255,.82); margin-top:4px; }
   .upnext .where { font-size:12px; color:rgba(255,255,255,.55); margin-top:3px; }
   /* A visit in progress is the one fact on this page that changes what she
@@ -1677,7 +1686,15 @@
         {%- if v.running %}<span class="live"></span>{{ t('sched.now') }}
         {%- else %}{{ t('sched.upcoming') }}{% endif -%}
       </div>
-      <div class="who">{{ v.patient }}</div>
+      {# THE APP, ON THE NAME. It was only ever in the small grey line at the
+         foot of the card — "Sábado · inMyTeam" — which is the last thing
+         read and the first thing skipped, and the card is a way INTO that
+         app: pressing it opens whichever one holds the visit. Which one
+         that is belongs beside the patient, in the app's own colour, the
+         same mark the springboard tile carries so the two match by sight
+         rather than by memory. #}
+      <div class="who"><span class="appbadge"
+        style="background:{{ v.accent }}">{{ v.mark }}</span>{{ v.patient }}</div>
       <div class="when">
         {{ v.fires }} – {{ v.ends }}
         {%- if v.buffered %} <span class="buffered">{{ t('sched.buffered') }}</span>{% endif -%}
@@ -1716,10 +1733,14 @@
             data-name="{{ nxt.app if nxt }}"
             data-agency="{{ nxt.agency if nxt }}">
       <span class="cap">{{ t('sched.after_that') }}</span>
-      <span class="who">{{ nxt.patient if nxt }}</span>
-      <span class="sub">
-        <span class="chip" style="background:{{ nxt.accent if nxt else '#666' }}"
-          >{{ nxt.mark if nxt }}</span
+      {# Beside the name here too, where the card above now carries it. It
+         used to lead the grey sub-line; two cards putting the same fact in
+         two different places is the kind of thing that has to be learned
+         instead of seen. #}
+      <span class="who"><span class="appbadge"
+        style="background:{{ nxt.accent if nxt else '#666' }}"
+        >{{ nxt.mark if nxt }}</span>{{ nxt.patient if nxt }}</span>
+      <span class="sub"
         >{{ nxt.day if nxt }} · {{ nxt.fires if nxt }} – {{ nxt.ends if nxt }}</span
         >{% if nxt and not nxt.does_entry %} <span class="noentry"
           >{{ t('sched.no_entry') }}</span>{% endif %}

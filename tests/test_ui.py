@@ -3350,18 +3350,47 @@ class TestTheCardUnderIt:
         assert "padding:14px 16px" in top
         assert "padding:14px 16px" in after
 
-    def test_a_patients_name_goes_in_as_text_never_as_markup(self):
+    def _painters(self):
         js = self._js()
-        body = js[js.index("function paintAfter"):js.index("function refreshSchedule")]
-        assert "who.textContent = v.patient" in body
-        assert "innerHTML" not in body
+        return (js[js.index("function paintUpNext"):js.index("function paintAfter")],
+                js[js.index("function paintAfter"):js.index("function refreshSchedule")])
 
-    def test_the_badge_survives_a_refresh(self):
-        """The chip lives inside the line the times are written into, so a
-        naive rewrite of that line destroys it."""
-        js = self._js()
-        body = js[js.index("function paintAfter"):js.index("function refreshSchedule")]
-        assert "sub.lastChild !== chip" in body
+    def test_a_patients_name_goes_in_as_text_never_as_markup(self):
+        """A patient's name is somebody else's words and this page has no
+        business reading them as markup. Both cards now build the name beside
+        a badge, so the name is a text NODE rather than an assignment — the
+        property being guarded is the same one."""
+        for body in self._painters():
+            assert "createTextNode(v.patient)" in body
+            # Aimed at the NAME's own element rather than at the word
+            # anywhere in the painter: clearing an empty caption with
+            # innerHTML is not the hazard this is about.
+            assert "who.innerHTML" not in body
+
+    def test_the_app_badge_rides_the_name_on_both_cards(self):
+        """Asked for repeatedly, and it was only ever in the small grey line
+        at the foot of the card — the last thing read and the first thing
+        skipped — while the card is the way INTO that app. Two cards putting
+        the same fact in two different places is something that has to be
+        learned instead of seen, so the badge sits on the name on both."""
+        for body in self._painters():
+            assert "who.appendChild(badge)" in body
+            assert "'appbadge'" in body
+
+    def test_the_badge_is_rebuilt_for_the_visit_on_the_card_now(self):
+        """The visit on these cards changes, and the app changes with it. A
+        badge left in place would say iMT over a patient who is now on
+        Exchange+ — the same class of mistake as the card that opened the
+        wrong app because it kept an hour-old package."""
+        for body in self._painters():
+            assert "who.textContent = ''" in body
+
+    def test_the_times_line_no_longer_holds_the_badge(self):
+        """It used to, which is why rewriting that line needed a dance around
+        the chip. Out of the line, the hazard is gone rather than handled."""
+        _, after = self._painters()
+        assert "sub.textContent" in after
+        assert "chip" not in after
 
 
 class TestAVisitIsAWayIntoItsApp:
