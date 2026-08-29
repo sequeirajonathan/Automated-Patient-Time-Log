@@ -2827,8 +2827,27 @@ def _app_home(driver, report) -> None:
             driver.activate_app(package)
             wait_for(lambda: _front_package() == package, timeout=10.0)
             break
-        if front == package and feed_mod.screen_for(focus,
-                                                    _tree()) in HOME_SCREENS:
+        # THE LIVE SESSION, NOT THE FEED'S FILE — see `_live_tree`.
+        #
+        # This asked `_tree()`, which the feed stops writing the moment a
+        # macro takes the driver. So "am I home yet" was answered about
+        # whatever was on screen when the macro STARTED, and pressing Back
+        # never changed the answer: the loop could only ever recognise a
+        # front page it was already standing on before it pressed anything.
+        #
+        # What it cost, live: with the provider picker in front — which
+        # HOME_SCREENS has always counted as home — the frozen file still
+        # held a page from the middle of the walk that opened it. So App Home
+        # spent its whole Back budget walking off the picker, out through
+        # AuthenticationActivity and into the Chrome sign-in tab, and cost a
+        # sign-in to get back to the page it started on. Auto-auth recovered
+        # it two minutes later. That is the exact dead end this macro exists
+        # to prevent.
+        #
+        # Same fault, same file, third time: the agency walk below carries
+        # the same note about the same frozen file.
+        if front == package and feed_mod.screen_for(
+                focus, _live_tree(driver)) in HOME_SCREENS:
             break
         report("macro.step.navigating")
         device_mod.send_ui_action("back")

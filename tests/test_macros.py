@@ -4653,6 +4653,73 @@ class TestBackToTheAppsOwnFirstPage:
             with pytest.raises(RuntimeError, match="come back to the front"):
                 macros._app_home(driver, lambda _s: None)
 
+    def test_it_asks_the_phone_where_it_is_not_the_frozen_file(self):
+        """The feed stops reading the phone while a macro holds the driver,
+        so the published hierarchy is pinned to whatever was on screen when
+        the macro STARTED. Answering "am I home yet" from it means pressing
+        Back can never change the answer.
+
+        Caught live on the provider picker — which HOME_SCREENS has always
+        counted as home. The frozen file still held a page from the middle
+        of the walk that opened the picker, so App Home pressed Back off it,
+        out through AuthenticationActivity and into the Chrome sign-in tab,
+        and spent a whole sign-in returning to the page it started on.
+
+        The other tests in this class stub `screen_for` outright, so none of
+        them can see which tree it was handed. This one answers FROM the
+        tree, which is the only way the difference shows.
+        """
+        from unittest.mock import patch as patch_mod
+
+        pkg = "com.hhaexchange.uma"
+        frozen, live = "<a page the walk passed through/>", "<the picker/>"
+        backs = []
+        driver = self._driver()
+        driver.page_source = live
+
+        with patch_mod.object(macros, "_front_package", return_value=pkg), \
+                patch_mod("apt_log.feed.current_focus",
+                          return_value=pkg + "/OnboardingActivity"), \
+                patch_mod("apt_log.feed.screen_for",
+                          side_effect=lambda _f, tree, *a, **k:
+                              "agency" if tree == live else "visit"), \
+                patch_mod("apt_log.device.send_ui_action",
+                          lambda *a, **k: backs.append(1)), \
+                patch_mod.object(macros, "_tree", lambda: frozen), \
+                patch_mod.object(macros, "_forget_stitched", lambda _a: None), \
+                patch_mod("apt_log.macros.time.sleep"):
+            macros._app_home(driver, lambda _s: None)
+
+        assert backs == [], (
+            "App Home walked away from the front page it was already on")
+
+    def test_a_driver_that_will_not_answer_still_gets_a_tree(self):
+        """`_live_tree` falls back to the published file when the session
+        refuses. App Home must not become unusable because a read failed —
+        a stale answer about a screen nothing navigated away from is still
+        better than no answer."""
+        from unittest.mock import patch as patch_mod, PropertyMock
+
+        pkg = "com.tellus.evv.v2"
+        driver = self._driver()
+        type(driver).page_source = PropertyMock(side_effect=RuntimeError("no"))
+        backs = []
+
+        with patch_mod.object(macros, "_front_package", return_value=pkg), \
+                patch_mod("apt_log.feed.current_focus",
+                          return_value=pkg + "/x"), \
+                patch_mod("apt_log.feed.screen_for",
+                          side_effect=lambda _f, tree, *a, **k:
+                              "home" if tree == "<published/>" else "visit"), \
+                patch_mod("apt_log.device.send_ui_action",
+                          lambda *a, **k: backs.append(1)), \
+                patch_mod.object(macros, "_tree", lambda: "<published/>"), \
+                patch_mod.object(macros, "_forget_stitched", lambda _a: None), \
+                patch_mod("apt_log.macros.time.sleep"):
+            macros._app_home(driver, lambda _s: None)
+
+        assert backs == []
+
     def test_it_is_registered_and_needs_no_confirmation(self):
         """It navigates. Nothing it does can be wrong enough to want a
         second press in front of it."""
