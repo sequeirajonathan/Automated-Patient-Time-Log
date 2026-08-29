@@ -1051,6 +1051,30 @@ MOVE_MS = 12
 CLAIM_NUDGE = 16
 CLAIM_STEP = 5
 
+# A DOT IS NOT A DRAG, AND MUST NOT BE GIVEN ONE.
+#
+# The lead-in above is bought against gesture interception, and interception
+# only happens to a DRAG. A single-point stroke — the tittle of an i, the dot
+# of a j, a full stop — has no drag to steal, so the nudge buys nothing there
+# and costs everything: it turns a dot into a 16px horizontal dash.
+#
+# Seen on the caregiver's own signature and reported as "two straight lines
+# that look like they were done programmatically", which is exactly what they
+# were. The log had already said so and nobody had read it that way:
+#
+#   points=34+27+72+101+1+1
+#   boxes=…;456,1735-456,1735;448,1727-448,1727
+#   strokes_ink=…,+83/1,+80/1
+#
+# Two strokes of ONE point each, at zero-size boxes, each leaving a line's
+# worth of ink.
+#
+# A dot still needs SOME movement, because a pad that draws on move events
+# renders a bare down-up as nothing at all — and a lost tittle is a wrong
+# signature too. Three pixels is under any touch slop, so it cannot read as a
+# drag, and it marks about as much as a fingertip would.
+DOT_MARK = 3
+
 
 # The locator strategy's wire name. Spelled out rather than imported from
 # appium, which is not installed in the cloud container where this suite also
@@ -1193,15 +1217,22 @@ def _draw(driver, path) -> None:
     # lies along the mark rather than across it; rightward for a stroke with
     # no horizontal travel at all. `build_paths` keeps every point inside the
     # canvas by a margin wider than this, so neither direction leaves the pad.
+    #
+    # NOT FOR A DOT — see DOT_MARK. There is no drag to be stolen, and the
+    # nudge is what turned two tittles into two straight lines.
     way = 1 if path[-1][0] >= x0 else -1
-    step = CLAIM_STEP
-    while step <= CLAIM_NUDGE:
-        pen.move_to_location(x0 + way * step, y0)
-        step += CLAIM_STEP
-    pen.move_to_location(x0 + way * CLAIM_NUDGE, y0)
-    # Back to where the stroke actually starts, so the signature itself is
-    # drawn from its own first point.
-    pen.move_to_location(x0, y0)
+    if len(path) > 1:
+        step = CLAIM_STEP
+        while step <= CLAIM_NUDGE:
+            pen.move_to_location(x0 + way * step, y0)
+            step += CLAIM_STEP
+        pen.move_to_location(x0 + way * CLAIM_NUDGE, y0)
+        # Back to where the stroke actually starts, so the signature itself is
+        # drawn from its own first point.
+        pen.move_to_location(x0, y0)
+    else:
+        pen.move_to_location(x0 + DOT_MARK, y0)
+        pen.move_to_location(x0, y0)
     for x, y in path[1:]:
         pen.move_to_location(x, y)
     pen.pause(PEN_SETTLE)

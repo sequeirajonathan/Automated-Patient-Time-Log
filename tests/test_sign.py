@@ -1785,3 +1785,88 @@ class TestARoleIsNotAName:
         """Only whole words are roles. A surname that merely contains one is
         a surname."""
         assert self.named("Firma de Ana Pacientes") == "Ana Pacientes"
+
+
+class TestADotIsNotADrag:
+    """"Two straight lines that look like they were done programmatically."
+
+    They were. The sideways lead-in is bought against gesture interception,
+    and interception only happens to a DRAG — a single-point stroke has none
+    to steal, so the nudge bought nothing there and turned each tittle into a
+    16px dash.
+
+    The log had said so and nobody had read it that way:
+
+        points=34+27+72+101+1+1
+        boxes=…;456,1735-456,1735;448,1727-448,1727
+        strokes_ink=…,+83/1,+80/1
+
+    Two strokes of one point, at zero-size boxes, each leaving a line's worth
+    of ink.
+    """
+
+    def _chain(self, path):
+        moves = []
+
+        class Pen:
+            def move_to_location(self, x, y):
+                moves.append((x, y))
+
+            def pause(self, _s):
+                pass
+
+            def pointer_down(self):
+                moves.append("DOWN")
+
+            def pointer_up(self):
+                moves.append("UP")
+
+        class Builder:
+            pointer_action = Pen()
+
+            def perform(self):
+                pass
+
+            def clear_actions(self):
+                pass
+
+        with patch("selenium.webdriver.common.actions.action_builder"
+                   ".ActionBuilder", return_value=Builder()):
+            sign._draw(MagicMock(), path)
+        return moves
+
+    def _travel(self, moves):
+        points = [m for m in moves if m not in ("DOWN", "UP")]
+        return max(abs(x - points[0][0]) for x, _ in points)
+
+    def test_a_dot_does_not_get_the_lead_in(self):
+        assert self._travel(self._chain([(500, 1600)])) <= sign.DOT_MARK
+
+    def test_a_dot_still_marks_something(self):
+        """A pad that draws on move events renders a bare down-up as nothing,
+        and a lost tittle is a wrong signature too."""
+        moves = self._chain([(500, 1600)])
+        points = [m for m in moves if m not in ("DOWN", "UP")]
+        assert len(points) > 1, "no movement at all"
+
+    def test_the_dot_mark_is_under_any_touch_slop(self):
+        """Or it would be a drag, and the sheet would take it — which is the
+        thing the lead-in exists to prevent."""
+        assert sign.DOT_MARK <= 4
+
+    def test_a_real_stroke_still_gets_the_lead_in(self):
+        """The dots were the artefact; the strokes were the reason it exists,
+        and 0 of 16 landed without it."""
+        assert self._travel(self._chain(
+            [(500, 1600), (500, 1900)])) == sign.CLAIM_NUDGE
+
+    def test_a_two_point_stroke_counts_as_a_stroke(self):
+        """The boundary is one point, not "short". Two points is a drag and a
+        drag can be stolen."""
+        assert self._travel(self._chain(
+            [(500, 1600), (505, 1900)])) == sign.CLAIM_NUDGE
+
+    def test_the_dot_lands_where_it_was_drawn(self):
+        moves = self._chain([(456, 1735)])
+        assert moves[-1] == "UP"
+        assert (456, 1735) in moves
