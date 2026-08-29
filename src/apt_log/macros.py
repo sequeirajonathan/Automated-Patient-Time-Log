@@ -1259,6 +1259,58 @@ def _tap_xy(x: int, y: int) -> None:
                    capture_output=True, timeout=10, check=True)
 
 
+def _where_the_phone_is(driver) -> tuple[str, str]:
+    """(package, activity), or ("", "") if the phone will not say.
+
+    Cheap and unreliable on purpose: the caller compares two readings and a
+    reading that failed compares equal to nothing, which is the safe answer
+    for every caller here.
+    """
+    try:
+        return (driver.current_package or "",
+                (driver.current_activity or "").lower())
+    except Exception:  # noqa: BLE001
+        return ("", "")
+
+
+def _back_out_of_the_fold(driver, was: tuple[str, str], capture):
+    """Undo a fold tap that went somewhere, WITHOUT leaving the app.
+
+    The guard above notices a tap that navigated instead of unfolding, and
+    used to answer with a bare BACK. On the schedule that is the app's ROOT,
+    and Back at a root closes the app: the phone landed in whichever care app
+    was behind it, mid-task, twice in five minutes while this was being
+    watched. The scan is a READER. A reader that can navigate the phone out
+    of the app somebody is working in is not one.
+
+    So Back is pressed only when the phone actually moved — a page that
+    merely redrew its chevrons never navigated, and pressing Back on it is
+    the bug rather than the fix — and if Back leaves the app anyway, the app
+    is brought straight back. Ending up somewhere else is not an outcome this
+    is allowed to have.
+    """
+    now = _where_the_phone_is(driver)
+    if now == was or not was[0]:
+        # Same page. The chevrons changed under a tap that went nowhere;
+        # there is nothing to back out of.
+        log.warning("a fold tap changed the page without navigating; "
+                    "scanning as-is")
+        return capture()
+    log.warning("a fold tap navigated instead of unfolding; backing out")
+    driver.press_keycode(4)
+    time.sleep(STITCH_SETTLE)
+    if _where_the_phone_is(driver)[0] not in ("", was[0]):
+        # Back went one step too far and left the app. Nothing about a scan
+        # justifies that, so put it back where it was found.
+        log.warning("backing out left %s; bringing it back", was[0])
+        try:
+            driver.activate_app(was[0])
+            time.sleep(STITCH_SETTLE)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("could not bring %s back (%s)", was[0], exc)
+    return capture()
+
+
 def _scroll_to_top(driver, cx: int, y_top: int, y_bot: int) -> None:
     prev = None
     for _ in range(8):
@@ -1374,6 +1426,10 @@ def _stitch_walk(driver, assume_top: bool = False) -> bool:
                     break
                 eb = rows[0]
                 before = _chevron_count(cap["statics"])
+                # WHERE WE WERE, so the back-out below can tell a page that
+                # navigated from a page that merely redrew. Read before the
+                # tap because afterwards there is nothing to compare against.
+                was = _where_the_phone_is(driver)
                 taps_left -= 1
                 try:
                     _tap_xy((eb[0] + eb[2]) // 2, (eb[1] + eb[3]) // 2)
@@ -1388,12 +1444,8 @@ def _stitch_walk(driver, assume_top: bool = False) -> bool:
                 # wherever the tap navigated to instead.
                 if (not _page_folds(fresh["statics"])
                         or _chevron_count(fresh["statics"]) < before - 2):
-                    log.warning("a fold tap navigated instead of unfolding; "
-                                "backing out")
                     expanding = False
-                    driver.press_keycode(4)
-                    time.sleep(STITCH_SETTLE)
-                    return capture()
+                    return _back_out_of_the_fold(driver, was, capture)
                 opened += 1
                 cap = fresh
             return cap

@@ -2416,12 +2416,19 @@ class TestAccordionScan:
                 f'clickable="false" bounds="[25,{y}][142,{y+16}]"/>'
                 + chev + extra)
 
+    # Where each fake page lives, because the back-out asks. A page that
+    # NAVIGATED is on another activity; a page that merely redrew is on the
+    # same one, and telling those apart is the whole of the guard below.
+    ACTIVITIES = {"elsewhere": ".VisitDetailActivity"}
+
     def _driver(self, state, pages, package="com.hhaexchange.uma"):
         driver = MagicMock()
         driver.get_window_size.return_value = {"width": self.W, "height": self.H}
         driver.current_package = package
         type(driver).page_source = property(
             lambda _self: pages[state["page"]])
+        type(driver).current_activity = property(
+            lambda _self: self.ACTIVITIES.get(state["page"], ".HomeActivity"))
         return driver
 
     def test_a_folded_card_is_opened_and_its_contents_scanned(
@@ -2474,6 +2481,76 @@ class TestAccordionScan:
             assert macros._stitch_walk(driver, assume_top=True) is True
         tapped.assert_called_once()          # never a second gamble
         driver.press_keycode.assert_called_once_with(4)
+
+    def test_a_page_that_only_redrew_is_not_backed_out_of(
+            self, tmp_path, monkeypatch):
+        """BACK AT A ROOT CLOSES THE APP, and the schedule IS the root.
+
+        The guard reads chevrons, and chevrons can change without anything
+        navigating — at which point a bare Back is not the fix, it is the
+        bug: it walks the phone out of the app somebody is working in and
+        into whichever care app was behind it. Watched happen twice in five
+        minutes. Same activity means the tap went nowhere; there is nothing
+        to back out of.
+        """
+        monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
+        schedule = self._dates() + "".join(
+            self._card(401 + i * 60, f"PACIENTE {i}") for i in range(4))
+        pages = {
+            "collapsed": schedule,
+            # The dates survive, the chevrons do not: the guard fires, but
+            # the phone never left the page.
+            "chevronless": self._dates() + "".join(
+                f'<node class="android.view.View" clickable="true" '
+                f'bounds="[25,{401 + i * 60}][700,{433 + i * 60}]"/>'
+                for i in range(4)),
+        }
+        state = {"page": "collapsed"}
+        driver = self._driver(state, pages)
+
+        def tap(_x, _y):
+            state["page"] = "chevronless"
+
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
+             patch("apt_log.macros._tap_xy", side_effect=tap):
+            assert macros._stitch_walk(driver, assume_top=True) is True
+        driver.press_keycode.assert_not_called()
+
+    def test_a_back_that_leaves_the_app_brings_it_straight_back(
+            self, tmp_path, monkeypatch):
+        """One Back returns from a detail page; the same Back one step
+        further out closes the app. The scan is a reader, and ending up in
+        another app is not an outcome a reader is allowed to have."""
+        monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
+        schedule = self._dates() + "".join(
+            self._card(401 + i * 60, f"PACIENTE {i}") for i in range(4))
+        pages = {
+            "collapsed": schedule,
+            "elsewhere": ('<node class="android.widget.TextView" text="Detalle" '
+                          'clickable="false" bounds="[25,401][142,417]"/>'),
+        }
+        state = {"page": "collapsed", "pkg": "com.hhaexchange.uma"}
+        driver = self._driver(state, pages)
+        type(driver).current_package = property(lambda _self: state["pkg"])
+
+        def tap(_x, _y):
+            state["page"] = "elsewhere"
+
+        def back(code):
+            assert code == 4
+            state["pkg"] = "com.inmyteam.inmyteam"   # one step too far
+            state["page"] = "collapsed"
+
+        def activate(pkg):
+            state["pkg"] = pkg
+
+        driver.press_keycode.side_effect = back
+        driver.activate_app.side_effect = activate
+        with patch("apt_log.macros.time.sleep"), fast_clock(), \
+             patch("apt_log.macros._tap_xy", side_effect=tap):
+            assert macros._stitch_walk(driver, assume_top=True) is True
+        driver.activate_app.assert_called_once_with("com.hhaexchange.uma")
+        assert state["pkg"] == "com.hhaexchange.uma"
 
     def test_only_the_proven_app_is_expanded(self, tmp_path, monkeypatch):
         monkeypatch.setattr(macros, "STITCH_DIR", tmp_path / "stitched")
