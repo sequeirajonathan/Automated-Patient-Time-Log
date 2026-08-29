@@ -2104,7 +2104,24 @@ class TestPermissionDialogIsNotWandering:
     teardown_method = setup_method
 
     def _run(self, focus, dwell=True):
-        with patch.object(feed, "_adb") as adb:
+        # THE MACRO STATUS HAS TO BE STUBBED, AND THIS CLASS FORGOT TO.
+        #
+        # The watchdog stands down while a macro is running, and it asks the
+        # real `read_status`, which reads a real file. On a developer's
+        # machine that file does not exist and this passed; on the controller
+        # it is live production state, so the whole suite failed whenever a
+        # macro happened to be in flight — and the suite is the deploy gate.
+        # It blocked a deploy on an auto-auth sign-in that fired seconds
+        # earlier: a random gate for a reason nothing in the diff caused.
+        # The class above this one stubs it and says so; this one is the
+        # sibling that did not.
+        import apt_log.macros as macros_mod
+
+        class S:
+            state = "idle"
+
+        with patch.object(macros_mod, "read_status", return_value=S()), \
+             patch.object(feed, "_adb") as adb:
             feed._watch_containment(focus)
             if dwell:
                 feed._out_since[0] = time.time() - feed.CONTAIN_DWELL - 1

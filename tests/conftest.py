@@ -146,6 +146,26 @@ def _isolated_prefs(tmp_path, monkeypatch):
                         lambda: tmp_path / "code-forwarded.json")
     monkeypatch.setattr(enrolled, "STORE_PATH", tmp_path / "signatures.json")
     monkeypatch.setattr(enrolled, "USE_PATH", tmp_path / "signings.jsonl")
+
+    # AND NOTHING MAY READ WHETHER A MACRO IS RUNNING RIGHT NOW.
+    #
+    # The same argument as the schedule and the SMS inbox above, and it went
+    # the same way: not a leak outward, a read of live machine state that
+    # makes the suite's answer depend on what the phone happens to be doing.
+    #
+    # The containment watchdog stands down while a macro runs, and it asks
+    # `read_status`, which reads this file. A developer's machine has no such
+    # file, so the test that asserts a stray app IS bounced passed everywhere
+    # it was written — and failed on the controller the moment an auto-auth
+    # sign-in fired seconds before the gate ran. The gate is the deploy, so a
+    # sign-in nobody asked for blocked a release for a reason nothing in the
+    # diff caused, and the message pointed at the containment watchdog.
+    #
+    # A suite that is also the deploy gate cannot be allowed to ask the
+    # machine what it is doing. Two tests stub this deliberately and should
+    # keep doing so — they are testing the running case; this is the belt for
+    # every test that never thought about it.
+    monkeypatch.setattr(macros, "STATUS_PATH", tmp_path / "macro-status.json")
     yield
 
 
