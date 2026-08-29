@@ -620,6 +620,12 @@
     const checksBtn = document.getElementById('btn-checks');
     if (checksBtn) checksBtn.hidden = !meta.checks_app || onLauncher;
 
+    // The other agency, on the one app that has one. Same rule as the button
+    // above it: offered where the picker exists, absent where it does not,
+    // rather than standing in every toolbar and failing on two of three apps.
+    const agencyBtn = document.getElementById('btn-agency');
+    if (agencyBtn) agencyBtn.hidden = !meta.agency_app || onLauncher;
+
     // THE PENCIL IS FOR A SIGNATURE SCREEN, AND ONLY A SIGNATURE SCREEN.
     //
     // It stood in the toolbar on every screen in both apps, so most of the
@@ -2195,6 +2201,28 @@
       fetch('/macro', {
         method: 'POST',
         body: new URLSearchParams({ name: 'app_home' }),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        redirect: 'follow'
+      }).catch(() => { awaitingMacro = false; unbusy(); toast(i18n.failed || ''); });
+    });
+    // To the provider picker, so the rest of the round's patients can be
+    // reached. This one STOPS at the picker rather than choosing: pressed
+    // from the toolbar there is no patient to read an agency off, and
+    // guessing "the other one" would be wrong the moment a third appears.
+    // Pressing a patient is the path that knows the answer — see
+    // `openVisitsApp` — and this is the path for when nobody pressed one.
+    //
+    // A minute, not forty seconds: choosing a provider makes the app drop
+    // its whole schedule and re-ask the server, and the walk to the picker
+    // alone is four taps with a settle after each.
+    const agencyRun = document.getElementById('btn-agency');
+    if (agencyRun) agencyRun.addEventListener('click', () => {
+      if (!driving()) return;
+      awaitingMacro = true;
+      busy(i18n.switchingAgency || '', 60000);
+      fetch('/macro', {
+        method: 'POST',
+        body: new URLSearchParams({ name: 'uma_agency' }),
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         redirect: 'follow'
       }).catch(() => { awaitingMacro = false; unbusy(); toast(i18n.failed || ''); });

@@ -3802,6 +3802,125 @@ class TestTheWeekIsMadeOfWaysIntoApps:
         assert "querySelector('#scheduleview .body')" in js
 
 
+class TestTheWayBackToAgencySelection:
+    """HHAeXchange+ carries Rainbow and Fatima on one account and the round
+    crosses between them, so reaching the other one is routine — and it was
+    four taps deep behind a menu whose rows name nothing useful.
+
+    Pressing a patient already routes to the right agency; this is the
+    control for the times nobody pressed a patient.
+    """
+
+    def _js(self):
+        return strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+
+    def _page(self):
+        return Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+
+    def test_the_toolbar_carries_the_control(self):
+        assert 'id="btn-agency"' in self._page()
+
+    def test_it_starts_hidden(self):
+        """Shown-then-hidden flashes a control into the toolbar on first
+        paint and takes it away a tick later — the same reason the pencil
+        starts hidden."""
+        page = self._page()
+        button = page[page.index('id="btn-agency"'):]
+        assert "hidden" in button[:button.index(">")]
+
+    def test_it_presses_the_macro_that_stops_at_the_picker(self):
+        """`uma_agency`, not `uma_agency_for`. From the toolbar there is no
+        patient to read an agency off, and guessing "the other one" would be
+        wrong the moment a third appears."""
+        js = self._js()
+        body = js[js.index("const agencyRun"):]
+        body = body[:body.index("const scanClose")]
+        assert "name: 'uma_agency'" in body
+        assert "uma_agency_for" not in body
+
+    def test_it_refuses_while_somebody_else_is_driving(self):
+        js = self._js()
+        body = js[js.index("const agencyRun"):]
+        assert "if (!driving()) return;" in body[:body.index("fetch(")]
+
+    def test_it_is_offered_only_where_there_is_an_agency_to_switch_to(self):
+        """Absent on the two single-agency apps rather than present and
+        failing — a button that works on one app in three teaches that it
+        does not work."""
+        js = self._js()
+        assert "agencyBtn.hidden = !meta.agency_app || onLauncher" in js
+
+    def test_the_server_says_which_apps_have_more_than_one_agency(self):
+        from apt_log import macros
+
+        assert macros.MULTI_AGENCY_APPS == ("com.hhaexchange.uma",)
+
+    def test_the_page_and_the_server_name_the_same_multi_agency_app(self):
+        """Two copies of one fact, and they have to agree: the toolbar gate
+        is served per screen while the schedule card's routing happens on a
+        view with no screen document to read it from, so the constant cannot
+        be deleted — only kept honest."""
+        from apt_log import macros
+
+        js = self._js()
+        line = next(l for l in js.splitlines() if "const MULTI_AGENCY" in l)
+        assert macros.MULTI_AGENCY_APPS[0] in line
+
+    def test_the_walk_does_not_call_going_forward_going_back(self):
+        """It reported `navigating`, which renders as "Going back" while the
+        phone walks four taps FORWARD through a menu."""
+        from apt_log import macros
+
+        src = Path("src/apt_log/macros.py").read_text(encoding="utf-8")
+        body = src[src.index("def _walk_to_agency_picker"):]
+        body = body[:body.index("def _by_id")]
+        assert 'report("macro.step.opening_the_agencies")' in body
+        assert 'report("macro.step.navigating")' not in body
+
+    def test_both_agency_steps_are_written_in_both_languages(self):
+        import json
+
+        for code in ("en", "es"):
+            words = json.loads(Path(
+                f"src/apt_log/ui/locales/{code}.json").read_text(
+                    encoding="utf-8"))
+            assert words["macro.step.opening_the_agencies"]
+            assert words["macro.step.switching_agency"]
+
+    def _meta_for(self, client, tmp_path, package):
+        """What the socket tells the page about the app in front.
+
+        It crosses as `screen`; the page binds it to a local called `meta`,
+        which is the name the toolbar gates read.
+        """
+        doc = {"at": "2026-08-29T16:00:00", "app": package,
+               "activity": "homeactivity", "blocked": "",
+               "elements": [], "size": [1080, 2340],
+               "statics": [{"cls": "TextView", "b": [0, 100, 500, 140],
+                            "txt": "agosto 29, 2026"}]}
+        (tmp_path / "screen.json").write_text(json.dumps(doc),
+                                              encoding="utf-8")
+        with patch.object(state_mod, "STATE_DIR", tmp_path):
+            with client.websocket_connect("/ws") as ws:
+                msg = ws.receive_json()
+        return msg.get("screen") or {}
+
+    def test_the_socket_says_hhaexchange_has_an_agency_to_switch_to(
+            self, client, tmp_path):
+        meta = self._meta_for(client, tmp_path, "com.hhaexchange.uma")
+        assert meta.get("agency_app") is True
+
+    def test_the_socket_says_the_single_agency_apps_do_not(
+            self, client, tmp_path):
+        """inMyTeam and Mobile Caregiver+ hold one agency each, so the
+        picker the control walks to does not exist on either."""
+        for package in ("com.inmyteam.inmyteam", "com.tellus.evv.v2"):
+            meta = self._meta_for(client, tmp_path, package)
+            assert meta.get("agency_app") is False, package
+
+
 class TestASplitVisitReadsAsEnterAndLeave:
     """The agency's rule on the page: enter on the first half, leave on the
     last, nothing at the seam."""
@@ -4335,6 +4454,9 @@ class TestEveryIconShapeActuallyDraws:
         assert shapes('id="btn-checks"') == 7
         assert shapes('id="btn-tasks"') == 4
         assert shapes('id="btn-sign"') == 2
+        # Two tracks and two arrowheads: swap, not reload. One head short and
+        # it reads as the refresh glyph, which is a different button.
+        assert shapes('id="btn-agency"') == 4
 
 
 class TestEveryHourSaysWhichZoneItIsIn:

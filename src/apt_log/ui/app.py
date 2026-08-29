@@ -1543,6 +1543,12 @@ async def live(ws: WebSocket):
                     # refusing when pressed.
                     "checks_app": (screen_doc.get("app") or "")
                     in macros_mod.CHECK_LOG_APPS,
+                    # Whether THIS app has more than one agency to choose
+                    # between. Only HHAeXchange+ does, so the switch control
+                    # is offered there and nowhere else — on the other two
+                    # the picker it walks to does not exist.
+                    "agency_app": (screen_doc.get("app") or "")
+                    in macros_mod.MULTI_AGENCY_APPS,
                 }
                 payload["screen_html"] = (
                     "" if model is None

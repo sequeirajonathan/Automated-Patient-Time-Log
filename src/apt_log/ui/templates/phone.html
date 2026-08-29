@@ -1875,6 +1875,30 @@
              stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"
           ><path d="M4 11.5 12 4.5l8 7"/><path d="M6 10.5V19h12v-8.5"/></svg>
       </button>
+      {# THE OTHER AGENCY. HHAeXchange+ carries Rainbow and Fatima on one
+         account and the round crosses between them, so "the rest of today's
+         patients are on the other one" is a routine move and it was four
+         taps deep behind a menu that names nothing usefully.
+
+         Beside App Home because they are the same kind of move — both are
+         ways back OUT of wherever a wrong tap landed — and hidden on the two
+         apps that hold one agency each, where the picker does not exist.
+
+         Pressing a patient already routes to the right agency by itself;
+         this is the control for the times nobody pressed a patient. #}
+      <button id="btn-agency" hidden aria-label="{{ t('macro.uma_agency') }}">
+        {# TWO ARROWS ROUND A CYCLE: swap, not refresh. The distinction is
+           the whole meaning here, and at 22px it rests on the arrowheads
+           pointing opposite ways along two separated tracks — a single ring
+           with one head is the reload glyph, which is a different button in
+           this same toolbar's vocabulary. Nothing else in the bar is built
+           from horizontal strokes, so it stays apart from the house, the
+           clipboard, the pencil and the eye at a glance. #}
+        <svg class="tool" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"
+          ><path d="M4 8.5h13"/><path d="M13.5 5 17 8.5 13.5 12"/>
+         <path d="M20 15.5H7"/><path d="M10.5 12 7 15.5 10.5 19"/></svg>
+      </button>
       <span class="spacer"></span>
       {# Only on a plan of care with something still unticked. A control that
          is always there and usually does nothing is a control pressed at the
@@ -2537,6 +2561,7 @@
     checkingTasks: {{ t('macro.step.checking')|tojson }},
     readingLog: {{ t('macro.step.reading_the_log')|tojson }},
     goingHome: {{ t('papp.app_home')|tojson }},
+    switchingAgency: {{ t('macro.step.opening_the_agencies')|tojson }},
     coachOn:   {{ t('papp.coach_on')|tojson }},
     coachOff:  {{ t('papp.coach_off')|tojson }},
     coachHeld: {{ t('papp.coach_held')|tojson }},

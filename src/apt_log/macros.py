@@ -2859,6 +2859,15 @@ def _app_home(driver, report) -> None:
 
 
 # ------------------------------------------------------- switching agencies
+# THE APPS THAT CARRY MORE THAN ONE AGENCY ON ONE ACCOUNT.
+#
+# The fact that decides who gets the switch control: on a single-agency app
+# the picker does not exist, and a button standing by everywhere and refusing
+# when pressed teaches only that it does not work — the same argument this
+# file already makes about the work-log button. inMyTeam and Mobile Caregiver+
+# each hold one agency, so neither offers it.
+MULTI_AGENCY_APPS = ("com.hhaexchange.uma",)
+
 # HHAeXchange+ carries more than one agency on one account, and the round
 # crosses between them twice a day. Walked live, and the path is four taps
 # deep with nothing on the way that names itself usefully:
@@ -2921,7 +2930,10 @@ def _uma_agency_for(driver, report, agency: str) -> None:
 
     _walk_to_agency_picker(driver, report)
 
-    report("macro.step.navigating")
+    # Also not "Going back". This is the press that changes provider, and it
+    # is the longest wait in the flow — the app drops its whole schedule and
+    # re-asks the server — so it is the label she reads for the longest.
+    report("macro.step.switching_agency")
     # The picker lists providers by their full registered name, which is
     # longer and punctuated differently from what a schedule file calls them
     # ("Fatima Home Care" against "Fatima Home Care, Inc. (Fatima Home Care,
@@ -2967,7 +2979,11 @@ def _walk_to_agency_picker(driver, report) -> None:
                         timeout=15.0):
             raise RuntimeError("HHAeXchange+ did not come to the front")
 
-    report("macro.step.navigating")
+    # NOT "navigating", which renders as "Going back" / "Regresando". This
+    # walk goes four taps FORWARD through a menu; the loading screen said the
+    # opposite of what the phone was doing, and matching those two is a thing
+    # the owner has already had to ask for once.
+    report("macro.step.opening_the_agencies")
     # Already there? The picker IS this app's other front page, and walking a
     # four-tap route to arrive where we started would be four chances to end
     # up somewhere else.
