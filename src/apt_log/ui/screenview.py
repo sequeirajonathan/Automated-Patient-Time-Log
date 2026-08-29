@@ -506,12 +506,31 @@ ACTION_WORDS = (
 DEMOTED_HINTS = ("no programada", "unscheduled")
 
 
+# CALLS TO ACTION ONLY WHEN THEY ARE THE WHOLE CAPTION.
+#
+# `Salida` alone, at the foot of inMyTeam's check-out sheet, is the control
+# that commits the check-out \u2014 and it was drawing as one more grey chevroned
+# cell, indistinguishable from `Firma del personal` and `Subir fichero`
+# above it. The app does not agree: it gives that row the full width of the
+# page and CENTRES its caption (x 514-567 of 1080, read off the phone),
+# where every other row on the sheet is left-aligned at x 29. Its own
+# visual weight is the standard this list exists to match.
+#
+# Matched whole rather than by prefix, which is why these are separate.
+# The same visit's detail page carries `Salida 05:39 p.m.` \u2014 the record of
+# a check-out that already happened \u2014 and a fact drawn as a filled button
+# is an invitation to press it.
+EXACT_ACTION_WORDS = ("salida", "check out", "clock out")
+
+
 def _looks_like_cta(text: str) -> bool:
     # The curly apostrophe is the one apps actually ship ("Let\u2019s Get
     # Started"); the word list is written with the plain one.
     t = (text or "").strip().lower().replace("\u2019", "'")
     if any(h in t for h in DEMOTED_HINTS):
         return False
+    if t in EXACT_ACTION_WORDS:
+        return True
     return bool(t) and any(t.startswith(w) for w in ACTION_WORDS)
 
 # Some apps draw their state marks as ImageViews instead \u2014 no text at all,

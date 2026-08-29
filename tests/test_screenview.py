@@ -1426,6 +1426,56 @@ class TestSelectAllNeverAnswersForARefusal:
         assert all(t["b"][0] < 540 for t in wanted), \
             "the treatment column only, never the refusal column"
 
+class TestSalidaIsTheButtonTheSheetIsFor:
+    """`Salida`, at the foot of inMyTeam's check-out sheet, is the control
+    that commits the check-out — and it drew as one more grey chevroned
+    cell, indistinguishable from `Firma del personal` and `Subir fichero`
+    above it.
+
+    The app does not agree, and its own weight is the standard: it gives
+    that row the full width of the page and CENTRES its caption (x 514-567
+    of 1080, read off the phone 2026-08-29), where every other row on the
+    sheet is left-aligned at x 29.
+    """
+
+    def test_the_bare_word_is_a_call_to_action(self):
+        assert screenview._looks_like_cta("Salida")
+
+    def test_a_recorded_exit_is_not(self):
+        """The same visit's detail carries `Salida 05:39 p.m.` — the record
+        of a check-out that already happened. A fact drawn as a filled
+        button is an invitation to press it."""
+        assert not screenview._looks_like_cta("Salida 05:39 p.m.")
+        assert not screenview._looks_like_cta("Salida 05:15 PM")
+
+    def test_it_is_matched_whole_and_not_by_prefix(self):
+        """Which is the whole reason these live apart from ACTION_WORDS."""
+        assert "salida" in screenview.EXACT_ACTION_WORDS
+        assert not any(w == "salida" for w in screenview.ACTION_WORDS)
+
+    def test_the_english_forms_come_too(self):
+        for word in ("Check out", "CLOCK OUT"):
+            assert screenview._looks_like_cta(word), word
+
+    def test_the_row_renders_filled_rather_than_chevroned(self):
+        """A cta gets the filled treatment and NO chevron — a chevron says
+        "opens more", and this one ends the visit."""
+        m = screenview.build(doc(
+            size=(1080, 2340),
+            elements=[el("", "android.view.View", [13, 2253, 1067, 2300])],
+            statics=[st([514, 2265, 567, 2288], "Salida")],
+        ))
+        (cell,) = [i for r in m["rows"] for i in r["items"]
+                   if i["kind"] == "row"]
+        assert cell["cta"] is True
+
+    def test_the_signature_rows_beside_it_stay_ordinary(self):
+        """They are steps on the way, not the act itself."""
+        for word in ("Firma del personal", "Firma del Paciente",
+                     "Subir fichero", "Nota adicional"):
+            assert not screenview._looks_like_cta(word), word
+
+
 class TestTabBarFurniture:
     """Mobile Caregiver+ labels each tab cell with a description as well as
     a caption, and hangs an unread count on one — so the patients list
