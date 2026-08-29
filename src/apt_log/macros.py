@@ -731,10 +731,60 @@ def _hhax_uma_login(driver, report) -> None:
     else:
         raise RuntimeError(
             "neither the sign-in control nor the web form appeared")
-    box = field("email")
-    box.clear()                # arrives prefilled with the remembered account
-    box.send_keys(email)
-    field("password").send_keys(password)
+    # THE LOOP BREAKS ON EXISTENCE; THE FORM GOES ON LOADING AFTER THAT.
+    #
+    # Above, one sighting of the email field ends the wait — and it should,
+    # because the field appearing is what the loop is for. But the page is
+    # still settling behind it, and the node seen a frame ago can be gone by
+    # the time anything is typed into it. A re-read landing in that gap
+    # returns nothing, and `None.clear()` is an AttributeError.
+    #
+    # It happened live, on the sign-in that was supposed to recover an expired
+    # session, and the cost is what makes it worth this much comment: the
+    # macro died at `macro.step.signing_in`, so the app was left sitting on
+    # its own login form, signed out, with the automatic recovery already
+    # spent. Nothing else was going to fix that before somebody noticed.
+    #
+    # So each field is waited for AT THE POINT OF USE rather than assumed
+    # from the earlier sighting, and a form that genuinely never offers one
+    # says which field it was — an AttributeError names the symptom and hides
+    # the cause.
+    from selenium.common.exceptions import (StaleElementReferenceException,
+                                            WebDriverException)
+
+    def need(web_id, timeout=20.0):
+        end = time.monotonic() + timeout
+        while True:
+            found = field(web_id)
+            if found is not None:
+                return found
+            if time.monotonic() >= end:
+                raise RuntimeError(
+                    "the sign-in form never offered its %s field" % web_id)
+            time.sleep(0.5)
+
+    def type_into(web_id, text, clear=False):
+        """Type into a field the page may still be rebuilding underneath us.
+
+        The same swap that empties a re-read can also happen BETWEEN finding
+        the node and using it, which is a stale reference rather than a
+        missing one. Both are the one situation — the form moved — and both
+        are answered the same way: look again, once.
+        """
+        for attempt in (1, 2):
+            box = need(web_id)
+            try:
+                if clear:
+                    box.clear()   # arrives prefilled with the remembered account
+                box.send_keys(text)
+                return
+            except (StaleElementReferenceException, WebDriverException):
+                if attempt == 2:
+                    raise
+                time.sleep(1.0)
+
+    type_into("email", email, clear=True)
+    type_into("password", password)
 
     # The submit control carries no id and no text in the accessibility tree.
     # Discovery's recording: it is the one wide button below the password
@@ -744,7 +794,7 @@ def _hhax_uma_login(driver, report) -> None:
     # (213 px on a 720 px screen at density 72), and a screen-relative
     # test refused the real submit. The submit spans the field it sits
     # under; the eye toggle never comes close.
-    pw = field("password").rect
+    pw = need("password").rect
     candidates = [
         b for b in driver.find_elements("class name", "android.widget.Button")
         if b.rect["width"] >= pw["width"] * 0.8

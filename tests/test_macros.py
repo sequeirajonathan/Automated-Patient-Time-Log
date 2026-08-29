@@ -1640,6 +1640,112 @@ class TestAliveSessionSurvivesTheColdResume:
                 macros.MACROS["hhax_uma_login"].run(driver, lambda _k: None)
 
 
+class TestTheFormThatIsStillLoading:
+    """The wait ends when the email field APPEARS; the page goes on settling
+    behind it. The node seen a frame ago can be replaced before anything is
+    typed into it, and a re-read landing in that gap finds nothing.
+
+    Watched live, and the cost is the reason these exist: the macro died on
+    `None.clear()` at the signing-in step, so HHAeXchange+ was left on its own
+    login form, signed out, with the automatic recovery already spent.
+    """
+
+    def _driver(self, email_present):
+        """A form whose email field comes and goes as `email_present` says.
+
+        `email_present` is called once per lookup and answers whether the
+        field is there for that one. Everything else on the form is steady.
+        """
+        driver = MagicMock()
+        driver.current_package = "com.hhaexchange.uma"
+        driver.current_activity = "com.hhaexchange.uma.AuthenticationActivity"
+        driver.page_source = '<a clickable="true"/>' * 5
+        box = MagicMock()
+        pw = MagicMock()
+        pw.rect = {"x": 90, "y": 800, "width": 900, "height": 90}
+        submit = MagicMock()
+        submit.rect = {"x": 90, "y": 1100, "width": 900, "height": 110}
+
+        def submitted():
+            # Chrome hands back and the app settles on home, which is what
+            # the macro's own closing check waits for.
+            driver.current_activity = "com.hhaexchange.uma.HomeActivity"
+        submit.click.side_effect = submitted
+
+        def find_elements(_by, selector):
+            if '@resource-id="email"' in selector:
+                return [box] if email_present() else []
+            if '@resource-id="password"' in selector:
+                return [pw]
+            return []
+        driver.find_elements.side_effect = find_elements
+        driver.find_elements_by_class_name = None
+        return driver, box, submit
+
+    def _run(self, driver, submit):
+        import itertools
+
+        from apt_log.secrets import (APP_PASSWORD, APP_USERNAME,
+                                     MemorySecretProvider)
+
+        real = driver.find_elements.side_effect
+
+        def find_elements(by, selector):
+            if by == "class name":
+                return [submit]
+            return real(by, selector)
+        driver.find_elements.side_effect = find_elements
+        provider = MemorySecretProvider(**{APP_USERNAME: "u",
+                                           APP_PASSWORD: "p"})
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider",
+                   return_value=provider), \
+             patch("apt_log.macros.dismiss_autofill", return_value=True), \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            macros.MACROS["hhax_uma_login"].run(driver, lambda _k: None)
+
+    def test_a_field_that_blinks_is_waited_for_not_crashed_on(self):
+        """The exact live failure: present when the loop looks, gone when the
+        typing looks, back a moment later."""
+        seen = {"n": 0}
+
+        def email_present():
+            seen["n"] += 1
+            return seen["n"] != 2          # there, gone, there again
+
+        driver, box, submit = self._driver(email_present)
+        self._run(driver, submit)
+        box.clear.assert_called_once()
+        box.send_keys.assert_called_once_with("u")
+
+    def test_a_field_that_never_returns_says_which_one(self):
+        """An AttributeError names the symptom and hides the cause. A form
+        that genuinely never offers the field should say so."""
+        seen = {"n": 0}
+
+        def email_present():
+            seen["n"] += 1
+            return seen["n"] == 1          # the one sighting, then never
+
+        driver, box, submit = self._driver(email_present)
+        with pytest.raises(RuntimeError, match="email"):
+            self._run(driver, submit)
+
+    def test_a_field_that_goes_stale_mid_typing_is_looked_up_again(self):
+        """The same swap can land BETWEEN finding the node and using it,
+        which is a stale reference rather than a missing one. One situation,
+        one answer: look again, once."""
+        from selenium.common.exceptions import StaleElementReferenceException
+
+        driver, box, submit = self._driver(lambda: True)
+        box.send_keys.side_effect = [StaleElementReferenceException(), None,
+                                     None]
+        self._run(driver, submit)
+        assert box.send_keys.call_count >= 2
+
+
 class TestTheDialogThatDismissesItself:
     """The inactivity countdown dialog runs out and swaps the screen
     between the macro reading it and tapping it — seen live as a
