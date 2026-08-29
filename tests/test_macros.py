@@ -4804,6 +4804,67 @@ class TestAFailedWorkLogReadDoesNotLeaveTheDrawerOpen:
             macros._close_the_drawer(MagicMock())
         assert backs == []
 
+class TestACaptionsCapitalisationIsNotItsMeaning:
+    """The work-log walk failed with "the work log is not reachable from
+    here" while the row it wanted sat on screen.
+
+    inMyTeam's drawer says `Mi Trabajo`. This file asked for `Mi trabajo`,
+    and XPath 1.0's contains() compares byte for byte — so one letter's case
+    made the control invisible to every macro that looks for it by name.
+    Read off the live phone 2026-08-29.
+    """
+
+    def test_the_needle_and_the_haystack_are_both_folded(self):
+        got = macros._ci_contains("@text", "Mi Trabajo")
+        assert "translate(@text," in got
+        assert '"mi trabajo"' in got, "the phrase is folded too, not just the node"
+
+    def test_the_fold_carries_the_accented_capitals(self):
+        """Read in Spanish. Á folded to a is not the same character as á, so
+        a table of the plain ASCII capitals alone would break Sesión."""
+        for upper, lower in zip("ÁÉÍÓÚÜÑ", "áéíóúüñ"):
+            assert upper in macros._FOLD_FROM
+            assert lower in macros._FOLD_TO
+            assert macros._FOLD_TO[macros._FOLD_FROM.index(upper)] == lower
+
+    def test_both_halves_of_the_table_are_the_same_length(self):
+        """translate() drops characters the second string is too short for,
+        which would silently delete letters from every caption tested."""
+        assert len(macros._FOLD_FROM) == len(macros._FOLD_TO)
+
+    def test_the_query_would_find_the_drawers_actual_spelling(self):
+        """The regression, named: the app writes Mi Trabajo and the code asks
+        for Mi trabajo."""
+        asked = [w for w in macros.MY_WORK_WORDS if "rabajo" in w]
+        assert asked, "the Spanish caption is still one of the words tried"
+        query = macros._ci_contains("@text", asked[0])
+        assert "mi trabajo" in query
+        # And the app's spelling folds to exactly that.
+        folded = "Mi Trabajo".translate(
+            str.maketrans(macros._FOLD_FROM, macros._FOLD_TO))
+        assert "mi trabajo" in folded
+
+    def test_words_asks_a_case_folded_question(self):
+        seen = {}
+
+        def find(_how, query):
+            seen["query"] = query
+            return []
+
+        driver = MagicMock()
+        driver.find_elements.side_effect = find
+        macros._words(driver, "Mi trabajo")
+        assert "translate(" in seen["query"]
+        assert "mi trabajo" in seen["query"]
+
+    def test_a_phrase_with_a_quote_in_it_is_skipped_not_interpolated(self):
+        """It goes into an XPath string literal. A quote would build a broken
+        expression rather than a wrong match, and no caption has ever had
+        one — but a crash on a page nobody predicted is worth one line."""
+        driver = MagicMock()
+        driver.find_elements.side_effect = AssertionError("must not be asked")
+        assert macros._words(driver, 'say "hi"') is None
+
 class TestNoMacroReferencesANameThatDoesNotExist:
     """A NameError should not have to reach the phone to be found.
 
@@ -4905,13 +4966,16 @@ class TestSigningInMyTeamOut:
             current_package = "com.inmyteam.inmyteam"
 
             def find_elements(self, how, query):
-                if "content-desc" in query and "navegación" in query:
+                # `_words` now folds case into the XPath itself, so the
+                # phrase arrives lowercased — see _ci_contains.
+                q = query.lower()
+                if "content-desc" in query and "navegación" in q:
                     return [drawer_el] if drawer else []
-                if "Cerrar sesi" in query or "Sign out" in query:
+                if "cerrar sesi" in q or "sign out" in q:
                     return [row_el] if row else []
                 if "EditText" in query:
                     return [self_el] if state["out"] else []
-                if "Comenzar" in query or "Get Started" in query:
+                if "comenzar" in q or "get started" in q:
                     return [self_el] if state["out"] else []
                 return []
 
@@ -4936,13 +5000,15 @@ class TestSigningInMyTeamOut:
             current_package = "com.inmyteam.inmyteam"
 
             def find_elements(self, how, query):
-                if "navegación" in query:
+                # Folded, because `_words` now folds case into the XPath.
+                q = query.lower()
+                if "navegación" in q:
                     return [Yes("drawer")]
-                if "Cerrar sesi" in query or "Sign out" in query:
+                if "cerrar sesi" in q or "sign out" in q:
                     return [Yes("row")]
-                if "Sí" in query or "Yes" in query:
+                if '"sí"' in q or '"yes"' in q:
                     return [Yes("yes")] if state["asked"] else []
-                if "EditText" in query or "Comenzar" in query:
+                if "EditText" in query or "comenzar" in q:
                     return [Yes("field")] if state["out"] else []
                 return []
 
@@ -5245,12 +5311,29 @@ class TestTheVerifyButtonIsFoundWhereItActuallyIs:
         def __init__(self, nodes):
             self.nodes = nodes
 
+        @staticmethod
+        def _asked_for(what, text):
+            """Whether the query's folded needle is in this node's text.
+
+            `_words` folds case into the XPath with translate(), so the
+            phrase reaches here lowercased and the node's text has to be
+            folded to meet it — which is exactly what the real engine does.
+            Still literal about everything else: a fake that matched any
+            xpath would have passed the broken locator this class exists
+            for.
+            """
+            import re
+
+            folded = text.lower()
+            tables = {macros._FOLD_FROM, macros._FOLD_TO}
+            return any(n and n not in tables and n in folded
+                       for n in re.findall(r'"([^"]*)"', what))
+
         def find_elements(self, how, what):
             hits = []
             for node in self.nodes:
-                own = f'contains(@text,"{node.text}")' in what
-                child = any(f'.//*[contains(@text,"{c.text}")' in what
-                            or f'contains(@text,"{c.text}")' in what
+                own = self._asked_for(what, node.text)
+                child = any(self._asked_for(what, c.text)
                             for c in node.children)
                 if own or child:
                     hits.append(node)

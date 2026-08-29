@@ -3051,6 +3051,28 @@ def _by_id(driver, resource_id: str):
     return found[0] if found else None
 
 
+# CASE IS NOT MEANING, AND XPATH 1.0 THINKS IT IS.
+#
+# `contains()` compares byte for byte, so a caption whose capitalisation the
+# app changed stops matching and the control "disappears". inMyTeam's drawer
+# says `Mi Trabajo`; this file asked for `Mi trabajo`, and the whole work-log
+# walk failed at the first row with "the work log is not reachable from here"
+# — while the row sat on screen, spelled exactly as expected apart from one
+# letter's case.
+#
+# XPath 1.0 has no lower-case(), so the fold is done with translate(). The
+# table carries the accented capitals as well: these apps are read in Spanish,
+# and Á folded to a is not the same character as á.
+_FOLD_FROM = "ABCDEFGHIJKLMNOPQRSTUVWXYZÁÉÍÓÚÜÑ"
+_FOLD_TO = "abcdefghijklmnopqrstuvwxyzáéíóúüñ"
+
+
+def _ci_contains(attr: str, word: str) -> str:
+    """An XPath test for `word` appearing in `attr`, ignoring case."""
+    return (f'contains(translate({attr},"{_FOLD_FROM}","{_FOLD_TO}"),'
+            f'"{word.lower()}")')
+
+
 def _words(driver, *words):
     """The smallest clickable containing any of these words.
 
@@ -3058,16 +3080,24 @@ def _words(driver, *words):
     Store's Update button, and for the same reason: these apps hang captions
     on non-clickable children, and the screen's own root contains every word
     on it. Smallest is what makes it the control rather than the page.
+
+    Matched WITHOUT REGARD TO CASE — see `_ci_contains`. Every caller here
+    passes a whole distinctive phrase, so folding case widens nothing that
+    matters: "Comenzar Visita" and "Cancelar Visita" are as different in one
+    case as in either.
     """
     best = None
     for word in words:
+        if '"' in word:
+            # The phrase is interpolated into an XPath string literal; one
+            # with a quote in it would build a broken expression rather than
+            # a wrong match, and no caption here has ever carried one.
+            continue
         try:
+            clause = (f'{_ci_contains("@text", word)}'
+                      f' or {_ci_contains("@content-desc", word)}')
             hits = [e for e in driver.find_elements(
-                "xpath",
-                f'//*[@clickable="true"][contains(@text,"{word}")'
-                f' or contains(@content-desc,"{word}")'
-                f' or .//*[contains(@text,"{word}")'
-                f' or contains(@content-desc,"{word}")]]')
+                "xpath", f'//*[@clickable="true"][{clause} or .//*[{clause}]]')
                 if e.is_displayed()]
         except Exception:  # noqa: BLE001
             continue
