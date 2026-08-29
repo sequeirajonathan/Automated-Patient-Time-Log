@@ -3227,7 +3227,15 @@ def _check_tasks(driver, report) -> None:
     if not pending:
         report("macro.step.nothing_to_check")
         return
-    report("macro.step.checking")
+    # ITS OWN STEP, because this is the only caller that means it.
+    # `macro.step.checking` is reported by ten other places — both sign-in
+    # walks, the legacy login, opening an app, going to an app's home — and
+    # in every one of them it means "verifying what I just did worked". The
+    # label was written for THIS caller, the rarest of the eleven, so the
+    # front end told her it was "ticking the required tasks" while it was
+    # merely opening an app. Reported from the phone as a weird loading state
+    # on app open, which is exactly what it was.
+    report("macro.step.ticking")
     for tick in pending:
         x = (tick["b"][0] + tick["b"][2]) // 2
         y = (tick["b"][1] + tick["b"][3]) // 2

@@ -3250,9 +3250,45 @@ class TestCheckStarredTasks:
         base = Path(__file__).resolve().parents[1] / "src/apt_log/ui/locales"
         for name in ("en.json", "es.json"):
             words = json.loads((base / name).read_text(encoding="utf-8"))
-            for key in ("macro.check_tasks", "macro.step.checking",
+            for key in ("macro.check_tasks", "macro.step.ticking",
                         "macro.step.nothing_to_check"):
                 assert words.get(key), f"{name} is missing {key}"
+
+    def test_the_ticking_label_is_not_shown_for_anything_else(self):
+        """ONE KEY WAS DOING TWO JOBS, and the rarer one had the label.
+
+        `macro.step.checking` is reported by ten places — both sign-in walks,
+        the legacy login, opening an app, going to an app's home — and in all
+        of them it means "verifying what I just did worked". Only this macro
+        meant ticking. The label was written for this macro, so opening an app
+        told her it was "ticking the required tasks", which is what it was
+        reported as: a weird loading state on app open.
+
+        So the tasks step has its own key, and the generic one says the
+        generic thing. This guards the split rather than the wording: if some
+        future step reports `checking` again, that is fine; if the tasks
+        macro goes back to sharing it, this fails.
+        """
+        import ast
+        import inspect
+        import json
+        import textwrap
+        from pathlib import Path
+
+        body = textwrap.dedent(inspect.getsource(macros._check_tasks))
+        reported = {n.args[0].value
+                    for n in ast.walk(ast.parse(body))
+                    if isinstance(n, ast.Call)
+                    and getattr(n.func, "id", "") == "report"
+                    and n.args and isinstance(n.args[0], ast.Constant)}
+        assert "macro.step.ticking" in reported
+        assert "macro.step.checking" not in reported, (
+            "the tasks macro is sharing the generic verifying step again")
+
+        base = Path(__file__).resolve().parents[1] / "src/apt_log/ui/locales"
+        for name in ("en.json", "es.json"):
+            words = json.loads((base / name).read_text(encoding="utf-8"))
+            assert words["macro.step.checking"] != words["macro.step.ticking"]
 
     def test_it_only_ever_taps_and_reads(self):
         """The tedious half is what this automates. Every consequential
