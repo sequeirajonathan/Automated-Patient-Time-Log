@@ -2984,16 +2984,81 @@ class TestTheDensityIsHandedBack:
         monkeypatch.setattr(prefs, "global_density", lambda: 120)
         assert feed._density_wanted("com.android.launcher/.Home") == 120
 
-    def test_the_reset_asks_the_phone_rather_than_guessing(self):
-        """`wm density reset` exists because the panel decides. A remembered
-        number would be a guess about a device that can change under us."""
+    def test_the_reset_lets_the_panel_decide(self):
+        """`wm density reset` exists because the panel decides. The hand-back
+        must ask for that rather than name a number of its own."""
         from conftest import strip_py_comments
 
         source = strip_py_comments(
             Path("src/apt_log/feed.py").read_text(encoding="utf-8"))
         body = source.split("def _watch_density(", 1)[1]
         assert '"wm", "density", "reset"' in body
-        assert "_density_now[0] = _physical_density(serial)" in body
+
+    def test_the_hand_back_happens_once_not_every_frame(self):
+        """IT RESET THE PHONE EVERY FRAME, and the log said so: one "density
+        handed back" line every 1.5 seconds for a minute, each one
+        re-laying-out every app on the phone while she was using it.
+
+        `_density_now` records what was last ASKED FOR — it is only ever
+        compared against the next `want`. The hand-back stored the panel's
+        physical density instead, so the guard compared 450 against
+        DENSITY_RESET, found them different, and handed back again. And
+        again. Reading the panel back was not wrong about the panel; it was
+        the wrong thing to put in a slot meaning "the last thing this asked
+        for".
+        """
+        feed._density_now[0] = 0
+        feed._left_at[0] = 0.0
+        calls = []
+
+        def adb(a, *_, **__):
+            calls.append(a)
+            m = MagicMock(returncode=0)
+            m.stdout = b"Physical density: 450\nOverride density: 300\n"
+            return m
+
+        import apt_log.macros as macros_mod
+
+        class S:
+            state = "idle"
+
+        with patch.object(feed, "_adb", side_effect=adb), \
+             patch.object(macros_mod, "read_status", return_value=S()), \
+             patch.object(macros_mod.SCAN_ACTIVE, "is_set",
+                          return_value=False), \
+             patch.object(prefs, "global_density", return_value=None):
+            # Out of the care apps, and past the dwell, so the hand-back is due.
+            feed._watch_density("com.android.settings/.Settings")
+            feed._left_at[0] -= feed.HANDBACK_DWELL + 1
+            for _ in range(6):
+                feed._watch_density("com.android.settings/.Settings")
+        resets = [c for c in calls if c[:4] == ["shell", "wm", "density",
+                                                "reset"]]
+        assert len(resets) == 1, f"handed back {len(resets)} times"
+
+    def test_a_care_app_after_a_hand_back_is_applied_again(self):
+        """The sentinel must not make the next real density look already-set."""
+        feed._density_now[0] = feed.DENSITY_RESET
+        feed._left_at[0] = 0.0
+        calls = []
+
+        def adb(a, *_, **__):
+            calls.append(a)
+            m = MagicMock(returncode=0)
+            m.stdout = b"Physical density: 450\nOverride density: 450\n"
+            return m
+
+        import apt_log.macros as macros_mod
+
+        class S:
+            state = "idle"
+
+        with patch.object(feed, "_adb", side_effect=adb), \
+             patch.object(macros_mod, "read_status", return_value=S()), \
+             patch.object(macros_mod.SCAN_ACTIVE, "is_set",
+                          return_value=False):
+            feed._watch_density("com.inmyteam.inmyteam/.MainActivity")
+        assert ["shell", "wm", "density", "105"] in calls
 
     def test_an_unreadable_physical_density_is_minus_one(self, monkeypatch):
         """Not a plausible default: every caller compares it against a wanted

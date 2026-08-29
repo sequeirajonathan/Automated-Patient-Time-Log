@@ -1003,10 +1003,21 @@ def _watch_density(focus: str, serial: str | None = None,
         log.info("density handed back to the phone (left %s)", pkg or "?")
         try:
             _adb(["shell", "wm", "density", "reset"], serial)
-            # Read back rather than assumed: the point of `reset` is that the
-            # panel decides, and a value invented here would be the guess the
-            # reset exists to avoid.
-            _density_now[0] = _physical_density(serial)
+            # THE SENTINEL, not the panel's number, and this is the whole bug
+            # that was here: what `_density_now` records is what was last
+            # ASKED FOR, because the only thing it is ever compared against
+            # is the next `want`. Recording the physical density instead
+            # meant the guard above compared 450 against DENSITY_RESET, found
+            # them different, and reset again — every frame, for as long as
+            # she was outside the care apps. Seen in the log as one
+            # "density handed back" line every 1.5 seconds for a minute,
+            # each one re-laying-out every app on the phone while she was
+            # trying to use it.
+            #
+            # Reading the panel back was not wrong about the panel. It was
+            # the wrong thing to store in a slot that means "the last thing
+            # this asked for".
+            _density_now[0] = DENSITY_RESET
         except (OSError, subprocess.SubprocessError) as exc:
             log.warning("could not hand the density back (%s)", exc)
         return
