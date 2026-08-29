@@ -909,6 +909,27 @@ def _sans_at(doc: dict) -> dict:
     return {k: v for k, v in doc.items() if k != "at"}
 
 
+def _ticked_task_count(doc: dict) -> int:
+    """How many task ticks this page already has ON.
+
+    The count behind the Clear-all button, read the same way and for the
+    same reason as the one above: the number she is shown is the number
+    that will be taken off, and the button cannot appear over a page the
+    macro would decline to touch. Zero everywhere that is not a plan of
+    care, and never raises — a page shaped unexpectedly costs the button,
+    not the frame.
+    """
+    from apt_log import macros as macros_mod
+
+    try:
+        size = doc.get("size") or [0, 0]
+        return len(macros_mod.done_tasks(
+            doc.get("elements") or [], doc.get("statics") or [],
+            size[0] if len(size) == 2 else 0, doc.get("app") or ""))
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 def _pending_task_count(doc: dict) -> int:
     """How many required tasks this page is still missing.
 
@@ -1512,6 +1533,9 @@ async def live(ws: WebSocket):
                     # moment. Counted from the SAME reading the macro runs,
                     # so the number on the button is the number it will tick.
                     "tasks": _pending_task_count(screen_doc),
+                    # ...and how many are already on, for the button
+                    # that takes them off again.
+                    "ticked": _ticked_task_count(screen_doc),
                     # The app is refusing to be used until it is updated.
                     # Rendering that screen as an ordinary page is what it
                     # did before: one button, which opens the Play Store,

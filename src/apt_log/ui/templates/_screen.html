@@ -210,6 +210,29 @@
           ></button>
           {% endif %}
         </span>
+      {% elif it.kind == 'toggle' and it.refuses %}
+        {# THE OPPOSITE ANSWER TO THE SAME QUESTION, and it must never be
+           mistakable for the switch beside it. A refusal on the record says
+           a treatment was not delivered. So it rides on the task's own row,
+           says what it is in words, and is drawn in the colour of a warning
+           rather than as one more identical grey switch. #}
+        <button type="button" class="a-check a-refuse{% if it.checked %} on{% endif %}"
+                role="checkbox" aria-checked="{{ 'true' if it.checked else 'false' }}"
+                data-aim='{{ it.aim | tojson }}'
+                aria-label="{{ t('papp.refused_col') }}"
+          ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor"
+                stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"
+            ><path d="M3.5 8.5 L6.5 11.5 L12.5 4.5"/></svg></button>
+      {% elif it.kind == 'taskhead' %}
+        {# WHAT EACH COLUMN MEANS, said once above the list. Every task on
+           this sheet has two boxes and they are opposite answers; without
+           this the right-hand one is an unlabelled square whose meaning
+           nobody can read off the page. Laid out to sit over the columns it
+           names — see .a-taskhead. #}
+        <span class="a-taskhead">
+          <span class="a-th-done">{{ t('papp.task_col') }}</span>
+          <span class="a-th-refuse">{{ t('papp.refused_col') }}</span>
+        </span>
       {% elif it.kind == 'toggle' and it.check %}
         {# A CHECKBOX, drawn as one. An iOS on/off switch says "this setting
            is on"; a plan of care asks "did you do this", which is a tick in
@@ -222,16 +245,6 @@
           ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor"
                 stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"
             ><path d="M3.5 8.5 L6.5 11.5 L12.5 4.5"/></svg></button>
-      {% elif it.kind == 'toggle' and it.refuses %}
-        {# THE OPPOSITE ANSWER TO THE SAME QUESTION, and it must never be
-           mistakable for the switch beside it. A refusal on the record says
-           a treatment was not delivered. So it rides on the task's own row,
-           says what it is in words, and is drawn in the colour of a warning
-           rather than as one more identical grey switch. #}
-        <button type="button" class="a-refuse{% if it.checked %} on{% endif %}"
-                data-aim='{{ it.aim | tojson }}'
-                aria-label="{{ t('papp.refused') }}"
-          ><span class="a-refuse-t">{{ t('papp.refused') }}</span></button>
       {% elif it.kind == 'toggle' %}
         <button type="button" class="a-switch{% if it.checked %} on{% endif %}"
                 data-aim='{{ it.aim | tojson }}'

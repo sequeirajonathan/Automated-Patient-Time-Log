@@ -3258,6 +3258,23 @@ def starred_tasks(elements: list[dict], statics: list[dict],
     same question of the screen it has already been published — one reading,
     used both to offer the button and to run it.
     """
+    return [t for t in _starred_pairs(elements, statics, width)
+            if not t.get("checked")]
+
+
+def _starred_pairs(elements: list[dict], statics: list[dict],
+                   width: int) -> list[dict]:
+    """Every task tick a star says is required, ticked or not.
+
+    THE COLUMN GUARD LIVES HERE AND NOWHERE ELSE. Each task on this sheet
+    has two boxes: the left one records the treatment given, the right one
+    records that the patient REFUSED it. Only the left column is a task
+    tick, and `TASK_TICK_MAX_X` is what says so — every refusal box on this
+    sheet sits at x 868-900 on a 1080-wide screen, well outside it.
+
+    Both the "tick everything" and the "clear everything" buttons read
+    through this, so neither can reach a refusal however either is changed.
+    """
     if not width:
         return []
     stars = [s for s in statics
@@ -3266,16 +3283,14 @@ def starred_tasks(elements: list[dict], statics: list[dict],
              if e.get("cls") == "CheckBox"
              and e.get("enabled", True) is not False
              and e["b"][2] <= width * TASK_TICK_MAX_X]
-    wanted: list[dict] = []
+    found: list[dict] = []
     for star in stars:
         middle = (star["b"][1] + star["b"][3]) / 2
         mate = next((t for t in ticks
                      if t["b"][1] <= middle <= t["b"][3]), None)
-        if mate is None or mate.get("checked"):
-            continue
-        if mate not in wanted:
-            wanted.append(mate)
-    return wanted
+        if mate is not None and mate not in found:
+            found.append(mate)
+    return found
 
 
 def _starred_tasks(driver) -> list[dict]:
@@ -3328,6 +3343,61 @@ def _poc_tasks(driver) -> list[dict]:
     from apt_log import feed as feed_mod
 
     return poc_tasks(feed_mod.elements(driver.page_source or ""))
+
+
+def starred_done(elements: list[dict], statics: list[dict],
+                 width: int) -> list[dict]:
+    """inMyTeam's required task ticks that ARE on — what Clear all presses.
+
+    The mirror of `starred_tasks`, over the same pairing: the column guard
+    that keeps the refusal boxes out of reach lives in `_starred_pairs` and
+    exists once, because a second copy is a second place for it to be
+    relaxed by somebody who has forgotten why it is there.
+    """
+    return [t for t in _starred_pairs(elements, statics, width)
+            if t.get("checked")]
+
+
+def poc_done(elements: list[dict]) -> list[dict]:
+    """HHAeXchange+ care-plan tasks already marked done.
+
+    Same refusal rule as `poc_tasks`: nothing whose id says `refused` is
+    looked at. Clearing a tick is not the same act as saying a patient
+    refused, and this must never become a way to do the second by accident.
+    """
+    out: list[dict] = []
+    for element in elements:
+        rid = element.get("rid") or ""
+        if not rid.startswith(POC_DONE_ID):
+            continue
+        if element.get("enabled", True) is False:
+            continue
+        if element.get("checked") or rid.endswith("_true"):
+            out.append(element)
+    return out
+
+
+def done_tasks(elements: list[dict], statics: list[dict], width: int,
+               package: str) -> list[dict]:
+    """The TICKED tasks on whichever plan of care this page is.
+
+    "Some we have a select all we should also have a deselect all" — asked
+    for after a run of taps went in wrong and every box had to be cleared by
+    hand, one 32px target at a time, from another state.
+    """
+    if package == "com.hhaexchange.uma":
+        return poc_done(elements)
+    return starred_done(elements, statics, width)
+
+
+def _done_tasks(driver) -> list[dict]:
+    """`done_tasks`, read off the live page."""
+    from apt_log import feed as feed_mod
+
+    src = driver.page_source or ""
+    return done_tasks(feed_mod.elements(src), feed_mod.statics(src),
+                      (driver.get_window_size() or {}).get("width") or 0,
+                      _front_package())
 
 
 def pending_tasks(elements: list[dict], statics: list[dict], width: int,
@@ -3408,6 +3478,42 @@ def _check_tasks(driver, report) -> None:
     if left:
         raise RuntimeError(
             f"{len(left)} of {len(pending)} tasks did not tick")
+
+
+def _clear_tasks(driver, report) -> None:
+    """Take every task tick back off the plan of care.
+
+    "Some we have a select all we should also have a deselect all" — asked
+    for from the room, after a run of taps went in wrong and every box had
+    to be cleared by hand, one 32px target at a time, from another state.
+
+    THE REFUSAL COLUMN IS NOT REACHABLE FROM HERE, by the same guard that
+    keeps the ticking button out of it — see `_starred_pairs`. Clearing a
+    tick and saying a patient refused a treatment are opposite acts, and
+    this must never become a way to do the second by accident.
+
+    Only ADDS nothing and REMOVES only what is on: a tap toggles, so the
+    ticks are read from the tree first and an already-empty box is left
+    alone rather than pressed into being ticked.
+    """
+    report("macro.step.reading")
+    done = _done_tasks(driver)
+    if not done:
+        report("macro.step.nothing_to_clear")
+        return
+    report("macro.step.clearing_tasks")
+    for tick in done:
+        x = (tick["b"][0] + tick["b"][2]) // 2
+        y = (tick["b"][1] + tick["b"][3]) // 2
+        _tap_xy(x, y)
+        time.sleep(0.35)
+    # Read the page back, for the reason its twin gives: a box that did not
+    # take is the failure worth naming, and here a half-cleared plan is one
+    # she would have to count by hand to notice.
+    left = _done_tasks(driver)
+    if left:
+        raise RuntimeError(
+            f"{len(left)} of {len(done)} ticks did not clear")
 
 
 # ---------------------------------------------------------------- EVV entry
@@ -4700,6 +4806,9 @@ MACROS: dict[str, Macro] = {
               _inmyteam_sign_out),
         Macro("clear_screen", "macro.clear_screen", _clear_screen),
         Macro("check_tasks", "macro.check_tasks", _check_tasks),
+        # Its opposite, and offered beside it: a run of taps that went
+        # in wrong had to be undone one 32px box at a time.
+        Macro("clear_tasks", "macro.clear_tasks", _clear_tasks),
         Macro("phone_settings", "macro.phone_settings", _phone_settings),
         Macro("restart_phone", "macro.restart_phone", _restart_phone),
         Macro("update_app", "macro.update_app", _update_app),

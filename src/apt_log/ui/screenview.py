@@ -2410,6 +2410,7 @@ def _fold_refusals(bands: list[list[dict]]) -> None:
     its own styling. A refusal band with no task above it is left exactly
     where it is: a control nobody can place is not one to move.
     """
+    first = None
     for i in range(len(bands) - 1, 0, -1):
         band = bands[i]
         toggles = [n for n in band if n.get("kind") == "toggle"]
@@ -2431,7 +2432,18 @@ def _fold_refusals(bands: list[list[dict]]) -> None:
         host.append(toggles[0])
         bands[i] = [n for n in band
                     if n is not toggles[0] and n not in labels]
+        first = i - 1
     bands[:] = [b for b in bands if b]
+    # AND A HEADING OVER THE TWO COLUMNS.
+    #
+    # Pairing them on one row was half the answer. Asked for from the room
+    # after seeing it: "the check mark next to the task doesn't display what
+    # it's for … the denial has no label or indication of what it does".
+    # Said once at the top of the list rather than on all twenty-one rows —
+    # a red word against every task is a page that shouts, and a column
+    # heading is how a form of two answers is read anywhere else.
+    if first is not None and bands and 0 <= first < len(bands):
+        bands.insert(first, [{"kind": "taskhead"}])
 
 
 def _pair_segments(band: list[dict], width: int) -> None:

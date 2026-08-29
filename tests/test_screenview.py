@@ -1347,6 +1347,57 @@ class TestARefusalIsNotTheSameAnswerAsDone:
                     encoding="utf-8"))
             assert words["papp.refused"]
 
+    def test_a_heading_names_the_two_columns(self):
+        """"The check mark next to the task doesn't display what it's for …
+        the denial has no label or indication of what it does." Said once
+        above the list rather than on all twenty-one rows: a red word
+        against every task shouts, a column heading is how a form of two
+        answers is read anywhere else."""
+        heads = [i for r in self._model()["rows"] for i in r["items"]
+                 if i["kind"] == "taskhead"]
+        assert len(heads) == 1, "once, at the top — not per row"
+
+    def test_the_heading_sits_directly_above_the_first_task(self):
+        rows = self._model()["rows"]
+        at = next(i for i, r in enumerate(rows)
+                  if any(x["kind"] == "taskhead" for x in r["items"]))
+        after = rows[at + 1]["items"]
+        assert [x["kind"] for x in after].count("toggle") == 2
+        assert self.TASKS[0] in [x.get("txt") for x in after]
+
+    def test_no_heading_where_there_is_no_refusal_column(self):
+        """A plan of care with one answer per task needs no explaining."""
+        assert not [i for r in self._model(refusals=False)["rows"]
+                    for i in r["items"] if i["kind"] == "taskhead"]
+
+    def test_the_heading_is_drawn_with_both_words(self):
+        from pathlib import Path
+
+        page = Path("src/apt_log/ui/templates/_screen.html").read_text(
+            encoding="utf-8")
+        assert "it.kind == 'taskhead'" in page
+        assert "papp.task_col" in page and "papp.refused_col" in page
+
+    def test_the_refusal_is_drawn_before_the_plain_checkbox_branch(self):
+        """THE BUG THE SCREENSHOT CAUGHT. These controls are checkboxes, so
+        `it.check` is true for them as well — and that branch sat first, so
+        the refusal rendered as an unlabelled empty box exactly like the
+        one it must never be mistaken for. Order is the whole fix."""
+        from pathlib import Path
+
+        page = Path("src/apt_log/ui/templates/_screen.html").read_text(
+            encoding="utf-8")
+        assert (page.index("it.kind == 'toggle' and it.refuses")
+                < page.index("it.kind == 'toggle' and it.check")), \
+            "the refusal must be matched before the plain checkbox"
+
+    def test_the_refusal_keeps_the_warning_colour(self):
+        from pathlib import Path
+
+        css = Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+        assert ".a-refuse { border-color:var(--bad); }" in css
+
 
 class TestSelectAllNeverAnswersForARefusal:
     """"Select all must just be for the tasks not for denying them" — the

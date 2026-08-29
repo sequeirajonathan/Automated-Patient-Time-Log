@@ -1081,13 +1081,23 @@
      warning, and never with margin-left:auto — it sits beside the task's
      own control, not at the far edge where a lone switch lives, because the
      two belong to one question and are read together. */
-  .a-refuse { flex:none; border:1.5px solid var(--bad); border-radius:999px;
-              background:none; color:var(--bad); cursor:pointer;
-              padding:4px 11px; font-size:11px; font-weight:700;
-              letter-spacing:.03em; text-transform:uppercase;
-              white-space:nowrap; transition:background .2s ease; }
-  .a-refuse.on { background:var(--bad); color:#fff; }
-  .a-refuse:active { opacity:.55; }
+  /* THE OPPOSITE ANSWER, drawn as the checkbox it is but never in the same
+     colour. Ticking this records that the patient REFUSED the treatment on
+     the same row, so it wears the warning colour and the column heading
+     above says which is which. A pill reading "SE NIEGA" on all twenty-one
+     rows was the first attempt and it shouted; the heading says it once. */
+  .a-refuse { border-color:var(--bad); }
+  .a-refuse.on { background:var(--bad); border-color:var(--bad); }
+
+  /* The heading, laid out to sit over the columns it names: the first word
+     over the task's own tick at the left, the second over the refusal box
+     at the right, with the same padding the rows use so they line up. */
+  .a-taskhead { flex:1; display:flex; align-items:center;
+                justify-content:space-between; gap:10px;
+                font-size:10.5px; font-weight:700; letter-spacing:.07em;
+                text-transform:uppercase; color:var(--muted); }
+  .a-row:has(> .a-taskhead) { background:none; box-shadow:none;
+                              padding:10px 14px 4px; min-height:0; }
 
   .a-icon { flex:none; width:38px; height:38px; border:none; border-radius:11px;
             background:var(--track); color:var(--tint); cursor:pointer;
@@ -1945,6 +1955,21 @@
          <path d="M14 7h6"/><path d="M14 17h6"/></svg>
         <span class="tasks-n" id="btn-tasks-n"></span>
       </button>
+      {# ITS OPPOSITE, and offered beside it. A run of ticks that went in
+         wrong had to be undone one 32px box at a time, from another state —
+         "we should also have a deselect all". Shown under the same rule as
+         the button before it: only where there is something to undo, so it
+         is never a control standing by to do nothing. It cannot reach the
+         refusal column; see macros._starred_pairs. #}
+      <button id="btn-untasks" hidden aria-label="{{ t('papp.clear_tasks') }}">
+        {# The same two ruled lines as the tick button, with the ticks
+           replaced by crosses: same family, opposite act. #}
+        <svg class="tool" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"
+          ><path d="M4 5 L10 11"/><path d="M10 5 L4 11"/>
+         <path d="M4 15 L10 21"/><path d="M10 15 L4 21"/>
+         <path d="M14 7h6"/><path d="M14 17h6"/></svg>
+      </button>
       {# WHAT THIS VISIT ALREADY HAS ON RECORD TODAY, in one press.
          The screen it opens is four deep behind a nav drawer, a tab that is
          not the one that opens, and a Search that must follow the tab — and
@@ -2592,6 +2617,7 @@
     resending: {{ t('papp.resending')|tojson }},
     updating: {{ t('papp.updating')|tojson }},
     checkingTasks: {{ t('macro.step.checking')|tojson }},
+    clearingTasks: {{ t('macro.step.clearing_tasks')|tojson }},
     readingLog: {{ t('macro.step.reading_the_log')|tojson }},
     goingHome: {{ t('papp.app_home')|tojson }},
     switchingAgency: {{ t('macro.step.opening_the_agencies')|tojson }},

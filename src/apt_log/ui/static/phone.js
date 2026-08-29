@@ -613,6 +613,14 @@
       if (badge) badge.textContent = left > 0 ? String(left) : '';
     }
 
+    // ...and its opposite, under the same rule: offered only where there is
+    // a tick to take off, so neither button is ever there doing nothing.
+    const untasksBtn = document.getElementById('btn-untasks');
+    if (untasksBtn) {
+      const on = Number(meta.ticked) || 0;
+      untasksBtn.hidden = on <= 0;
+    }
+
     // The day's record, offered on the one app that publishes a readable
     // one. Hidden elsewhere rather than shown and refusing: a button that
     // sometimes says "this app's work log is not walked" teaches nothing
@@ -2168,6 +2176,20 @@
       fetch('/macro', {
         method: 'POST',
         body: new URLSearchParams({ name: 'check_tasks' }),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        redirect: 'follow'
+      }).catch(() => { awaitingMacro = false; unbusy(); toast(i18n.failed || ''); });
+    });
+    // Every tick off again. Same shape as the button above and the same
+    // refusal it cannot reach — the macro reads the treatment column only.
+    const untasksRun = document.getElementById('btn-untasks');
+    if (untasksRun) untasksRun.addEventListener('click', () => {
+      if (!driving()) return;
+      awaitingMacro = true;
+      busy(i18n.clearingTasks || '', 60000);
+      fetch('/macro', {
+        method: 'POST',
+        body: new URLSearchParams({ name: 'clear_tasks' }),
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         redirect: 'follow'
       }).catch(() => { awaitingMacro = false; unbusy(); toast(i18n.failed || ''); });

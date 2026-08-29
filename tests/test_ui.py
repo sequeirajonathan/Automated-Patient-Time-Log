@@ -4459,6 +4459,81 @@ class TestEveryIconShapeActuallyDraws:
         assert shapes('id="btn-agency"') == 4
 
 
+class TestTheDeselectAllIsOfferedBesideTheSelectAll:
+    """"Some we have a select all we should also have a deselect all"."""
+
+    def _page(self):
+        from pathlib import Path
+
+        return Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+
+    def _js(self):
+        from pathlib import Path
+
+        return strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+
+    def test_the_toolbar_carries_it(self):
+        assert 'id="btn-untasks"' in self._page()
+
+    def test_it_starts_hidden(self):
+        page = self._page()
+        button = page[page.index('id="btn-untasks"'):]
+        assert "hidden" in button[:button.index(">")]
+
+    def test_it_is_offered_only_where_there_is_a_tick_to_take_off(self):
+        """Under the same rule as the button beside it, so neither ever
+        stands there doing nothing."""
+        assert "untasksBtn.hidden = on <= 0" in self._js()
+
+    def test_it_presses_the_clearing_macro(self):
+        js = self._js()
+        body = js[js.index("const untasksRun"):]
+        body = body[:body.index("// The work log")] if "// The work log" in body \
+            else body[:2000]
+        assert "name: 'clear_tasks'" in body
+        assert "check_tasks" not in body
+
+    def test_it_refuses_while_somebody_else_is_driving(self):
+        js = self._js()
+        body = js[js.index("const untasksRun"):]
+        assert "if (!driving()) return;" in body[:body.index("fetch(")]
+
+    def test_the_socket_says_how_many_ticks_are_on(self, client, tmp_path):
+        """The count is the server's, read the same way the macro reads it,
+        so the button cannot appear over a page the macro would decline."""
+        doc = {"at": "2026-08-29T18:00:00", "app": "com.inmyteam.inmyteam",
+               "activity": "mainactivity", "blocked": "",
+               "size": [1080, 2340],
+               "elements": [{"rid": "", "cls": "CheckBox", "txt": "",
+                             "b": [26, 369, 58, 401], "checked": True,
+                             "enabled": True, "focused": False,
+                             "has_text": False}],
+               "statics": [{"cls": "TextView", "b": [10, 372, 22, 398],
+                            "txt": "*"}]}
+        (tmp_path / "screen.json").write_text(json.dumps(doc),
+                                              encoding="utf-8")
+        with patch.object(state_mod, "STATE_DIR", tmp_path):
+            with client.websocket_connect("/ws") as ws:
+                msg = ws.receive_json()
+        assert (msg.get("screen") or {}).get("ticked") == 1
+
+    def test_both_words_are_written_in_both_languages(self):
+        import json as _json
+        from pathlib import Path
+
+        for code in ("en", "es"):
+            words = _json.loads(Path(
+                f"src/apt_log/ui/locales/{code}.json").read_text(
+                    encoding="utf-8"))
+            for key in ("papp.clear_tasks", "macro.clear_tasks",
+                        "macro.step.clearing_tasks",
+                        "macro.step.nothing_to_clear",
+                        "papp.task_col", "papp.refused_col"):
+                assert words[key], key
+
+
 class TestEveryHourSaysWhichZoneItIsIn:
     """Reported from Central: "I'm getting confused with my CDT local time,
     would like to avoid any confusion on my end."

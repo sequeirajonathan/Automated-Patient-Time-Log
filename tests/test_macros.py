@@ -4865,6 +4865,105 @@ class TestACaptionsCapitalisationIsNotItsMeaning:
         driver.find_elements.side_effect = AssertionError("must not be asked")
         assert macros._words(driver, 'say "hi"') is None
 
+class TestClearingEveryTickIsAlsoAButton:
+    """"Some we have a select all we should also have a deselect all" —
+    asked for after a run of taps went in wrong and every box had to be
+    cleared by hand, one 32px target at a time, from another state.
+
+    Geometry verbatim from the phone: done boxes at x 26-58, refusal boxes
+    at x 868-900, on a 1080-wide screen.
+    """
+
+    def _page(self, ticked=(True, True, False)):
+        els, sts = [], []
+        for k, on in enumerate(ticked):
+            y = 369 + 62 * k
+            els.append({"cls": "CheckBox", "b": [26, y, 58, y + 32],
+                        "checked": on, "enabled": True})
+            # The refusal beside it, and ALWAYS on — so a rule that ignored
+            # the column would have three more to clear and would say so.
+            els.append({"cls": "CheckBox", "b": [868, y + 27, 900, y + 59],
+                        "checked": True, "enabled": True})
+            sts.append({"cls": "TextView", "b": [10, y + 3, 22, y + 29],
+                        "txt": "*"})
+            sts.append({"cls": "TextView", "b": [640, y + 28, 860, y + 58],
+                        "txt": "*"})
+        return els, sts
+
+    def test_it_finds_the_ticks_that_are_on(self):
+        els, sts = self._page()
+        got = macros.done_tasks(els, sts, 1080, "com.inmyteam.inmyteam")
+        assert len(got) == 2
+
+    def test_it_never_reaches_the_refusal_column(self):
+        """The refusals here are all ticked. None of them is ours to clear:
+        taking one off is answering for the patient, in the other
+        direction."""
+        els, sts = self._page()
+        got = macros.done_tasks(els, sts, 1080, "com.inmyteam.inmyteam")
+        assert all(t["b"][0] < 540 for t in got)
+
+    def test_the_column_guard_lives_in_one_place(self):
+        """Both buttons read through `_starred_pairs`, so the guard cannot
+        be relaxed for one and not the other."""
+        import inspect
+
+        for fn in (macros.starred_tasks, macros.starred_done):
+            assert "_starred_pairs" in inspect.getsource(fn)
+        assert "TASK_TICK_MAX_X" in inspect.getsource(macros._starred_pairs)
+
+    def test_hhaexchange_clears_only_its_completed_column(self):
+        els = [
+            {"rid": "poc_task_item_status_completed_true", "cls": "View",
+             "b": [0, 0, 10, 10], "checked": True, "enabled": True},
+            {"rid": "poc_task_item_status_refused_true", "cls": "View",
+             "b": [0, 0, 10, 10], "checked": True, "enabled": True},
+        ]
+        got = macros.poc_done(els)
+        assert [e["rid"] for e in got] == [
+            "poc_task_item_status_completed_true"]
+
+    def test_it_presses_every_tick_that_is_on_and_nothing_else(self):
+        taps = []
+        els, sts = self._page()
+        pages = [els, [dict(e, checked=(e["b"][0] > 540)) for e in els]]
+
+        with patch.object(macros, "_done_tasks",
+                          side_effect=lambda _d: macros.done_tasks(
+                              pages[min(len(taps) and 1, 1)], sts, 1080,
+                              "com.inmyteam.inmyteam")), \
+             patch.object(macros, "_tap_xy",
+                          side_effect=lambda x, y: taps.append((x, y))), \
+             patch("apt_log.macros.time.sleep"):
+            macros._clear_tasks(MagicMock(), lambda _s: None)
+        assert len(taps) == 2
+        assert all(x < 540 for x, _y in taps)
+
+    def test_an_empty_plan_is_said_so_rather_than_pressed(self):
+        steps = []
+        with patch.object(macros, "_done_tasks", return_value=[]), \
+             patch.object(macros, "_tap_xy",
+                          side_effect=AssertionError("must press nothing")):
+            macros._clear_tasks(MagicMock(), steps.append)
+        assert steps[-1] == "macro.step.nothing_to_clear"
+
+    def test_a_tick_that_would_not_clear_is_named(self):
+        """The same read-back its twin does: a half-cleared plan is one she
+        would have to count by hand to notice."""
+        els, sts = self._page()
+        with patch.object(macros, "_done_tasks",
+                          side_effect=lambda _d: macros.done_tasks(
+                              els, sts, 1080, "com.inmyteam.inmyteam")), \
+             patch.object(macros, "_tap_xy"), \
+             patch("apt_log.macros.time.sleep"):
+            with pytest.raises(RuntimeError, match="did not clear"):
+                macros._clear_tasks(MagicMock(), lambda _s: None)
+
+    def test_it_is_registered_and_needs_no_confirmation(self):
+        assert "clear_tasks" in macros.MACROS
+        assert "clear_tasks" not in macros.CONFIRM
+
+
 class TestNoMacroReferencesANameThatDoesNotExist:
     """A NameError should not have to reach the phone to be found.
 
