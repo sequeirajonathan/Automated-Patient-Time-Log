@@ -6055,3 +6055,125 @@ class TestTheSessionExpiryNotice:
                / "src/apt_log/macros.py").read_text(encoding="utf-8")
         i = src.index("def _dismiss_session_notice")
         assert "except Exception" in src[i:i + 1400]
+
+
+class TestTheSignInWalkStaysOffALiveSession:
+    """Live, on a Sunday morning, mid-visit. She pressed the inMyTeam tile;
+    the tile runs the sign-in walk; the app was already signed in. The walk's
+    only test for "not the sign-in screen" was "no EditText" — and a
+    signed-in app has EditTexts: a search box on the patients list, "Nota
+    adicional" on a check-out sheet.
+
+    So it found a box that was not the number box and tried to put the
+    account number in it. The element refused — "Cannot set the element to
+    ...; did you interact with the correct element?" — and that refusal is
+    the only reason the account number did not land in a patient's visit
+    note. Three of those latched automatic sign-in off, silently.
+    """
+
+    def _src(self):
+        return (Path(__file__).resolve().parents[1]
+                / "src/apt_log/macros.py").read_text(encoding="utf-8")
+
+    GUARD = "if not _asks_for_a_number(driver)"
+
+    def test_the_screen_must_say_what_it_is_before_anything_is_typed(self):
+        src = self._src()
+        i = src.index("def _inmyteam_walk")
+        body = src[i:]
+        guard = body.index(self.GUARD)
+        typed = body.index("box.send_keys(number)")
+        assert guard < typed, "the number goes in before the screen is checked"
+
+    def test_it_wants_the_prompt_and_the_submit(self):
+        """Either alone is weak. A page could carry one; a sign-in screen
+        carries both."""
+        src = self._src()
+        i = src.index(self.GUARD)
+        guard = src[i:src.index("return", i)]
+        assert "SIGN_IN_SUBMIT_WORDS" in guard
+
+    def test_a_live_session_is_not_an_error(self):
+        """Arriving to find the session alive is the ordinary outcome of
+        pressing a tile — the walk's own docstring promises it. It only
+        needed detecting."""
+        src = self._src()
+        i = src.index(self.GUARD)
+        guard = src[i:src.index("return", i) + len("return")]
+        assert 'report("macro.step.finished")' in guard
+        assert "raise" not in guard
+
+    def test_the_prompt_words_cover_both_languages(self):
+        src = self._src()
+        i = src.index("SIGN_IN_NUMBER_WORDS = (")
+        block = src[i:i + 260]
+        assert "número de teléfono" in block
+        assert "phone number" in block
+
+    def test_the_prompt_is_read_off_the_page_not_off_a_clickable(self):
+        """The prompt is a caption — a label above the box, or the box's own
+        hint. Nothing promises it sits inside a tappable node, and a test
+        that needs it to would go quiet the day the app moves it."""
+        driver = MagicMock()
+        driver.page_source = ('<node text="Ingrese su número de teléfono '
+                              'celular"/><node class="android.widget.EditText"/>')
+        driver.find_elements.return_value = []
+        assert macros._asks_for_a_number(driver) is True
+
+    def test_a_signed_in_page_with_a_box_does_not_look_like_the_number_screen(
+            self):
+        """The live one: a check-out sheet's "Nota adicional" is an EditText
+        on a page that never asks for a number."""
+        driver = MagicMock()
+        driver.page_source = ('<node text="Nota adicional"/>'
+                              '<node class="android.widget.EditText"/>')
+        assert macros._asks_for_a_number(driver) is False
+
+    def test_an_unreadable_page_is_not_the_number_screen(self):
+        driver = MagicMock()
+        type(driver).page_source = PropertyMock(side_effect=Exception("boom"))
+        assert macros._asks_for_a_number(driver) is False
+
+    def test_the_tile_over_a_live_session_types_nothing_at_all(self):
+        """The incident itself, driven end to end: a signed-in app with a box
+        on it, and the tile pressed. Nothing may be typed, and it is not a
+        failure — three "failures" are what latched sign-in off silently."""
+        import itertools
+
+        from apt_log.secrets import INMYTEAM_PHONE, MemorySecretProvider
+
+        typed, steps = [], []
+        box = MagicMock()
+        box.is_displayed.return_value = True
+        box.send_keys.side_effect = typed.append
+        tappable = MagicMock()
+        tappable.is_displayed.return_value = True
+        tappable.rect = {"x": 0, "y": 0, "width": 300, "height": 60}
+
+        driver = MagicMock()
+        driver.current_activity = "com.inmyteam.inmyteam.MainActivity"
+        driver.current_package = "com.inmyteam.inmyteam"
+        # A check-out sheet: a note box, a couple of controls, and not one
+        # word about a phone number.
+        driver.page_source = ('<node text="Nota adicional"/>'
+                              '<node text="Guardar"/>'
+                              '<node class="android.widget.EditText"/>')
+
+        def find_elements(_by, selector):
+            if "EditText" in selector:
+                return [box]
+            return [tappable, tappable]
+
+        driver.find_elements.side_effect = find_elements
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.secrets.FileSecretProvider",
+                   return_value=MemorySecretProvider(
+                       **{INMYTEAM_PHONE: "3055550123"})), \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            macros.MACROS["inmyteam_login"].run(driver, steps.append)
+
+        assert typed == []
+        box.clear.assert_not_called()
+        assert "macro.step.signing_in" not in steps

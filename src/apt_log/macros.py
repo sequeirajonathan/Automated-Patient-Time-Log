@@ -1942,6 +1942,21 @@ SIGN_IN_START_WORDS = ("Get Started", "Comencemos", "Comenzar", "Empezar")
 # control below the field and this is it.
 SIGN_IN_SUBMIT_WORDS = ("Sign in", "Iniciar", "Registrarse")
 
+# WHAT THE NUMBER SCREEN SAYS IT IS.
+#
+# "One EditText means the number screen" was the whole test, and a signed-in
+# app has EditTexts too — a search box on the patients list, "Nota adicional"
+# on a check-out sheet. Live on a Sunday morning, mid-visit: the tile ran the
+# sign-in walk over a working session, found a box that was not the number
+# box, and tried to put the account number in it. It was refused — "Cannot
+# set the element to ...; did you interact with the correct element?" — and
+# that refusal is the only reason the account number did not land in a
+# patient's visit note.
+#
+# So the screen has to say what it is before anything is typed into it.
+SIGN_IN_NUMBER_WORDS = ("número de teléfono", "numero de telefono",
+                        "cell phone number", "phone number")
+
 # The dialog inMyTeam raises when it will not go on: a title, one line of
 # reason, and one button. Both known headings, because the app's own sign-out
 # confirmation uses the same chrome ("Advertencia!" / "¿Desea cerrar la
@@ -2111,6 +2126,21 @@ def _inmyteam_walk(driver, report, resend: bool = False) -> None:
         return
 
     # ---------------------------------------------------------- the number
+    #
+    # AND ONLY IF THIS REALLY IS THE NUMBER SCREEN. A box on its own proves
+    # nothing: a signed-in app has boxes too, and the walk typed at one of
+    # them during a live visit (see SIGN_IN_NUMBER_WORDS). The screen must
+    # carry its own prompt AND its submit — the two things every sign-in
+    # screen has and no ordinary page has both of.
+    #
+    # Not an error: arriving to find the session alive is the ordinary
+    # outcome of pressing a tile, and the docstring above already promises
+    # it. It just has to be DETECTED, which "no EditText" did not do.
+    if not _asks_for_a_number(driver) or by_words(*SIGN_IN_SUBMIT_WORDS) is None:
+        log.info("inMyTeam is past its sign-in walk — leaving it alone")
+        report("macro.step.finished")
+        return
+
     report("macro.step.signing_in")
     try:
         number = FileSecretProvider().get(INMYTEAM_PHONE)
@@ -2441,6 +2471,26 @@ def _asks_for_a_code(driver) -> bool:
     except Exception:  # noqa: BLE001
         return False
     return any(w in words for w in _CODE_WORDS)
+
+
+def _asks_for_a_number(driver) -> bool:
+    """Whether the screen in front is asking for the account's phone number.
+
+    The twin of `_asks_for_a_code`, and needed for the same reason: both
+    sign-in screens are one EditText and a button, and so is half a signed-in
+    app. The screen has to SAY what it is.
+
+    Read off the page rather than off a clickable, because the prompt is a
+    caption — a label above the box, or the box's own hint — and nothing
+    promises it sits inside a tappable node. Asking the page is the test the
+    code screen already uses and the one that does not depend on how the app
+    happens to build its captions.
+    """
+    try:
+        words = (driver.page_source or "").lower()
+    except Exception:  # noqa: BLE001
+        return False
+    return any(w in words for w in SIGN_IN_NUMBER_WORDS)
 
 
 def _code_box(driver):
