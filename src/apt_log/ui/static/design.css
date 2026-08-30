@@ -51,3 +51,33 @@
     --peek-bed: hsl(222 30% 15%);
   }
 }
+
+/* WHICH BUILD DREW THIS PAGE, on every view — the launcher, the app, the
+   schedule, the signature map — and in front of an open pad.
+
+   Not decoration. A page held open across a deploy reloads itself when the
+   socket reports a new boot id, and when that does not happen the only
+   symptom is old behaviour on a page that otherwise looks completely
+   current. That cost an evening: a screenshot showing a fixed bug still
+   present, with no way for either of us to tell whether the page was
+   running the fix. The page now says so itself.
+
+   Centred because the middle of every header row is the one band no view
+   puts anything in, and `pointer-events:none` because it sits over those
+   headers — a diagnostic must never be able to take a tap meant for Back.
+   `aria-hidden` for the same reason in the other direction: it is for us,
+   not for the person using this to do a visit. */
+.buildstamp { position:fixed; top:calc(env(safe-area-inset-top) + 7px);
+              left:50%; transform:translateX(-50%); z-index:45;
+              pointer-events:none; -webkit-user-select:none;
+              user-select:none; white-space:nowrap;
+              font:500 9.5px/1.4 ui-monospace, SFMono-Regular, Menlo,
+                   monospace;
+              letter-spacing:.06em; color:var(--muted); opacity:.4;
+              padding:3px 7px; border-radius:999px; }
+/* THE SERVER HAS MOVED ON AND THIS PAGE HAS NOT. Said out loud rather than
+   left silent: the self-reload is guarded against loops, so it can
+   legitimately decline to fire, and then this is the only thing on screen
+   that knows the page is stale. */
+.buildstamp.behind { color:var(--unknown); opacity:1;
+                     background:hsl(38 60% 33% / .14); }

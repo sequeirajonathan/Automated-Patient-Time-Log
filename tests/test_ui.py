@@ -841,6 +841,52 @@ class TestShellNeverGoesStale:
             assert "location.reload()" in js
             assert "aptlog-reloaded" in js     # and the loop guard with it
 
+    def test_every_page_says_which_build_drew_it(self, client):
+        """THE PAGE HAD NO WAY TO SAY WHICH BUILD IT WAS. A fix was deployed
+        and verified, and a screenshot still showed the bug — with nothing on
+        screen, on either side, able to settle whether that page was running
+        the fix. "Boot id idea is great let's add that globally so we can see
+        anywhere on the app.\""""
+        from apt_log.ui.app import BOOT_ID
+
+        for path in ("/app", "/console"):
+            body = client.get(path).text
+            assert 'class="buildstamp"' in body, path
+            assert BOOT_ID in body, path
+
+    def test_the_stamp_cannot_take_a_tap_meant_for_the_page(self):
+        """It is fixed over the header band on every view, so a diagnostic
+        that could swallow a press on Back would be worse than no diagnostic.
+        """
+        css = (Path(__file__).resolve().parents[1]
+               / "src/apt_log/ui/static/design.css").read_text(encoding="utf-8")
+        rule = css[css.index(".buildstamp {"):]
+        assert "pointer-events:none" in rule[:rule.index("}")]
+
+    def test_the_stamp_is_shared_rather_than_per_page(self):
+        """"Globally" means one rule in the stylesheet both pages already
+        load — not a copy per template that the next page forgets."""
+        css = (Path(__file__).resolve().parents[1]
+               / "src/apt_log/ui/static/design.css").read_text(encoding="utf-8")
+        assert ".buildstamp {" in css
+        for name in ("phone.html", "console.html"):
+            tpl = (Path(__file__).resolve().parents[1]
+                   / "src/apt_log/ui/templates" / name).read_text(encoding="utf-8")
+            assert ".buildstamp {" not in tpl, name
+
+    def test_a_page_that_did_not_reload_says_so_instead_of_looking_current(self):
+        """The reload is guarded against loops and can decline to fire. When
+        it does, old code keeps running on a page that looks entirely current
+        — the exact failure this stamp exists to make visible — so the mark
+        goes on BEFORE the reload is attempted, not after."""
+        js = (Path(__file__).resolve().parents[1]
+              / "src/apt_log/ui/static/phone.js").read_text(encoding="utf-8")
+        mark = js.index("stamp.classList.add('behind')")
+        guard = js.index("aptlog-reloaded")
+        assert mark < guard
+        # And it names both builds, so the two ids can be compared by eye.
+        assert "body.dataset.boot + ' → ' + msg.boot" in js
+
 
 class TestTheCodeBarClearsThePhonesControls:
     """Reported from the field: the OTP input sat so close to the controls

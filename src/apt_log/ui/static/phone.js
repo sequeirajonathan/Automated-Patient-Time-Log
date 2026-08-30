@@ -1767,6 +1767,18 @@
       // The timestamp guard keeps a genuinely broken deploy from turning
       // this into a reload loop.
       if (msg.boot && body.dataset.boot && msg.boot !== body.dataset.boot) {
+        // SAY IT BEFORE RELOADING, because the reload may not happen. The
+        // guard below exists so a genuinely broken deploy cannot turn this
+        // into a reload loop — and when it holds, the page keeps running old
+        // code with nothing on screen admitting it. Marking the stamp first
+        // means the one case that is hardest to diagnose is the one case that
+        // is visible: it names the build the page is running and the build the
+        // server is on.
+        const stamp = document.getElementById('buildstamp');
+        if (stamp) {
+          stamp.classList.add('behind');
+          stamp.textContent = body.dataset.boot + ' → ' + msg.boot;
+        }
         const last = Number(sessionStorage.getItem('aptlog-reloaded') || 0);
         if (Date.now() - last > 30000) {
           sessionStorage.setItem('aptlog-reloaded', String(Date.now()));

@@ -1698,9 +1698,13 @@
            box-shadow:0 8px 30px -8px rgb(0 0 0 / .4); }
   body.toasting #toast { opacity:1; transform:translateX(-50%); }
   .muted { color:var(--muted); }
+
 </style>
 </head>
 <body data-view="launcher" data-boot="{{ boot }}">
+
+{# Outside every view, so it survives moving between them. #}
+<span class="buildstamp" id="buildstamp" aria-hidden="true">{{ boot }}</span>
 
 {# Launch screen: paints with the first HTML, owns the moment while the socket
    connects, then fades like an iOS launch image. #}

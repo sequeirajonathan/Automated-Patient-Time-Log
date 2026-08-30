@@ -215,6 +215,10 @@
 </head>
 <body data-boot="{{ boot }}">
 
+{# Same stamp as /app, from the same rule in design.css — "anywhere on the
+   app" has to include the page you go to when something looks wrong. #}
+<span class="buildstamp" id="buildstamp" aria-hidden="true">{{ boot }}</span>
+
 <div class="bar">
   {# Back to the phone, in the position and shape iOS puts it. This page is a
      detail view of /app, and it says so by being leavable the same way. #}
