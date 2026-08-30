@@ -654,9 +654,16 @@
     // THE LAST CARE APP THE PHONE WAS IN, remembered across a reload. It is
     // what the way back points at, and a page opened fresh onto a home
     // screen would otherwise have nothing to offer but the picker.
+    // THE SERVER'S ANSWER OUTRANKS THIS BROWSER'S. The watchdog has kept
+    // this record all along and it survives a cold page load, which is the
+    // one case the browser's own memory cannot cover: opened fresh onto a
+    // home screen, it had seen no care app and could name none.
+    if (meta.last_app) lastCareApp = meta.last_app;
     if (currentPackage && appOpen[currentPackage] !== undefined) {
       lastCareApp = currentPackage;
-      try { localStorage.setItem('aptlog-last-app', currentPackage); }
+    }
+    if (lastCareApp) {
+      try { localStorage.setItem('aptlog-last-app', lastCareApp); }
       catch (e) { /* private window, blocked storage: the picker still works */ }
     }
     body.classList.toggle('offapp', onLauncher);

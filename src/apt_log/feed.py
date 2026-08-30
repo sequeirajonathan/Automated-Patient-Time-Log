@@ -1097,9 +1097,41 @@ def last_care_app() -> str:
     return _last_care_app[0]
 
 
+# WRITTEN DOWN BECAUSE THE PORTAL IS A DIFFERENT PROCESS.
+#
+# The home screen's way back has to name an app, and the browser can only
+# name one it has seen for itself this session — a page opened fresh onto a
+# launcher had nothing to offer but the app picker. This is the same record
+# the watchdog already keeps, put where the UI can read it.
+#
+# A NAME, AND NOTHING ELSE. The file holds one package name and a stamp: no
+# patient, no visit, nothing about what was on the screen.
+LAST_APP_NAME = "last-care-app.json"
+
+
+def _publish_last_care_app(pkg: str) -> None:
+    """Record which care app was last in front, for the UI to read."""
+    try:
+        from apt_log.ui.state import STATE_DIR
+
+        target = STATE_DIR / LAST_APP_NAME
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"app": pkg, "at": time.time()}),
+                       encoding="utf-8")
+        tmp.replace(target)
+    except OSError as exc:
+        log.warning("cannot record the last care app (%s)", exc)
+
+
 def _watch_containment(focus: str, serial: str | None = None) -> None:
     pkg = (focus or "").split("/")[0]
     if pkg in CARE_APPS:
+        # Only on a change: this runs on every tick, and the file exists so
+        # a page loading cold has somewhere to point, not to be rewritten
+        # twice a second for as long as she is in an app.
+        if _last_care_app[0] != pkg:
+            _publish_last_care_app(pkg)
         _last_care_app[0] = pkg
         _out_since[0] = 0.0
         return

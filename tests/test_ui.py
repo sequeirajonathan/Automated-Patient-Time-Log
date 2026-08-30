@@ -6506,3 +6506,60 @@ class TestTheWayBackFromTheHomeScreen:
         js = self._js()
         i = js.index("} else if (onLauncher && body.dataset.view === 'screen'")
         assert "view('launcher')" in js[i:i + 900]
+
+    def test_the_server_says_which_app_so_a_cold_load_can_too(
+            self, client, tmp_path):
+        """A page opened fresh onto a home screen has seen no care app and
+        can name none. The watchdog has kept this record all along; it is
+        just in another process."""
+        from apt_log import feed as feed_mod
+
+        (tmp_path / feed_mod.LAST_APP_NAME).write_text(
+            json.dumps({"app": "com.tellus.evv.v2", "at": 1}),
+            encoding="utf-8")
+        (tmp_path / "screen.json").write_text(
+            json.dumps({"app": "com.sec.android.app.launcher",
+                        "size": [1080, 2340], "elements": [], "statics": []}),
+            encoding="utf-8")
+        with patch.object(state_mod, "STATE_DIR", tmp_path):
+            with client.websocket_connect("/ws") as ws:
+                msg = ws.receive_json()
+        assert (msg.get("screen") or {}).get("last_app") == "com.tellus.evv.v2"
+
+    def test_an_unreadable_record_is_a_real_answer(self, client, tmp_path):
+        """Absent or corrupt falls back to what the browser remembers, and
+        offers nothing if it remembers nothing — never a crash and never a
+        button pointing at ''."""
+        import importlib
+
+        uiapp = importlib.import_module("apt_log.ui.app")
+        from apt_log import feed as feed_mod
+
+        with patch.object(state_mod, "STATE_DIR", tmp_path):
+            assert uiapp._last_care_app() == ""
+            (tmp_path / feed_mod.LAST_APP_NAME).write_text(
+                "not json", encoding="utf-8")
+            assert uiapp._last_care_app() == ""
+
+    def test_the_client_prefers_the_servers_answer(self):
+        js = self._js()
+        assert "if (meta.last_app) lastCareApp = meta.last_app;" in js
+
+    def test_the_record_carries_a_name_and_nothing_else(self):
+        """It sits in the state directory beside the screen document, and
+        must never become a second place visit detail leaks to."""
+        src = (Path(__file__).resolve().parents[1]
+               / "src/apt_log/feed.py").read_text(encoding="utf-8")
+        i = src.index("def _publish_last_care_app")
+        body = src[i:i + 700]
+        assert '"app": pkg' in body and '"at": time.time()' in body
+        for leak in ("patient", "visit", "statics", "elements"):
+            assert leak not in body
+
+    def test_it_is_written_only_when_it_changes(self):
+        """This runs on every tick. The file exists so a cold page load has
+        somewhere to point, not to be rewritten twice a second."""
+        src = (Path(__file__).resolve().parents[1]
+               / "src/apt_log/feed.py").read_text(encoding="utf-8")
+        i = src.index("def _watch_containment")
+        assert "if _last_care_app[0] != pkg:" in src[i:i + 500]

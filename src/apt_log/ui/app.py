@@ -1008,6 +1008,25 @@ def _code_screen(doc: dict) -> bool:
         return False
 
 
+def _last_care_app() -> str:
+    """The care app the phone was last in, as the watchdog recorded it.
+
+    Read from the file rather than from `feed.last_care_app()`: the feed runs
+    in its own process and its memory is not this one's. Absent or unreadable
+    is a real answer — the card then falls back to what the browser itself
+    remembers, and offers nothing if it remembers nothing.
+    """
+    from apt_log import feed as feed_mod
+
+    try:
+        doc = json.loads(
+            (state_mod.STATE_DIR / feed_mod.LAST_APP_NAME)
+            .read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    return str(doc.get("app") or "") if isinstance(doc, dict) else ""
+
+
 def _role_signer(role: str, doc: dict) -> str:
     """The person who fills this signature role, or "".
 
@@ -1662,6 +1681,14 @@ async def live(ws: WebSocket):
                     # the control bar beside Back and Home. Empty on screens
                     # without one.
                     "apptabs": (model or {}).get("apptabs") or [],
+                    # WHICH APP THE WAY BACK POINTS AT, from the watchdog's
+                    # own record rather than from what this browser happens
+                    # to have seen. A page opened cold onto a home screen had
+                    # nothing to offer but the picker; now it can name the app
+                    # she was in. Just a package name — the client turns it
+                    # into a label and an open macro from the tiles it already
+                    # has, so an unknown one simply offers nothing.
+                    "last_app": _last_care_app(),
                     # This dump is a popup window and not the page — see
                     # `screenview._is_overlay_only`. The page underneath is
                     # absent from the tree, not empty in it, and the front
