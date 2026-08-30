@@ -2225,7 +2225,44 @@ def signature_roster():
     """
     from apt_log import enrolled as enrolled_mod
 
-    return JSONResponse({"parties": enrolled_mod.roster()})
+    parties = enrolled_mod.roster()
+    # WHICH SIDE OF A SIGNATURE SHEET EACH PARTY BELONGS ON.
+    #
+    # A check-out asks for two signatures in a row on near-identical pads,
+    # and the only difference is whose. Without this the page could only
+    # narrow the row when the server had resolved the sheet to a PERSON —
+    # and on inMyTeam's patient pad it cannot, because `_role_signer`
+    # refuses to guess unless the screen carries the patient's name and that
+    # sheet does not. Keying the hiding on that identification hid every
+    # party on the pad, including the patient whose signature was the point:
+    # "the auto sign is not even available on the pencil drawer anymore".
+    #
+    # A ROLE IS KNOWABLE WHERE AN IDENTITY IS NOT. There is one caregiver on
+    # this round and the schedule names her; everybody else who has adopted a
+    # signature is a patient. That is enough to keep her off a patient's pad
+    # and keep the patients off hers, without pretending to know which
+    # patient.
+    #
+    # Matched through `who_signs` so the tolerance — middle initials, case —
+    # lives in the one tested place rather than being re-implemented here or,
+    # worse, in the browser. Computed in the route rather than in
+    # `enrolled.roster`: that function is the privacy-scoped view of the
+    # store and has no business knowing about the schedule.
+    caregiver = ""
+    try:
+        from apt_log import schedule as schedule_mod
+
+        caregiver = enrolled_mod.who_signs(schedule_mod.load().caregiver or "")
+    except Exception:  # noqa: BLE001
+        log.exception("naming the caregiver for the signature roster")
+    for party in parties:
+        # "" WHEN SHE CANNOT BE NAMED, and the page then offers everyone.
+        # Labelling every party "patient" because the schedule failed to load
+        # would take the caregiver's own signature off her own pad.
+        party["role"] = ("" if not caregiver
+                         else "staff" if party["name"] == caregiver
+                         else "patient")
+    return JSONResponse({"parties": parties})
 
 
 def _app_called(app_ref: str) -> str:

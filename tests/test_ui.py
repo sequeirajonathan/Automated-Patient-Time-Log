@@ -4708,8 +4708,8 @@ class TestThePadKnowsWhoseSignatureItIsCollecting:
         rendered?" A button on the screen can be pressed, and what it
         presses is one person's signature onto another person's record."""
         js = self._js()
-        assert "const asking = !!signerRole || !!signerNamed;" in js
-        assert "b.hidden = asking && !mine;" in js
+        assert "b.hidden = (signerAdopted ? !mine" in js
+        assert "b.dataset.role !== signerRole" in js
 
     def test_an_unresolved_signer_offers_nobody_rather_than_everybody(self):
         """THE HIDING WAS KEYED ON THE WRONG FACT, and the caregiver's
@@ -4728,11 +4728,66 @@ class TestThePadKnowsWhoseSignatureItIsCollecting:
         js = self._js()
         # The old fact must not be what decides it any more.
         assert "const wrong = !!signerAdopted && !mine;" not in js
-        i = js.index("const asking = !!signerRole || !!signerNamed;")
-        j = js.index("b.hidden = asking && !mine;")
-        assert i < j
+        # An unresolved signer falls through to the ROLE, which is knowable.
+        assert "signerRole && b.dataset.role" in js
         # With nobody left to offer, the caption over the row goes too.
         assert "wrap.hidden = !shown;" in js
+
+    def test_the_patients_own_signature_survives_on_the_patients_pad(self):
+        """THE OVERCORRECTION, AND IT COST THE FEATURE. Hiding every party
+        the server had not identified took the PATIENT's adopted signature
+        off the patient's pad — the one that was wanted — because that pad
+        is exactly where the identity cannot be resolved. "The auto sign is
+        not even available on the pencil drawer anymore for either."
+
+        The side is knowable where the identity is not, so a patient's pad
+        drops only the caregiver.
+        """
+        js = self._js()
+        i = js.index("b.hidden = (signerAdopted ? !mine")
+        clause = js[i:i + 220]
+        # No role data, or no role on the sheet: nobody is hidden. That is the
+        # branch that must not silently empty the row.
+        assert "b.dataset.role" in clause and "signerRole" in clause
+        assert "!==" in clause
+
+    def test_the_roster_says_which_side_each_party_is_on(self, client):
+        """The page cannot work this out: it would need the schedule and the
+        same name tolerance the store uses. Both live on the server, so the
+        answer does."""
+        from unittest.mock import patch as _patch
+        from types import SimpleNamespace
+
+        parties = [{"name": "Carmen Villalon"}, {"name": "Sadia Amselem"}]
+        with _patch("apt_log.enrolled.roster", return_value=parties), \
+             _patch("apt_log.schedule.load",
+                    return_value=SimpleNamespace(caregiver="Sadia Amselem")), \
+             _patch("apt_log.enrolled.who_signs",
+                    side_effect=lambda n: n):
+            got = client.get("/signature/roster").json()["parties"]
+        roles = {p["name"]: p["role"] for p in got}
+        assert roles == {"Carmen Villalon": "patient",
+                         "Sadia Amselem": "staff"}
+
+    def test_an_unnamed_caregiver_labels_nobody_rather_than_everybody(
+            self, client):
+        """Falling back to "everyone is a patient" would take the caregiver's
+        own signature off her own pad the moment the schedule failed to load.
+        No answer is the safe answer: the page then offers everyone."""
+        from unittest.mock import patch as _patch
+
+        with _patch("apt_log.enrolled.roster",
+                    return_value=[{"name": "Carmen Villalon"}]), \
+             _patch("apt_log.schedule.load", side_effect=OSError("no file")):
+            got = client.get("/signature/roster").json()["parties"]
+        assert [p["role"] for p in got] == [""]
+
+    def test_the_roster_still_never_carries_a_signature(self, client):
+        """The role is one more safe field on a view that is defined by what
+        it leaves out. Adding to it must not become a way in."""
+        body = client.get("/signature/roster").text
+        for leak in ("strokes", "points", "path", "aspect"):
+            assert leak not in body
 
     def test_the_apps_buttons_leave_the_page_when_the_pad_takes_them(
             self, client, tmp_path):

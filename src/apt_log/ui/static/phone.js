@@ -1228,6 +1228,10 @@
       // somebody types into, and it is going onto a page.
       b.textContent = p.name;
       b.dataset.name = p.name;
+      // Which side of a signature sheet this party belongs on — the server's
+      // reading of the schedule, not a guess made here. "" means it could not
+      // be decided, and `markSigner` then offers everyone.
+      b.dataset.role = p.role || '';
       row.appendChild(b);
     }
     wrap.hidden = !row.children.length;
@@ -1289,10 +1293,6 @@
     // stays filled, which is an honest picture of two people who could sign;
     // with it the one this screen asked for is the only filled one.
     row.classList.toggle('aimed', !!signerAdopted);
-    // WHETHER THIS SCREEN IS ASKING FOR SOMEBODY IN PARTICULAR. A signature
-    // sheet always is: it says "Firma del Paciente" or names the person.
-    // Anywhere else the roster is just the roster and every pill stands.
-    const asking = !!signerRole || !!signerNamed;
     let shown = 0;
     for (const b of row.children) {
       const mine = !!signerAdopted && b.dataset.name === signerAdopted;
@@ -1305,20 +1305,31 @@
       // is one person's signature onto another person's record. When the
       // sheet has named exactly one party, hers is the only one drawn.
       //
-      // AND WHEN IT HAS NAMED NONE, NEITHER IS. The first version keyed the
-      // hiding on `signerAdopted`, so it only worked once the server had
-      // resolved the sheet to a person — and on the patient's pad it often
-      // cannot: `_role_signer` refuses to guess unless the screen itself
-      // carries the patient's name, which inMyTeam's check-out sheet does
-      // not. Read off the live phone at that pad: role 'patient', signer '',
-      // and so `wrong` was false for every pill and the caregiver's
-      // signature was offered on the patient's page — "why do I still see
-      // Sadia Amselem when I clicked on patient". Not-yet-known is not
-      // permission; the sheet is asking for the patient either way.
+      // AND WHEN IT HAS NAMED ONLY A ROLE, THE ROLE IS ENOUGH. The first
+      // version keyed the hiding on `signerAdopted`, so it only narrowed the
+      // row once the server had resolved the sheet to a PERSON — and on the
+      // patient's pad it often cannot: `_role_signer` refuses to guess
+      // unless the screen carries the patient's name, and inMyTeam's
+      // check-out sheet does not. Read off the live phone at that pad: role
+      // 'patient', signer '', so nothing counted as wrong and the
+      // caregiver's signature was offered on the patient's page.
+      //
+      // Answering that with "hide everyone unless we identified them" then
+      // overshot in the other direction and took the PATIENT's own signature
+      // off her own pad, which is the one that was wanted: "the auto sign is
+      // not even available on the pencil drawer anymore for either". Both
+      // failures are the same mistake — treating an unresolved identity as
+      // if it settled the question. It does not, and it does not have to:
+      // the party's SIDE is known from the schedule (see /signature/roster),
+      // so a patient's pad drops the caregiver and keeps the patients, and
+      // hers drops the patients and keeps her. No claim about WHICH patient
+      // is made or needed.
       //
       // Hidden rather than deleted, so the row rebuilds without a fetch the
       // moment the sheet asks for somebody else.
-      b.hidden = asking && !mine;
+      b.hidden = (signerAdopted ? !mine
+                  : !!(signerRole && b.dataset.role
+                       && b.dataset.role !== signerRole));
       if (!b.hidden) shown += 1;
       if (mine) b.setAttribute('aria-current', 'true');
       else b.removeAttribute('aria-current');
