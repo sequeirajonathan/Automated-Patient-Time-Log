@@ -1662,6 +1662,12 @@ async def live(ws: WebSocket):
                     # the control bar beside Back and Home. Empty on screens
                     # without one.
                     "apptabs": (model or {}).get("apptabs") or [],
+                    # This dump is a popup window and not the page — see
+                    # `screenview._is_overlay_only`. The page underneath is
+                    # absent from the tree, not empty in it, and the front
+                    # end has to tell "choose one of these" from "here is the
+                    # whole screen" so it can wait rather than redraw.
+                    "overlay": bool((model or {}).get("overlay")),
                     # Whether THIS app can be asked what it has recorded
                     # today. Only inMyTeam publishes a readable work log, so
                     # the button that opens it is offered on that app and

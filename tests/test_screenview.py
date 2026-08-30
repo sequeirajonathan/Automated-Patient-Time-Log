@@ -7,6 +7,8 @@ what tapping it means — every interactive item keeps its rid/class/bounds aim
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from apt_log.ui import screenview
 
 
@@ -2931,3 +2933,72 @@ class TestATitleIsNotAButton:
         — lifted, not dropped."""
         nav = screenview.build(self._doc())["nav"]
         assert nav["back"]["aim"]["rid"] == "visits_menu"
+
+
+class TestAPopupIsNotThePage:
+    """Timed on the live phone. Choosing a historical period leaves Mobile
+    Caregiver+ fetching for about five seconds, and for all five the
+    accessibility tree is ONLY the dropdown's own window — the page beneath
+    is absent from it, not empty in it. The whole tree was a 391x300 box at
+    [689,181] on a 1080x2340 screen.
+
+    "It takes a bit to load historical data, let's make sure we are waiting
+    for the load to finish."
+    """
+
+    SCREEN = [1080, 2340]
+
+    def _popup(self):
+        opts = ["Hoy", "La semana Pasada", "Esta semana", "La semana que viene"]
+        return {"app": "com.tellus.evv.v2", "size": self.SCREEN,
+                "elements": [
+                    {"cls": "CheckedTextView", "rid": "android:id/text1",
+                     "txt": t, "b": [690, 181 + i * 60, 1080, 238 + i * 60],
+                     "enabled": True, "checked": False, "focused": False,
+                     "has_text": True}
+                    for i, t in enumerate(opts)],
+                "statics": []}
+
+    def _page(self):
+        return {"app": "com.tellus.evv.v2", "size": self.SCREEN,
+                "elements": [
+                    {"cls": "View", "rid": "visits_event0_0", "txt": "",
+                     "b": [0, 310, 1080, 421], "enabled": True,
+                     "checked": False, "focused": False, "has_text": False}],
+                "statics": [{"cls": "TextView", "rid": "screen_title",
+                             "txt": "Visitas", "b": [482, 119, 598, 162]}]}
+
+    def test_a_dropdowns_own_window_is_marked_as_one(self):
+        assert screenview.build(self._popup())["overlay"] is True
+
+    def test_the_page_is_not(self):
+        assert screenview.build(self._page())["overlay"] is False
+
+    def test_a_short_page_is_not_a_popup(self):
+        """The first rule judged by AREA and called a one-visit day a popup:
+        height varies with content, and a list with a single row on it is a
+        title and a row. Full-bleed width is what every page has."""
+        assert screenview.build(self._page())["overlay"] is False
+
+    def test_an_empty_tree_is_not_called_an_overlay(self):
+        """Nothing at all is a different problem and has its own handling —
+        this must not quietly claim every blank screen is a popup."""
+        doc = {"app": "x", "size": self.SCREEN, "elements": [], "statics": []}
+        assert screenview.build(doc)["overlay"] is False
+
+    def test_the_options_are_still_offered(self):
+        """The flag says how to WAIT, not what to hide: while the list is up
+        she has to be able to choose from it."""
+        items = [it for row in screenview.build(self._popup())["rows"]
+                 for it in row["items"]]
+        words = {it.get("txt") for it in items}
+        assert "La semana Pasada" in words
+
+    def test_the_page_stops_waiting_only_when_the_app_comes_back(self):
+        """A popup following a popup is the app not yet returned, so the
+        shimmer holds; a popup following the PAGE is the successor she asked
+        for and must be pressable."""
+        js = (Path(__file__).resolve().parents[1]
+              / "src/apt_log/ui/static/phone.js").read_text(encoding="utf-8")
+        assert "if (!(nowOverlay && lastOverlay)) tapping(false);" in js
+        assert "lastOverlay = nowOverlay;" in js

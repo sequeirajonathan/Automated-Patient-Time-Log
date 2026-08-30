@@ -1911,6 +1911,12 @@ def build(doc: dict) -> dict | None:
         # screen is worse than one badly drawn one.
         rows = _without(rows, permission["box"])
     return {"id": doc.get("id", ""), "nav": nav, "rows": rows,
+            # WHETHER THIS DUMP IS A POPUP RATHER THAN THE PAGE — see
+            # `_is_overlay_only`. The page it is over has not gone anywhere;
+            # it is simply not in this tree, and the front end needs to know
+            # the difference between "choose one of these" and "here is the
+            # whole screen".
+            "overlay": _is_overlay_only(doc),
             "apptabs": apptabs,
             # THE TRAIL THE APP SAYS IT WALKED — see `feed.nav_state`. Named
             # apart from `nav` above, which is the app's own top bar: this is
@@ -2456,6 +2462,46 @@ REFUSAL_WORDS = ("el paciente se niega", "el paciente rehusa",
 
 def _is_refusal(text: str) -> bool:
     return (text or "").strip().lower().rstrip(".") in REFUSAL_WORDS
+
+
+# A POPUP FLOATS; A PAGE SPANS. Measured on the phone with the period
+# dropdown open: the entire tree was a 391px-wide box starting 689px across a
+# 1080px screen — 36% of the width, touching neither edge.
+#
+# WIDTH AND NOT AREA, which was the first rule and was wrong: a page can be
+# genuinely short — a list with one visit on it is a title and a row — and
+# judging by area called that a popup too. Height varies with content;
+# full-bleed width is what every one of these pages has and no floating
+# window does.
+OVERLAY_MAX_WIDTH = 0.7
+
+
+def _is_overlay_only(doc: dict) -> bool:
+    """Whether this whole tree is one floating box.
+
+    ANDROID PUTS A DROPDOWN IN ITS OWN WINDOW, and while that window is up
+    the accessibility dump returns only it — the page underneath is absent
+    from the tree entirely, not empty in it. Reflowed without knowing that,
+    the portal replaced the whole page with five anonymous rows.
+
+    And it kept them. Timed on the live phone: choosing a historical period
+    left that same popup dump published for FIVE SECONDS after the press,
+    while Mobile Caregiver+ fetched the week — so the options stayed on
+    screen with the choice apparently not taken, which is an invitation to
+    press again. "It takes a bit to load historical data, let's make sure we
+    are waiting for the load to finish."
+
+    The width is the tell and it is not a close call: 36% of the screen
+    against a page that runs edge to edge.
+    """
+    items = (doc.get("elements") or []) + (doc.get("statics") or [])
+    if not items:
+        return False
+    size = doc.get("size") or []
+    if len(size) != 2 or not (size[0] and size[1]):
+        return False
+    xs = [b for it in items for b in (it["b"][0], it["b"][2])]
+    return (max(xs) - min(xs)) < OVERLAY_MAX_WIDTH * size[0]
 
 
 def _fold_selects(bands: list[list[dict]]) -> None:

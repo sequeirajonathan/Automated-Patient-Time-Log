@@ -20,6 +20,9 @@
   let frameId = '';
   let frameImg = '';
   let lastScreenHtml = '';
+  // Whether the screen before this one was a popup window rather than the
+  // page — see the overlay note in applyScreen.
+  let lastOverlay = false;
   let awaitingMacro = false;
   let awaitingScan = false;
   let macroEndedAt = 0;
@@ -422,7 +425,23 @@
           root.classList.add('enter');
         }
       }
-      tapping(false);
+      // A POPUP THAT FOLLOWS A POPUP IS NOT THE ANSWER TO A TAP MADE IN IT.
+      //
+      // Android draws a dropdown in its own window, and while it is up the
+      // tree is ONLY that window — so choosing a period publishes the same
+      // option list again with the tick moved, which counted as "the screen
+      // moved" and took the shimmer off. Timed on the phone: Mobile
+      // Caregiver+ then spends about five seconds fetching the week, and for
+      // all five the portal showed the option list, undimmed, with the choice
+      // apparently not taken. That is an invitation to press again.
+      //
+      // Opening the picker still clears it — that overlay follows the PAGE
+      // and is the successor she asked for, and it must be pressable or she
+      // cannot choose. It is the second overlay in a row that means the app
+      // has not come back yet.
+      const nowOverlay = !!(meta && meta.overlay);
+      if (!(nowOverlay && lastOverlay)) tapping(false);
+      lastOverlay = nowOverlay;
       if (!pendingApp) unbusy();
     }
     if (!meta) return;
