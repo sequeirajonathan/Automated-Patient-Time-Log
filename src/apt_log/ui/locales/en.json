@@ -271,7 +271,7 @@
  "papp.notify_on": "Notify me",
  "papp.offline_short": "Disconnected",
  "papp.on_launcher": "The phone is on its home screen.",
- "papp.on_launcher_hint": "Choose an app to open it from here.",
+ "papp.on_launcher_hint": "Go back to the app you were using, or choose another one.",
  "papp.opening": "Opening {app}…",
  "papp.peek": "Photo",
  "papp.photo_taken": "Photo from {time}",

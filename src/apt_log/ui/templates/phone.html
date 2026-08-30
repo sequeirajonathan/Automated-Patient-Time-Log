@@ -1248,6 +1248,10 @@
   #offapp p { margin:0; font-size:15.5px; color:var(--ink); }
   #offapp p.muted { font-size:13px; color:var(--muted); }
   #offapp .a-btn { margin-top:6px; min-width:170px; }
+  /* Two filled buttons of the same colour are two equal offers, and these
+     are not equal: one puts back the app she did not mean to leave, the
+     other is for choosing a different one. The second stands down. */
+  #offapp #offapp-apps { background:var(--track); color:var(--tint); }
   body.offapp #screenwrap { display:none; }
   body.offapp #offapp { display:flex; }
 

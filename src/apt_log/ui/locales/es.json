@@ -271,7 +271,7 @@
  "papp.notify_on": "Avísame",
  "papp.offline_short": "Sin conexión",
  "papp.on_launcher": "El teléfono está en su pantalla de inicio.",
- "papp.on_launcher_hint": "Elija una aplicación para abrirla desde aquí.",
+ "papp.on_launcher_hint": "Vuelva a la aplicación que estaba usando, o elija otra.",
  "papp.opening": "Abriendo {app}…",
  "papp.peek": "Foto",
  "papp.photo_taken": "Foto de las {time}",
