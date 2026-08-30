@@ -23,6 +23,7 @@ where a control is drawn on her page, never what tapping it means.
 from __future__ import annotations
 
 import re
+from collections import Counter
 
 # Widget classes with a meaning of their own. Anything else that is clickable
 # is a container row — the shape Android lists are made of.
@@ -1113,6 +1114,48 @@ def build(doc: dict) -> dict | None:
                     if j > c or (j != c and not _contains(cov, e["b"]))]
         statics = [s for s in statics if not _contains(cov, s["b"])]
 
+    # A SIDE MENU IS IN FRONT OF THE PAGE, NOT PART OF IT.
+    #
+    # Unlike a dropdown, a navigation drawer shares the page's window, so the
+    # tree carries both at once and the banding — which groups by vertical
+    # overlap — married them. Read off the phone with Mobile Caregiver+'s
+    # menu open: the drawer's hide button landed in the title bar between
+    # "Menú" and "Visitas", and its first two entries were folded INTO the
+    # day's visit row, so a patient's appointment cell read "La visita está
+    # programada… / Mi perfil / Notificaciones". Reported as exactly that —
+    # "the UIs are clashing".
+    #
+    # Dropped HERE, before anything claims a caption, and that placement is
+    # the point: done later, the page's own visit row had already taken "Mi
+    # perfil" and "Notificaciones" for itself, and removing the row took
+    # them with it — leaving two blank entries in the menu.
+    #
+    # Everything outside the panel is behind it and cannot be pressed; on
+    # the phone a tap out there only closes the menu. So the page steps
+    # aside and the drawer IS the page until it is closed.
+    drawer_right = _drawer_edge(elements, w)
+    drawer_exit = None
+    if drawer_right:
+        elements = [e for e in elements if e["b"][2] == drawer_right]
+        keep = [e["b"] for e in elements]
+        statics = [s for s in statics
+                   if any(_contains(b, s["b"]) for b in keep)]
+        # AND A WAY BACK OUT OF IT. "Clicking back took me out of the app
+        # thinking it would just close the menu ... there needs to be a way
+        # to close the menu somehow as well to return to the main page."
+        #
+        # The app has one — a hide button in the panel's own corner — and it
+        # was being drawn as one more anonymous control among the menu
+        # entries. It is the only control here that does not span the panel,
+        # which is what tells it apart from an entry without reading anybody's
+        # resource id. Handed to the same slot a bottom sheet's exit uses, so
+        # it is drawn where the way out is always drawn.
+        narrow = [e for e in elements
+                  if e["b"][0] > 0 and (e["b"][2] - e["b"][0]) < drawer_right / 2]
+        if len(narrow) == 1:
+            drawer_exit = narrow[0]
+            elements = [e for e in elements if e is not drawer_exit]
+
     _name_the_unnamed(elements, statics, doc, w, h)
 
     # The way out of a modal, lifted before anything else looks at it — the
@@ -1120,7 +1163,11 @@ def build(doc: dict) -> dict | None:
     # screen she cannot do without. Named in her own language, because the
     # app's word for it is an id.
     dismiss = None
-    if any(_is_dismiss(e) for e in elements):
+    if drawer_exit is not None:
+        dismiss = _item(drawer_exit, "button")
+        dismiss["txt_key"] = "papp.close_menu"
+        dismiss["small"] = True
+    elif any(_is_dismiss(e) for e in elements):
         elements = [e for e in elements if not _is_dismiss(e)]
         sheet = [e for e in elements
                  if not _is_up_affordance({"txt": e.get("txt", "")})]
@@ -2462,6 +2509,44 @@ REFUSAL_WORDS = ("el paciente se niega", "el paciente rehusa",
 
 def _is_refusal(text: str) -> bool:
     return (text or "").strip().lower().rstrip(".") in REFUSAL_WORDS
+
+
+# A side menu is a column of controls sharing one right edge, well short of
+# the screen, over a page whose own controls run much wider. Measured with
+# Mobile Caregiver+'s drawer open: ten controls all ending at x=400 on a
+# 1080px screen, against a visit row ending at 1080.
+DRAWER_MAX_RIGHT = 0.6
+DRAWER_MIN_ITEMS = 4
+
+
+def _drawer_edge(controls: list[dict], width: int) -> int:
+    """The right edge of an open side menu, or 0.
+
+    Detected by shape rather than by any app's own names, because all three
+    apps have one of these and none of them label it the same way. What makes
+    a drawer a drawer is that its controls are a stack sharing an edge that
+    stops well short of the screen, while the page underneath still has
+    controls running most of the width — a real page's rows do not all end
+    two-fifths of the way across.
+
+    Takes the screen's CLICKABLES — the raw elements, before anything has
+    been folded into them — because the drop has to happen before a caption
+    is claimed. Returns the edge so the caller can keep what is in front.
+    """
+    if not width:
+        return 0
+    edges: Counter = Counter(n["b"][2] for n in controls)
+    if not edges:
+        return 0
+    wide = max(edges)
+    if wide <= DRAWER_MAX_RIGHT * width:
+        # Nothing here runs wide, so there is no page for a panel to be over
+        # — this is a narrow screen or a popup, and neither is a drawer.
+        return 0
+    for edge, count in edges.items():
+        if count >= DRAWER_MIN_ITEMS and edge <= DRAWER_MAX_RIGHT * width:
+            return edge
+    return 0
 
 
 # A POPUP FLOATS; A PAGE SPANS. Measured on the phone with the period

@@ -3002,3 +3002,103 @@ class TestAPopupIsNotThePage:
               / "src/apt_log/ui/static/phone.js").read_text(encoding="utf-8")
         assert "if (!(nowOverlay && lastOverlay)) tapping(false);" in js
         assert "lastOverlay = nowOverlay;" in js
+
+
+class TestASideMenuIsInFrontOfThePage:
+    """"We need to work on what happens on menu click — the UIs are
+    clashing."
+
+    Read off the phone with Mobile Caregiver+'s drawer open. Unlike a
+    dropdown, a navigation drawer shares the page's window, so the tree
+    carries both at once and the banding — which groups by vertical overlap
+    — married them: the drawer's hide button landed in the title bar between
+    "Menú" and "Visitas", and its first two entries were folded INTO the
+    day's visit row.
+    """
+
+    W = 1080
+
+    def _doc(self):
+        entries = [("menu_my_profile", "Mi perfil"),
+                   ("menu_notifications", "Notificaciones"),
+                   ("title_change_password", "Cambiar contraseña"),
+                   ("title_help_center", "Centro de ayuda"),
+                   ("menu_linked_agencies", "Agencias vinculadas"),
+                   ("text_logout", "Cerrar sesión")]
+        els = [
+            # The page underneath, still in the tree.
+            {"cls": "LinearLayout", "rid": "visits_menu", "txt": "",
+             "b": [20, 101, 114, 180], "enabled": True, "checked": False,
+             "focused": False, "has_text": False},
+            {"cls": "View", "rid": "visits_event0_0", "txt": "",
+             "b": [0, 310, 1080, 421], "enabled": True, "checked": False,
+             "focused": False, "has_text": False},
+            # The panel: a stack of controls sharing an edge at x=400.
+            {"cls": "ImageButton", "rid": "menu_exit", "txt": "Ocultar menú lat",
+             "b": [340, 116, 400, 176], "enabled": True, "checked": False,
+             "focused": False, "has_text": True},
+        ]
+        sts = [{"cls": "View", "rid": None,
+                "txt": "La visita está programada para MARINA",
+                "b": [0, 310, 1080, 421]},
+               {"cls": "TextView", "rid": "visits_scheduleperiod",
+                "txt": "Hoy - sáb, ago 29", "b": [13, 192, 247, 230]}]
+        for i, (rid, word) in enumerate(entries):
+            top = 302 + i * 60
+            els.append({"cls": "LinearLayout", "rid": rid, "txt": "",
+                        "b": [0, top, 400, top + 60], "enabled": True,
+                        "checked": False, "focused": False, "has_text": False})
+            sts.append({"cls": "TextView", "rid": "text1", "txt": word,
+                        "b": [30, top + 11, 340, top + 49]})
+        return {"app": "com.tellus.evv.v2", "size": [self.W, 2340],
+                "elements": els, "statics": sts}
+
+    def _words(self, model):
+        out = []
+        for row in model["rows"]:
+            for it in row["items"]:
+                out.append(it.get("txt") or (it.get("lines") or [""])[0])
+        return out
+
+    def test_the_page_behind_steps_aside(self):
+        """Everything outside the panel is behind it and cannot be pressed —
+        on the phone a tap out there only closes the menu."""
+        words = self._words(screenview.build(self._doc()))
+        assert not [w for w in words if "La visita está programada" in w]
+        assert "Hoy - sáb, ago 29" not in words
+
+    def test_every_entry_keeps_its_own_words(self):
+        """THE ORDER OF THE DROP IS THE POINT. Done after the captions are
+        claimed, the page's visit row had already taken "Mi perfil" and
+        "Notificaciones" for itself, and removing the row took them with it —
+        leaving two blank entries at the top of the menu."""
+        words = self._words(screenview.build(self._doc()))
+        for entry in ("Mi perfil", "Notificaciones", "Cambiar contraseña",
+                      "Cerrar sesión"):
+            assert entry in words, entry
+
+    def test_there_is_a_way_out_of_it(self):
+        """"Clicking back took me out of the app thinking it would just close
+        the menu ... there needs to be a way to close the menu somehow as
+        well to return to the main page." The app has one; it was being drawn
+        as one more anonymous control among the entries."""
+        model = screenview.build(self._doc())
+        assert model["dismiss"]
+        assert model["dismiss"]["aim"]["rid"] == "menu_exit"
+        assert model["dismiss"]["txt_key"] == "papp.close_menu"
+
+    def test_the_exit_is_not_also_an_entry(self):
+        model = screenview.build(self._doc())
+        rids = [it.get("aim", {}).get("rid")
+                for row in model["rows"] for it in row["items"]]
+        assert "menu_exit" not in rids
+
+    def test_an_ordinary_page_is_untouched(self):
+        """A page's rows do not all end two-fifths of the way across, and
+        nothing here may fire on one that simply has a narrow control."""
+        doc = self._doc()
+        doc["elements"] = [e for e in doc["elements"]
+                           if not (e["b"][2] == 400)]
+        doc["statics"] = doc["statics"][:2]
+        words = self._words(screenview.build(doc))
+        assert any("La visita está programada" in w for w in words)
