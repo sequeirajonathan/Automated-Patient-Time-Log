@@ -1954,8 +1954,27 @@ SIGN_IN_SUBMIT_WORDS = ("Sign in", "Iniciar", "Registrarse")
 # patient's visit note.
 #
 # So the screen has to say what it is before anything is typed into it.
-SIGN_IN_NUMBER_WORDS = ("número de teléfono", "numero de telefono",
-                        "cell phone number", "phone number")
+#
+# WHOLE SENTENCES, NOT "phone number". The first cut of this guard matched
+# the bare words, and the app's own resources say why that is not enough:
+# "Phone Number" / "Número de teléfono" are ordinary FIELD LABELS in this
+# app, and a patient's number is on their page. Pair that with the submit
+# half — SIGN_IN_SUBMIT_WORDS carries "Iniciar", and "Iniciar Visita" is a
+# real caption here — and a Spanish visit page satisfies both halves of the
+# test. The guard would wave the walk through onto exactly the kind of page
+# the incident happened on.
+#
+# Each phrase below is one this app ships and only its sign-in screen shows:
+# two field prompts and two headings, read out of the installed APK's
+# resources. The heading is known to be on that screen from the field, not
+# just from the APK — see `by_words`, which was written because "Sign in"
+# matched the screen root through it.
+SIGN_IN_NUMBER_WORDS = ("ingrese su número de teléfono",
+                        "ingrese su numero de telefono",
+                        "inicia sesión con tu número de teléfono",
+                        "inicia sesion con tu numero de telefono",
+                        "enter your cell phone number",
+                        "sign in with your phone number")
 
 # The dialog inMyTeam raises when it will not go on: a title, one line of
 # reason, and one button. Both known headings, because the app's own sign-out

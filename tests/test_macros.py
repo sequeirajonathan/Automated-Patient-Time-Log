@@ -6077,6 +6077,13 @@ class TestTheSignInWalkStaysOffALiveSession:
 
     GUARD = "if not _asks_for_a_number(driver)"
 
+    def _phrase_table(self, src):
+        """Just the phrases in SIGN_IN_NUMBER_WORDS — the opening bracket to
+        its own close, so the comment on whatever is declared next cannot
+        wander in."""
+        start = src.index("(", src.index("SIGN_IN_NUMBER_WORDS"))
+        return src[start:src.index(")", start)]
+
     def test_the_screen_must_say_what_it_is_before_anything_is_typed(self):
         src = self._src()
         i = src.index("def _inmyteam_walk")
@@ -6105,10 +6112,55 @@ class TestTheSignInWalkStaysOffALiveSession:
 
     def test_the_prompt_words_cover_both_languages(self):
         src = self._src()
-        i = src.index("SIGN_IN_NUMBER_WORDS = (")
-        block = src[i:i + 260]
-        assert "número de teléfono" in block
+        block = self._phrase_table(src)
+        assert any("teléfono" in w or "telefono" in w
+                   for w in block.splitlines()[1:])
         assert "phone number" in block
+
+    def test_a_patients_own_phone_number_is_not_a_sign_in_screen(self):
+        """Found by reading the app's own resources rather than by guessing.
+
+        "Phone Number" / "Número de teléfono" are ordinary FIELD LABELS in
+        this app and a patient's number is on their page — so a guard that
+        matched the bare words would fire on a patient page. It needs the
+        whole sentence only the sign-in screen says."""
+        driver = MagicMock()
+        driver.page_source = (
+            '<node text="A PATIENT"/><node text="Número de teléfono"/>'
+            '<node text="Iniciar Visita"/>'
+            '<node class="android.widget.EditText"/>')
+        assert macros._asks_for_a_number(driver) is False
+
+    def test_the_submit_half_alone_cannot_carry_the_guard(self):
+        """"Iniciar Visita" is a real caption in this app, and
+        SIGN_IN_SUBMIT_WORDS carries "Iniciar" — so the submit half matches
+        on an ordinary visit page. The prompt half is what has to be
+        unambiguous, and this pins that it is a whole sentence."""
+        src = self._src()
+        block = self._phrase_table(src)
+        phrases = re.findall(r'"([^"]+)"', block)
+        assert phrases, "no phrases found"
+        for phrase in phrases:
+            assert len(phrase.split()) >= 4, (
+                f"{phrase!r} is short enough to appear as a field label")
+
+    def test_the_phrases_are_lowercase_because_the_page_is_folded_down(self):
+        """`_asks_for_a_number` lowercases the page and compares directly, so
+        a capital in the table would never match anything."""
+        src = self._src()
+        block = self._phrase_table(src)
+        for phrase in re.findall(r'"([^"]+)"', block):
+            assert phrase == phrase.lower(), phrase
+
+    def test_the_real_number_screen_still_passes_in_either_language(self):
+        """The captions this app actually ships, off its own resources."""
+        for caption in ("Ingrese su número de teléfono celular",
+                        "Enter your cell phone number",
+                        "Sign in with your phone number"):
+            driver = MagicMock()
+            driver.page_source = (f'<node text="{caption}"/>'
+                                  '<node class="android.widget.EditText"/>')
+            assert macros._asks_for_a_number(driver) is True, caption
 
     def test_the_prompt_is_read_off_the_page_not_off_a_clickable(self):
         """The prompt is a caption — a label above the box, or the box's own
