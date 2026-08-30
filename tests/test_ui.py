@@ -4761,13 +4761,51 @@ class TestThePadKnowsWhoseSignatureItIsCollecting:
         parties = [{"name": "Carmen Villalon"}, {"name": "Sadia Amselem"}]
         with _patch("apt_log.enrolled.roster", return_value=parties), \
              _patch("apt_log.schedule.load",
-                    return_value=SimpleNamespace(caregiver="Sadia Amselem")), \
-             _patch("apt_log.enrolled.who_signs",
-                    side_effect=lambda n: n):
+                    return_value=SimpleNamespace(caregiver="Sadia Amselem")):
             got = client.get("/signature/roster").json()["parties"]
         roles = {p["name"]: p["role"] for p in got}
         assert roles == {"Carmen Villalon": "patient",
                          "Sadia Amselem": "staff"}
+
+    def test_a_scoped_adoption_is_still_labelled(self, client):
+        """THE FIRST VERSION OF THIS SHIPPED INERT, and the live roster is
+        what said so: every party came back with an empty role.
+
+        It asked `who_signs`, which also decides whether an adoption COVERS
+        the app in front — and with no package to hand it refuses every
+        adoption that names apps. The caregiver's is scoped to inMyTeam, so
+        she went unmatched and nobody could be labelled. Whether her
+        signature may be used on an app is a different question from whether
+        she is the caregiver.
+        """
+        from unittest.mock import patch as _patch
+        from types import SimpleNamespace
+
+        parties = [{"name": "Carmen Villalon", "apps": []},
+                   {"name": "Sadia Amselem",
+                    "apps": ["com.inmyteam.inmyteam"]}]
+        with _patch("apt_log.enrolled.roster", return_value=parties), \
+             _patch("apt_log.schedule.load",
+                    return_value=SimpleNamespace(caregiver="Sadia Amselem")):
+            got = client.get("/signature/roster").json()["parties"]
+        assert {p["name"]: p["role"] for p in got} == {
+            "Carmen Villalon": "patient", "Sadia Amselem": "staff"}
+
+    def test_the_resolved_signer_is_looked_up_for_the_app_in_front(self):
+        """A SECOND PLACE THE PACKAGE WAS BEING DROPPED, and this one was
+        never mine — it predates the role work and disabled the sharpest
+        behaviour the pad has.
+
+        `signer_adopted` is what lets the pad mark the one party this sheet
+        wants. It asked `who_signs` with no package, so a scoped adoption
+        could never resolve: on the caregiver's own pad, inside the very app
+        her adoption is scoped to, it answered "".
+        """
+        src = (Path(__file__).resolve().parents[1]
+               / "src/apt_log/ui/app.py").read_text(encoding="utf-8")
+        i = src.index('"signer_adopted"')
+        clause = src[i:i + 300]
+        assert "package=" in clause, "the app in front must be passed"
 
     def test_an_unnamed_caregiver_labels_nobody_rather_than_everybody(
             self, client):
@@ -5329,7 +5367,13 @@ class TestThePadNamesWhoIsSigning:
         answer different questions: one is a heading, one marks a button."""
         app = Path("src/apt_log/ui/app.py").read_text(encoding="utf-8")
         assert '"signer": _signer' in app
-        assert 'enrolled.who_signs(_signer)' in app
+        # Asked FOR THE APP IN FRONT. Pinned without the package originally,
+        # which is how a scoped adoption came to be unresolvable in the very
+        # app it was scoped to — see
+        # `test_the_resolved_signer_is_looked_up_for_the_app_in_front`.
+        assert 'enrolled.who_signs(' in app
+        i = app.index('"signer_adopted"')
+        assert "package=" in app[i:i + 300]
 
     def test_the_matching_is_not_done_in_the_browser(self):
         """Tolerance for a middle initial belongs in one tested place, and

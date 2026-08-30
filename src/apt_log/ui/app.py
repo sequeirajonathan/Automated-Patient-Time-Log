@@ -1591,8 +1591,20 @@ async def live(ws: WebSocket):
                     # one tested place, and it returns nothing at all when
                     # more than one party could be meant.
                     "signer": _signer,
-                    "signer_adopted": (enrolled.who_signs(_signer)
-                                       if _signer else ""),
+                    # THE PACKAGE IS NOT OPTIONAL HERE, and leaving it off
+                    # quietly disabled this for every scoped adoption.
+                    # `who_signs` refuses an adoption that names apps unless
+                    # the app in front is one of them — which is the whole
+                    # point of scoping — and with no package it refuses ALL
+                    # of them. Measured on the live machine: the caregiver's
+                    # adoption is scoped to inMyTeam, and on her own pad in
+                    # inMyTeam this resolved to "". So the "server named
+                    # exactly one party" path could never fire for her, and
+                    # the pill was never marked as the one this sheet wants.
+                    "signer_adopted": (
+                        enrolled.who_signs(
+                            _signer, package=screen_doc.get("app", ""))
+                        if _signer else ""),
                     # Which of the two the sheet is asking for, so the pad
                     # can say "waiting for the patient's signature" even when
                     # nobody is named — and so it can hold back the party
@@ -2243,25 +2255,35 @@ def signature_roster():
     # and keep the patients off hers, without pretending to know which
     # patient.
     #
-    # Matched through `who_signs` so the tolerance — middle initials, case —
-    # lives in the one tested place rather than being re-implemented here or,
-    # worse, in the browser. Computed in the route rather than in
-    # `enrolled.roster`: that function is the privacy-scoped view of the
-    # store and has no business knowing about the schedule.
+    # Matched through `enrolled.matches` so the tolerance — middle initials,
+    # case, a name written long one place and short another — lives in the one
+    # tested place rather than being re-implemented here or, worse, in the
+    # browser. Computed in the route rather than in `enrolled.roster`: that
+    # function is the privacy-scoped view of the store and has no business
+    # knowing about the schedule.
+    #
+    # `matches` AND NOT `who_signs`, which was the first attempt and shipped
+    # inert. `who_signs` also asks whether the adoption COVERS the app in
+    # front, and with no package to hand it refuses every scoped adoption —
+    # measured on the live machine, where the caregiver's adoption is scoped
+    # to inMyTeam and so came back unmatched, leaving every party unlabelled.
+    # Scope is a different question anyway: whether her signature may be used
+    # on this app has nothing to do with whether she is the caregiver.
     caregiver = ""
     try:
         from apt_log import schedule as schedule_mod
 
-        caregiver = enrolled_mod.who_signs(schedule_mod.load().caregiver or "")
+        caregiver = schedule_mod.load().caregiver or ""
     except Exception:  # noqa: BLE001
         log.exception("naming the caregiver for the signature roster")
     for party in parties:
         # "" WHEN SHE CANNOT BE NAMED, and the page then offers everyone.
         # Labelling every party "patient" because the schedule failed to load
         # would take the caregiver's own signature off her own pad.
-        party["role"] = ("" if not caregiver
-                         else "staff" if party["name"] == caregiver
-                         else "patient")
+        party["role"] = (
+            "" if not caregiver
+            else "staff" if enrolled_mod.matches(caregiver, party["name"])
+            else "patient")
     return JSONResponse({"parties": parties})
 
 
