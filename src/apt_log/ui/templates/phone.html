@@ -1394,6 +1394,14 @@
                    margin:2px auto 12px; }
   body.asking #sheet { transform:translateY(0); }
   body.signing #signsheet { transform:translateY(0); }
+  /* THE ONE SHEET WITH A FIXED SHOPPING LIST ON IT. The others hold a list
+     that is as long as it is and scrolling them is correct; this one holds a
+     canvas, its tools and two rows of buttons, every one of which has to be
+     reachable without hunting. 80% left it ten pixels short of scrolling once
+     the saved-signature row came back — the layout above is what buys the
+     room, and this is the margin that keeps a wrapped line or a third party
+     from spending it all again. */
+  #signsheet { max-height:90%; }
   body.enrolling #enrolsheet { transform:translateY(0); }
 
   /* ------------------------------------------------------- registering one
@@ -1532,10 +1540,10 @@
      long Spanish age string on a narrow phone drops instead of overflowing. */
   .codemeta { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 8px;
               padding:0 6px; }
-  .adopted { margin:0 0 14px; }
+  .adopted { margin:0 0 10px; }
   .adopted[hidden] { display:none; }
-  .adopted-label { display:block; font-size:12px; color:var(--muted);
-                   margin-bottom:7px; }
+  .adopted-label { display:block; font-size:11.5px; color:var(--muted);
+                   margin-bottom:5px; }
   .adopted-row { display:flex; flex-wrap:wrap; gap:8px; }
   /* The name is the whole button. A row of identical "Sign" pills is how the
      wrong person's signature gets applied, so the name never truncates to an
@@ -1559,9 +1567,6 @@
   .adopted-row.aimed button { background:var(--tint-soft); color:var(--tint); }
   .adopted-row.aimed button.primary { background:var(--accent); color:#fff; }
   /* Whose pad this is, in the app's own words, above the row. */
-  .signwhose { margin:0 0 10px; font-size:13.5px; line-height:1.35;
-               color:var(--ink); }
-  .signwhose[hidden] { display:none; }
   .adoptwrap { margin-top:14px; text-align:center; }
   .adoptform { margin-top:10px; text-align:left; padding:14px;
                border-radius:14px; background:var(--bg);
@@ -1630,17 +1635,24 @@
 
   /* Undo and Erase act on HER canvas, so they sit against it and stay
      quiet — undoing a stroke is not a decision worth a filled pill. */
-  .padtools { display:flex; justify-content:flex-end; gap:4px; margin-top:6px; }
+  /* The canvas's own strip: what the ink will look like on one side, what to
+     do about it on the other. `min-width:0` on the preview so the caption is
+     what gives way on a narrow phone — the tap targets never shrink. */
+  .padstrip { display:flex; align-items:center; justify-content:space-between;
+              gap:8px; margin-top:4px; }
+  .padtools { display:flex; justify-content:flex-end; gap:2px; flex:none; }
   .padtool { border:none; background:none; color:var(--tint); cursor:pointer;
              font-size:14px; font-weight:600; padding:8px 12px;
              min-height:40px; border-radius:10px; }
   .padtool:active { background:var(--tint-soft); }
 
-  .signpreview-wrap { display:flex; align-items:center; gap:10px;
-                      margin-top:10px; }
-  .signpreview-wrap .preview-label { margin:0; text-align:left; flex:1;
-                                     font-size:12px; color:var(--muted); }
-  .signpreview-wrap #signpreview { width:44%; margin:0; flex:none; }
+  .signpreview-wrap { display:flex; align-items:center; gap:7px; margin:0;
+                      min-width:0; flex:1 1 auto; }
+  .signpreview-wrap .preview-label { margin:0; text-align:left;
+                                     font-size:11.5px; color:var(--muted);
+                                     overflow:hidden; text-overflow:ellipsis;
+                                     white-space:nowrap; }
+  .signpreview-wrap #signpreview { width:88px; margin:0; flex:none; }
 
   /* The one action of step one, and it looks like it. */
   /* The hint that only appears once the ink has landed, pointing at the
@@ -2250,9 +2262,13 @@
      the far side of a rule, under a heading that says so, and every button in
      it carries a phone glyph. The words stay the app's own — they name the
      app's buttons — and the glyph is what makes them unmistakably not hers. #}
+  {# `data-plain` is what this says when the screen has named nobody — the
+     heading is rewritten in place with whose pad it is, so the two never sit
+     on the page as separate lines saying the same thing. #}
   <div class="signstep">
     <span class="signstep-n">1</span>
-    <span class="signstep-t">{{ t('sign.step_draw') }}</span>
+    <span class="signstep-t" id="sign-step-title"
+          data-plain="{{ t('sign.step_draw') }}">{{ t('sign.step_draw') }}</span>
   </div>
   {# ONE PRESS, FOR A HAND THAT CANNOT DRAW.
 
@@ -2265,29 +2281,35 @@
      is not the thing they came here for. Each button carries the party's own
      name, because a row of identical "Sign" buttons is how the wrong person's
      signature gets applied. Hidden entirely when nobody has adopted one. #}
-  {# WHOSE PAD THIS IS, IN THE APP'S OWN WORDS.
-
-     inMyTeam's exit puts two identical signature screens back to back — the
-     patient's, then the caregiver's — and this sheet looked the same on both.
-     The app names the signer in its title bar and nothing was reading it.
-
-     Filled from the screen push, never typed here, and empty on every screen
-     that is not a pad. #}
-  <p class="signwhose" id="sign-whose" hidden></p>
+  {# WHOSE PAD THIS IS is said by step one's heading above, which markSigner
+     rewrites from the screen push — inMyTeam's exit puts two identical
+     signature screens back to back, the patient's then the caregiver's, and
+     the app names the signer in its title bar. It used to be a second line
+     of its own here, under a heading that said nearly the same thing. #}
   <div class="adopted" id="sign-adopted" hidden>
     <span class="adopted-label">{{ t('sign.adopted_label') }}</span>
     <div class="adopted-row" id="sign-adopted-row"></div>
   </div>
   <canvas id="signpad" width="10" height="10"></canvas>
-  {# Against the canvas, because they act ON the canvas. Plain text buttons:
+  {# ONE STRIP UNDER THE CANVAS, not two bands.
+
+     These were a row of text buttons and then a whole separate band holding
+     a caption and a mostly-empty rectangle — about 120px between the canvas
+     and the one button that does anything, on a sheet that had ten pixels of
+     headroom left once the saved-signature row came back. Both belong to the
+     canvas above them and both are small, so they share a line.
+
+     Against the canvas, because they act ON the canvas. Plain text buttons:
      undoing a stroke is not a decision worth a filled pill. #}
-  <div class="padtools">
-    <button type="button" id="sign-undo" class="padtool">{{ t('signature.undo') }}</button>
-    <button type="button" id="sign-clear" class="padtool">{{ t('sign.erase') }}</button>
-  </div>
-  <div class="signpreview-wrap">
-    <span class="preview-label">{{ t('sign.preview') }}</span>
-    <canvas id="signpreview" width="10" height="10"></canvas>
+  <div class="padstrip">
+    <span class="signpreview-wrap">
+      <span class="preview-label">{{ t('sign.preview') }}</span>
+      <canvas id="signpreview" width="10" height="10"></canvas>
+    </span>
+    <span class="padtools">
+      <button type="button" id="sign-undo" class="padtool">{{ t('signature.undo') }}</button>
+      <button type="button" id="sign-clear" class="padtool">{{ t('sign.erase') }}</button>
+    </span>
   </div>
   {# IT DRAWS. IT DOES NOT SUBMIT — and the old wording, "Enviar al
      teléfono", read as a submit to the one person using it: the log shows six

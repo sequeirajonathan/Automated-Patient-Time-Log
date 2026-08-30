@@ -5415,12 +5415,40 @@ class TestThePadNamesWhoIsSigning:
                     encoding="utf-8"))
             assert "{who}" in catalogue["sign.whose"]
 
+    def test_the_pad_does_not_stack_two_bands_under_its_canvas(self):
+        """"Anything we can do to avoid scrolling on the pencil drawer, keep
+        things tidy in this component."
+
+        Measured at 390x844 with a saved-signature pill and the app's own
+        buttons showing: 665px of content against 675px of sheet — ten pixels
+        from scrolling, which is why it read as crowded. The two bands under
+        the canvas were 117px of it: a row of text buttons, then a caption
+        and a mostly-empty rectangle. Both belong to the canvas and both are
+        small, so they share one line.
+        """
+        html = (Path(__file__).resolve().parents[1]
+                / "src/apt_log/ui/templates/phone.html").read_text(
+                    encoding="utf-8")
+        pad = html.split('id="signsheet"', 1)[1].split("</div>\n<div", 1)[0]
+        # One strip holding both, rather than the two siblings it replaced.
+        strip = pad.index('class="padstrip"')
+        assert strip < pad.index('class="signpreview-wrap"')
+        assert strip < pad.index('class="padtools"')
+        # And the label is what gives way when the phone is narrow, never the
+        # tap targets.
+        rule = html[html.index(".padtools {"):]
+        assert "flex:none" in rule[:rule.index("}")]
+
     def test_the_name_goes_in_as_text(self):
         """It is the app's rendering of somebody's legal name, arriving over a
         socket and going onto a page."""
         body = self._js().split("function markSigner(", 1)[1].split(
             "\n  }", 1)[0]
-        assert "heading.textContent" in body
+        # It lands on step one's own heading now — the separate line under it
+        # said nearly the same thing and the sheet could not spare it. Still
+        # textContent, which is what this test is actually about.
+        assert "title.textContent" in body
+        assert "innerHTML" not in body
         assert "innerHTML" not in body
 
 

@@ -1276,17 +1276,20 @@
 
   function markSigner() {
     const row = document.getElementById('sign-adopted-row');
-    const heading = document.getElementById('sign-whose');
-    if (heading) {
+    // STEP ONE'S OWN HEADING SAYS WHOSE PAD THIS IS, rather than a second
+    // line underneath repeating it. "Firme aquí" and "Esperando la firma del
+    // paciente" were stacked and said nearly the same thing, and the sheet
+    // could not afford the line: with the saved-signature row back it had ten
+    // pixels of headroom left. The specific sentence wins and the generic one
+    // is what it falls back to.
+    const title = document.getElementById('sign-step-title');
+    if (title) {
       // textContent: the app's own rendering of somebody's legal name.
-      // With no name, the ROLE still says what the sheet is waiting for —
-      // "Esperando la firma del paciente" — which is the whole state of the
-      // screen while the drawer is what she is working in.
       const waiting = signerRole
         ? (i18n.signWaiting || {})[signerRole] || '' : '';
-      heading.textContent = signerNamed
+      const whose = signerNamed
         ? (i18n.signWhose || '').replace('{who}', signerNamed) : waiting;
-      heading.hidden = !heading.textContent;
+      title.textContent = whose || title.dataset.plain || '';
     }
     if (!row) return;
     // Only when the server resolved exactly one party. Without it every pill
