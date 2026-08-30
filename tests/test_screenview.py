@@ -2886,3 +2886,48 @@ class TestADropdownIsDrawnAsADropdown:
     def test_no_band_is_left_empty(self):
         rows = screenview.build(self._today())["rows"]
         assert all(row["items"] for row in rows)
+
+
+class TestATitleIsNotAButton:
+    """"Menú › Visitas" — a list cell offering to open something called
+    Visitas, which is not a thing. Mobile Caregiver+'s title bar was not
+    being recognised as one at all, so its drawer handle and its screen
+    title fell into the page as an ordinary row.
+
+    The band was split by whether an item had an aim, and every item carries
+    one: the aim is how the peek maps a drawn item back to the phone, filled
+    in for a plain caption exactly as for a control. The title counted as a
+    button, and the all-buttons-are-small gate was then being asked about a
+    line of text — which "Visitas" is too wide to pass.
+    """
+
+    def _doc(self):
+        return {"app": "com.tellus.evv.v2", "size": [1080, 2340],
+                "elements": [
+                    {"cls": "LinearLayout", "rid": "visits_menu", "txt": "",
+                     "b": [20, 101, 114, 180], "enabled": True,
+                     "checked": False, "focused": False, "has_text": False}],
+                "statics": [
+                    {"cls": "TextView", "rid": "drawer_text_menu",
+                     "txt": "Menú", "b": [20, 139, 96, 180]},
+                    {"cls": "TextView", "rid": "screen_title", "txt": "Visitas",
+                     "b": [482, 119, 598, 162]},
+                    {"cls": "TextView", "rid": "row", "txt": "MARINA",
+                     "b": [15, 600, 500, 640]}]}
+
+    def test_the_screen_title_titles_the_screen(self):
+        nav = screenview.build(self._doc())["nav"]
+        assert nav and nav["title"] == "Visitas"
+
+    def test_the_title_bar_is_lifted_out_of_the_list(self):
+        model = screenview.build(self._doc())
+        items = [it for row in model["rows"] for it in row["items"]]
+        assert not [it for it in items if it.get("txt") == "Visitas"]
+        assert not [it for it in items
+                    if "Menú" in (it.get("lines") or [])]
+
+    def test_the_drawer_handle_stays_a_control(self):
+        """It is the way into the app's own menu and must still be pressable
+        — lifted, not dropped."""
+        nav = screenview.build(self._doc())["nav"]
+        assert nav["back"]["aim"]["rid"] == "visits_menu"

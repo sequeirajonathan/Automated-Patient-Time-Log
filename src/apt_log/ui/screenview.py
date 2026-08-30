@@ -1801,8 +1801,23 @@ def build(doc: dict) -> dict | None:
     nav = None
     if bands:
         first = bands[0]
-        buttons = [n for n in first if n.get("aim")]
-        titles = [n for n in first if not n.get("aim") and n.get("txt")]
+        # SPLIT BY WHAT THE ITEM IS, NOT BY WHETHER IT CAN BE AIMED AT.
+        #
+        # This asked `n.get("aim")`, and every item carries one — the aim is
+        # how the peek maps a drawn item back to the phone, and it is filled
+        # in for a plain caption exactly as it is for a control. So a title
+        # counted as a button, and then the all-buttons-are-small gate was
+        # being asked about a line of text.
+        #
+        # Mobile Caregiver+ failed it: its screen title "Visitas" is wider
+        # than a control, so the band was not a nav bar at all, and the app's
+        # title and its drawer handle fell into the list as an ordinary row
+        # reading "Menú › Visitas" — a cell offering to open something called
+        # Visitas, which is not a thing. A label is a title; a control is a
+        # control, and the kind already says which.
+        buttons = [n for n in first if n["kind"] not in ("label", "text")]
+        titles = [n for n in first
+                  if n["kind"] in ("label", "text") and n.get("txt")]
         # A title bar's title is a title, never a paragraph. A page whose top
         # band is a hint sentence with an inline link ("Encontrará las visitas
         # anteriores con Visita Buscar", seen on the tablet-density schedule)
