@@ -6414,3 +6414,73 @@ class TestBackNeverLeavesTheAppBehind:
             self.UMA + "/HomeActivity"])
         assert ui._return_if_back_left(self.UMA) is False
         assert sent == []
+
+
+class TestTheWayBackFromTheHomeScreen:
+    """"Clicking back took me out of the app thinking it would just close the
+    menu ... I end up on the android Home Screen and it appears stuck."
+
+    Back from an app's first page pops it off the task stack and the phone
+    lands on the launcher. The containment watchdog deliberately leaves the
+    home screen alone — it exists to stop the phone WANDERING, and a launcher
+    is where a phone rests — so nothing came to the rescue. Reproduced from
+    this end three times in one evening, and after every deploy.
+    """
+
+    def _js(self):
+        return (Path(__file__).resolve().parents[1]
+                / "src/apt_log/ui/static/phone.js").read_text(encoding="utf-8")
+
+    def _html(self):
+        return (Path(__file__).resolve().parents[1]
+                / "src/apt_log/ui/templates/phone.html").read_text(
+                    encoding="utf-8")
+
+    def test_the_card_offers_the_way_back(self, client):
+        body = client.get("/app").text
+        assert 'id="offapp-return"' in body
+
+    def test_it_is_the_leading_choice_and_the_picker_still_stands(self, client):
+        """The picker is for choosing a DIFFERENT app. This is the far
+        commoner case, which is not a choice at all — she did not mean to
+        leave — so it leads."""
+        body = client.get("/app").text
+        assert body.index('id="offapp-return"') < body.index('id="offapp-apps"')
+        assert 'id="offapp-apps"' in body
+
+    def test_it_names_the_app_it_returns_to(self):
+        js = self._js()
+        assert "i18n.backToApp" in js
+        assert "{app}" in js[js.index("i18n.backToApp"):
+                              js.index("i18n.backToApp") + 120]
+        assert "backToApp:" in self._html()
+
+    def test_it_reopens_rather_than_signing_in(self):
+        """`appOpen` is the app's open-only macro: it activates and waits,
+        and presses nothing inside the app. A stray press here costs a second
+        and cannot touch a visit."""
+        js = self._js()
+        block = js[js.index("const goBack = document.getElementById"):]
+        assert "appOpen[pkg]" in block[:900]
+        # And it must not fall through to a sign-in walk.
+        assert "dataset.macro" not in block[:900]
+
+    def test_nothing_to_return_to_offers_no_button(self):
+        """A phone that has never been in a care app has nowhere to go back
+        to, and the card must not offer a press that would do nothing."""
+        js = self._js()
+        block = js[js.index("function paintReturn"):]
+        assert "btn.hidden = !ready" in block[:900]
+
+    def test_the_app_is_remembered_across_a_reload(self):
+        """A page opened fresh onto a home screen would otherwise have
+        nothing to offer but the picker."""
+        js = self._js()
+        assert "localStorage.setItem('aptlog-last-app'" in js
+        assert "localStorage.getItem('aptlog-last-app')" in js
+
+    def test_blocked_storage_does_not_break_the_card(self):
+        """A private window throws on the accessor itself."""
+        js = self._js()
+        i = js.index("localStorage.setItem('aptlog-last-app'")
+        assert "catch" in js[i:i + 200]

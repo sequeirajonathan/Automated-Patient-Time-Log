@@ -23,6 +23,10 @@
   // Whether the screen before this one was a popup window rather than the
   // page — see the overlay note in applyScreen.
   let lastOverlay = false;
+  // The last care app the phone was seen in — what the home-screen card's
+  // way back points at. Mirrored to localStorage so a page opened fresh onto
+  // a home screen still has somewhere to send her.
+  let lastCareApp = '';
   let awaitingMacro = false;
   let awaitingScan = false;
   let macroEndedAt = 0;
@@ -115,6 +119,25 @@
       label.textContent = i18n.syncing || '';
     } else {
       label.textContent = i18n.live || '';
+    }
+  }
+
+  // Which app the way-back button points at, and what it says. Hidden when
+  // there is nothing to point at — a phone that has not been in a care app
+  // this session and has nothing remembered — so the card never offers a
+  // press that would do nothing.
+  function paintReturn() {
+    const btn = document.getElementById('offapp-return');
+    if (!btn) return;
+    if (!lastCareApp) {
+      try { lastCareApp = localStorage.getItem('aptlog-last-app') || ''; }
+      catch (e) { lastCareApp = ''; }
+    }
+    const name = appNames[lastCareApp] || '';
+    const ready = !!(lastCareApp && appOpen[lastCareApp] && name);
+    btn.hidden = !ready;
+    if (ready) {
+      btn.textContent = (i18n.backToApp || '').replace('{app}', name);
     }
   }
 
@@ -619,7 +642,16 @@
         view('launcher');
       }
     }
+    // THE LAST CARE APP THE PHONE WAS IN, remembered across a reload. It is
+    // what the way back points at, and a page opened fresh onto a home
+    // screen would otherwise have nothing to offer but the picker.
+    if (currentPackage && appOpen[currentPackage] !== undefined) {
+      lastCareApp = currentPackage;
+      try { localStorage.setItem('aptlog-last-app', currentPackage); }
+      catch (e) { /* private window, blocked storage: the picker still works */ }
+    }
     body.classList.toggle('offapp', onLauncher);
+    if (onLauncher) paintReturn();
     // A system panel is over the app. Said plainly, with the one act that
     // helps, instead of a sketch of a screen nobody is being shown — and
     // instead of her tapping controls that cannot possibly answer, which is
@@ -2231,6 +2263,23 @@
     });
     const offapp = document.getElementById('offapp-apps');
     if (offapp) offapp.addEventListener('click', () => view('launcher'));
+    const goBack = document.getElementById('offapp-return');
+    if (goBack) goBack.addEventListener('click', () => {
+      // The same open the tile does, aimed at the app she was already in.
+      // It activates and waits; it presses nothing inside the app, so a
+      // stray press here costs a second and cannot touch a visit.
+      const pkg = lastCareApp;
+      if (!pkg || !appOpen[pkg]) return;
+      pendingApp = pkg;
+      view('screen');
+      busy((i18n.opening || '').replace('{app}', appNames[pkg] || ''), 45000);
+      fetch('/macro', {
+        method: 'POST',
+        body: new URLSearchParams({ name: appOpen[pkg] }),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        redirect: 'follow'
+      }).catch(() => { pendingApp = ''; unbusy(); toast(i18n.failed || ''); });
+    });
     // The way out from under a system panel. It is a macro rather than a
     // keypress because a keypress is exactly what does not work here: this
     // phone swallows the collapse command, Back and Home alike, and only a

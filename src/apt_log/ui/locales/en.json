@@ -234,6 +234,7 @@
  "otp.title": "Login code",
  "papp.app_home": "Back to this app's first page",
  "papp.apps": "Apps",
+ "papp.back_to_app": "Back to {app}",
  "papp.asleep": "The phone's screen is off.",
  "papp.asleep_hint": "Wake it to see and use it from here.",
  "papp.choose": "Choose an app. It opens on the phone in Florida, and this page becomes its screen.",

@@ -234,6 +234,7 @@
  "otp.title": "Código de acceso",
  "papp.app_home": "Volver a la primera página de esta app",
  "papp.apps": "Aplicaciones",
+ "papp.back_to_app": "Volver a {app}",
  "papp.asleep": "La pantalla del teléfono está apagada.",
  "papp.asleep_hint": "Actívela para verla y usarla desde aquí.",
  "papp.choose": "Elija una aplicación. Se abre en el teléfono en Florida y esta página se convierte en su pantalla.",

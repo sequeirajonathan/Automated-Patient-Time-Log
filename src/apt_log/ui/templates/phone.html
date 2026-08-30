@@ -2145,6 +2145,19 @@
            stroke-width="1.6"><path d="M4 11 12 4l8 7"/><path d="M6 9.5V20h12V9.5"/></svg>
       <p>{{ t('papp.on_launcher') }}</p>
       <p class="muted">{{ t('papp.on_launcher_hint') }}</p>
+      {# ONE PRESS BACK TO WHERE SHE WAS.
+         Back from an app's first page pops it off the stack and the phone
+         lands here, and the containment watchdog deliberately leaves the
+         home screen alone — it exists to stop the phone WANDERING, and the
+         launcher is where a phone rests. So nothing came to the rescue:
+         "clicking back took me out of the app ... I end up on the android
+         Home Screen and it appears stuck." Reproduced from this end three
+         times in one evening.
+         The picker below still stands for choosing a DIFFERENT app. This one
+         is for the far commoner case, which is not a choice at all — she did
+         not mean to leave. Named with the app so it is obvious which. #}
+      <button type="button" class="a-btn cta" id="offapp-return"
+              style="flex:none" hidden></button>
       <button type="button" class="a-btn" id="offapp-apps"
               style="flex:none">{{ t('papp.apps') }}</button>
     </div>
@@ -2631,6 +2644,7 @@
     zone: {{ zone|tojson }},
     appTitle: {{ t('app.title')|tojson }},
     opening: {{ t('papp.opening')|tojson }},
+    backToApp: {{ t('papp.back_to_app')|tojson }},
     waiting: {{ t('papp.waiting_screen')|tojson }},
     notifyOn: {{ t('papp.notify_on')|tojson }},
     notifyOff: {{ t('papp.notify_off')|tojson }},
