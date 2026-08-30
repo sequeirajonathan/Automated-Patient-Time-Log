@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import time
 from unittest.mock import MagicMock, patch
 
@@ -3333,3 +3334,92 @@ class TestAStaticKeepsItsName:
                            'bounds="[24,245][553,313]"/>')
         assert got and got[0]["txt"] == "agosto 29"
         assert got[0].get("rid", "") == ""
+
+
+class TestTheJournalSaysWhichColumnATickWentInto:
+    """A real check-out could not be reconstructed afterwards.
+
+    The refresh line counts corrected fields, which reads as a tick count —
+    but inMyTeam's sheet gives every task TWO boxes, its own on the left and
+    "el paciente se niega" on the right. So a logged "22" meant either
+    twenty-two tasks ticked or eleven ticked twice over, and nothing in the
+    journal could tell those apart. They are opposite accounts of what a
+    caregiver did.
+
+    The geometry here is the real sheet's, off the flight recorder: task
+    boxes at x=26, refusal boxes at x=868.
+    """
+
+    def setup_method(self):
+        feed._LAST_TICKS[0] = None
+
+    def _sheet(self, done=0, refused=0, tasks=22):
+        els = []
+        for i in range(tasks):
+            top = 369 + i * 62
+            els.append({"cls": "CheckBox", "rid": "", "txt": "",
+                        "b": [26, top, 58, top + 32], "checked": i < done})
+            els.append({"cls": "CheckBox", "rid": "", "txt": "",
+                        "b": [868, top + 27, 900, top + 59],
+                        "checked": i < refused})
+        return els
+
+    def test_the_two_columns_are_counted_apart(self, caplog):
+        with caplog.at_level(logging.INFO, logger="apt_log.feed"):
+            feed._tick_columns(self._sheet(done=11, refused=3))
+        line = caplog.text
+        assert "11/22 at x=26" in line
+        assert "3/22 at x=868" in line
+
+    def test_eleven_tasks_ticked_twice_reads_differently_from_twenty_two(
+            self, caplog):
+        """The exact ambiguity this exists to end: both of these would have
+        logged the bare number 22 before."""
+        with caplog.at_level(logging.INFO, logger="apt_log.feed"):
+            feed._tick_columns(self._sheet(done=22, refused=0))
+            all_done = caplog.text
+            caplog.clear()
+            feed._tick_columns(self._sheet(done=11, refused=11))
+            half_each = caplog.text
+        assert "22/22 at x=26" in all_done
+        assert "11/22 at x=26" in half_each and "11/22 at x=868" in half_each
+
+    def test_a_tick_going_missing_is_a_line_in_the_journal(self, caplog):
+        """The failure that started this: the ticked count going DOWN while
+        she was putting ticks in. It has to be visible without inference."""
+        with caplog.at_level(logging.INFO, logger="apt_log.feed"):
+            feed._tick_columns(self._sheet(done=22))
+            caplog.clear()
+            feed._tick_columns(self._sheet(done=11))
+        assert "11/22 at x=26" in caplog.text
+
+    def test_an_untouched_sheet_does_not_repeat_itself(self, caplog):
+        """It runs every couple of seconds. A journal that says the same
+        thing three hundred times is one nobody reads."""
+        with caplog.at_level(logging.INFO, logger="apt_log.feed"):
+            feed._tick_columns(self._sheet(done=4))
+            caplog.clear()
+            feed._tick_columns(self._sheet(done=4))
+            feed._tick_columns(self._sheet(done=4))
+        assert caplog.text.strip() == ""
+
+    def test_a_screen_with_no_tick_boxes_says_nothing(self, caplog):
+        with caplog.at_level(logging.INFO, logger="apt_log.feed"):
+            feed._tick_columns([{"cls": "Button", "b": [0, 0, 100, 50]}])
+        assert "ticks" not in caplog.text
+
+    def test_leaving_the_sheet_and_coming_back_reports_again(self, caplog):
+        """Otherwise the first tally after a detour is swallowed as a
+        duplicate of one from a different screen."""
+        with caplog.at_level(logging.INFO, logger="apt_log.feed"):
+            feed._tick_columns(self._sheet(done=4))
+            feed._tick_columns([{"cls": "Button", "b": [0, 0, 100, 50]}])
+            caplog.clear()
+            feed._tick_columns(self._sheet(done=4))
+        assert "4/22 at x=26" in caplog.text
+
+    def test_a_malformed_element_cannot_break_the_tick(self, caplog):
+        """This is a log line. It sits on the path every capture takes."""
+        with caplog.at_level(logging.INFO, logger="apt_log.feed"):
+            feed._tick_columns([{"cls": "CheckBox", "b": None},
+                                {"cls": "CheckBox"}])

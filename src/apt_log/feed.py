@@ -1548,6 +1548,59 @@ def _fresh_stitch(directory: Path, viewport_id: str,
 LIVE_STATES = ("checked", "selected", "enabled", "focused")
 
 
+# WHICH COLUMN A TICK WENT INTO.
+#
+# The refresh line below counts corrected FIELDS, and on a check-out sheet
+# that reads as a tick count — but only if you already know the sheet has one
+# tick per task. inMyTeam's has TWO: the task's own box on the left, "el
+# paciente se niega" on the right. So "22" meant either twenty-two tasks
+# ticked, or eleven tasks ticked twice over, and those are opposite readings
+# of the same number. Reconstructing a real check-out afterwards, that
+# ambiguity could not be resolved from the journal at all.
+#
+# Reported BY LEFT EDGE and not by meaning. Which column says what is the
+# reflow's judgement (see REFUSAL_WORDS), it is read off captions, and the
+# feed has no business guessing at it — an x coordinate is a fact.
+TICKABLE = ("CheckBox", "RadioButton")
+
+# The last tally logged, so a journal is a record of CHANGES rather than the
+# same line every couple of seconds. A list because this is a module-level
+# cell, the same shape `_FOLDS_OPENED_AT` uses in the runner.
+_LAST_TICKS: list = [None]
+
+
+def _tick_columns(els: list[dict]) -> None:
+    """Log how many boxes are ticked in each column, when that changes.
+
+    Quiet on every screen without tick boxes, and quiet while a sheet sits
+    untouched — it speaks only when a tick goes in or comes out. That makes
+    the drop this exists to catch (ticks going DOWN while she is putting
+    them in) a line in the journal rather than an inference from one.
+    """
+    try:
+        boxes = [e for e in els
+                 if (e.get("cls") or "").split(".")[-1] in TICKABLE
+                 and e.get("b")]
+        if not boxes:
+            _LAST_TICKS[0] = None
+            return
+        tally: dict[int, list[int]] = {}
+        for e in boxes:
+            col = tally.setdefault(e["b"][0], [0, 0])
+            col[1] += 1
+            if e.get("checked"):
+                col[0] += 1
+        shape = tuple(sorted((x, on) for x, (on, _total) in tally.items()))
+        if shape == _LAST_TICKS[0]:
+            return
+        _LAST_TICKS[0] = shape
+        log.info("ticks %s", ", ".join(
+            f"{on}/{total} at x={x}"
+            for x, (on, total) in sorted(tally.items())))
+    except Exception as exc:  # noqa: BLE001 — a log line never breaks a tick
+        log.debug("cannot tally ticks (%s)", exc)
+
+
 def _merge_live_states(doc: dict, els: list[dict]) -> dict:
     """The stitched page, wearing the live viewport's control states.
 
@@ -1784,6 +1837,13 @@ def write_frame(path: Path, serial: str | None = None,
     # boxes: she taps, nothing happens, and the fault looks like the portal's.
     if reason == APP_NOT_RESPONDING:
         els = []
+
+    # What the sheet in front says about itself, before any of the caching
+    # below. Read off the LIVE viewport and not the stitched page, because a
+    # stitch is a photograph of layout and the question here is what is
+    # ticked right now — and because a page nobody has walked still needs
+    # answering for.
+    _tick_columns(els)
 
     # The whole page, when the runner has walked it: while the stitched
     # document's first capture still matches what is in front, the portal
