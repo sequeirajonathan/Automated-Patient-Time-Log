@@ -361,6 +361,48 @@ def missed(schedule, now: datetime, armed_keys=None,
     return out
 
 
+def on_duty(schedule, now: datetime, app: str = "", armed_keys=None) -> bool:
+    """Whether an armed visit is relying on an app right now.
+
+    THE SECOND REASON A DEAD SESSION MAY BE REVIVED.
+
+    Automatic sign-in is otherwise gated on somebody watching the portal, and
+    that gate is right for what it was built for: an unwatched phone must not
+    loop sign-in against its own inactivity timer all night. But it answers
+    "is anybody looking", and the question that actually matters at half past
+    four in the morning is "is anything about to need this app". Those come
+    apart exactly when it hurts — the session expires unattended overnight,
+    the phone stands on the sign-in page, and at the visit the entry fires
+    into a signed-out app.
+
+    Arming is what closes the gap, and it closes it honestly. It is already
+    an attestation by a person that the caregiver is with the patient
+    (REQ-5.9) — so reviving the app that visit runs in is inside what
+    somebody has already asked for, not a new liberty the machine is taking.
+
+    The window runs from ARMS to the end of the visit plus GRACE: the lead
+    walk needs the app, the fire needs it, and an expiry MID-visit still has
+    a check-out to make. Outside that window nothing here says yes, so the
+    overnight loop the gate was built to prevent stays prevented.
+
+    `app` narrows it to one package's visits; empty asks about any.
+    """
+    from apt_log import arming
+
+    keys = arming.armed() if armed_keys is None else set(armed_keys)
+    if not keys:
+        return False
+    for day in _days_to_look_at(schedule, now):
+        for visit in schedule.on(day):
+            if app and visit.app != app:
+                continue
+            if arming.key_for(visit.block) not in keys:
+                continue
+            if visit.arms <= now <= visit.ends + GRACE:
+                return True
+    return False
+
+
 def preparing(schedule, now: datetime, armed_keys=None) -> list[Due]:
     """Armed visits inside their lead window that have not fired yet.
 

@@ -1798,3 +1798,80 @@ class TestTheDrawerIsFoundInEitherLanguage:
 class _Shown:
     def is_displayed(self):
         return True
+
+
+class TestASessionMayBeRevivedForAVisitThatNeedsIt:
+    """Automatic sign-in was gated on somebody watching the portal, and that
+    gate answers the wrong question overnight.
+
+    The app expires its own session on inactivity. At four in the morning
+    nobody is watching, so the one thing that exists to fix that refuses to
+    run; the phone stands on the sign-in page until morning and the visit
+    fires into a signed-out app.
+
+    Arming is what closes it honestly: it is already a person's attestation
+    that the caregiver is with the patient (REQ-5.9), so reviving the app
+    that visit runs in is inside what somebody has asked for.
+    """
+
+    def test_nothing_armed_means_nothing_needs_reviving(self):
+        s = a_schedule()
+        assert autoentry.on_duty(s, monday(9, 0)) is False
+
+    def test_an_armed_visit_in_its_window_needs_the_app(self):
+        s = a_schedule()
+        arm(s.blocks[0])
+        assert autoentry.on_duty(s, monday(9, 0)) is True
+
+    def test_the_window_opens_when_the_visit_arms_not_when_it_fires(self):
+        """The lead walk needs the app signed in too — by the time the fire
+        is due it should be one press, not a cold start and a login against
+        the clock."""
+        s = a_schedule()
+        arm(s.blocks[0])
+        visit = s.on(monday(9, 0).date())[0]
+        assert visit.arms < visit.fires
+        assert autoentry.on_duty(s, visit.arms) is True
+        assert autoentry.on_duty(
+            s, visit.arms - timedelta(minutes=1)) is False
+
+    def test_it_still_holds_mid_visit_because_a_check_out_is_coming(self):
+        """The expiry that started all this happened DURING a visit. A window
+        that closed at the entry would leave the check-out stranded."""
+        s = a_schedule()
+        arm(s.blocks[0])
+        assert autoentry.on_duty(s, monday(10, 30)) is True
+
+    def test_and_closes_once_the_visit_and_its_grace_are_past(self):
+        s = a_schedule()
+        arm(s.blocks[0])
+        visit = s.on(monday(9, 0).date())[0]
+        assert autoentry.on_duty(s, visit.ends + autoentry.GRACE) is True
+        assert autoentry.on_duty(
+            s, visit.ends + autoentry.GRACE + timedelta(minutes=1)) is False
+
+    def test_the_overnight_loop_the_gate_was_built_for_stays_prevented(self):
+        """Three in the morning, armed visit or not: nothing is due, so
+        nothing may sign itself in."""
+        s = a_schedule()
+        arm(s.blocks[0])
+        assert autoentry.on_duty(s, monday(3, 0)) is False
+
+    def test_it_is_asked_about_one_app_not_any_app(self):
+        """A visit in Mobile Caregiver+ is no reason to revive inMyTeam."""
+        s = a_schedule(app="com.tellus.evv.v2")
+        arm(s.blocks[0])
+        assert autoentry.on_duty(s, monday(9, 0), "com.tellus.evv.v2") is True
+        assert autoentry.on_duty(
+            s, monday(9, 0), "com.inmyteam.inmyteam") is False
+
+    def test_no_app_named_asks_about_any_of_them(self):
+        s = a_schedule()
+        arm(s.blocks[0])
+        assert autoentry.on_duty(s, monday(9, 0), "") is True
+
+    def test_a_visit_nobody_armed_is_not_a_reason(self):
+        """The switch defaults to off and that default is the design. An
+        unarmed visit must not open the unattended door."""
+        s = a_schedule()
+        assert autoentry.on_duty(s, monday(9, 0), "com.tellus.evv.v2") is False

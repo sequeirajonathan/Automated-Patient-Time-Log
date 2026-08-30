@@ -5907,13 +5907,14 @@ class Runner:
 
         True when an auth run was started. See the constants above for the
         whole argument; the conditions here are the guardrails in order —
-        someone watching, right app, actually the login screen, seen fresh,
-        and outside the cooldown that keeps a bad-credential day from
-        becoming a loop.
-        """
-        if not someone_is_watching(self._viewers_path):
-            return False
+        somebody watching OR a visit relying on the app, right app, actually
+        the login screen, seen fresh, and outside the cooldown that keeps a
+        bad-credential day from becoming a loop.
 
+        The attendance gate moved BELOW the app is identified, because "may
+        this be revived" now has a second answer that is per-app: see
+        `_needs_reviving`.
+        """
         # Never stack onto a run in flight or just done: a tile's own sign-in
         # walk leaves the login screen visible in the (slightly lagging)
         # screen document for a beat after it starts, and a second auth on
@@ -5941,6 +5942,14 @@ class Runner:
         macro_name = auth_macro_for(doc.get("app") or "", self._secrets,
                                     doc=doc)
         if macro_name is None:
+            return False
+        # MAY A DEAD SESSION BE REVIVED WITH NOBODY LOOKING?
+        #
+        # Only for an app something is actually waiting on. Asked here rather
+        # than at the top because the answer is per-app: the app in front is
+        # not known until the line above.
+        watched = someone_is_watching(self._viewers_path)
+        if not watched and not self._needs_reviving(doc.get("app") or ""):
             return False
         # "Sign in when we see inputs for auth" — the owner's rule, taken
         # literally. The activity's name is not the signal: the flight
@@ -5998,9 +6007,44 @@ class Runner:
         self._auto_auth_at = time.monotonic()
         self._auto_auth_seen[macro_name] = now
         self._remember_auto_auth()
-        log.info("login screen is up — signing in without being asked")
+        # WHICH DOOR IT CAME THROUGH. A sign-in nobody was present for is a
+        # different event from one that happened while she had the portal
+        # open, and a log that words them identically cannot answer "did the
+        # unattended path ever actually work" — the question this whole
+        # mechanism exists to make answerable.
+        log.info("login screen is up — signing in without being asked (%s)",
+                 "somebody is watching" if watched else "a visit needs it")
         self.execute(macro_name, f"auto-{uuid.uuid4().hex[:8]}")
         return True
+
+    def _needs_reviving(self, app: str) -> bool:
+        """Whether an armed visit is relying on `app` at this moment.
+
+        THE ANSWER TO A SESSION DYING WITH NOBODY LOOKING. The watcher gate
+        asks "is anybody present"; overnight the answer is no, and the app's
+        own inactivity timer does not care — so the session expires, the
+        phone stands on the sign-in page until morning, and the visit fires
+        into a signed-out app. That is the failure this exists for.
+
+        Never raises and never guesses: no schedule, nothing armed, or any
+        trouble reading either, and the answer is NO — which leaves the
+        original watcher-only behaviour exactly as it was.
+        """
+        if not app:
+            return False
+        try:
+            from apt_log import arming, autoentry
+            from apt_log import schedule as schedule_mod
+
+            # Cheapest question first, and it is also the shipped state:
+            # with nothing armed there is no schedule worth reading.
+            if not arming.armed():
+                return False
+            return autoentry.on_duty(schedule_mod.load(),
+                                     datetime.now().astimezone(), app)
+        except Exception as exc:  # noqa: BLE001 — never break the tick
+            log.debug("cannot tell whether a visit needs %s (%s)", app, exc)
+            return False
 
     def _auth_failed(self, name: str) -> None:
         """Count a failed sign-in, and stop at the cap.

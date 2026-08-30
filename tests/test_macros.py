@@ -629,6 +629,134 @@ class TestLaunchSteadiness:
         execute.assert_not_called()
 
 
+class TestADeadSessionRevivesItselfWhenAVisitNeedsIt:
+    """Nobody watching is not the same fact as nothing needing the app.
+
+    The session expires on the app's own inactivity timer. Overnight nobody
+    is on the portal, so the watcher gate refused to run the one thing that
+    fixes it: the phone stood on the sign-in page until morning and the
+    visit fired into a signed-out app.
+
+    The second door is an ARMED visit relying on that app — already a
+    person's attestation that the caregiver is with the patient — and it is
+    the only thing that opens the unattended path.
+    """
+
+    def _doc(self, tmp_path, app="com.hhaexchange.uma"):
+        import datetime as dt
+
+        (tmp_path / "screen.json").write_text(json.dumps(
+            {"app": app, "screen": "login", "blocked": "",
+             "at": dt.datetime.now().isoformat()}))
+
+    def _unwatched(self, tmp_path):
+        """Nobody on a socket, and nobody recently either — the overnight
+        state. An empty stamp is what `someone_is_watching` reads as no."""
+        (tmp_path / "viewers.json").write_text(json.dumps({"n": 0,
+                                                           "seen": 0}))
+
+    def _runner(self, tmp_path):
+        return macros.Runner(tmp_path / "req.json", tmp_path / "status.json",
+                             screen_path=tmp_path / "screen.json",
+                             viewers_path=tmp_path / "viewers.json",
+                             secrets=TestAutoAuth()._secrets())
+
+    def test_unwatched_and_nothing_due_still_refuses(self, tmp_path):
+        """The case the gate was built for, and it must not regress: an
+        unwatched phone must not loop sign-in against its own timer."""
+        self._doc(tmp_path)
+        self._unwatched(tmp_path)
+        runner = self._runner(tmp_path)
+        with patch.object(runner, "_needs_reviving", return_value=False), \
+             patch.object(runner, "execute") as execute:
+            assert runner.maybe_auto_auth() is False
+        execute.assert_not_called()
+
+    def test_unwatched_but_a_visit_needs_it_signs_in(self, tmp_path):
+        self._doc(tmp_path)
+        self._unwatched(tmp_path)
+        runner = self._runner(tmp_path)
+        with patch.object(runner, "_needs_reviving", return_value=True), \
+             patch.object(runner, "execute") as execute:
+            assert runner.maybe_auto_auth() is True
+        assert execute.call_args.args[0] == "hhax_uma_login"
+
+    def test_the_question_is_asked_about_the_app_in_front(self, tmp_path):
+        """A visit in one app is no reason to sign into another, so the app
+        has to reach `_needs_reviving` — not just the fact of a visit."""
+        self._doc(tmp_path, app="com.hhaexchange.uma")
+        self._unwatched(tmp_path)
+        runner = self._runner(tmp_path)
+        with patch.object(runner, "_needs_reviving",
+                          return_value=True) as needs, \
+             patch.object(runner, "execute"):
+            runner.maybe_auto_auth()
+        assert needs.call_args.args[0] == "com.hhaexchange.uma"
+
+    def test_a_watcher_alone_is_still_enough(self, tmp_path):
+        """The original door stays open, and it must not start depending on
+        a schedule: she opens the portal, sees the sign-in page, and it
+        signs in — armed visit or not."""
+        self._doc(tmp_path)
+        (tmp_path / "viewers.json").write_text(json.dumps({"n": 1}))
+        runner = self._runner(tmp_path)
+        with patch.object(runner, "_needs_reviving",
+                          return_value=False) as needs, \
+             patch.object(runner, "execute") as execute:
+            assert runner.maybe_auto_auth() is True
+        execute.assert_called_once()
+        needs.assert_not_called()
+
+    def test_a_stop_still_means_stop_on_the_unattended_path(self, tmp_path):
+        """The latch is what stands between a bad credential and a locked
+        account. The new door must not walk around it."""
+        self._doc(tmp_path)
+        self._unwatched(tmp_path)
+        runner = self._runner(tmp_path)
+        runner.stop_auth("hhax_uma_login", "too_many_failures")
+        with patch.object(runner, "_needs_reviving", return_value=True), \
+             patch.object(runner, "execute") as execute:
+            assert runner.maybe_auto_auth() is False
+        execute.assert_not_called()
+
+    def test_a_screen_that_is_not_a_login_is_left_alone(self, tmp_path):
+        """Being needed is permission to sign IN, not permission to act on
+        whatever happens to be in front."""
+        import datetime as dt
+
+        (tmp_path / "screen.json").write_text(json.dumps(
+            {"app": "com.hhaexchange.uma", "screen": "home", "blocked": "",
+             "at": dt.datetime.now().isoformat()}))
+        self._unwatched(tmp_path)
+        runner = self._runner(tmp_path)
+        with patch.object(runner, "_needs_reviving", return_value=True), \
+             patch.object(runner, "execute") as execute:
+            assert runner.maybe_auto_auth() is False
+        execute.assert_not_called()
+
+    def test_no_schedule_at_all_is_not_a_reason_to_sign_in(self, tmp_path):
+        """`_needs_reviving` answers NO to everything it cannot establish,
+        which leaves the watcher-only behaviour exactly as it was."""
+        runner = self._runner(tmp_path)
+        with patch("apt_log.arming.armed",
+                   side_effect=OSError("no state dir")):
+            assert runner._needs_reviving("com.hhaexchange.uma") is False
+
+    def test_nothing_armed_is_answered_without_reading_a_schedule(self,
+                                                                  tmp_path):
+        """The shipped state, and the cheap question: with no switch thrown
+        there is nothing to read a schedule for."""
+        runner = self._runner(tmp_path)
+        with patch("apt_log.arming.armed", return_value=set()), \
+             patch("apt_log.schedule.load") as load:
+            assert runner._needs_reviving("com.hhaexchange.uma") is False
+        load.assert_not_called()
+
+    def test_an_empty_app_is_never_needed(self, tmp_path):
+        runner = self._runner(tmp_path)
+        assert runner._needs_reviving("") is False
+
+
 class TestAuthMacroFor:
     """An app gets automatic sign-in only once its secrets are on the device.
 
