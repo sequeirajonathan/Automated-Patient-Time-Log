@@ -1289,6 +1289,11 @@
     // stays filled, which is an honest picture of two people who could sign;
     // with it the one this screen asked for is the only filled one.
     row.classList.toggle('aimed', !!signerAdopted);
+    // WHETHER THIS SCREEN IS ASKING FOR SOMEBODY IN PARTICULAR. A signature
+    // sheet always is: it says "Firma del Paciente" or names the person.
+    // Anywhere else the roster is just the roster and every pill stands.
+    const asking = !!signerRole || !!signerNamed;
+    let shown = 0;
     for (const b of row.children) {
       const mine = !!signerAdopted && b.dataset.name === signerAdopted;
       b.classList.toggle('primary', mine);
@@ -1300,13 +1305,31 @@
       // is one person's signature onto another person's record. When the
       // sheet has named exactly one party, hers is the only one drawn.
       //
+      // AND WHEN IT HAS NAMED NONE, NEITHER IS. The first version keyed the
+      // hiding on `signerAdopted`, so it only worked once the server had
+      // resolved the sheet to a person — and on the patient's pad it often
+      // cannot: `_role_signer` refuses to guess unless the screen itself
+      // carries the patient's name, which inMyTeam's check-out sheet does
+      // not. Read off the live phone at that pad: role 'patient', signer '',
+      // and so `wrong` was false for every pill and the caregiver's
+      // signature was offered on the patient's page — "why do I still see
+      // Sadia Amselem when I clicked on patient". Not-yet-known is not
+      // permission; the sheet is asking for the patient either way.
+      //
       // Hidden rather than deleted, so the row rebuilds without a fetch the
       // moment the sheet asks for somebody else.
-      const wrong = !!signerAdopted && !mine;
-      b.hidden = wrong;
+      b.hidden = asking && !mine;
+      if (!b.hidden) shown += 1;
       if (mine) b.setAttribute('aria-current', 'true');
       else b.removeAttribute('aria-current');
     }
+    // An empty row is a caption over a gap — "Firmas guardadas" with nothing
+    // under it. With nobody to offer, the whole block goes and the pad is
+    // just a pad. `renderAdopted` owns this flag too and runs first; taking
+    // it here as well is what makes the block follow the SHEET and not only
+    // the roster.
+    const wrap = document.getElementById('sign-adopted');
+    if (wrap) wrap.hidden = !shown;
   }
 
   function loadAdopted() {

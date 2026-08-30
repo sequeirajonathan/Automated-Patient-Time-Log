@@ -146,6 +146,13 @@
       {% endfor %}
     </div>
     {% elif row.actions %}
+    {# A ROW THE PENCIL DRAWER IS ALREADY HOLDING IS NOT DRAWN TWICE.
+       `_sheet_actions` stamps the signature sheet's own row when it carries
+       it into the pad; drawn here as well, Hecho and Borrar existed twice on
+       one page, aimed at the same elements, with the destructive one a stray
+       press away from a signature it would wipe. The waiting card below says
+       where they went. #}
+    {% if not row.handed %}
     {# The page's own actions, side by side and full width. On Visit Detail
        these are Check in and Note & Check out — the only controls here that
        change a record — and as chevroned list cells they looked exactly like
@@ -158,6 +165,7 @@
         >{{ it.txt or (it.lines[0] if it.lines else '·') }}</button>
       {% endfor %}
     </div>
+    {% endif %}
     {% else %}
     <div class="a-row n{{ row['items'] | length }}{% if row.get('keys') %} a-keys{% endif %}{% if row.heads %} a-heads{% endif %}{% if row.checks %} a-checklist{% endif %}">
     {% for it in row['items'] %}
@@ -338,6 +346,20 @@
     </div>
     {% endif %}
   {% endfor %}
+  {% if m.pad_waiting %}
+  {# WHAT THIS PAGE IS FOR WHILE THE PAD IS OPEN.
+     The sheet's controls are in the pencil drawer and the canvas is under
+     her finger there, so the page behind holds one honest sentence — whose
+     signature the phone is waiting for — instead of a second set of the
+     same buttons. The role is what the sheet itself said, so this names the
+     patient's pad and the caregiver's pad apart even when neither is
+     resolved to a person. #}
+  <div class="a-waiting" role="status">
+    <span class="a-wait-pulse" aria-hidden="true"></span>
+    <span class="a-wait-t">{{ t('sign.waiting.' ~ m.pad_waiting) }}</span>
+    <span class="a-wait-sub">{{ t('sign.pad_drives') }}</span>
+  </div>
+  {% endif %}
   {# The page's tail says whether the map is complete, without a sentence:
      while the scan is still reading, a sweep animates under the list —
      motion means work in progress. When the page is whole the motion

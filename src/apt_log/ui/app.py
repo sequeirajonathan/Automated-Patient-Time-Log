@@ -1114,6 +1114,17 @@ def _sheet_actions(doc: dict, model: dict | None) -> list[dict]:
     for row in model.get("rows") or ():
         if not row.get("actions"):
             continue
+        # STAMPED AS HANDED OVER, so the page behind stops drawing it.
+        #
+        # Widening this gate put Hecho and Borrar in the drawer without
+        # taking them off the reflowed page, and both copies aimed at the
+        # same two elements — "I'm still getting the actions for hecho and
+        # borrar on the front end". Two live copies of a control that wipes
+        # a signature is one copy too many, and the drawer is the one with
+        # the canvas under it. The mark rides on the row rather than on the
+        # model so it names the row actually taken: a page with a second
+        # actions row keeps that one.
+        row["handed"] = True
         return _pad_order([{"txt": (it.get("txt")
                                     or (it.get("lines") or [""])[0] or ""),
                             "aim": it["aim"]}
@@ -1653,6 +1664,26 @@ async def live(ws: WebSocket):
                     "agency_app": (screen_doc.get("app") or "")
                     in macros_mod.MULTI_AGENCY_APPS,
                 }
+                # THE PAGE BEHIND THE PAD IS A WAITING SCREEN.
+                #
+                # When the drawer is holding this sheet's controls, the pad is
+                # what she is working in and the reflowed page has nothing left
+                # to offer — on inMyTeam it is literally a heading and the two
+                # buttons that just moved. Drawn as a waiting card it says what
+                # the phone is waiting for and for whom: "on the front end we
+                # can display something like esperando firma personal or
+                # esperando firma del paciente sort of like a loading screen
+                # because the pencil drawer is the main front end component
+                # driving in this case".
+                #
+                # Gated on the actions having actually been handed over, not on
+                # the role alone: a signature screen whose buttons stayed on the
+                # page still needs the page.
+                if model is not None:
+                    model["pad_waiting"] = (
+                        _role if _role and any(r.get("handed")
+                                               for r in model.get("rows") or ())
+                        else "")
                 payload["screen_html"] = (
                     "" if model is None
                     else templates.get_template("_screen.html").render(

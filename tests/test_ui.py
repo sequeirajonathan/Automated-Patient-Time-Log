@@ -4571,13 +4571,21 @@ class TestThePadKnowsWhoseSignatureItIsCollecting:
                        {"cls": "TextView", "b": [719, 2265, 770, 2288],
                         "txt": "Borrar"}]}
 
-    def _meta(self, client, tmp_path, doc):
+    def _msg(self, client, tmp_path, doc):
         (tmp_path / "screen.json").write_text(json.dumps(doc),
                                               encoding="utf-8")
         with patch.object(state_mod, "STATE_DIR", tmp_path):
             with client.websocket_connect("/ws") as ws:
-                msg = ws.receive_json()
-        return msg.get("screen") or {}
+                return ws.receive_json()
+
+    def _meta(self, client, tmp_path, doc):
+        return self._msg(client, tmp_path, doc).get("screen") or {}
+
+    def _html(self, client, tmp_path, doc):
+        # `screen_html` rides BESIDE `screen`, not inside it — reading it off
+        # the meta gave "" and made an assertion that nothing was rendered
+        # twice pass over a page that was never rendered at all.
+        return self._msg(client, tmp_path, doc).get("screen_html") or ""
 
     def _js(self):
         from pathlib import Path
@@ -4635,8 +4643,74 @@ class TestThePadKnowsWhoseSignatureItIsCollecting:
         rendered?" A button on the screen can be pressed, and what it
         presses is one person's signature onto another person's record."""
         js = self._js()
-        assert "const wrong = !!signerAdopted && !mine;" in js
-        assert "b.hidden = wrong;" in js
+        assert "const asking = !!signerRole || !!signerNamed;" in js
+        assert "b.hidden = asking && !mine;" in js
+
+    def test_an_unresolved_signer_offers_nobody_rather_than_everybody(self):
+        """THE HIDING WAS KEYED ON THE WRONG FACT, and the caregiver's
+        signature was offered on the patient's pad because of it.
+
+        The first version hid a pill only when the server had resolved the
+        sheet to a person and it was somebody else. On the patient's pad it
+        often cannot resolve one: `_role_signer` refuses to guess unless the
+        screen itself carries the patient's name, and inMyTeam's check-out
+        sheet does not. Read off the live phone at that pad — role 'patient',
+        signer '' — so nothing was "wrong" and every pill stood.
+
+        Not-yet-known is not permission. The sheet is asking for the patient
+        either way, so the gate is that it is ASKING.
+        """
+        js = self._js()
+        # The old fact must not be what decides it any more.
+        assert "const wrong = !!signerAdopted && !mine;" not in js
+        i = js.index("const asking = !!signerRole || !!signerNamed;")
+        j = js.index("b.hidden = asking && !mine;")
+        assert i < j
+        # With nobody left to offer, the caption over the row goes too.
+        assert "wrap.hidden = !shown;" in js
+
+    def test_the_apps_buttons_leave_the_page_when_the_pad_takes_them(
+            self, client, tmp_path):
+        """"I'm still getting the actions for hecho and borrar on the front
+        end." Widening the gate put them in the drawer without taking them
+        off the page, so one press away from a signature there were two live
+        copies of the control that wipes it."""
+        msg = self._msg(client, tmp_path, self.PAD)
+        meta = msg.get("screen") or {}
+        assert "Hecho" in [a.get("txt") for a in meta.get("sheet_actions") or []]
+        html = msg.get("screen_html") or ""
+        assert html, "the page must have rendered for this to mean anything"
+        assert "a-actbtn" not in html
+        assert ">Hecho<" not in html and ">Borrar<" not in html
+
+    def test_the_page_behind_the_pad_says_what_it_is_waiting_for(
+            self, client, tmp_path):
+        """"On the front end we can display something like esperando firma
+        personal or esperando firma del paciente sort of like a loading
+        screen because the pencil drawer is the main front end component
+        driving in this case." The role is what names it: patient's pad and
+        caregiver's pad are otherwise the same page."""
+        html = self._html(client, tmp_path, self.PAD)
+        assert "a-waiting" in html
+        assert "Esperando la firma del paciente" in html
+
+    def test_a_page_the_pad_did_not_take_keeps_its_own_actions(
+            self, client, tmp_path):
+        """The waiting card stands in for controls that MOVED. A page whose
+        actions stayed put still needs them — Visit Detail's "Check in" is
+        the only way to start a visit and no drawer is holding it."""
+        doc = dict(self.PAD)
+        doc["statics"] = [{"cls": "TextView", "b": [13, 1484, 152, 1505],
+                           "txt": "Detalle de la Visita"},
+                          {"cls": "TextView", "b": [324, 2265, 378, 2288],
+                           "txt": "Entrada"},
+                          {"cls": "TextView", "b": [719, 2265, 770, 2288],
+                           "txt": "Salida"}]
+        msg = self._msg(client, tmp_path, doc)
+        assert not ((msg.get("screen") or {}).get("sheet_actions") or [])
+        html = msg.get("screen_html") or ""
+        assert "a-waiting" not in html
+        assert "Entrada" in html
 
     def test_a_hidden_party_cannot_be_applied_by_a_stray_press(self):
         """The row is delegated, so the guard belongs at the handler too and

@@ -392,6 +392,7 @@
  "sign.no_canvas": "This screen has no signature box. Open the app's signature screen first, then sign here.",
  "sign.now_press": "Now finish on the phone, using the button below.",
  "sign.onphone": "On the phone:",
+ "sign.pad_drives": "This screen's buttons are in the pencil. Open it to sign and finish.",
  "sign.preview": "How it will land:",
  "sign.replay_failed": "The drawing did not finish. Look at the phone screen — if it is half-drawn, clear it in the app and send again.",
  "sign.send": "Draw it on the phone",
