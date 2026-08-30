@@ -591,6 +591,23 @@
   .a-pageend { width:48px; height:3px; border-radius:999px;
                background:var(--line); margin:12px auto 16px; }
 
+  /* A DROPDOWN. It says what it is set to, and the caret says there are
+     other answers — the two things a chevroned list cell could not say, and
+     the reason the period picker read as a heading nobody could place. Full
+     width because it governs everything under it, and its note carries what
+     the choice currently yields ("ago 23 - ago 29") so the range is attached
+     to the control that decides it rather than floating alongside. */
+  .a-select { display:flex; flex-direction:column; gap:3px; width:100%;
+              text-align:left; padding:9px 12px; border-radius:12px;
+              border:1px solid var(--line); background:var(--card);
+              color:var(--ink); font:inherit; cursor:pointer; }
+  .a-select:active { background:var(--tint-soft); }
+  .a-sel-face { display:flex; align-items:center; gap:8px; }
+  .a-sel-val { flex:1; font-size:15px; font-weight:600;
+               overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .a-sel-caret { flex:none; width:12px; height:8px; color:var(--muted); }
+  .a-sel-note { font-size:12px; color:var(--muted); }
+
   /* THE PAGE BEHIND AN OPEN PAD. Its own buttons moved into the pencil
      drawer, so what is left says what the phone is waiting for and whose
      signature it is waiting on — a state, not a control. Deliberately shaped

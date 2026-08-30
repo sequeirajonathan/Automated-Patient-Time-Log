@@ -253,3 +253,60 @@ class TestARepeatedNameIsNotOneName:
             nominal_dy=100)
         names = [s for s in doc["statics"] if s["txt"] == "NIEVES C MASTRAPA"]
         assert len(names) == 1
+
+
+class TestADayHeaderIsOneDayHeader:
+    """Read off Mobile Caregiver+'s week list: step two's scroll came out
+    238px wrong, and "lun, ago 24" was placed twice — once where it belongs
+    and once inside Monday's own visits, between the 3:20 and the 6:00. A
+    stray date in the middle of a day is not a blemish on a page whose whole
+    job is saying which visit happened when.
+
+    The near-miss dedupe cannot catch it: a bad offset is precisely the case
+    where the two placements are far apart.
+    """
+
+    def _captures(self):
+        # A header that is one-of-a-kind in each capture, seen twice because
+        # the second capture's offset was mis-measured.
+        return [
+            {"elements": [],
+             "statics": [{"cls": "TextView", "rid": "day", "txt": "lun, ago 24",
+                          "b": [15, 438, 164, 476]},
+                         {"cls": "TextView", "rid": "anchor", "txt": "A",
+                          "b": [15, 900, 100, 940]}]},
+            {"elements": [],
+             "statics": [{"cls": "TextView", "rid": "day", "txt": "lun, ago 24",
+                          "b": [15, 257, 164, 295]},
+                         {"cls": "TextView", "rid": "anchor", "txt": "A",
+                          "b": [15, 500, 100, 540]}]},
+        ]
+
+    def test_a_lone_header_is_placed_once(self):
+        doc = stitch.stitch(self._captures(), nominal_dy=400)
+        days = [s for s in doc["statics"] if s["txt"] == "lun, ago 24"]
+        assert len(days) == 1, "the day header was doubled"
+
+    def test_it_keeps_the_placement_that_cannot_be_wrong(self):
+        """Step zero's offset is zero, so step zero's position is truth."""
+        doc = stitch.stitch(self._captures(), nominal_dy=400)
+        day = [s for s in doc["statics"] if s["txt"] == "lun, ago 24"][0]
+        assert day["vb"][1] == 438
+        assert day["step"] == 0
+
+    def test_a_repeated_row_is_left_alone(self):
+        """The safety of the rule is its scope. A name that appears twice
+        INSIDE one capture is two real rows, and deleting those is a bug this
+        module has already had — so it never reaches the rule."""
+        caps = [
+            {"elements": [],
+             "statics": [{"cls": "TextView", "rid": "", "txt": "MARINA",
+                          "b": [15, 100, 400, 140]},
+                         {"cls": "TextView", "rid": "", "txt": "MARINA",
+                          "b": [15, 300, 400, 340]}]},
+            {"elements": [],
+             "statics": [{"cls": "TextView", "rid": "", "txt": "MARINA",
+                          "b": [15, 700, 400, 740]}]},
+        ]
+        doc = stitch.stitch(caps, nominal_dy=400)
+        assert len([s for s in doc["statics"] if s["txt"] == "MARINA"]) == 3

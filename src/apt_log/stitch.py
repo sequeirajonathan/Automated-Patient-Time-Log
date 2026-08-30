@@ -113,6 +113,38 @@ def stitch(captures: list[dict], nominal_dy: int) -> dict:
     out_elements: list[dict] = []
     out_statics: list[dict] = []
 
+    # AN ITEM THAT IS ONE-OF-A-KIND IN EVERY CAPTURE IS ONE ITEM.
+    #
+    # The offset between steps is measured, and a measurement can be wrong.
+    # Mobile Caregiver+'s week list was read with step two off by 238px, and
+    # the page came out with "lun, ago 24" twice: once where it belongs and
+    # once in the middle of Monday's own visits, between the 3:20 and the
+    # 6:00. A stray date inside a day is not a small blemish on a page whose
+    # whole job is saying which visit happened when.
+    #
+    # The dedupe below cannot catch it: it asks whether two placements are
+    # NEAR each other, and a bad offset is exactly the case where they are
+    # not. This asks a different question — is this identity unique inside
+    # its own capture — and that is the same trust rule `_shift` and the
+    # pinned-chrome guard already use, for the same reason. A day header is
+    # unambiguous; if it occurs once in one capture and once in another, the
+    # two are the same header and the distance between them is measurement
+    # error, not content.
+    #
+    # SCOPED TO UNIQUE IDENTITIES, and that restriction is the whole safety
+    # of it. A schedule repeats patient rows and repeats them legitimately —
+    # deleting those is a bug this file has already had — but a repeated row
+    # is not unique in its capture, so it never reaches this rule.
+    most: Counter = Counter()
+    for capture in captures:
+        here = Counter(_key(item) for item in
+                       ((capture.get("elements") or [])
+                        + (capture.get("statics") or [])))
+        for k, n in here.items():
+            most[k] = max(most[k], n)
+    lone = {k for k, n in most.items() if n == 1}
+    once_placed: set[tuple] = set()
+
     for step, capture in enumerate(captures):
         prev_pos: dict[tuple, int] = {}
         shift = None
@@ -142,6 +174,13 @@ def stitch(captures: list[dict], nominal_dy: int) -> dict:
                 vy1 = int(item["b"][1] + offset)
                 vy2 = int(item["b"][3] + offset)
                 key = (kind, *_key(item))
+                # The earliest capture placed it, and the earliest capture is
+                # the one whose offset is zero — so it is the placement that
+                # cannot be wrong. Later steps only re-see it.
+                if _key(item) in lone:
+                    if key in once_placed:
+                        continue
+                    once_placed.add(key)
                 placed = seen.setdefault(key, [])
                 if any(abs(vy1 - v) <= DEDUP_VY_TOLERANCE and s != step
                        for v, s in placed):

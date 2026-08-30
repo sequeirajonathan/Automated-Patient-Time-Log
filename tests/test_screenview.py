@@ -2775,3 +2775,68 @@ class TestTheAppsOwnBackNeverRidesInTheList:
         words = [(i.get("txt") or "") for r in m["rows"]
                  for i in (r.get("items") or [])]
         assert "Navigate up" not in words
+
+
+class TestADropdownIsDrawnAsADropdown:
+    """"Hoy is just a header and we can make this waaay better ... it's
+    coming up as something clickable? Not sure but it doesn't look good ...
+    looks like Hoy opens up a filter which is nice but it doesn't behave like
+    a filter pick if you know what I mean. As you can see I started out the
+    prompt confused as to what this header even does."
+
+    Read off Mobile Caregiver+'s visit list: the control is an Android
+    Spinner — a native select — with its chosen value drawn inside it and the
+    range that choice yields sitting loose beside it.
+    """
+
+    def _doc(self):
+        return {"app": "com.tellus.evv.v2", "size": [1080, 2340],
+                "elements": [
+                    {"cls": "Spinner", "rid": "spinnerPeriod", "txt": "",
+                     "b": [742, 181, 1080, 241], "enabled": True,
+                     "checked": False, "focused": False, "has_text": False}],
+                "statics": [
+                    {"cls": "TextView", "rid": "visits_scheduleperiod",
+                     "txt": "ago 23 - ago 29", "b": [13, 192, 220, 230]},
+                    {"cls": "CheckedTextView", "rid": "text1",
+                     "txt": "La semana Pasada", "b": [749, 192, 1080, 230]}]}
+
+    def _only(self, model):
+        items = [it for row in model["rows"] for it in row["items"]]
+        return [it for it in items if it["kind"] == "select"]
+
+    def test_a_spinner_is_a_select_not_a_list_row(self):
+        picks = self._only(screenview.build(self._doc()))
+        assert len(picks) == 1, "the picker was not recognised"
+
+    def test_it_says_what_it_is_set_to(self):
+        """Android draws the chosen option in a CheckedTextView laid over the
+        control, so the Spinner node itself carries no text. A picker that
+        cannot say what it is set to is a button labelled nothing."""
+        assert self._only(screenview.build(self._doc()))[0]["txt"] == \
+            "La semana Pasada"
+
+    def test_the_range_rides_on_the_control_that_decides_it(self):
+        """Loose beside the picker it read as a page heading — which is
+        exactly what was reported. It is what the choice currently yields."""
+        assert self._only(screenview.build(self._doc()))[0]["note"] == \
+            "ago 23 - ago 29"
+
+    def test_nothing_is_left_floating_next_to_it(self):
+        model = screenview.build(self._doc())
+        band = [row for row in model["rows"]
+                if any(it["kind"] == "select" for it in row["items"])][0]
+        assert len(band["items"]) == 1
+
+    def test_a_band_with_a_second_control_is_left_alone(self):
+        """Nothing here can say which words belong to which control, so a
+        band that is not simply a picker and its caption is left as found."""
+        doc = self._doc()
+        doc["elements"].append(
+            {"cls": "Button", "rid": "go", "txt": "Ir", "b": [600, 181, 700, 241],
+             "enabled": True, "checked": False, "focused": False,
+             "has_text": True})
+        items = [it for row in screenview.build(doc)["rows"]
+                 for it in row["items"]]
+        assert any(it["kind"] == "label" and it.get("txt") == "ago 23 - ago 29"
+                   for it in items)

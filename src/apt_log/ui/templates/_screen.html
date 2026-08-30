@@ -199,6 +199,28 @@
            <path d="M2 21h20"/></svg>
           <span class="a-canvas-t">{{ t('sign.here') }}</span>
         </button>
+      {% elif it.kind == 'select' %}
+        {# A DROPDOWN, DRAWN AS ONE. Android's Spinner opens a list of
+           choices and picking one changes what the page shows — a filter,
+           in other words — and reflowed as a chevroned list cell it looked
+           like somewhere to navigate to. Reported as exactly that
+           confusion: "it's coming up as something clickable? not sure but
+           it doesn't look good ... it doesn't behave like a filter pick".
+
+           So it is a field with a value in it and a caret pointing down,
+           which is what every select on every platform looks like, and the
+           words that were floating beside it ride underneath as the note
+           they always were. #}
+        <button type="button" class="a-select" data-aim='{{ it.aim | tojson }}'
+                aria-haspopup="listbox">
+          <span class="a-sel-face">
+            <span class="a-sel-val">{{ it.txt or (it.lines[0] if it.lines else '···') }}</span>
+            <svg class="a-sel-caret" viewBox="0 0 12 8" fill="none"
+                 stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                 stroke-linejoin="round"><path d="M1 1.5 L6 6.5 L11 1.5"/></svg>
+          </span>
+          {% if it.note %}<span class="a-sel-note">{{ it.note }}</span>{% endif %}
+        </button>
       {% elif it.kind == 'field' %}
         {# The app's own box, drawn as a box: its placeholder inside it and
            its own magnifier in the corner it sits in on the phone. An empty

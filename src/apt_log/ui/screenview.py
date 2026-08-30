@@ -28,6 +28,16 @@ import re
 # is a container row — the shape Android lists are made of.
 BUTTONS = ("Button", "ImageButton")
 FIELDS = ("EditText", "AutoCompleteTextView", "SearchView")
+
+# A DROPDOWN IS NOT A LIST ROW, and drawing one as the other is how a filter
+# stops reading as a filter. Android's Spinner is a native select: pressing it
+# opens a list of choices and picking one changes what the page shows.
+# Reflowed as an ordinary chevroned cell it looked like one more thing to
+# navigate into — "Hoy is just a header ... it's coming up as something
+# clickable? Not sure but it doesn't look good ... it doesn't behave like a
+# filter pick if you know what I mean". The reporter opened by saying he could
+# not tell what the control was, which is the whole defect.
+SELECTS = ("Spinner", "AppCompatSpinner")
 TOGGLES = ("CheckBox", "Switch", "CompoundButton", "ToggleButton", "RadioButton")
 
 # ...but a CHECKBOX is not a SWITCH, and drawing one as the other was
@@ -627,6 +637,8 @@ def _kind(cls: str, role: str = "") -> str:
         return "button"
     if cls in FIELDS:
         return "field"
+    if cls in SELECTS:
+        return "select"
     if cls in TOGGLES:
         return "toggle"
     if cls in IMAGES:
@@ -1185,6 +1197,24 @@ def build(doc: dict) -> dict | None:
             # glyph keeps its meaning: the agency picker's info button
             # rendered as an empty box until its glyph translated.
             item["txt"] = ICON_LABELS.get(item["txt"].strip(), "")
+        if kind == "select" and not item["txt"]:
+            # A SPINNER'S VALUE IS DRAWN INSIDE IT, the way a button's caption
+            # is — Android puts the chosen option in a CheckedTextView laid
+            # over the control, so the Spinner node itself carries no text at
+            # all. Read the same strict-containment way, because the choice it
+            # is currently set to is the entire content of the control: a
+            # picker that cannot say what it is set to is a button labelled
+            # nothing.
+            for i, s in enumerate(statics):
+                if i in folded or s.get("step", 0) != e.get("step", 0):
+                    continue
+                word = (s.get("txt") or "").strip()
+                if not word or _is_icon_text(word):
+                    continue
+                if _contains(e["b"], s["b"]):
+                    item["txt"] = word
+                    folded.add(i)
+                    break
         if kind == "button" and not item["txt"]:
             # A BUTTON WHOSE CAPTION IS DRAWN ON TOP OF IT.
             #
@@ -1845,6 +1875,7 @@ def build(doc: dict) -> dict | None:
     bands = [band for band in bands if band]
 
     _fold_refusals(bands)
+    _fold_selects(bands)
 
     rows = []
     for band in bands:
@@ -2407,6 +2438,40 @@ REFUSAL_WORDS = ("el paciente se niega", "el paciente rehusa",
 
 def _is_refusal(text: str) -> bool:
     return (text or "").strip().lower().rstrip(".") in REFUSAL_WORDS
+
+
+def _fold_selects(bands: list[list[dict]]) -> None:
+    """Give a dropdown the words standing next to it.
+
+    A Spinner sits in a band with loose text that belongs to it, and which
+    half of the pair it is differs by app: Mobile Caregiver+'s visit list
+    puts the CONSEQUENCE beside the control — "ago 23 - ago 29" on the left,
+    the picker reading "La semana Pasada" on the right — while other screens
+    put a CAPTION there. Either way it is not a sentence the page is making
+    on its own, and left loose it read as a heading: "Hoy is just a header
+    ... I started out the prompt confused as to what this header even does".
+
+    So the band collapses to the control, and the words ride on it as its
+    note. One thing on the line, and it is plainly a thing you press to
+    choose with — which is what it always was.
+
+    ONLY WHEN THE BAND IS A PICKER AND ITS WORDS. A band holding a second
+    control is a row of controls and nothing here can say which words go
+    with which, so it is left exactly as found.
+    """
+    for band in bands:
+        picks = [it for it in band if it["kind"] == "select"]
+        if len(picks) != 1:
+            continue
+        words = [it for it in band
+                 if it["kind"] == "label" and (it.get("txt") or "").strip()]
+        if len(words) + 1 != len(band):
+            continue
+        pick = picks[0]
+        note = " · ".join((w["txt"] or "").strip() for w in words)
+        if note:
+            pick["note"] = note
+        band[:] = [pick]
 
 
 def _fold_refusals(bands: list[list[dict]]) -> None:
