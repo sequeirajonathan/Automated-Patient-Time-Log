@@ -2840,3 +2840,49 @@ class TestADropdownIsDrawnAsADropdown:
                  for it in row["items"]]
         assert any(it["kind"] == "label" and it.get("txt") == "ago 23 - ago 29"
                    for it in items)
+
+    def _today(self):
+        """The state the report came from: the picker set to Today, and the
+        app writing "Hoy - sáb, ago 29" beside a control reading "Hoy"."""
+        return {"app": "com.tellus.evv.v2", "size": [1080, 2340],
+                "elements": [
+                    {"cls": "Spinner", "rid": "spinnerPeriod", "txt": "",
+                     "b": [742, 181, 1080, 241], "enabled": True,
+                     "checked": False, "focused": False, "has_text": False}],
+                "statics": [
+                    {"cls": "TextView", "rid": "visits_scheduleperiod",
+                     "txt": "Hoy - sáb, ago 29", "b": [13, 192, 220, 230]},
+                    {"cls": "CheckedTextView", "rid": "text1", "txt": "Hoy",
+                     "b": [749, 192, 1080, 230]},
+                    {"cls": "TextView", "rid": "visits_event0_title",
+                     "txt": "sáb, ago 29", "b": [15, 257, 182, 295]}]}
+
+    def test_the_value_is_not_repeated_in_its_own_note(self):
+        pick = self._only(screenview.build(self._today()))[0]
+        assert pick["txt"] == "Hoy"
+        assert pick["note"] == "sáb, ago 29"
+
+    def test_a_lone_day_header_repeating_the_picker_is_dropped(self):
+        """On a single day the group header is the date the picker has just
+        said, printed again immediately underneath."""
+        items = [it for row in screenview.build(self._today())["rows"]
+                 for it in row["items"]]
+        assert not [it for it in items
+                    if it["kind"] == "label" and it.get("txt") == "sáb, ago 29"]
+
+    def test_a_week_keeps_every_one_of_its_days(self):
+        """With several headings each is telling the reader something the
+        picker cannot, so none of them go."""
+        doc = self._today()
+        doc["statics"][0]["txt"] = "ago 23 - ago 29"
+        doc["statics"][1]["txt"] = "La semana Pasada"
+        doc["statics"].append({"cls": "TextView", "rid": "visits_event1_title",
+                               "txt": "dom, ago 23", "b": [15, 500, 182, 538]})
+        heads = [it for row in screenview.build(doc)["rows"]
+                 for it in row["items"]
+                 if it["kind"] == "label" and it.get("header")]
+        assert len(heads) == 2
+
+    def test_no_band_is_left_empty(self):
+        rows = screenview.build(self._today())["rows"]
+        assert all(row["items"] for row in rows)

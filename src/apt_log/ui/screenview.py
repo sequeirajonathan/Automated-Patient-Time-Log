@@ -1876,6 +1876,9 @@ def build(doc: dict) -> dict | None:
 
     _fold_refusals(bands)
     _fold_selects(bands)
+    # `_fold_selects` can empty a band — a day header that only repeated what
+    # the picker said — and an empty band would draw as a blank row.
+    bands = [band for band in bands if band]
 
     rows = []
     for band in bands:
@@ -2469,9 +2472,34 @@ def _fold_selects(bands: list[list[dict]]) -> None:
             continue
         pick = picks[0]
         note = " · ".join((w["txt"] or "").strip() for w in words)
+        # NOT THE SAME WORD TWICE ON ONE LINE. Set to Today, this app writes
+        # "Hoy - sáb, ago 29" beside a picker that already reads "Hoy" —
+        # harmless while the two sat apart, plainly redundant once they are
+        # one control. The value leads and the note says the rest.
+        value = (pick.get("txt") or "").strip()
+        if value and note.casefold().startswith(value.casefold()):
+            note = note[len(value):].lstrip(" -–—·:").strip() or note
         if note:
             pick["note"] = note
         band[:] = [pick]
+
+    # AND NOT THE SAME DATE TWICE ON ONE PAGE. The list groups by day, which
+    # is right across a week — but on a single day the group's header is the
+    # date the picker has just said, printed again immediately underneath.
+    #
+    # Only when there is exactly ONE such heading, so a week keeps every one
+    # of its days: with several, each is telling the reader something the
+    # picker cannot.
+    notes = {(it.get("note") or "").strip() for band in bands for it in band
+             if it["kind"] == "select" and it.get("note")}
+    if notes:
+        heads = [(band, it) for band in bands for it in band
+                 if it["kind"] == "label" and it.get("header")
+                 and (it.get("txt") or "").strip() in notes]
+        if len(heads) == 1:
+            band, it = heads[0]
+            if len(band) == 1:
+                band.clear()
 
 
 def _fold_refusals(bands: list[list[dict]]) -> None:
