@@ -3206,3 +3206,72 @@ class TestWhatAWalkOfMobileCaregiverTurnedUp:
              "has_text": False})
         aims = [it.get("aim", {}).get("b") for it in self._rows(doc)]
         assert [792, 1900, 1050, 1960] in aims
+
+
+class TestAWithheldTabIsNotOffered:
+    """"My sister doesn't use the messages feature ... let's make messages
+    inaccessible from the front end to avoid issues down the line."
+
+    370 agency notices, none of them used, and nothing the portal can
+    usefully paginate — the whole-page walk stops at ten viewports.
+    """
+
+    def _bar(self, current="Visitas"):
+        tabs = [("action_tab_home", "Visitas", 223),
+                ("action_tab_patient", "Beneficiarios", 434),
+                ("action_tab_messages", "Mensajes", 645)]
+        els, sts = [], []
+        for rid, word, x in tabs:
+            # The selected tab has no clickable container — that is how the
+            # app marks it, and how the lift tells "here" from "a way there".
+            if word != current:
+                els.append({"cls": "FrameLayout", "rid": rid, "txt": word,
+                            "b": [x, 2210, x + 211, 2280], "enabled": True,
+                            "checked": False, "focused": False,
+                            "has_text": True})
+            sts.append({"cls": "TextView", "rid": "navigation_bar_item_label",
+                        "txt": word, "b": [x + 20, 2239, x + 190, 2275]})
+        sts.append({"cls": "TextView", "rid": "text_view_badge_count",
+                    "txt": "370", "b": [740, 2210, 791, 2233]})
+        els.append({"cls": "View", "rid": "content", "txt": "",
+                    "b": [0, 300, 1080, 400], "enabled": True,
+                    "checked": False, "focused": False, "has_text": False})
+        sts.append({"cls": "TextView", "rid": "c", "txt": "A row",
+                    "b": [20, 320, 500, 380]})
+        return {"app": "com.tellus.evv.v2", "size": [1080, 2340],
+                "elements": els, "statics": sts}
+
+    def test_the_door_is_not_offered(self):
+        tabs = screenview.build(self._bar())["apptabs"]
+        assert [t["txt"] for t in tabs] == ["Visitas", "Beneficiarios"]
+
+    def test_the_other_apps_keep_every_tab(self):
+        doc = self._bar()
+        doc["app"] = "com.inmyteam.inmyteam"
+        tabs = screenview.build(doc)["apptabs"]
+        assert "Mensajes" in [t["txt"] for t in tabs]
+
+    def test_the_room_still_renders_if_the_phone_is_in_it(self):
+        """Somebody may open it on the handset. Hiding a page the phone is
+        actually showing would leave her looking at a blank portal with no
+        way to understand or leave it — a worse failure than the one this
+        avoids. The selected tab carries no aim, so it is not a door."""
+        tabs = screenview.build(self._bar(current="Mensajes"))["apptabs"]
+        here = [t for t in tabs if t["txt"] == "Mensajes"]
+        assert here and here[0]["current"] and not here[0]["aim"]
+
+    def test_and_a_way_out_of_it_remains(self):
+        tabs = screenview.build(self._bar(current="Mensajes"))["apptabs"]
+        assert [t["txt"] for t in tabs if t.get("aim")] == ["Visitas",
+                                                            "Beneficiarios"]
+
+    def test_the_bars_furniture_does_not_fall_into_the_page(self):
+        """Filtered AFTER the lift, never before it. The sweep uses the
+        captions the lift found, so dropping the tab earlier would leave its
+        caption and its unread count behind as a stray "Mensajes" and a bare
+        "370" at the end of the body."""
+        model = screenview.build(self._bar())
+        words = [(it.get("txt") or (it.get("lines") or [""])[0] or "")
+                 for row in model["rows"] for it in row["items"]]
+        assert "Mensajes" not in words
+        assert "370" not in words

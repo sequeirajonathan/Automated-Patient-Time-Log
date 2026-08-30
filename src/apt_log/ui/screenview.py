@@ -1194,6 +1194,16 @@ def build(doc: dict) -> dict | None:
     # from the captions (every tab has one) so the selected tab — which
     # Compose leaves without a clickable container — is not lost.
     apptabs, tab_ids = _app_tabs(elements, statics, w, h)
+    # AND ONE OF THEM IS NOT OFFERED — see WITHHELD_TABS. Filtered AFTER the
+    # lift, never before it: the bar's furniture is swept using the captions
+    # the lift found, so dropping a tab earlier would leave its caption and
+    # its unread count behind to fall into the page as a stray "Mensajes"
+    # and a bare "370".
+    withheld = WITHHELD_TABS.get(doc.get("app") or "", ())
+    if withheld:
+        apptabs = [t for t in apptabs
+                   if not (t.get("aim")
+                           and (t["aim"].get("rid") or "") in withheld)]
     elements = [e for e in elements if id(e) not in tab_ids]
     statics = [s for s in statics if id(s) not in tab_ids]
 
@@ -2582,6 +2592,29 @@ def _is_refusal(text: str) -> bool:
 # the screen, over a page whose own controls run much wider. Measured with
 # Mobile Caregiver+'s drawer open: ten controls all ending at x=400 on a
 # 1080px screen, against a visit row ending at 1080.
+# DOORS THE PORTAL DOES NOT OFFER, by app and by the tab's own resource id.
+#
+# Mobile Caregiver+'s Mensajes holds 370 notices from the agency, none of
+# which the caregiver uses and none of which the portal can usefully paginate
+# — the whole-page walk stops at ten viewports, so it would only ever show
+# the first few dozen anyway. Withheld on the owner's instruction: "my sister
+# doesn't use the messages feature ... let's make messages inaccessible from
+# the front end to avoid issues down the line."
+#
+# THE DOOR, NOT THE ROOM. Nothing here blocks the phone from being on that
+# page — somebody may open it on the handset — and if it is, the portal draws
+# it exactly as before. Hiding a page the phone is actually showing would
+# leave her looking at a blank portal with no way to understand or leave it,
+# which is a worse failure than the one this avoids.
+#
+# Matched by resource id because a caption is translated and this must not
+# depend on which language the phone is set to. A tab with no aim is the one
+# already selected — it is where she IS, not a way to get somewhere — so it
+# is never a door and is left alone.
+WITHHELD_TABS = {
+    "com.tellus.evv.v2": ("action_tab_messages",),
+}
+
 DRAWER_MAX_RIGHT = 0.6
 DRAWER_MIN_ITEMS = 4
 
