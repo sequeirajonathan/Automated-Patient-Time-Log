@@ -952,6 +952,46 @@ def _mc_tap(bounds: list[int]) -> None:
     _tap_xy((bounds[0] + bounds[2]) // 2, (bounds[1] + bounds[3]) // 2)
 
 
+# The words the session-expiry dialog puts on itself, in both languages the
+# phone is ever set to. Read off the live device: title "Sesión caducada",
+# message "Su sesión ha caducado, por favor vuelva a iniciar sesión."
+SESSION_LAPSED_WORDS = ("sesión caducada", "sesion caducada",
+                        "su sesión ha caducado", "su sesion ha caducado",
+                        "session expired", "session has expired")
+
+
+def _dismiss_session_notice(driver) -> bool:
+    """Answer the "your session has expired" dialog, if that is what is up.
+
+    True when one was found and pressed. Best effort: a failure here leaves
+    the caller exactly where it would have been anyway, facing a lock it
+    cannot read — so it never raises.
+
+    NARROW BY DESIGN. It presses only a dialog whose own words are about the
+    session. A dialog on this phone can just as easily be a warning about a
+    VISIT — inMyTeam raises one for a check-in outside its window — and an
+    automatic OK on anything that happens to be in front is how a machine
+    ends up agreeing to something nobody read.
+    """
+    try:
+        if _words(driver, *SESSION_LAPSED_WORDS) is None:
+            return False
+        # The dialog's own confirm. Named by its words rather than by
+        # `android:id/button1`, which is the platform's id for whatever the
+        # positive button happens to be and would press a Delete just as
+        # readily on some other dialog.
+        ok = _words(driver, "ok", "aceptar", "continuar")
+        if ok is None:
+            return False
+        log.info("answering Mobile Caregiver+'s session-expired notice")
+        ok.click()
+        time.sleep(BACK_SETTLE)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        log.info("could not answer the session notice (%s)", exc)
+        return False
+
+
 def _mobile_caregiver_pin(driver, report) -> None:
     """Mobile Caregiver+ — answer whichever of its two locks is up.
 
@@ -977,6 +1017,24 @@ def _mobile_caregiver_pin(driver, report) -> None:
     wake_display()
     driver.activate_app("com.tellus.evv.v2")
     wait_for(lambda: bool(driver.current_activity), timeout=15.0)
+
+    # AND A THIRD THING IN FRONT OF BOTH LOCKS.
+    #
+    # When the server session lapses the app does not simply show its form —
+    # it raises a dialog over it first: "Sesión caducada / Su sesión ha
+    # caducado, por favor vuelva a iniciar sesión." with a single OK. While
+    # that is up the keypad is not drawn and the form cannot be typed into,
+    # and this macro went looking for the keypad, found "0 of 10 keys" and
+    # failed. Three failures latched automatic sign-in off, and nothing in
+    # the portal said so — found live with the app sitting expired and no
+    # way for her to act on it.
+    #
+    # So the notice is answered first. Narrow ON PURPOSE: it presses a dialog
+    # only when the words on it are about the session, because a dialog on
+    # this phone can also be a warning about a VISIT, and blanket-pressing OK
+    # during sign-in is how an automatic answer ends up agreeing to something
+    # nobody read.
+    _dismiss_session_notice(driver)
 
     def activity() -> str:
         return (driver.current_activity or "").lower()

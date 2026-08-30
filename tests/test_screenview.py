@@ -3275,3 +3275,51 @@ class TestAWithheldTabIsNotOffered:
                  for row in model["rows"] for it in row["items"]]
         assert "Mensajes" not in words
         assert "370" not in words
+
+
+class TestTheSessionExpiryDialog:
+    """Found by expiring the session on purpose. Mobile Caregiver+ does not
+    simply show its form when the server session lapses — it raises a dialog
+    over it first, and the portal drew the sentence with nothing to press.
+    """
+
+    def _doc(self):
+        return {"app": "com.tellus.evv.v2", "size": [1080, 2340],
+                "elements": [{"cls": "Button", "rid": "button1", "txt": "OK",
+                              "b": [783, 1242, 893, 1302], "enabled": True,
+                              "checked": False, "focused": False,
+                              "has_text": True}],
+                "statics": [
+                    {"cls": "TextView", "rid": "alertTitle",
+                     "txt": "Sesión caducada", "b": [201, 1097, 878, 1148]},
+                    {"cls": "TextView", "rid": "message",
+                     "txt": "Su sesión ha caducado, por favor vuelva a "
+                            "iniciar sesión.", "b": [171, 1158, 908, 1237]}]}
+
+    def test_the_dialog_is_recognised(self):
+        """A plain Button carrying its own "OK", with no caption inside it to
+        find — so the alert went unrecognised and she was left reading a
+        sentence with nothing at all to press."""
+        alert = screenview.build(self._doc())["alert"]
+        assert alert and alert["title"] == "Sesión caducada"
+
+    def test_the_way_out_is_offered(self):
+        alert = screenview.build(self._doc())["alert"]
+        assert alert["action"]["txt"] == "OK"
+        assert alert["action"]["aim"]["rid"] == "button1"
+
+    def test_a_caption_inside_the_button_still_wins_where_there_is_one(self):
+        """The usual shape in these apps, and it must keep working."""
+        doc = self._doc()
+        doc["elements"][0]["txt"] = ""
+        doc["statics"].append({"cls": "TextView", "rid": "cap", "txt": "Aceptar",
+                               "b": [800, 1255, 880, 1290]})
+        alert = screenview.build(doc)["alert"]
+        assert alert and alert["action"]["txt"] == "Aceptar"
+
+    def test_an_ordinary_button_is_not_an_alert(self):
+        """Both the message above and the small button are required, or this
+        would claim any OK-ish control on an ordinary form."""
+        doc = self._doc()
+        doc["statics"] = []
+        assert screenview.build(doc)["alert"] is None

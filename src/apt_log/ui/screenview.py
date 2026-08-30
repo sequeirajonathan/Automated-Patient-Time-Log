@@ -1032,10 +1032,17 @@ def _app_alert(doc: dict, w: int, h: int) -> dict | None:
         area = (box[2] - box[0]) * (box[3] - box[1])
         if area > w * h * ALERT_ACTION_MAX_AREA or area <= 0:
             continue
+        # THE WORD MAY BE ON THE BUTTON ITSELF. These apps usually hang a
+        # caption on a non-clickable child, and looking only there was enough
+        # until Mobile Caregiver+'s session-expiry dialog — a plain Button
+        # carrying its own "OK", with no caption inside it to find. So the
+        # alert went unrecognised, and the page showed "Su sesión ha caducado,
+        # por favor vuelva a iniciar sesión" with nothing at all to press.
+        # Found by expiring the session on purpose.
         caption = next((s for s in statics if _contains(box, s["b"])), None)
-        if caption is None:
-            continue
-        if (caption.get("txt") or "").strip().lower() not in ALERT_ACTION_WORDS:
+        word = ((element.get("txt") or "").strip()
+                or (caption.get("txt") if caption else "") or "").strip()
+        if word.lower() not in ALERT_ACTION_WORDS:
             continue
         # The message: text ABOVE the button, in the button's own column.
         middle = (box[0] + box[2]) / 2
@@ -1052,8 +1059,7 @@ def _app_alert(doc: dict, w: int, h: int) -> dict | None:
                  max([box[2]] + [s["b"][2] for s in said]),
                  max([box[3]] + [s["b"][3] for s in said])]
         return {"title": lines[0], "lines": lines[1:],
-                "action": {"txt": (caption.get("txt") or "").strip(),
-                           "aim": _aim(element)},
+                "action": {"txt": word, "aim": _aim(element)},
                 "box": whole}
     return None
 

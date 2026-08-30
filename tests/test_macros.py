@@ -6001,3 +6001,57 @@ class TestRescanReadsTodayOpenToo:
         """Unfolding and scrolling are separate questions: the page may have
         been left scrolled, so the probe is still paid."""
         assert self._rescan()["top"] is False
+
+
+class TestTheSessionExpiryNotice:
+    """The lock behind the lock. When the server session lapses this app
+    raises "Sesión caducada / Su sesión ha caducado, por favor vuelva a
+    iniciar sesión." over its own form, and while that is up the keypad is
+    not drawn — so the sign-in macro went looking for it, found "0 of 10
+    keys" and failed. Three failures latched automatic sign-in off, and
+    nothing in the portal said so.
+    """
+
+    def test_the_macro_answers_the_notice_before_reading_the_lock(self):
+        src = (Path(__file__).resolve().parents[1]
+               / "src/apt_log/macros.py").read_text(encoding="utf-8")
+        i = src.index("def _mobile_caregiver_pin")
+        head = src[i:i + 2600]
+        assert "_dismiss_session_notice(driver)" in head
+        # Before either lock is examined, or it is answering a screen it
+        # cannot see.
+        assert (head.index("_dismiss_session_notice(driver)")
+                < head.index("def on_pin_screen"))
+
+    def test_it_presses_only_a_dialog_about_the_session(self):
+        """A dialog on this phone can just as easily be a warning about a
+        VISIT — inMyTeam raises one for a check-in outside its window — and
+        an automatic OK on whatever is in front is how a machine agrees to
+        something nobody read."""
+        src = (Path(__file__).resolve().parents[1]
+               / "src/apt_log/macros.py").read_text(encoding="utf-8")
+        i = src.index("def _dismiss_session_notice")
+        body = src[i:i + 1400]
+        assert "SESSION_LAPSED_WORDS" in body
+        assert "return False" in body
+
+    def test_it_does_not_press_by_the_platform_button_id(self):
+        """`android:id/button1` is whatever the positive button happens to
+        be, and would press a Delete just as readily on another dialog."""
+        src = (Path(__file__).resolve().parents[1]
+               / "src/apt_log/macros.py").read_text(encoding="utf-8")
+        i = src.index("def _dismiss_session_notice")
+        body = src[i:i + 1400]
+        # It finds its button BY ITS WORDS. Asserted as the positive
+        # property: the id is named in the comment that explains why it is
+        # not used, so its mere presence proves nothing either way.
+        assert '_words(driver, "ok", "aceptar", "continuar")' in body
+        assert "find_element" not in body
+
+    def test_it_never_raises(self):
+        """It runs before the macro knows what it is facing; a failure here
+        must leave the caller exactly where it would have been."""
+        src = (Path(__file__).resolve().parents[1]
+               / "src/apt_log/macros.py").read_text(encoding="utf-8")
+        i = src.index("def _dismiss_session_notice")
+        assert "except Exception" in src[i:i + 1400]
