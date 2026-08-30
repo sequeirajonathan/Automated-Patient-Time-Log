@@ -863,6 +863,25 @@ class TestShellNeverGoesStale:
         rule = css[css.index(".buildstamp {"):]
         assert "pointer-events:none" in rule[:rule.index("}")]
 
+    def test_the_stamp_is_anchored_per_page_because_the_bands_differ(self):
+        """One position cannot be clean on both. Centred at the top is the
+        empty middle of every header row in /app — and on /console it lands
+        straight through "Centro de control", which is what the browser
+        showed. The console bar is full and that page has no fixed chrome at
+        the bottom, so the stamp goes there instead."""
+        css = (Path(__file__).resolve().parents[1]
+               / "src/apt_log/ui/static/design.css").read_text(encoding="utf-8")
+        assert "body[data-view] .buildstamp" in css
+        assert "body:not([data-view]) .buildstamp" in css
+        # /app is the only one of the two whose body carries data-view, which
+        # is what the two selectors turn on.
+        phone = (Path(__file__).resolve().parents[1]
+                 / "src/apt_log/ui/templates/phone.html").read_text(encoding="utf-8")
+        console = (Path(__file__).resolve().parents[1]
+                   / "src/apt_log/ui/templates/console.html").read_text(encoding="utf-8")
+        assert "data-view=" in phone
+        assert "data-view=" not in console.split("<body")[1].split(">")[0]
+
     def test_the_stamp_is_shared_rather_than_per_page(self):
         """"Globally" means one rule in the stylesheet both pages already
         load — not a copy per template that the next page forgets."""

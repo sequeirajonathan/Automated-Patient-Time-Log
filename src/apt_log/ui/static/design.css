@@ -62,19 +62,32 @@
    present, with no way for either of us to tell whether the page was
    running the fix. The page now says so itself.
 
-   Centred because the middle of every header row is the one band no view
-   puts anything in, and `pointer-events:none` because it sits over those
-   headers — a diagnostic must never be able to take a tap meant for Back.
-   `aria-hidden` for the same reason in the other direction: it is for us,
-   not for the person using this to do a visit. */
-.buildstamp { position:fixed; top:calc(env(safe-area-inset-top) + 7px);
-              left:50%; transform:translateX(-50%); z-index:45;
+   `pointer-events:none` because it is fixed over the page's own chrome — a
+   diagnostic must never be able to take a tap meant for Back. `aria-hidden`
+   for the same reason in the other direction: it is for us, not for the
+   person using this to do a visit.
+
+   The look is shared; WHERE it sits is per page, because the two pages have
+   opposite empty bands and one position cannot be clean on both. Checked in
+   a browser rather than reasoned about: centred at the top is the empty
+   middle of every header row in /app, and on /console it lands straight
+   through "Centro de control". */
+.buildstamp { position:fixed; z-index:45;
               pointer-events:none; -webkit-user-select:none;
               user-select:none; white-space:nowrap;
               font:500 9.5px/1.4 ui-monospace, SFMono-Regular, Menlo,
                    monospace;
               letter-spacing:.06em; color:var(--muted); opacity:.4;
               padding:3px 7px; border-radius:999px; }
+/* /app: the middle of the header band, which every view leaves empty
+   between its Back button and its tools. */
+body[data-view] .buildstamp { top:calc(env(safe-area-inset-top) + 7px);
+                              left:50%; transform:translateX(-50%); }
+/* /console: its bar is full — back link, title and the language switch — and
+   it has no fixed chrome at the bottom at all, so the stamp goes there. */
+body:not([data-view]) .buildstamp {
+              bottom:calc(env(safe-area-inset-bottom) + 6px);
+              left:50%; transform:translateX(-50%); }
 /* THE SERVER HAS MOVED ON AND THIS PAGE HAS NOT. Said out loud rather than
    left silent: the self-reload is guarded against loops, so it can
    legitimately decline to fire, and then this is the only thing on screen
