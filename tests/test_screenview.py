@@ -3004,6 +3004,95 @@ class TestAPopupIsNotThePage:
         assert "lastOverlay = nowOverlay;" in js
 
 
+class TestACheckOutSheetIsNotASideMenu:
+    """A screenshot from a live check-out: twenty-two empty tick boxes, no
+    task names, no headings, nothing saying what any of it was for.
+
+    "Check boxes but no labels, nothing indicating what was going on." She
+    gave up on the portal and had somebody standing next to the phone tick
+    them by hand, and the visit was closed with eleven of the twenty-two
+    tasks recorded.
+
+    THE SHEET WAS BEING READ AS AN OPEN SIDE MENU. The drawer rule was "four
+    or more controls sharing a right edge that stops short of the screen",
+    and inMyTeam's sheet is twenty-two tasks each with a 32px tick box at
+    x=26-58 — twenty-two controls on the edge 58. So the caller kept only
+    controls ON that edge (losing every task's second tick) and only statics
+    INSIDE them, and nothing fits inside a 32px box.
+
+    The geometry below is the real one, off the flight recorder.
+    """
+
+    W, H = 1080, 2340
+
+    def _doc(self, tasks=22):
+        els, sts = [], []
+        for i in range(tasks):
+            top = 369 + i * 62
+            # The task's own tick, hard against the left margin.
+            els.append({"cls": "CheckBox", "rid": "", "txt": "",
+                        "b": [26, top, 58, top + 32], "enabled": True,
+                        "checked": False, "focused": False,
+                        "has_text": False})
+            # Its refusal tick, staggered lower and to the right.
+            els.append({"cls": "CheckBox", "rid": "", "txt": "",
+                        "b": [868, top + 27, 900, top + 59], "enabled": True,
+                        "checked": False, "focused": False,
+                        "has_text": False})
+            sts.append({"cls": "TextView", "rid": "",
+                        "txt": f"Tarea numero {i + 1}",
+                        "b": [63, top + 3, 275, top + 28]})
+            sts.append({"cls": "TextView", "rid": "",
+                        "txt": "El paciente se niega",
+                        "b": [905, top + 29, 1064, top + 56]})
+        return {"app": "com.inmyteam.inmyteam", "size": [self.W, self.H],
+                "elements": els, "statics": sts}
+
+    def _words(self, model):
+        out = []
+        for row in model["rows"]:
+            for it in row["items"]:
+                out.append(it.get("txt") or "")
+                out.extend(it.get("lines") or [])
+        return [w for w in out if w]
+
+    def test_a_column_of_tick_boxes_is_not_a_drawer(self):
+        assert screenview._drawer_edge(
+            self._doc()["elements"], self.W) == 0
+
+    def test_every_task_still_says_what_it_is(self):
+        """The whole complaint, in one assertion."""
+        words = self._words(screenview.build(self._doc()))
+        for i in (1, 11, 22):
+            assert f"Tarea numero {i}" in words, f"task {i} lost its name"
+
+    def test_both_of_a_tasks_ticks_are_drawn(self):
+        """Left is "treatment given", right is "patient refused". Keeping
+        only one of them silently drops half the answers the sheet asks
+        for."""
+        model = screenview.build(self._doc())
+        boxes = [it for row in model["rows"] for it in row["items"]
+                 if it.get("check")]
+        assert len(boxes) == 44, f"{len(boxes)} ticks drawn, not 44"
+
+    def test_a_real_side_menu_is_still_a_side_menu(self):
+        """The floor must not cost us the thing it was added beside: the
+        drawer this was written from measured 400px on a 1080px phone."""
+        els = [{"cls": "LinearLayout", "rid": f"menu_{i}", "txt": "",
+                "b": [0, 302 + i * 60, 400, 362 + i * 60], "enabled": True,
+                "checked": False, "focused": False, "has_text": False}
+               for i in range(6)]
+        els.append({"cls": "View", "rid": "page_row", "txt": "",
+                    "b": [0, 900, 1080, 1000], "enabled": True,
+                    "checked": False, "focused": False, "has_text": False})
+        assert screenview._drawer_edge(els, self.W) == 400
+
+    def test_the_floor_sits_between_the_two(self):
+        """A tick column is 5% of the screen and a menu is 37%. Anything
+        between those is the judgement call, and it is written down."""
+        assert 58 / 1080 < screenview.DRAWER_MIN_RIGHT < 400 / 1080
+
+
 class TestASideMenuIsInFrontOfThePage:
     """"We need to work on what happens on menu click — the UIs are
     clashing."

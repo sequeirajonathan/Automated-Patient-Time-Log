@@ -2622,6 +2622,27 @@ WITHHELD_TABS = {
 }
 
 DRAWER_MAX_RIGHT = 0.6
+
+# AND A FLOOR, WHICH THIS DID NOT HAVE, AND THE COST OF THAT WAS A CHECK-OUT.
+#
+# The rule was "four or more controls sharing a right edge that stops short
+# of the screen". inMyTeam's check-out sheet is twenty-two tasks, each with a
+# 32px tick box at x=26-58 — twenty-two controls sharing the right edge 58,
+# which is short of the screen by a mile. So the whole page was read as an
+# open side menu: the caller keeps only controls ON that edge, which threw
+# away every task's second tick, and keeps only statics INSIDE them, and
+# nothing fits inside a 32px box. Twenty-two naked checkboxes, no task names,
+# no headings, nothing saying what any of it was for.
+#
+# Reported with a screenshot of exactly that: "check boxes but no labels
+# nothing indicating what was going on". She gave up on the portal and had
+# somebody standing next to the phone tick them by hand.
+#
+# A panel is a SLAB OF THE SCREEN. The drawer this was written from measured
+# 400px on a 1080px phone — 37% — and a menu narrower than a quarter of the
+# display is not one anybody could read. A column of tick boxes is 5%.
+DRAWER_MIN_RIGHT = 0.25
+
 DRAWER_MIN_ITEMS = 4
 
 # A row's own expander: a fraction of its width, lying almost entirely inside
@@ -2657,7 +2678,8 @@ def _drawer_edge(controls: list[dict], width: int) -> int:
         # — this is a narrow screen or a popup, and neither is a drawer.
         return 0
     for edge, count in edges.items():
-        if count >= DRAWER_MIN_ITEMS and edge <= DRAWER_MAX_RIGHT * width:
+        if (count >= DRAWER_MIN_ITEMS
+                and DRAWER_MIN_RIGHT * width <= edge <= DRAWER_MAX_RIGHT * width):
             return edge
     return 0
 
