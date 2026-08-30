@@ -3608,7 +3608,12 @@ class TestBackStaysInsideTheApp:
         care app is the phone doing something she did not ask for, and the
         answer is to put her back rather than to throw her out."""
         js = self._js()
-        assert "} else if (onLauncher && body.dataset.view === 'screen') {" in js
+        # The guard is `onLauncher`, so no other arrival can reach the eject
+        # at all. Pinned as the condition rather than as a whole line: the
+        # branch has since gained a second clause, holding the screen view so
+        # the home-screen card's way back is actually seen.
+        i = js.index("} else if (onLauncher && body.dataset.view === 'screen'")
+        assert "view('launcher')" in js[i:i + 900]
 
     def test_leaving_on_purpose_still_works(self):
         """Home is how you leave. It is wired separately and does not go
@@ -6484,3 +6489,20 @@ class TestTheWayBackFromTheHomeScreen:
         js = self._js()
         i = js.index("localStorage.setItem('aptlog-last-app'")
         assert "catch" in js[i:i + 200]
+
+    def test_she_is_not_ejected_past_the_card(self):
+        """EJECTING HER HID THE WAY BACK. The card lives in the screen view;
+        switching to the picker meant she never saw it, and the two-press
+        hunt through the tiles is what "it appears stuck" was. The screen
+        view holds when the app she just left is one we can reopen."""
+        js = self._js()
+        i = js.index("} else if (onLauncher && body.dataset.view === 'screen'")
+        assert "!appOpen[wasPackage]" in js[i:i + 140]
+
+    def test_an_app_we_cannot_reopen_still_sends_her_to_the_picker(self):
+        """The branch keeps the case it was written for: with nowhere to
+        return to, holding the screen view would strand her on a card whose
+        only offer is the picker anyway."""
+        js = self._js()
+        i = js.index("} else if (onLauncher && body.dataset.view === 'screen'")
+        assert "view('launcher')" in js[i:i + 900]

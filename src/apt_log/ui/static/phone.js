@@ -635,7 +635,16 @@
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           redirect: 'follow'
         }).catch(() => { pendingApp = ''; unbusy(); });
-      } else if (onLauncher && body.dataset.view === 'screen') {
+      } else if (onLauncher && body.dataset.view === 'screen'
+                 && !appOpen[wasPackage]) {
+        // EJECTING HER HID THE WAY BACK. The home-screen card lives in the
+        // screen view; sending her to the picker meant she never saw it, and
+        // the two-press hunt through the tiles is what "it appears stuck"
+        // was. So when the app she just left is one we can reopen, the
+        // screen view holds and the card does the talking — it says where
+        // the phone is, offers one press back, and keeps Aplicaciones under
+        // it for the case this branch was written for.
+        //
         // Only the launcher sends her to the picker. Drifting into ANOTHER
         // care app is the phone doing something she did not ask for, and the
         // right answer is to put her back, not to eject her.
