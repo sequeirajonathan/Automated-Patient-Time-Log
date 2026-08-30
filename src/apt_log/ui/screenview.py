@@ -1343,6 +1343,34 @@ def build(doc: dict) -> dict | None:
                     lines = shaped[:-1]
                     item["status"] = shaped[-1]
                     item["status_tone"] = status_tone(shaped[-1])
+            # A ROW'S OWN DESCRIPTION IS NOT A TITLE FOR IT.
+            #
+            # These apps hang a whole spoken sentence on a list row's
+            # content-description — the one a screen reader would say — and
+            # where the row ALSO carries its fields as children, the reflow
+            # was drawing both: the sentence as the headline, the fields
+            # underneath repeating it.
+            #
+            # Found walking Mobile Caregiver+'s Mensajes tab, where it is
+            # ruinous. Every row led with "Un mensaje sin leer de EVV ADMIN
+            # en sábado ago 01, 2026 at 5:00 a. m. y su contenido es Planned
+            # Downtime: Netsmart will be performing…" — 233 characters that
+            # begin identically on every message in the list, so eighteen
+            # different messages were eighteen identical rows and the sender,
+            # the date and the subject were all below the fold of their own
+            # cell.
+            #
+            # The test is containment, not wording: a sentence that already
+            # holds two or more of the row's own lines says nothing they do
+            # not, in any language. The fields are what the app formatted for
+            # reading; the sentence is what it wrote for speaking.
+            if lines and item["txt"]:
+                spoken = " ".join(item["txt"].casefold().split())
+                inside = sum(1 for line in lines
+                             if (folded_line := " ".join(line.casefold().split()))
+                             and folded_line[:60] in spoken)
+                if inside >= 2:
+                    item["txt"] = ""
             item["lines"] = lines
             item["badge"] = badge
             # A row whose only content is a KNOWN glyph is named by it —
@@ -1578,6 +1606,45 @@ def build(doc: dict) -> dict | None:
                      and not n.get("lines")
                      and not n.get("txt")
                      and _sliver(n))]
+
+    # A ROW'S OWN CHEVRON IS NOT A SECOND CONTROL.
+    #
+    # Found walking Mobile Caregiver+'s beneficiary page. Every section there
+    # — Info del beneficiario, Dirección, Teléfono, Contacto de emergencia,
+    # Documentos — is a wide captioned row with a small nameless clickable
+    # sitting at its right end, which is the expander the row draws for
+    # itself. Reflowed as found, each heading came with a blank pressable row
+    # beside it: five empty cells on one page, every one of them offering
+    # nothing and doing exactly what the row next to it does.
+    #
+    # NOT STRICT CONTAINMENT, which was the obvious test and misses: the
+    # app's own boxes are not aligned to the pixel, and one of the five sat
+    # twelve pixels above its parent's top edge. Judged by how much of the
+    # small one lies within the wide one, and by it being far narrower —
+    # a chevron is a fraction of the row it belongs to.
+    #
+    # Only WORDLESS rows, so a checkbox (a toggle) and any control that says
+    # what it is are both untouched.
+    def _is_own_affordance(inner: dict) -> bool:
+        if inner["kind"] != "row" or inner.get("txt") or inner.get("lines"):
+            return False
+        iw = inner["b"][2] - inner["b"][0]
+        area = iw * (inner["b"][3] - inner["b"][1])
+        if area <= 0:
+            return False
+        for outer in items:
+            if outer is inner or not (outer.get("txt") or outer.get("lines")):
+                continue
+            ow = outer["b"][2] - outer["b"][0]
+            if not ow or iw > ow * AFFORDANCE_MAX_WIDTH:
+                continue
+            dx = min(inner["b"][2], outer["b"][2]) - max(inner["b"][0], outer["b"][0])
+            dy = min(inner["b"][3], outer["b"][3]) - max(inner["b"][1], outer["b"][1])
+            if dx > 0 and dy > 0 and (dx * dy) / area >= AFFORDANCE_MIN_INSIDE:
+                return True
+        return False
+
+    items = [n for n in items if not _is_own_affordance(n)]
 
     items.sort(key=lambda n: (n["b"][1], n["b"][0]))
 
@@ -2517,6 +2584,13 @@ def _is_refusal(text: str) -> bool:
 # 1080px screen, against a visit row ending at 1080.
 DRAWER_MAX_RIGHT = 0.6
 DRAWER_MIN_ITEMS = 4
+
+# A row's own expander: a fraction of its width, lying almost entirely inside
+# it. Measured on Mobile Caregiver+'s beneficiary sections — a 60px chevron on
+# a 1040px row, one of the five sitting 12px proud of its parent's top edge,
+# which is why "almost" and not "entirely".
+AFFORDANCE_MAX_WIDTH = 0.35
+AFFORDANCE_MIN_INSIDE = 0.75
 
 
 def _drawer_edge(controls: list[dict], width: int) -> int:

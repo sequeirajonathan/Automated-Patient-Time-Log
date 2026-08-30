@@ -2914,7 +2914,7 @@ class TestATitleIsNotAButton:
                      "txt": "Menú", "b": [20, 139, 96, 180]},
                     {"cls": "TextView", "rid": "screen_title", "txt": "Visitas",
                      "b": [482, 119, 598, 162]},
-                    {"cls": "TextView", "rid": "row", "txt": "MARINA",
+                    {"cls": "TextView", "rid": "row", "txt": "A PATIENT",
                      "b": [15, 600, 500, 640]}]}
 
     def test_the_screen_title_titles_the_screen(self):
@@ -3039,7 +3039,7 @@ class TestASideMenuIsInFrontOfThePage:
              "focused": False, "has_text": True},
         ]
         sts = [{"cls": "View", "rid": None,
-                "txt": "La visita está programada para MARINA",
+                "txt": "La visita está programada para UN PACIENTE",
                 "b": [0, 310, 1080, 421]},
                {"cls": "TextView", "rid": "visits_scheduleperiod",
                 "txt": "Hoy - sáb, ago 29", "b": [13, 192, 247, 230]}]
@@ -3102,3 +3102,107 @@ class TestASideMenuIsInFrontOfThePage:
         doc["statics"] = doc["statics"][:2]
         words = self._words(screenview.build(doc))
         assert any("La visita está programada" in w for w in words)
+
+
+class TestWhatAWalkOfMobileCaregiverTurnedUp:
+    """Two reflow defects found by opening pages nobody had opened before —
+    only two of this app's screens were ever mapped, and everything else
+    reported as "home"."""
+
+    def _messages(self):
+        """Mensajes. Each row carries a spoken sentence as its own
+        description AND its fields as children, so the reflow drew both."""
+        spoken = ("Un mensaje sin leer de EVV ADMIN en sábado ago 01, 2026 "
+                  "at 5:00 a. m. y su contenido es Planned Downtime: "
+                  "maintenance is scheduled")
+        els, sts = [], []
+        for i in range(3):
+            top = 257 + i * 149
+            els.append({"cls": "LinearLayout", "rid": "root_view",
+                        "txt": spoken, "b": [0, top, 1080, top + 148],
+                        "enabled": True, "checked": False, "focused": False,
+                        "has_text": True})
+            sts += [{"cls": "TextView", "rid": "textFrom", "txt": "EVV ADMIN",
+                     "b": [20, top + 13, 195, top + 51]},
+                    {"cls": "TextView", "rid": "text_date", "txt": "ago 01",
+                     "b": [200, top + 13, 1060, top + 51]},
+                    {"cls": "TextView", "rid": "text_content",
+                     "txt": "Planned Downtime: maintenance is scheduled",
+                     "b": [45, top + 59, 1060, top + 135]}]
+        return {"app": "com.tellus.evv.v2", "size": [1080, 2340],
+                "elements": els, "statics": sts}
+
+    def _sections(self):
+        """A beneficiary page. Every section is a wide captioned row with its
+        own expander at the right end — one of them sitting 12px proud of its
+        parent, which is why containment alone will not do."""
+        els, sts = [], []
+        for i, word in enumerate(("Info del beneficiario", "Dirección",
+                                  "Teléfono", "Documentos (0)")):
+            top = 345 + i * 200
+            skew = -12 if i == 1 else 0
+            els += [{"cls": "View", "rid": "", "txt": "",
+                     "b": [20, top, 1060, top + 60], "enabled": True,
+                     "checked": False, "focused": False, "has_text": False},
+                    {"cls": "View", "rid": "", "txt": "",
+                     "b": [1000, top + skew, 1060, top + 60 + skew],
+                     "enabled": True, "checked": False, "focused": False,
+                     "has_text": False}]
+            sts.append({"cls": "TextView", "rid": "t", "txt": word,
+                        "b": [30, top + 11, 700, top + 49]})
+        return {"app": "com.tellus.evv.v2", "size": [1080, 2340],
+                "elements": els, "statics": sts}
+
+    def _rows(self, doc):
+        return [it for row in screenview.build(doc)["rows"]
+                for it in row["items"]]
+
+    def test_a_spoken_sentence_does_not_headline_the_row_it_describes(self):
+        """Eighteen messages were eighteen identical rows: every one led with
+        233 characters that begin the same way, and the sender, the date and
+        the subject were below the fold of their own cell."""
+        for it in self._rows(self._messages()):
+            if it["kind"] == "row":
+                assert "Un mensaje sin leer" not in (it.get("txt") or "")
+
+    def test_and_the_fields_it_was_hiding_are_what_shows(self):
+        rows = [it for it in self._rows(self._messages())
+                if it["kind"] == "row" and it.get("lines")]
+        assert rows
+        assert rows[0]["lines"][:2] == ["EVV ADMIN", "ago 01"]
+
+    def test_a_sentence_that_is_not_a_restatement_is_kept(self):
+        """The test is containment, not length: a row whose own words say
+        something its lines do not must keep them."""
+        doc = self._messages()
+        for e in doc["elements"]:
+            e["txt"] = "Mensaje urgente del supervisor"
+        assert any(it.get("txt") == "Mensaje urgente del supervisor"
+                   for it in self._rows(doc))
+
+    def test_a_rows_own_expander_is_not_a_second_row(self):
+        """Five empty pressable cells on one page, each offering nothing and
+        doing what the row beside it already does."""
+        blanks = [it for it in self._rows(self._sections())
+                  if it["kind"] == "row"
+                  and not it.get("txt") and not it.get("lines")]
+        assert blanks == []
+
+    def test_the_section_headings_all_survive(self):
+        words = {(it.get("txt") or (it.get("lines") or [""])[0])
+                 for it in self._rows(self._sections())}
+        for heading in ("Info del beneficiario", "Dirección", "Teléfono",
+                        "Documentos (0)"):
+            assert heading in words, heading
+
+    def test_a_wordless_control_standing_alone_is_left_alone(self):
+        """The rule is about a control INSIDE another one. A nameless button
+        on its own is still a control, and this app's call buttons are
+        exactly that."""
+        doc = self._sections()
+        doc["elements"].append(
+            {"cls": "View", "rid": "", "txt": "", "b": [792, 1900, 1050, 1960],
+             "enabled": True, "checked": False, "focused": False,
+             "has_text": False})
+        aims = [it.get("aim", {}).get("b") for it in self._rows(doc)]
+        assert [792, 1900, 1050, 1960] in aims

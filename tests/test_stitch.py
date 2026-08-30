@@ -300,13 +300,13 @@ class TestADayHeaderIsOneDayHeader:
         module has already had — so it never reaches the rule."""
         caps = [
             {"elements": [],
-             "statics": [{"cls": "TextView", "rid": "", "txt": "MARINA",
+             "statics": [{"cls": "TextView", "rid": "", "txt": "A PATIENT",
                           "b": [15, 100, 400, 140]},
-                         {"cls": "TextView", "rid": "", "txt": "MARINA",
+                         {"cls": "TextView", "rid": "", "txt": "A PATIENT",
                           "b": [15, 300, 400, 340]}]},
             {"elements": [],
-             "statics": [{"cls": "TextView", "rid": "", "txt": "MARINA",
+             "statics": [{"cls": "TextView", "rid": "", "txt": "A PATIENT",
                           "b": [15, 700, 400, 740]}]},
         ]
         doc = stitch.stitch(caps, nominal_dy=400)
-        assert len([s for s in doc["statics"] if s["txt"] == "MARINA"]) == 3
+        assert len([s for s in doc["statics"] if s["txt"] == "A PATIENT"]) == 3
