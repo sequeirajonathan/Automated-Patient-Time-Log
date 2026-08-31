@@ -915,6 +915,12 @@ MC_KEYPAD_READY = 25.0
 # activity's name arrives before its views are inflated, and a lookup that
 # does not wait blames the app for a race.
 MC_FORM_READY = 20.0
+# How long to keep watching AFTER a password sign-in lands, in case the app
+# raises its passcode gate behind it. Measured live: signed in at 12:46:57,
+# dashboard at 12:47:00, PinActivity at 12:47:01 — one second. The budget is
+# wider than the observation because the gap is a race with the app's own
+# splash, and this is only paid on a sign-in, which is rare.
+MC_PIN_AFTER_LOGIN = 10.0
 
 
 def _mc_keypad(driver) -> dict:
@@ -1011,9 +1017,13 @@ def _mobile_caregiver_pin(driver, report) -> None:
     which no number of keypad taps can answer. Landing there with only a PIN
     stored is how an auth macro spins without ever signing anything in.
 
-    So the screen in front decides. Either lock may be up, and clearing the
-    first can reveal the second, which is why the passcode path falls through
-    to the password path rather than declaring victory.
+    So the screen in front decides. Either lock may be up, and clearing one
+    can reveal the other — IN BOTH DIRECTIONS. Clearing the passcode can drop
+    the app onto an expired session, which is why the passcode path falls
+    through to the password path rather than declaring victory; and signing
+    the session in raises the passcode gate a second behind it, which is why
+    the password path does not declare victory either. Neither lock is the
+    last one by virtue of being first.
     """
     from apt_log.secrets import (MC_PASSWORD, MC_PIN, MC_USERNAME,
                                  FileSecretProvider, SecretNotFound)
@@ -1051,15 +1061,16 @@ def _mobile_caregiver_pin(driver, report) -> None:
         return "login" in activity()
 
     # ------------------------------------------------------------- the PIN
-    #
-    # A COLD START IS NOT A MISSING KEYPAD. Four seconds was the whole budget
-    # for this app to draw its passcode screen, and this app opens on a splash
-    # — so a slow morning skipped the passcode path entirely and fell through
-    # to the password form, which is not what was on screen. The wait is now
-    # long enough to lose an argument with a cold start, and it waits for the
-    # KEYPAD rather than for the activity's name.
     keys: dict = {}
-    if wait_for(on_pin_screen, timeout=MC_KEYPAD_READY, poll=0.6):
+
+    def answer_the_passcode() -> None:
+        """Type the stored passcode into the keypad in front. Once.
+
+        Lifted out of the opening branch because the gate has two moments,
+        not one: it can be up when the app opens, and it can be raised again
+        behind a fresh password sign-in. Same keypad, same single attempt.
+        """
+        nonlocal keys
         # Read only once the keypad is actually up, and raised rather
         # than returned: an unlocked app must not even open the file.
         pin = FileSecretProvider().get(MC_PIN)
@@ -1097,6 +1108,15 @@ def _mobile_caregiver_pin(driver, report) -> None:
             # and this app locks. A person is told instead.
             raise RuntimeError(
                 "still on the passcode screen after entering the code")
+
+    # A COLD START IS NOT A MISSING KEYPAD. Four seconds was the whole budget
+    # for this app to draw its passcode screen, and this app opens on a splash
+    # — so a slow morning skipped the passcode path entirely and fell through
+    # to the password form, which is not what was on screen. The wait is now
+    # long enough to lose an argument with a cold start, and it waits for the
+    # KEYPAD rather than for the activity's name.
+    if wait_for(on_pin_screen, timeout=MC_KEYPAD_READY, poll=0.6):
+        answer_the_passcode()
 
     # ------------------------------------------------- the expired session
     # "Sesión caducada" has one button and it only acknowledges; the form is
@@ -1174,6 +1194,22 @@ def _mobile_caregiver_pin(driver, report) -> None:
     report("macro.step.checking")
     if not wait_for(lambda: not on_login_screen(), timeout=30.0):
         raise RuntimeError("still on the sign-in form after signing in")
+
+    # AND THE PASSCODE GATE COMES UP BEHIND THE SIGN-IN.
+    #
+    # Leaving LoginActivity was this macro's whole test of success, and this
+    # app answers a fresh server sign-in by raising its passcode screen a
+    # second later. Found live, to the second: signed in 12:46:57, dashboard
+    # 12:47:00, PinActivity 12:47:01 — and the macro had already reported
+    # finished at :57, so nothing came back for it. The app sat locked for
+    # half an hour while the portal called it done, and the owner found it
+    # by opening the app himself.
+    #
+    # The docstring above had this exactly one way round: clearing the
+    # passcode can reveal an expired session. It goes the other way too.
+    # "Done" onto a locked door is the one answer this macro must not give.
+    if wait_for(on_pin_screen, timeout=MC_PIN_AFTER_LOGIN, poll=0.5):
+        answer_the_passcode()
 
 
 def _read_page(driver, report) -> None:

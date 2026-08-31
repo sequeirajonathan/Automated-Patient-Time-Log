@@ -3180,6 +3180,128 @@ class TestMobileCaregiverExpiredSession:
                 "com.tellus.evv.v2", provider) == expected
 
 
+class TestThePasscodeGateBehindTheSignIn:
+    """The lock that comes up AFTER the password, found on the live phone.
+
+    Leaving LoginActivity was this macro's whole test of success, and the app
+    answers a fresh server sign-in by raising its passcode screen a second
+    later. The Pi's log, to the second: signed in 12:46:57, DashboardActivity
+    12:47:00, PinActivity 12:47:01 — and `macro mobile_caregiver_pin
+    finished` at :57, before the gate existed. The app then sat locked for
+    half an hour while the portal called it done, and the owner found it by
+    opening the app himself and asking what the screen was.
+    """
+
+    FORM = "com.tellus.evv.activities.LoginActivity"
+    GATE = "com.tellus.evv.activities.PinActivity"
+    HOME = "com.tellus.evv.activities.DashboardActivity"
+    PIN = "2580"
+    # Six clears (the code's length plus two) and then the four digits.
+    TAPS_TO_UNLOCK = len(PIN) + 2 + len(PIN)
+
+    def _driver(self, unlocks=True):
+        """A phone that signs in and lands on the passcode gate."""
+        from unittest.mock import PropertyMock
+
+        keypad = TestMobileCaregiverPin()._keypad()
+        state = {"activity": self.FORM, "taps": 0, "unlocks": unlocks}
+        driver = MagicMock()
+        type(driver).current_activity = PropertyMock(
+            side_effect=lambda: state["activity"])
+        # The form carries no keypad and the gate carries nothing else, so
+        # neither path can be satisfied by the other's markup.
+        type(driver).page_source = PropertyMock(
+            side_effect=lambda: (keypad if state["activity"] == self.GATE
+                                 else "<hierarchy></hierarchy>"))
+
+        def find_elements(_by, selector):
+            if state["activity"] != self.FORM:
+                return []
+            if "login_password_input" in selector:
+                box = MagicMock()
+                box.text = ""
+                return [box]
+            if "login_username_input" in selector:
+                box = MagicMock()
+                box.text = "remembered between sessions"
+                return [box]
+            if "login_button" in selector:
+                button = MagicMock()
+                # What the phone actually did: past the dashboard and onto
+                # the gate, faster than anything could look.
+                button.click.side_effect = lambda: state.update(
+                    activity=self.GATE)
+                return [button]
+            return []
+
+        driver.find_elements.side_effect = find_elements
+        return driver, state
+
+    def _run(self, driver, state):
+        import itertools
+
+        from apt_log.secrets import (MC_PASSWORD, MC_PIN, MemorySecretProvider)
+
+        taps: list = []
+        original = macros._mc_tap
+
+        def tap(bounds, _o=original):
+            state["taps"] += 1
+            _o(bounds)
+            if state["unlocks"] and state["taps"] >= self.TAPS_TO_UNLOCK:
+                state["activity"] = self.HOME
+
+        with patch("apt_log.macros.wake_display"), \
+             patch("apt_log.macros._tap_xy",
+                   side_effect=lambda x, y: taps.append((x, y))), \
+             patch.object(macros, "_mc_tap", side_effect=tap), \
+             patch("apt_log.secrets.FileSecretProvider",
+                   return_value=MemorySecretProvider(
+                       **{MC_PASSWORD: "hunter2", MC_PIN: self.PIN})), \
+             patch("apt_log.macros.time.sleep"), \
+             patch("apt_log.macros.time.monotonic",
+                   side_effect=itertools.count(step=0.5)):
+            macros.MACROS["mobile_caregiver_pin"].run(driver, lambda _k: None)
+        return taps
+
+    def test_the_gate_raised_behind_the_password_is_answered(self):
+        driver, state = self._driver()
+        self._run(driver, state)
+        assert state["activity"] == self.HOME, (
+            "the macro finished onto the passcode screen, which is exactly "
+            "how the app sat locked for half an hour")
+
+    def test_the_code_is_typed_on_the_right_keys(self):
+        """Not merely "some taps happened" — the passcode itself."""
+        driver, state = self._driver()
+        taps = self._run(driver, state)
+
+        def centre(d):
+            i = "1234567890".index(d)
+            x = 299 + (i % 3) * 44
+            y = 784 + (i // 3) * 44
+            keys = TestMobileCaregiverPin()
+            return (x + keys.KEY_W // 2, y + keys.KEY_H // 2)
+
+        assert taps[-4:] == [centre(d) for d in self.PIN]
+
+    def test_a_gate_that_does_not_open_is_a_failure_not_a_finish(self):
+        """The whole point. "Done" onto a locked door is the one answer this
+        macro must not give — a person can only act on being told."""
+        driver, state = self._driver(unlocks=False)
+        with pytest.raises(RuntimeError, match="passcode screen"):
+            self._run(driver, state)
+
+    def test_the_passcode_is_never_typed_twice_in_one_run(self):
+        """It locks after a few wrong ones. If the first attempt did not
+        take, the macro raises — it does not come round for another."""
+        driver, state = self._driver(unlocks=False)
+        with pytest.raises(RuntimeError):
+            self._run(driver, state)
+        assert state["taps"] == self.TAPS_TO_UNLOCK, (
+            "the code went in more than once")
+
+
 class TestClearScreen:
     """The hand-operated way out from under a system panel.
 
@@ -6162,8 +6284,12 @@ class TestTheSessionExpiryNotice:
     def test_the_macro_answers_the_notice_before_reading_the_lock(self):
         src = (Path(__file__).resolve().parents[1]
                / "src/apt_log/macros.py").read_text(encoding="utf-8")
+        # The function itself, not a fixed number of characters: a 2600-char
+        # window silently stopped covering `on_pin_screen` the moment the
+        # docstring grew, and the test failed for a reason that had nothing
+        # to do with what it is checking.
         i = src.index("def _mobile_caregiver_pin")
-        head = src[i:i + 2600]
+        head = src[i:].split("\ndef ", 1)[0]
         assert "_dismiss_session_notice(driver)" in head
         # Before either lock is examined, or it is answering a screen it
         # cannot see.
