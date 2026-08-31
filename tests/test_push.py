@@ -434,3 +434,50 @@ class TestTheCodeNoticeGoesByPushAlone:
 
         with patch("apt_log.push.send", side_effect=RuntimeError("boom")):
             macros._say_the_code_is_waiting()   # does not raise
+
+
+class TestTheSuiteCannotRingAnybodysPhone:
+    """"The notifications are every time the app deploys."
+
+    The deploy gate runs this suite ON THE PI. The tests that exercise a
+    failed check-in and a waiting sign-in code called the real `notify.send`,
+    which ran the real `alert.sh`, which posted to the real relay topic — so
+    every deploy notified the owner's phone, several times over. The journal
+    shows them landing four seconds after pytest starts.
+
+    The same class of leak the conftest was already written to prevent for
+    preferences, app versions and the pause flag. Notifications were missed.
+    """
+
+    def test_the_relay_has_no_script_to_run(self):
+        """`notify.send` already refuses when the alerter is absent, and says
+        so. Pointing it at nothing is a state it handles rather than a mock
+        of a state it handles."""
+        from apt_log import notify
+
+        assert not notify.ALERT_SCRIPT.exists()
+
+    def test_so_sending_one_does_nothing_and_says_so(self):
+        from apt_log import notify
+
+        assert notify.send("this must not leave the machine") is False
+
+    def test_and_no_subprocess_is_reached_at_all(self):
+        """Not merely "the message did not arrive" — nothing is spawned."""
+        from unittest.mock import patch
+
+        from apt_log import notify
+
+        with patch("apt_log.notify.subprocess.run") as ran:
+            notify.send("nor this")
+        ran.assert_not_called()
+
+    def test_the_guard_is_automatic_and_not_opt_in(self):
+        """A test that forgets to ask for it is exactly the test that leaks."""
+        from pathlib import Path
+
+        conftest = (Path(__file__).resolve().parent
+                    / "conftest.py").read_text(encoding="utf-8")
+        block = conftest.split("def _no_notification_leaves_the_machine",
+                               1)[0]
+        assert block.rstrip().endswith("@pytest.fixture(autouse=True)")

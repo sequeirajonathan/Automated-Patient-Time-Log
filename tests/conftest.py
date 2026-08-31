@@ -21,6 +21,41 @@ from apt_log.ui import mirror, state
 
 
 @pytest.fixture(autouse=True)
+def _no_notification_leaves_the_machine(tmp_path, monkeypatch):
+    """The suite may not ring anybody's phone.
+
+    THIS WAS NOT HYPOTHETICAL. The deploy gate runs these tests on the Pi,
+    and the tests that exercise a failed check-in and a waiting sign-in code
+    called the real `notify.send`, which ran the real `alert.sh`, which
+    posted to the real relay topic. Every deploy therefore notified the
+    owner's phone — several times, because several tests walk those paths.
+    Reported as "the notifications are every time the app deploys", and the
+    journal shows them landing four seconds after pytest starts.
+
+    Blocked by pointing the relay at an alerter that is not there, which is
+    a state `notify.send` already handles and already has a word for. That
+    is deliberately gentler than replacing `subprocess`: the module holds the
+    exception types `send` catches, and swapping it out turned its own
+    `except` clause into a TypeError.
+
+    A test that needs the subprocess branch itself puts a real script back —
+    see the sign-in notice test — and a test that wants to assert a notice
+    was sent patches `notify.send` or `push.send`, which sits above this.
+    """
+    from unittest.mock import MagicMock
+
+    from apt_log import notify
+
+    monkeypatch.setattr(notify, "ALERT_SCRIPT", tmp_path / "no-alerter.sh")
+    try:
+        import pywebpush
+    except Exception:  # noqa: BLE001 — absent in the dev container
+        return
+    monkeypatch.setattr(pywebpush, "webpush",
+                        MagicMock(name="webpush (blocked in tests)"))
+
+
+@pytest.fixture(autouse=True)
 def _isolated_prefs(tmp_path, monkeypatch):
     monkeypatch.setattr(prefs, "PREFS_PATH", tmp_path / "prefs.json")
     # The app-version record, for the same reason and caught the same way:

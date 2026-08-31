@@ -1518,11 +1518,16 @@ class TestTheCodeIsAnnounced:
                 patch("apt_log.push.send", side_effect=OSError("no network")):
             macros._say_the_code_is_waiting()   # does not raise
         # And the relay, still used for the machine's OWN failures, swallows
-        # its own trouble the same way.
+        # its own trouble the same way. The alerter is put BACK for this one
+        # assertion: the suite-wide guard points it at a script that is not
+        # there, which would answer False before ever reaching the branch
+        # this is about.
         from apt_log import notify
 
-        with patch("apt_log.notify.subprocess.run",
-                   side_effect=OSError("no curl")):
+        real = (Path(__file__).resolve().parents[1] / "scripts" / "alert.sh")
+        with patch.object(notify, "ALERT_SCRIPT", real), \
+                patch("apt_log.notify.subprocess.run",
+                      side_effect=OSError("no curl")):
             assert notify.send("anything") is False
 
 
