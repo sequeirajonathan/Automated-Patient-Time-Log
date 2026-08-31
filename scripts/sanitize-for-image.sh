@@ -53,6 +53,13 @@ rm -f /var/lib/aptlog/signatures.json /etc/aptlog/signatures.json \
 # The trail of applications, which names patients and dates. Not reproducible
 # ink, and not something to hand over either.
 rm -f /var/lib/aptlog/signings.jsonl 2>/dev/null || true
+# THE FIRE LEDGER, for the same reason and it was missed. It is the record of
+# EVV entries this machine asserted: dates, which app, and WHO ATTESTED that
+# the caregiver was present. The occurrence keys are hashes, which is why this
+# looked harmless, but the attestation is a person's name and the dates are a
+# person's working week. It now also quotes the message of a failed fire, and
+# a macro's message can name whatever was on the screen.
+rm -f /var/lib/aptlog/fired.json 2>/dev/null || true
 rm -rf "/home/$SERVICE_USER/.local/share/python_keyring" \
        "/home/$SERVICE_USER/.android" 2>/dev/null || true
 

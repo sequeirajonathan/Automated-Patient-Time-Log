@@ -1875,3 +1875,116 @@ class TestASessionMayBeRevivedForAVisitThatNeedsIt:
         unarmed visit must not open the unattended door."""
         s = a_schedule()
         assert autoentry.on_duty(s, monday(9, 0), "com.tellus.evv.v2") is False
+
+
+class TestAFailedFireSaysWhyItFailed:
+    """"So did it actually arm the patient in the morning, or did it fail?"
+
+    It failed, and the only durable record said `RuntimeError` and nothing
+    else. The journal that held the reason is Storage=volatile and 64MB and
+    had already rotated by the time the question was asked, so the answer was
+    gone. A check-in that did not happen for a real patient is the one event
+    that has to stay explicable hours later.
+
+    The message goes in the LEDGER, which never leaves the machine — never on
+    `Status`, every field of which is written to macro-status.json and drawn
+    in the portal.
+    """
+
+    def _runner(self, tmp_path):
+        from apt_log import macros
+
+        return macros.Runner(tmp_path / "req.json", tmp_path / "status.json",
+                             screen_path=tmp_path / "screen.json")
+
+    def _armed(self, monkeypatch, when=None):
+        from apt_log import macros, schedule as schedule_mod
+
+        s = a_schedule()
+        arm(s.blocks[0], who="Jonathan")
+        monkeypatch.setattr(schedule_mod, "load", lambda *a, **k: s)
+        monkeypatch.setattr(macros, "datetime",
+                            _FrozenClock(when or monday(9, 0)))
+        return s
+
+    def _record(self, s):
+        key = arming.key_for(s.blocks[0])
+        return autoentry.spent()[f"{key}:{monday(9, 0).date()}:entry"]
+
+    def test_an_exception_escaping_the_run_is_quoted(self, tmp_path,
+                                                     monkeypatch):
+        from unittest.mock import patch
+
+        s = self._armed(monkeypatch)
+        runner = self._runner(tmp_path)
+        with patch.object(runner, "execute",
+                          side_effect=RuntimeError("no check-in control")):
+            assert runner.maybe_fire() is False
+        rec = self._record(s)
+        assert rec["outcome"] == "failed"
+        assert rec["error"] == "RuntimeError"
+        assert "no check-in control" in rec["detail"]
+
+    def _macro_raises(self, monkeypatch, words):
+        """Make the evv_entry macro itself blow up, so `execute` catches it —
+        the path this morning's fire actually took, where the message never
+        reaches the caller at all."""
+        from unittest.mock import MagicMock
+
+        from apt_log import macros, resident
+
+        def run(driver, report, *rest):
+            raise RuntimeError(words)
+
+        monkeypatch.setattr(macros.MACROS["evv_entry"], "run", run)
+        monkeypatch.setattr(resident, "run",
+                            lambda fn: fn(MagicMock()))
+        from apt_log.ui import mirror as mirror_mod
+
+        monkeypatch.setattr(mirror_mod, "publish", lambda **kw: None)
+
+    def test_and_so_is_one_the_macro_swallowed(self, tmp_path, monkeypatch):
+        s = self._armed(monkeypatch)
+        self._macro_raises(monkeypatch, "the visit card was not there")
+        runner = self._runner(tmp_path)
+        assert runner.maybe_fire() is False
+        rec = self._record(s)
+        assert rec["error"] == "RuntimeError"
+        assert "the visit card was not there" in rec["detail"]
+
+    def test_the_message_never_reaches_the_portal(self, tmp_path,
+                                                  monkeypatch):
+        """Everything on Status is written to macro-status.json and shown to
+        her, so a message that may name a screen, a control or a patient must
+        not be on it. That rule predates this and still holds."""
+        import json as _json
+
+        self._armed(monkeypatch)
+        self._macro_raises(monkeypatch, "A PATIENT has no card")
+        runner = self._runner(tmp_path)
+        runner.maybe_fire()
+        shown = _json.loads((tmp_path / "status.json").read_text())
+        assert shown.get("error") == "RuntimeError"
+        assert "A PATIENT" not in _json.dumps(shown)
+
+    def test_a_success_carries_no_stale_message(self, tmp_path, monkeypatch):
+        """The field is cleared at the start of every run, so a failure
+        cannot lend its words to the next visit's record."""
+        from unittest.mock import patch
+
+        s = self._armed(monkeypatch)
+        runner = self._runner(tmp_path)
+        runner._last_failure = "something from an earlier run"
+        with patch.object(runner, "execute") as execute:
+            execute.return_value = _Done()
+            assert runner.maybe_fire() is True
+        assert self._record(s)["detail"] == ""
+
+    def test_the_ledger_is_swept_before_an_image_is_taken(self):
+        """It holds dates and WHO ATTESTED to presence, and now a macro's own
+        words as well. The hashed keys are why this looked harmless."""
+        import pathlib
+
+        script = (pathlib.Path(__file__).resolve().parents[1]
+                  / "scripts/sanitize-for-image.sh").read_text(encoding="utf-8")
+        assert "fired.json" in script

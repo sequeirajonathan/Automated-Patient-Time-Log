@@ -5296,6 +5296,10 @@ class Runner:
         # Here rather than in `start`, because `execute` is reachable without
         # ever starting the loop — which is how every test uses it.
         self._auth_fails: dict[str, int] = {}
+        # The last macro failure's MESSAGE, for the ledger to quote. Never on
+        # `Status` — see `execute` — because everything there reaches the
+        # portal, and a message may name a screen, a control, or a patient.
+        self._last_failure: str = ""
         # The frame a stitch walk failed on: not retried until the screen
         # changes, or a stubborn page would be walked forever.
         self._stitch_failed_for: str = ""
@@ -5564,12 +5568,18 @@ class Runner:
                                            item.visit.block.start.strftime("%H:%M")))
         except Exception as exc:  # noqa: BLE001
             autoentry.spend(item.occurrence, "failed",
-                            {"error": type(exc).__name__})
-            log.warning("the armed fire failed (%s)", type(exc).__name__)
+                            {"error": type(exc).__name__,
+                             "detail": str(exc)[:300]})
+            log.warning("the armed fire failed (%s: %s)",
+                        type(exc).__name__, exc)
             return False
         outcome = "done" if status.state == "done" else "failed"
+        # `detail` is the message `execute` swallowed. Empty on success, and
+        # empty for a failure that carried no words of its own.
         autoentry.spend(item.occurrence, outcome,
-                        {"error": status.error or ""})
+                        {"error": status.error or "",
+                         "detail": self._last_failure if outcome == "failed"
+                         else ""})
         _tell_somebody_about_the_fire(item, outcome)
         return outcome == "done"
 
@@ -6069,6 +6079,9 @@ class Runner:
         macro = MACROS[name]
         status = Status(id=rid, name=name, state="running",
                         step="macro.step.starting")
+        # Cleared HERE rather than on success: a run that fails must not be
+        # able to quote the message from the run before it.
+        self._last_failure = ""
         write_status(status, self._status_path)
 
         def report(step_key: str) -> None:
@@ -6091,6 +6104,20 @@ class Runner:
             # a name. Macro failures are structural -- a missing screen, a dialog
             # nobody recognised -- so the type is the useful part.
             status.error = type(exc).__name__
+            # AND THE MESSAGE, KEPT WHERE IT IS NOT SHOWN.
+            #
+            # "Did it arm the patient this morning, or did it fail?" — it
+            # failed, and the only durable record said `RuntimeError` and
+            # nothing else. The journal that had the reason is volatile and
+            # 64MB, and it had already rotated by the time the question was
+            # asked. A check-in that did not happen for a real patient is the
+            # one event that must be explicable hours later.
+            #
+            # In memory and NOT on `status`: everything on `status` is written
+            # to macro-status.json and reaches the portal, which is the exact
+            # thing the note above forbids. The armed-fire path below copies
+            # it into the ledger, which never leaves the machine.
+            self._last_failure = f"{type(exc).__name__}: {exc}"[:300]
             status.at = datetime.now().isoformat()
             write_status(status, self._status_path)
             self._auth_failed(name)
