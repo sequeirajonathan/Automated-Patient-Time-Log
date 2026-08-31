@@ -1008,6 +1008,27 @@ def _code_screen(doc: dict) -> bool:
         return False
 
 
+def _on_the_work_log(screen_doc: dict, model: dict | None) -> bool:
+    """Whether the phone is standing on the app's work log right now.
+
+    Read off the title the page gives itself rather than off an activity
+    name: inMyTeam keeps its whole app in one activity, so the activity says
+    `mainactivity` on the visits list and on the work log alike.
+
+    The words are `macros.MY_WORK_WORDS` — the same list the walk presses to
+    GET here. One table, so "this is the work log" and "this is the row that
+    opens it" can never come apart, which is the failure the walk's own
+    comment records (`Mi Trabajo` against `Mi trabajo`, one letter's case).
+    """
+    from apt_log import macros as macros_mod
+
+    if (screen_doc.get("app") or "") not in macros_mod.CHECK_LOG_APPS:
+        return False
+    title = ((model or {}).get("nav") or {}).get("title") or ""
+    folded = " ".join(title.casefold().split())
+    return any(w.casefold() in folded for w in macros_mod.MY_WORK_WORDS)
+
+
 def _last_care_app() -> str:
     """The care app the phone was last in, as the watchdog recorded it.
 
@@ -1702,6 +1723,20 @@ async def live(ws: WebSocket):
                     # refusing when pressed.
                     "checks_app": (screen_doc.get("app") or "")
                     in macros_mod.CHECK_LOG_APPS,
+                    # AND WHETHER SHE IS STANDING ON IT ALREADY.
+                    #
+                    # The work log is four presses deep and the walk that
+                    # opens it leaves the phone there, which is the point —
+                    # the answer is that screen. But pressing the button
+                    # again then walked back in from where it already was,
+                    # so the way out was the one thing it would not do.
+                    # Reported as: "it was supposed to take me back to Hoy
+                    # but it's stuck on Mi Trabajo."
+                    #
+                    # Read off the page's own title, and MATCHED ON THE WORD
+                    # LIST THE WALK NAVIGATES BY, so the two can never
+                    # disagree about what this screen is.
+                    "on_checks_log": _on_the_work_log(screen_doc, model),
                     # Whether THIS app has more than one agency to choose
                     # between. Only HHAeXchange+ does, so the switch control
                     # is offered there and nowhere else — on the other two

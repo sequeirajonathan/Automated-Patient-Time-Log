@@ -5662,6 +5662,100 @@ class TestTheSavedSignatureRowFollowsTheAppInFront:
         assert '"apps"' in block[:block.index("return sorted")]
 
 
+class TestTheClipboardComesBackOffTheWorkLog:
+    """"When I click on the clipboard next to the eye it was supposed to
+    take me back to Hoy, but it's stuck on Mi Trabajo."
+
+    The work log is four presses deep and the walk that opens it leaves the
+    phone there on purpose — the answer is that screen. But pressing the
+    button again walked back in from where it already was, so the one thing
+    it would not do was leave.
+
+    Driven on the phone first: from the log, one Back reached Visitas and
+    the NEXT put the launcher on screen. So the way back is exactly one
+    step.
+    """
+
+    def _js(self):
+        return strip_js_comments(
+            Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+
+    def _handler(self):
+        js = self._js()
+        i = js.index("const checksRun = document.getElementById('btn-checks')")
+        return js[i:js.index("\n    });", i)]
+
+    def _back_branch(self):
+        """Just the branch that leaves the log: from its `if` to where the
+        walk would otherwise begin. Bounded that way rather than on a
+        `return` — the branch has one of its own in its socket guard."""
+        body = self._handler()
+        i = body.index("if (onChecksLog)")
+        return body[i:body.index("awaitingMacro = true;", i)]
+
+    def test_the_server_says_whether_she_is_standing_on_it(self):
+        app = Path("src/apt_log/ui/app.py").read_text(encoding="utf-8")
+        assert '"on_checks_log"' in app
+
+    def test_that_reading_uses_the_walks_own_word_list(self, ):
+        """One table, so "this is the work log" and "this is the row that
+        opens it" can never come apart — the failure the walk itself records,
+        `Mi Trabajo` against `Mi trabajo`, one letter's case."""
+        app = Path("src/apt_log/ui/app.py").read_text(encoding="utf-8")
+        body = app.split("def _on_the_work_log(", 1)[1].split("\ndef ", 1)[0]
+        assert "MY_WORK_WORDS" in body
+        assert "CHECK_LOG_APPS" in body
+
+    def test_it_is_read_off_the_title_not_the_activity(self):
+        """inMyTeam keeps its whole app in one activity — `mainactivity` on
+        the visits list and on the work log alike."""
+        app = Path("src/apt_log/ui/app.py").read_text(encoding="utf-8")
+        body = app.split("def _on_the_work_log(", 1)[1].split("\ndef ", 1)[0]
+        assert '"title"' in body
+        assert "activity" not in body.split('"""', 2)[2]
+
+    def test_on_the_log_the_press_goes_back_instead_of_walking_in(self):
+        back = self._back_branch()
+        assert "action: 'back'" in back
+        # And it leaves before reaching the walk it is standing in for.
+        assert "evv_checks" not in back
+
+    def test_it_goes_up_exactly_one_step(self):
+        """A second Back leaves the APP, not the page — seen on the phone.
+        One send, no loop."""
+        back = self._back_branch()
+        assert back.count("action: 'back'") == 1
+        assert "for (" not in back and "while (" not in back
+
+    def test_the_overshoot_guard_is_stamped_like_every_other_back(self):
+        """`backSentAt` is what lets a launcher arriving right after a Back
+        be recognised as an overshoot and bounced back into the app."""
+        assert "backSentAt = Date.now();" in self._back_branch()
+
+    def test_the_button_says_which_way_it_will_go(self):
+        js = self._js()
+        assert "i18n.leaveLog" in js and "i18n.readLog" in js
+        html = Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+        assert "leaveLog:" in html and "readLog:" in html
+
+    def test_and_looks_different_while_it_means_the_other_thing(self):
+        js = self._js()
+        assert "classList.toggle('backout', onChecksLog)" in js
+        html = Path("src/apt_log/ui/templates/phone.html").read_text(
+            encoding="utf-8")
+        assert "#btn-checks.backout" in html
+
+    def test_the_label_is_said_in_both_languages(self):
+        import json
+
+        for code in ("en", "es"):
+            catalogue = json.loads(
+                Path(f"src/apt_log/ui/locales/{code}.json").read_text(
+                    encoding="utf-8"))
+            assert catalogue["papp.leave_log"].strip()
+
+
 class TestTheSignatureMapping:
     """Who will be asked to sign, and who has nothing on file yet.
 

@@ -429,6 +429,12 @@
   .hdr-row .chev { width:12px; height:20px; }
   .hdr-row .spacer { flex:1; }
   .hdr-row svg.tool { width:21px; height:21px; }
+  /* THE CLIPBOARD, WHEN PRESSING IT IS THE WAY BACK. Same button, opposite
+     direction, so it has to look like it has changed its mind — filled
+     rather than outlined, the way the pill marks a control that is holding
+     a state rather than offering one. */
+  #btn-checks.backout { background:var(--tint); color:var(--paper);
+                        border-radius:8px; }
   .hdr-row button[hidden] { display:none; }
   /* How many are still unticked, on the button that ticks them. The number
      is the app's own answer, so it doubles as the reason the button is
@@ -2702,6 +2708,10 @@
     checkingTasks: {{ t('macro.step.checking')|tojson }},
     clearingTasks: {{ t('macro.step.clearing_tasks')|tojson }},
     readingLog: {{ t('macro.step.reading_the_log')|tojson }},
+    {# What the clipboard says it will do, which depends on where the
+       phone is standing: open the day's record, or come back off it. #}
+    readLog: {{ t('macro.evv_checks')|tojson }},
+    leaveLog: {{ t('papp.leave_log')|tojson }},
     goingHome: {{ t('papp.app_home')|tojson }},
     signWaiting: {
       patient: {{ t('sign.waiting.patient')|tojson }},

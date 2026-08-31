@@ -368,6 +368,9 @@
   }
 
   let currentPackage = '';
+  // Whether the phone is standing on the app's work log. Set from the
+  // screen payload; the clipboard reads it to decide which way it goes.
+  let onChecksLog = false;
   // The atlas's name for the page in front — 'home' marks an app's root,
   // where one more Back would exit to the Android launcher.
   let currentScreen = '';
@@ -708,6 +711,22 @@
     // except not to press it.
     const checksBtn = document.getElementById('btn-checks');
     if (checksBtn) checksBtn.hidden = !meta.checks_app || onLauncher;
+    // ON THE LOG ALREADY, THE SAME BUTTON IS THE WAY OFF IT.
+    //
+    // The walk leaves the phone on the work log on purpose — the answer is
+    // that screen — but pressing the button again walked back in from where
+    // it already was, so the one thing it would not do was leave. "It was
+    // supposed to take me back to Hoy but it's stuck on Mi Trabajo."
+    //
+    // Marked here and read by the handler, so the button's meaning follows
+    // the screen rather than being decided when it is pressed.
+    onChecksLog = !!meta.on_checks_log;
+    if (checksBtn) {
+      checksBtn.classList.toggle('backout', onChecksLog);
+      checksBtn.setAttribute(
+        'aria-label',
+        onChecksLog ? (i18n.leaveLog || '') : (i18n.readLog || ''));
+    }
 
     // The other agency, on the one app that has one. Same rule as the button
     // above it: offered where the picker exists, absent where it does not,
@@ -2439,6 +2458,22 @@
     const checksRun = document.getElementById('btn-checks');
     if (checksRun) checksRun.addEventListener('click', () => {
       if (!driving()) return;
+      // Already there: this press is the way back, not a second walk in.
+      // ONE STEP, and only one. The app's own up-arrow leaves the log for
+      // the visits list; a second would leave the APP — driven on the
+      // phone from this very screen, one Back reached Visitas and the next
+      // put the launcher up. So the button goes up exactly once and stops.
+      if (onChecksLog) {
+        if (!socket || socket.readyState !== 1) { toast(i18n.failed || ''); return; }
+        onChecksLog = false;
+        // The same send the pill's Back uses, stamp and all: `backSentAt` is
+        // what lets a launcher arriving right after a Back be recognised as
+        // an overshoot and bounced back into the app.
+        backSentAt = Date.now();
+        socket.send(JSON.stringify({ type: 'device', action: 'back' }));
+        tapping(true);
+        return;
+      }
       awaitingMacro = true;
       busy(i18n.readingLog || '', 90000);
       fetch('/macro', {
