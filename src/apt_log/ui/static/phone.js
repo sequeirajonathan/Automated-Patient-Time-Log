@@ -1988,15 +1988,23 @@
           // The names come from the bookmark each browser opened, so a
           // person nobody has named still shows as a number — the badge
           // never invents an identity it was not given.
+          //
+          // And it never LOSES one either: a browser opened without a `who`
+          // is a whole person the names cannot account for, so it is counted
+          // on the end as "+1". Naming Jonathan while quietly swallowing the
+          // other two people on the portal is worse than a bare number,
+          // because it reads as "just me".
           const named = (lastWatching || []).filter(Boolean);
-          if (count) {
-            count.textContent = named.length ? named.join(', ') : String(n);
-          }
+          const nameless = Math.max(0, n - named.length);
+          const who = named.length
+            ? named.join(', ') + (nameless ? ` +${nameless}` : '')
+            : String(n);
+          if (count) count.textContent = who;
           // The full list on the label too, for a screen reader and for a
           // long-press, where the strip has no room to grow.
           badge.setAttribute(
             'aria-label',
-            named.length ? `${i18n.watchers || ''}: ${named.join(', ')}`
+            named.length ? `${i18n.watchers || ''}: ${who}`
                          : (i18n.watchers || ''));
         }
       }

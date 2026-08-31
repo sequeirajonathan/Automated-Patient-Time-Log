@@ -2938,7 +2938,19 @@ class TestOnePersonIsCountedOnce:
             (Path(__file__).resolve().parents[1]
              / "src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
         i = js.index("named.join(', ')")
-        assert "String(n)" in js[i:i + 120]
+        assert "String(n)" in js[i:i + 200]
+
+    def test_a_person_with_no_name_is_still_counted_on_the_badge(self):
+        """Driven live: Jonathan plus one unnamed device published n=2 and
+        who=["Jonathan"], and the badge read "Jonathan" — which says "just
+        me" about two people. The unnamed ones go on the end as +1."""
+        js = strip_js_comments(
+            (Path(__file__).resolve().parents[1]
+             / "src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+        i = js.index("const nameless")
+        block = js[i:i + 300]
+        assert "n - named.length" in block
+        assert "+${nameless}" in block
 
     def test_the_watching_file_keeps_the_shape_the_macros_read(self):
         """`macros.someone_is_watching` reads `n` and `seen`, and auto
