@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from importlib import import_module
 from pathlib import Path
 from unittest.mock import patch
 
@@ -2836,7 +2837,9 @@ class TestWhoElseIsOn:
 
         src = (P(__file__).resolve().parents[1]
                / "src/apt_log/ui/app.py").read_text(encoding="utf-8")
-        assert 'payload["viewers"] = last["viewers"] = _viewers' in src
+        assert 'payload["viewers"] = people' in src
+        # And who they are, which is the half a number cannot carry.
+        assert 'payload["watching"] = names' in src
 
     def test_it_is_hidden_when_it_is_only_you(self):
         """A badge reading "1" all day is furniture."""
@@ -2861,7 +2864,92 @@ class TestWhoElseIsOn:
         src = (P(__file__).resolve().parents[1]
                / "src/apt_log/ui/app.py").read_text(encoding="utf-8")
         body = src[src.index("def _publish_viewers"):]
-        assert "if _viewers > 0:" in body[:body.index("\ntemplates =")]
+        assert "if people > 0:" in body[:body.index("\ntemplates =")]
+
+
+class TestOnePersonIsCountedOnce:
+    """"I have the bookmark open and the safari link open — it should be able
+    to say 1 person. I'm still 1 person with a who."
+
+    A link saved to the home screen opens in its own cookie jar and reports
+    its own user-agent, so the fingerprint that collapses duplicate BROWSERS
+    cannot see that the two are one PERSON. The name can.
+    """
+
+    def _store(self, tmp_path, monkeypatch):
+        from apt_log import prefs
+
+        monkeypatch.setattr(prefs, "PREFS_PATH", tmp_path / "prefs.json")
+        return prefs
+
+    def test_two_browsers_one_name_is_one_row(self, tmp_path, monkeypatch):
+        prefs = self._store(tmp_path, monkeypatch)
+        prefs.seen("installed", agent="iPhone standalone", name="EL DUEÑO")
+        prefs.seen("in-safari", agent="iPhone Safari", name="EL DUEÑO")
+        assert [d.get("name") for d in prefs.devices()] == ["EL DUEÑO"]
+
+    def test_but_two_names_stay_two_people(self, tmp_path, monkeypatch):
+        prefs = self._store(tmp_path, monkeypatch)
+        prefs.seen("hers", agent="iPhone Safari", name="LA HERMANA")
+        prefs.seen("his", agent="iPhone Safari", name="EL DUEÑO")
+        assert len(prefs.devices()) == 2
+
+    def test_an_unnamed_browser_is_left_alone(self, tmp_path, monkeypatch):
+        """Nobody has claimed it, so nothing here may decide who it is."""
+        prefs = self._store(tmp_path, monkeypatch)
+        prefs.seen("a", agent="laptop one")
+        prefs.seen("b", agent="laptop two")
+        assert len(prefs.devices()) == 2
+
+    def test_the_live_badge_counts_people_not_sockets(self):
+        """`_who_is_on` is what the count comes from, and it folds a named
+        person down to one however many sockets they hold."""
+        # `from apt_log.ui import app` hands back the FastAPI instance the
+        # package re-exports, not this module.
+        uiapp = import_module("apt_log.ui.app")
+
+        uiapp._watchers.clear()
+        uiapp._watchers.update({1: "EL DUEÑO", 2: "EL DUEÑO",
+                                3: "LA HERMANA", 4: ""})
+        people, names = uiapp._who_is_on()
+        # Two named people, plus one browser nobody has named.
+        assert people == 3
+        assert names == ["EL DUEÑO", "LA HERMANA"]
+        uiapp._watchers.clear()
+
+    def test_a_nameless_crowd_is_still_counted(self):
+        """An unclaimed browser is somebody; we just cannot say who."""
+        uiapp = import_module("apt_log.ui.app")
+
+        uiapp._watchers.clear()
+        uiapp._watchers.update({1: "", 2: "", 3: ""})
+        assert uiapp._who_is_on() == (3, [])
+        uiapp._watchers.clear()
+
+    def test_the_badge_shows_the_names_when_it_has_them(self):
+        js = strip_js_comments(
+            (Path(__file__).resolve().parents[1]
+             / "src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+        assert "named.join(', ')" in js
+
+    def test_and_falls_back_to_a_number_when_it_does_not(self):
+        """The badge never invents an identity it was not given."""
+        js = strip_js_comments(
+            (Path(__file__).resolve().parents[1]
+             / "src/apt_log/ui/static/phone.js").read_text(encoding="utf-8"))
+        i = js.index("named.join(', ')")
+        assert "String(n)" in js[i:i + 120]
+
+    def test_the_watching_file_keeps_the_shape_the_macros_read(self):
+        """`macros.someone_is_watching` reads `n` and `seen`, and auto
+        sign-in hangs off it. Adding names must not rename those."""
+        from pathlib import Path as P
+
+        src = (P(__file__).resolve().parents[1]
+               / "src/apt_log/ui/app.py").read_text(encoding="utf-8")
+        body = src[src.index("def _publish_viewers"):]
+        body = body[:body.index("\ntemplates =")]
+        assert '"n": people' in body and '"seen": seen' in body
 
 
 class TestTheTickThatSaysWhatItTicks:

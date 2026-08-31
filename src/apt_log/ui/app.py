@@ -87,7 +87,25 @@ BOOT_ID = _uuid.uuid4().hex[:12]
 # signal, refreshed on the slow tick, so a crashed UI cannot leave a stale
 # "someone is watching" on disk.
 VIEWERS_PATH = state_mod.STATE_DIR / "viewers.json"
-_viewers = 0
+# WHO IS ON, not merely HOW MANY SOCKETS ARE OPEN.
+#
+# It was a bare integer, and it read wrong for the same reason the device
+# list did: one person with the installed app AND a Safari tab holds two
+# sockets and was counted twice. "It should be able to say 1 person — I'm
+# still 1 person with a who."
+#
+# So each socket carries the name of the device that opened it, and the count
+# is of PEOPLE. Sockets nobody has named are counted one apiece — an unclaimed
+# browser is somebody, we just cannot say who.
+_watchers: dict[int, str] = {}
+
+
+def _who_is_on() -> tuple[int, list[str]]:
+    """(how many people, the names among them). Named people once each."""
+    named = sorted({n for n in _watchers.values() if n},
+                   key=str.casefold)
+    anonymous = sum(1 for n in _watchers.values() if not n)
+    return len(named) + anonymous, named
 
 
 def _publish_viewers() -> None:
@@ -110,12 +128,16 @@ def _publish_viewers() -> None:
                      .get("seen") or 0)
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         seen = 0.0
-    if _viewers > 0:
+    people, names = _who_is_on()
+    if people > 0:
         seen = _time.time()
     try:
         VIEWERS_PATH.parent.mkdir(parents=True, exist_ok=True)
         tmp = VIEWERS_PATH.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"n": _viewers, "seen": seen}),
+        # `n` and `seen` keep their meaning and their names: `someone_is_
+        # watching` reads both and must not have to learn a new shape.
+        tmp.write_text(json.dumps({"n": people, "seen": seen,
+                                   "who": names}),
                        encoding="utf-8")
         tmp.replace(VIEWERS_PATH)
     except OSError as exc:
@@ -1542,8 +1564,17 @@ async def live(ws: WebSocket):
     someone's kitchen.
     """
     await ws.accept()
-    global _viewers
-    _viewers += 1
+    # WHOSE SOCKET THIS IS. Read from the same cookie the pages use, so the
+    # name a bookmark set is the name that shows up here. Unnamed is fine and
+    # common — a browser nobody has claimed still counts as somebody.
+    watcher = id(ws)
+    try:
+        _watchers[watcher] = (prefs.device(
+            prefs.resolve(ws.cookies.get(DEVICE_COOKIE) or "",
+                          ws.headers.get("user-agent", ""))) or {}
+        ).get("name", "") or ""
+    except Exception:  # noqa: BLE001 — a label never costs a connection
+        _watchers[watcher] = ""
     _publish_viewers()
     # Same order as _translator: this device's stored choice outranks the
     # cookie, so a socket opened before the cookie caught up still pushes
@@ -1871,8 +1902,13 @@ async def live(ws: WebSocket):
                 # "somebody else is here" is a fact worth having before you
                 # reach for a button. The count is sockets, which is as close
                 # to "people looking" as anything on hand.
-                if _viewers != last.get("viewers"):
-                    payload["viewers"] = last["viewers"] = _viewers
+                # Both the count and the names, so the header can say who
+                # rather than only how many.
+                people, names = _who_is_on()
+                if [people, names] != last.get("viewers"):
+                    payload["viewers"] = people
+                    payload["watching"] = names
+                    last["viewers"] = [people, names]
                 s = await asyncio.to_thread(state_mod.collect)
                 mirror = _mirror_payload(s, t)
                 if mirror != last.get("mirror"):
@@ -1927,7 +1963,7 @@ async def live(ws: WebSocket):
         # Socket closed underneath us mid-send; nothing to clean up.
         return
     finally:
-        _viewers = max(0, _viewers - 1)
+        _watchers.pop(watcher, None)
         _publish_viewers()
         if watching_video:
             _release()

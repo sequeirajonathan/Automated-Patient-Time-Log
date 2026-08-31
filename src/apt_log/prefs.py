@@ -204,6 +204,37 @@ def _merge_duplicates(doc: dict[str, Any]) -> None:
         kept["where"] = kept.get("where") or dev.get("where", "")
         doc["devices"].pop(did, None)
 
+    # AND ONE PERSON IS ONE PERSON, ACROSS BROWSERS.
+    #
+    # The pass above collapses rows that look like the same BROWSER. This one
+    # collapses rows that say they are the same PERSON, which is a different
+    # question and the one that was wrong on screen: a link saved to the home
+    # screen opens in its own cookie jar and reports its own user-agent, so
+    # the same phone showed up twice — once as the installed app, once as the
+    # Safari tab. Reported as "I have the bookmark open and the safari link
+    # open, it should be able to say 1 person — I'm still 1 person with a
+    # who".
+    #
+    # Only NAMED rows, and only to each other. An unnamed row is a browser
+    # nobody has claimed and is left exactly where the fingerprint put it.
+    by_name: dict[str, str] = {}
+    for did, dev in sorted(doc["devices"].items(),
+                           key=lambda kv: kv[1].get("seen") or 0, reverse=True):
+        name = (dev.get("name") or "").strip().casefold()
+        if not name:
+            continue
+        keeper = by_name.get(name)
+        if keeper is None:
+            by_name[name] = did
+            continue
+        kept = doc["devices"][keeper]
+        # The keeper is the more recent, so its page and language are current.
+        kept["language"] = kept.get("language") or dev.get("language")
+        if not kept.get("language"):
+            kept.pop("language", None)
+        kept["where"] = kept.get("where") or dev.get("where", "")
+        doc["devices"].pop(did, None)
+
 
 def seen(device_id: str, *, agent: str = "", where: str = "",
          name: str = "", path: Path | None = None) -> dict[str, Any]:

@@ -371,6 +371,9 @@
   // Whether the phone is standing on the app's work log. Set from the
   // screen payload; the clipboard reads it to decide which way it goes.
   let onChecksLog = false;
+  // The names of everybody holding a socket, as the server last
+  // said them. Empty until the first update carries them.
+  let lastWatching = [];
   // The atlas's name for the page in front — 'home' marks an app's root,
   // where one more Back would exit to the Android launcher.
   let currentScreen = '';
@@ -1970,13 +1973,31 @@
       // How many of us are on. Shown only when it is more than one: a badge
       // reading "1" all day is furniture, and the fact worth having is that
       // somebody ELSE is here — one phone, two sets of hands.
+      if (msg.watching !== undefined) lastWatching = msg.watching || [];
       if (msg.viewers !== undefined) {
         const badge = document.getElementById('watchers');
         const n = Number(msg.viewers) || 0;
         if (badge) {
           badge.hidden = n < 2;
           const count = document.getElementById('watchers-n');
-          if (count) count.textContent = String(n);
+          // WHO, NOT JUST HOW MANY. "Would be nice to see who's online, not
+          // just a number next to the live indicator." A count answers
+          // "is somebody else here"; a name answers "should I wait, or is
+          // that just my own laptop".
+          //
+          // The names come from the bookmark each browser opened, so a
+          // person nobody has named still shows as a number — the badge
+          // never invents an identity it was not given.
+          const named = (lastWatching || []).filter(Boolean);
+          if (count) {
+            count.textContent = named.length ? named.join(', ') : String(n);
+          }
+          // The full list on the label too, for a screen reader and for a
+          // long-press, where the strip has no room to grow.
+          badge.setAttribute(
+            'aria-label',
+            named.length ? `${i18n.watchers || ''}: ${named.join(', ')}`
+                         : (i18n.watchers || ''));
         }
       }
       if (msg.macro) applyMacro(msg.macro);
