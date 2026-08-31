@@ -366,18 +366,32 @@ class TestSending:
 
 
 @needs_push
-class TestTheCodeNoticeGoesBothWays:
-    """Push reaches only phones that subscribed and only where iOS granted
-    it; the relay reaches whoever configured it, from a machine that does not
-    care whether this portal is healthy. Neither is enough alone."""
+class TestTheCodeNoticeGoesByPushAlone:
+    """It went both ways once, and that was right while a person had to type
+    the code: push reaches only phones that subscribed, the relay reaches
+    whoever configured it.
 
-    def test_both_roads_are_taken(self, store):
+    It is not right now. The controller reads the texted code off the
+    handset's own SIM and types it unaided, and the portal shows the live
+    token besides — so the relay, which is a PUBLIC topic, was being told
+    that a code was wanted which nobody had to act on.
+    """
+
+    def test_the_private_road_is_taken(self, store):
         from apt_log import macros
 
         with patch("apt_log.push.send", return_value=1) as pushed, \
+             patch("apt_log.notify.send", return_value=True):
+            macros._say_the_code_is_waiting()
+        assert pushed.called
+
+    def test_and_the_public_one_is_not(self, store):
+        from apt_log import macros
+
+        with patch("apt_log.push.send", return_value=1), \
              patch("apt_log.notify.send", return_value=True) as relayed:
             macros._say_the_code_is_waiting()
-        assert pushed.called and relayed.called
+        relayed.assert_not_called()
 
     def test_the_push_opens_the_app_not_a_web_page(self, store):
         from apt_log import macros
@@ -412,10 +426,11 @@ class TestTheCodeNoticeGoesBothWays:
 
         assert macros.PORTAL_URL.endswith(macros.CODE_DEEP_LINK)
 
-    def test_a_failing_push_does_not_stop_the_relay(self, store):
+    def test_a_failing_push_does_not_stop_the_sign_in(self, store):
+        """It used to fall through to the relay; there is no relay on this
+        path any more, so what has to hold is that the failure stays
+        contained. Telling somebody is not the job — signing in is."""
         from apt_log import macros
 
-        with patch("apt_log.push.send", side_effect=RuntimeError("boom")), \
-             patch("apt_log.notify.send") as relayed:
-            macros._say_the_code_is_waiting()
-        assert relayed.called
+        with patch("apt_log.push.send", side_effect=RuntimeError("boom")):
+            macros._say_the_code_is_waiting()   # does not raise
