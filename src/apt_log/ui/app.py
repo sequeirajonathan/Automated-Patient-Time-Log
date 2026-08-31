@@ -174,6 +174,9 @@ def _translator(request: Request) -> Translator:
     return Translator(chosen)
 
 
+WHO_PARAM = "who"
+
+
 def _device_id(request: Request) -> str:
     """Who is looking. An opaque id in a cookie — not a login, because there
     is nothing here to log into and never will be: the tailnet is the fence,
@@ -185,8 +188,53 @@ def _device_id(request: Request) -> str:
     itself instead of adding another row to "who is on" every time iOS
     forgets a jar.
     """
-    return prefs.resolve(request.cookies.get(DEVICE_COOKIE) or "",
-                         request.headers.get("user-agent", ""))
+    device_id = prefs.resolve(request.cookies.get(DEVICE_COOKIE) or "",
+                              request.headers.get("user-agent", ""))
+    # A NAMED LINK THAT LANDS ON SOMEBODY ELSE'S ROW IS A NEW PHONE.
+    #
+    # `resolve` matches on the user-agent when a cookie has gone missing,
+    # which is right for "the same phone came back" and wrong for two phones
+    # that are the same model — and these two are. Without this, Bertha
+    # opening her own bookmark on a cookie-less iPhone lands on Sadia's row
+    # and RENAMES it, and then both of them are Bertha.
+    #
+    # Only ever splits when the link names somebody and the row already
+    # belongs to somebody else. An unnamed row is simply claimed, and a
+    # matching name is the same person arriving again.
+    who = (request.query_params.get(WHO_PARAM) or "").strip()
+    if who:
+        try:
+            held = (prefs.device(device_id) or {}).get("name") or ""
+        except Exception:  # noqa: BLE001
+            held = ""
+        if held and held.casefold() != who.casefold():
+            return prefs.new_device_id()
+    return device_id
+
+
+# (WHO_PARAM is defined above `_device_id`, which reads it.)
+# WHOSE PHONE THIS IS, CLAIMED BY THE BOOKMARK ITSELF.
+#
+# Identity here is a cookie and deliberately not a login — the tailnet is the
+# fence. But a cookie cannot be written on a sticky note, and iOS drops them:
+# "who is on" was a list of opaque ids, and the two people using this could
+# not be told apart on it. `prefs.rename` has existed the whole time with
+# nothing calling it.
+#
+# So the name rides in the URL, once, on a link saved to each home screen:
+#     /app?who=Sadia      /app?who=Bertha
+# and the BARE /app, with no parameter, stays what it always was — the
+# machine's own default. Asked for in exactly those terms: "unless we leave
+# the default no param and we know exactly that it's the machine."
+#
+# It is a LABEL, not a credential. Anybody already past the tailnet could
+# type any name; that is true of every other control here and is the same
+# trade the cookie already makes. It buys a readable "who is on", nothing
+# more, and it must never be made to carry more than that.
+def _claimed_name(request: Request) -> str:
+    """The name this link claims, or "". Capped by `prefs.seen`, which owns
+    the question of what a device name may be."""
+    return (request.query_params.get(WHO_PARAM) or "").strip()
 
 
 def _remember(response: Response, request: Request, device_id: str,
@@ -195,8 +243,11 @@ def _remember(response: Response, request: Request, device_id: str,
     response.set_cookie(DEVICE_COOKIE, device_id, max_age=prefs.DEVICE_TTL,
                         httponly=True, samesite="lax")
     try:
+        # The name rides WITH the sighting rather than following it: see
+        # `prefs.seen`. Written separately, the row exists unnamed for one
+        # save, and every save merges duplicates.
         prefs.seen(device_id, agent=request.headers.get("user-agent", ""),
-                   where=where)
+                   where=where, name=_claimed_name(request))
     except Exception as exc:  # noqa: BLE001
         log.debug("cannot record the device (%s)", exc)
     return response

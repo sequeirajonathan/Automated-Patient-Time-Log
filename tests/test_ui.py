@@ -6862,3 +6862,130 @@ class TestTheWayBackFromTheHomeScreen:
                / "src/apt_log/feed.py").read_text(encoding="utf-8")
         i = src.index("def _watch_containment")
         assert "if _last_care_app[0] != pkg:" in src[i:i + 500]
+
+
+class TestEachPhoneCanSayWhoItIs:
+    """"The machine also needs a unique URL so we know who's who ... what are
+    the url parameters so I can save them on my sister and mom's phone."
+
+    Identity here is a cookie and deliberately not a login — the tailnet is
+    the fence. But a cookie cannot be written on a sticky note, so "who is
+    on" was a list of opaque ids and the two people using this could not be
+    told apart. `prefs.rename` had existed the whole time with nothing
+    calling it.
+
+    Placeholder names throughout, as everywhere that touches the round.
+    """
+
+    def _store(self, tmp_path, monkeypatch):
+        from apt_log import prefs
+
+        monkeypatch.setattr(prefs, "PREFS_PATH", tmp_path / "prefs.json")
+        return prefs
+
+    def _names(self, prefs):
+        return sorted((d.get("name") or "") for d in prefs.devices())
+
+    def test_a_link_can_name_the_phone_that_opens_it(self, tmp_path,
+                                                     monkeypatch):
+        from fastapi.testclient import TestClient
+
+        from apt_log.ui.app import app
+
+        prefs = self._store(tmp_path, monkeypatch)
+        TestClient(app).get("/app?who=LA%20HERMANA")
+        assert self._names(prefs) == ["LA HERMANA"]
+
+    def test_two_phones_of_the_same_model_stay_two_people(self, tmp_path,
+                                                          monkeypatch):
+        """THE CASE THIS EXISTS FOR. The fingerprint that recovers a lost
+        cookie is a GUESS, and these two hold identical handsets — so without
+        a name outranking it, the second bookmark lands on the first's row
+        and renames it, and both of them are the same person."""
+        from fastapi.testclient import TestClient
+
+        from apt_log.ui.app import app
+
+        prefs = self._store(tmp_path, monkeypatch)
+        TestClient(app).get("/app?who=LA%20HERMANA")
+        TestClient(app).get("/app?who=LA%20MADRE")
+        assert self._names(prefs) == ["LA HERMANA", "LA MADRE"]
+
+    def test_opening_the_bookmark_again_adds_nobody(self, tmp_path,
+                                                    monkeypatch):
+        """A saved link is opened every day. It must not fill the list."""
+        from fastapi.testclient import TestClient
+
+        from apt_log.ui.app import app
+
+        prefs = self._store(tmp_path, monkeypatch)
+        client = TestClient(app)
+        for _ in range(4):
+            client.get("/app?who=LA%20HERMANA")
+        assert self._names(prefs) == ["LA HERMANA"]
+
+    def test_the_name_sticks_once_the_link_has_been_used(self, tmp_path,
+                                                         monkeypatch):
+        """She taps through the portal after arriving; those pages carry no
+        parameter and must not un-name her."""
+        from fastapi.testclient import TestClient
+
+        from apt_log.ui.app import app
+
+        prefs = self._store(tmp_path, monkeypatch)
+        client = TestClient(app)
+        client.get("/app?who=LA%20HERMANA")
+        client.get("/app")
+        client.get("/console")
+        assert self._names(prefs) == ["LA HERMANA"]
+
+    def test_no_parameter_names_nobody(self, tmp_path, monkeypatch):
+        """The bare link is the default and stays the default — "we leave the
+        default no param and we know exactly that it's the machine"."""
+        from fastapi.testclient import TestClient
+
+        from apt_log.ui.app import app
+
+        prefs = self._store(tmp_path, monkeypatch)
+        TestClient(app).get("/app")
+        assert self._names(prefs) == [""]
+
+    def test_it_is_a_label_and_grants_nothing(self, tmp_path, monkeypatch):
+        """Anybody already past the tailnet could type any name. That is true
+        of every other control here; this must never be made to carry more
+        than a label."""
+        from pathlib import Path
+
+        src = (Path(__file__).resolve().parents[1]
+               / "src/apt_log/ui/app.py").read_text(encoding="utf-8")
+        body = src.split("def _claimed_name(", 1)[1].split("\ndef ", 1)[0]
+        for power in ("macro", "token", "secret", "admin", "enrolled"):
+            assert power not in body
+
+
+class TestTheCheckInFailureNoLongerBuzzes:
+    """"Turn off the check-in failure alert too, I just need schedule
+    reminders." Asked for twice.
+
+    The 5am entry has failed every weekday it has ever run, so this had
+    become a notice that fires every morning and says what he already knows —
+    the same argument the file already makes about announcing successes.
+    """
+
+    def _body(self):
+        from pathlib import Path
+
+        src = (Path(__file__).resolve().parents[1]
+               / "src/apt_log/macros.py").read_text(encoding="utf-8")
+        return src.split("def _tell_somebody_about_the_fire(",
+                         1)[1].split("\ndef ", 1)[0]
+
+    def test_it_neither_pushes_nor_relays(self):
+        body = self._body()
+        assert "push.send" not in body
+        assert "notify.send" not in body
+
+    def test_but_the_failure_is_still_written_down(self):
+        """Only the sentence went; the evidence stays. The ledger keeps the
+        outcome and the reason, and the journal keeps the walk."""
+        assert "log.warning" in self._body()

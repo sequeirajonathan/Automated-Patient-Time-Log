@@ -3723,22 +3723,26 @@ FIRE_MISSED = "A scheduled check-in was missed and needs doing by hand."
 
 
 def _tell_somebody_about_the_fire(item, outcome: str) -> None:
-    """Alert on a fire that did not land. Never raises — see notify."""
+    """Record a fire that did not land. NO LONGER NOTIFIES ANYBODY.
+
+    Switched off on the owner's instruction, asked for twice: "I only want
+    the schedule on who's next with a 5 minute warning", then "turn off the
+    check-in failure alert too, I just need schedule reminders."
+
+    His call to make, and the argument for it is his: the 5am entry has
+    failed every weekday it has ever run, so this alert had become a thing
+    that buzzes every morning and tells him something he already knows. A
+    notice that always fires is one nobody reads, which is the same reasoning
+    written above about announcing successes.
+
+    NOTHING IS LOST FROM THE RECORD, only from the phone. The ledger keeps
+    the outcome and now the reason with it, the journal keeps the walk, and
+    the portal still shows the day. This was the sentence, not the evidence.
+    """
     if outcome == "done":
         return
-    sentence = FIRE_MISSED if outcome == "missed" else FIRE_FAILED
-    try:
-        from apt_log import push
-
-        push.send(PUSH_TITLE, sentence, url=PORTAL_URL, tag="evv")
-    except Exception as exc:  # noqa: BLE001
-        log.warning("could not push the fire notice (%s)", exc)
-    try:
-        from apt_log import notify
-
-        notify.send(sentence, url=PORTAL_URL)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("could not alert about the fire (%s)", exc)
+    log.warning("a scheduled %s %s — not notifying, by request",
+                item.kind, outcome)
 
 
 # ------------------------------------------------------ the location prompt

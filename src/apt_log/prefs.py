@@ -176,11 +176,25 @@ def _merge_duplicates(doc: dict[str, Any]) -> None:
             mark = dev["mark"] = fingerprint(dev["agent"])
         if not mark:
             continue
+        # TWO PHONES OF THE SAME MODEL ARE NOT ONE PHONE.
+        #
+        # The fingerprint is a GUESS at identity, made to recover a lost
+        # cookie; a name is a person's claim, typed into a link saved on a
+        # home screen. So a named row is never merged into another, and two
+        # rows that carry different names are never merged at all — the two
+        # people using this hold identical handsets, so their user-agents are
+        # identical too, and without this the whole point of naming them
+        # ("so we know who's who") collapses back into one row on the next
+        # write. An UNNAMED duplicate still merges, which is the case this
+        # function was written for.
         keeper = by_mark.get(mark)
         if keeper is None:
             by_mark[mark] = did
             continue
         kept = doc["devices"][keeper]
+        here, there = (dev.get("name") or ""), (kept.get("name") or "")
+        if here and there and here.casefold() != there.casefold():
+            continue
         kept["name"] = kept.get("name") or dev.get("name", "")
         # The keeper is the more recent, so its language and page are the
         # current ones; only fill in what it does not have.
@@ -192,7 +206,7 @@ def _merge_duplicates(doc: dict[str, Any]) -> None:
 
 
 def seen(device_id: str, *, agent: str = "", where: str = "",
-         path: Path | None = None) -> dict[str, Any]:
+         name: str = "", path: Path | None = None) -> dict[str, Any]:
     """Record that a device is here, and return its preferences.
 
     `where` is which page it is on, so the control centre can say what the
@@ -201,6 +215,14 @@ def seen(device_id: str, *, agent: str = "", where: str = "",
     """
     def edit(doc):
         dev = doc["devices"].setdefault(device_id, {})
+        # NAMED IN THE SAME WRITE THAT RECORDS THE SIGHTING, never after.
+        # Every write merges duplicates, so a row that is briefly unnamed is
+        # a row that can be swallowed by somebody else's before its name
+        # arrives — which is exactly what happened to the second phone: it
+        # was created blank, merged into the first, and then the rename
+        # relabelled the wrong person.
+        if name.strip():
+            dev["name"] = name.strip()[:40]
         dev.setdefault("name", "")
         # Deliberately NOT defaulting the language here. A device that has
         # never touched the switch has not chosen anything, and writing the
