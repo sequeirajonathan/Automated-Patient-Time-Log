@@ -3285,12 +3285,27 @@ class TestTheNextVisitOnTheHomeScreen:
 
     def test_the_second_card_is_hidden_when_there_is_no_second_visit(
             self, client):
-        """One visit in the whole week: a card with nothing on it should not
-        be on the page."""
-        page = self._rendered(client, self._plan(
-            self._one("Ada", days=["mon"])))
+        """One visit ahead: a card with nothing on it should not be on the
+        page.
+
+        THE DAY IS CHOSEN RELATIVE TO TODAY, and it has to be. Pinned to
+        "mon", this passed six days a week and failed on Mondays: `upcoming`
+        looks eight days ahead, so a weekly block seen ON its own weekday has
+        TWO occurrences in the window — today's and next week's — and the
+        second card was right to appear. The fixture was wrong, not the page.
+
+        A suite that expires is a deploy gate that expires, and this one went
+        red on the Pi with nothing wrong with the release. Three days out
+        leaves exactly one occurrence inside the window on every day of the
+        week.
+        """
+        import datetime as dt
+
+        names = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+        day = names[(dt.date.today() + dt.timedelta(days=3)).weekday()]
+        page = self._rendered(client, self._plan(self._one("Ada", days=[day])))
         head = page[page.index('id="after"'):page.index('id="after"') + 220]
-        assert "hidden" in head
+        assert "hidden" in head, f"a second card appeared for a {day} visit"
 
     def test_the_full_week_is_grouped_by_day(self, client):
         page = self._rendered(client, self._plan(
@@ -4713,7 +4728,11 @@ class TestThePadKnowsWhoseSignatureItIsCollecting:
         rendered?" A button on the screen can be pressed, and what it
         presses is one person's signature onto another person's record."""
         js = self._js()
-        assert "b.hidden = (signerAdopted ? !mine" in js
+        # The wording moved when the row learned to narrow by app; the
+        # PROPERTY is what this is about, so it is asserted on behaviour —
+        # see `TestTheSavedSignatureRowFollowsTheAppInFront`, which drives
+        # the real function — and only the role rule is pinned here.
+        assert "signerAdopted ? !mine" in js
         assert "b.dataset.role !== signerRole" in js
 
     def test_an_unresolved_signer_offers_nobody_rather_than_everybody(self):
@@ -4749,7 +4768,7 @@ class TestThePadKnowsWhoseSignatureItIsCollecting:
         drops only the caregiver.
         """
         js = self._js()
-        i = js.index("b.hidden = (signerAdopted ? !mine")
+        i = js.index("signerAdopted ? !mine")
         clause = js[i:i + 220]
         # No role data, or no role on the sheet: nobody is hidden. That is the
         # branch that must not silently empty the row.
@@ -5455,6 +5474,192 @@ class TestThePadNamesWhoIsSigning:
         assert "title.textContent" in body
         assert "innerHTML" not in body
         assert "innerHTML" not in body
+
+
+# A DOM small enough to read and real enough to run the shipped functions
+# against: the signature row, its wrapper, and the heading they write to.
+HARNESS = """
+const parties = %(parties)s;
+let currentPackage = %(package)s;
+const signerRole = %(role)s, signerAdopted = %(adopted)s, signerNamed = '';
+const i18n = {signWaiting: {}, signWhose: ''};
+
+function el() {
+  return {dataset: {}, hidden: false, textContent: '', children: [],
+          classList: {toggle() {}, contains() { return false; }},
+          setAttribute() {}, removeAttribute() {},
+          appendChild(c) { this.children.push(c); }};
+}
+const row = el(), wrap = el(), title = el();
+const document = {
+  createElement() { return el(); },
+  getElementById(id) {
+    if (id === 'sign-adopted-row') return row;
+    if (id === 'sign-adopted') return wrap;
+    if (id === 'sign-step-title') return title;
+    return el();
+  },
+};
+
+%(render)s
+
+%(mark)s
+
+renderAdopted(parties);
+console.log(JSON.stringify(
+  row.children.filter((b) => !b.hidden).map((b) => b.dataset.name)));
+"""
+
+
+class TestTheSavedSignatureRowFollowsTheAppInFront:
+    """Two symptoms off one live check-out, and one cause.
+
+    inMyTeam's PATIENT pad offered five patients when four of them are
+    enrolled only on other apps — "only Carmen's does anything", the rest
+    404 `not_enrolled`. Its STAFF pad offered three identical "Sadia
+    Amselem" buttons, because the store holds one entry per app scope and
+    the roster emits one row per ENTRY.
+
+    Signatures are adopted per app deliberately: inMyTeam wants her full
+    signature, the other two take her initials. The row simply ignored that.
+
+    Driven rather than read: the real `markSigner` is run against a shimmed
+    row, so these are statements about what she is offered, not about how
+    the file is worded.
+    """
+
+    JS = (Path(__file__).resolve().parents[1]
+          / "src/apt_log/ui/static/phone.js")
+
+    def _fn(self, name):
+        """One top-level function's source, by brace balance."""
+        src = self.JS.read_text(encoding="utf-8")
+        start = src.index(f"function {name}(")
+        depth, i = 0, src.index("{", start)
+        for j in range(i, len(src)):
+            if src[j] == "{":
+                depth += 1
+            elif src[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    return src[start:j + 1]
+        raise AssertionError(f"{name} is not brace-balanced")
+
+    def _offered(self, parties, package, role="", adopted=""):
+        """The names still on the row after the real code has run.
+
+        Both functions are driven, not just the filter: the roster's JSON
+        goes through `renderAdopted` exactly as it does in the browser, so a
+        scope dropped on the way onto the button would fail here too.
+        """
+        import json
+        import shutil
+        import subprocess
+        import tempfile
+
+        node = shutil.which("node") or shutil.which("nodejs")
+        if not node:
+            pytest.skip("no JavaScript engine available")
+        harness = HARNESS % {
+            "parties": json.dumps(parties),
+            "package": json.dumps(package),
+            "role": json.dumps(role),
+            "adopted": json.dumps(adopted),
+            "render": self._fn("renderAdopted"),
+            "mark": self._fn("markSigner"),
+        }
+        with tempfile.NamedTemporaryFile("w", suffix=".js", encoding="utf-8",
+                                         delete=False) as fh:
+            fh.write(harness)
+            path = fh.name
+        done = subprocess.run([node, path], capture_output=True, timeout=60)
+        assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
+        return json.loads(done.stdout.decode("utf-8").strip().splitlines()[-1])
+
+    # The real store's shape, with placeholder names.
+    PATIENTS = [
+        {"name": "UN PACIENTE", "role": "patient",
+         "apps": ["com.inmyteam.inmyteam"]},
+        {"name": "OTRA PACIENTE", "role": "patient",
+         "apps": ["com.hhaexchange.uma"]},
+        {"name": "TERCERA PACIENTE", "role": "patient",
+         "apps": ["com.tellus.evv.v2"]},
+    ]
+    STAFF3 = [
+        {"name": "LA CUIDADORA", "role": "staff",
+         "apps": ["com.inmyteam.inmyteam"]},
+        {"name": "LA CUIDADORA", "role": "staff",
+         "apps": ["com.hhaexchange.uma"]},
+        {"name": "LA CUIDADORA", "role": "staff",
+         "apps": ["com.tellus.evv.v2"]},
+    ]
+
+    def test_only_the_patient_enrolled_on_this_app_is_offered(self):
+        """"Why are there five patient buttons and only Carmen's does
+        anything?" Because the other four 404."""
+        got = self._offered(self.PATIENTS, "com.inmyteam.inmyteam",
+                            role="patient")
+        assert got == ["UN PACIENTE"]
+
+    def test_three_identical_caregiver_buttons_become_one(self):
+        got = self._offered(self.STAFF3, "com.inmyteam.inmyteam",
+                            role="staff")
+        assert got == ["LA CUIDADORA"]
+
+    def test_and_it_is_the_one_scoped_to_the_app_in_front(self):
+        """Not just any of the three — pressing sends {name, package} and the
+        server resolves the scope, so the row must agree with what it will
+        resolve to."""
+        for pkg in ("com.inmyteam.inmyteam", "com.hhaexchange.uma",
+                    "com.tellus.evv.v2"):
+            assert self._offered(self.STAFF3, pkg, role="staff") == [
+                "LA CUIDADORA"], pkg
+
+    def test_an_unscoped_adoption_is_offered_on_every_app(self):
+        """`enrolled._covers` says a blanket adoption covers everything, and
+        a stricter rule here would hide a button that WOULD have worked."""
+        blanket = [{"name": "CUALQUIERA", "role": "patient", "apps": []}]
+        for pkg in ("com.inmyteam.inmyteam", "com.tellus.evv.v2"):
+            assert self._offered(blanket, pkg, role="patient") == [
+                "CUALQUIERA"], pkg
+
+    def test_with_no_package_known_nothing_is_filtered(self):
+        """The fallback: before the first screen lands there is no app in
+        front, and the row must behave as it did before."""
+        got = self._offered(self.PATIENTS, "", role="patient")
+        assert len(got) == 3
+
+    def test_the_caregiver_is_still_dropped_from_a_patients_pad(self):
+        """The narrowing is additional to the role rule, not instead of it."""
+        row = self.PATIENTS[:1] + [
+            {"name": "LA CUIDADORA", "role": "staff",
+             "apps": ["com.inmyteam.inmyteam"]}]
+        assert self._offered(row, "com.inmyteam.inmyteam",
+                             role="patient") == ["UN PACIENTE"]
+
+    def test_a_resolved_signer_still_wins(self):
+        """When the server named a person, hers is the only button — the
+        property the row already had."""
+        row = self.PATIENTS[:1] + [
+            {"name": "LA CUIDADORA", "role": "staff",
+             "apps": ["com.inmyteam.inmyteam"]}]
+        assert self._offered(row, "com.inmyteam.inmyteam", role="staff",
+                             adopted="LA CUIDADORA") == ["LA CUIDADORA"]
+
+    def test_nobody_enrolled_here_leaves_an_empty_row(self):
+        """A pad on an app nothing is enrolled for offers nothing, rather
+        than offering buttons that cannot work."""
+        assert self._offered(self.PATIENTS, "com.hhaexchange.caregiver",
+                             role="patient") == []
+
+    def test_the_roster_still_sends_the_scopes_this_needs(self):
+        """The filter is only as good as the field it reads, and that field
+        crosses a route."""
+        enrolled_src = (Path(__file__).resolve().parents[1]
+                        / "src/apt_log/enrolled.py").read_text(
+                            encoding="utf-8")
+        block = enrolled_src.split("def roster(", 1)[1]
+        assert '"apps"' in block[:block.index("return sorted")]
 
 
 class TestTheSignatureMapping:

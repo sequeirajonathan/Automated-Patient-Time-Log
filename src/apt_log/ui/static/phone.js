@@ -1299,6 +1299,13 @@
       // reading of the schedule, not a guess made here. "" means it could not
       // be decided, and `markSigner` then offers everyone.
       b.dataset.role = p.role || '';
+      // WHICH APPS THIS ADOPTION IS FOR, carried so the row can be narrowed
+      // to the app in front. The roster has always sent it and this file
+      // threw it away. Newline-joined because a package name cannot contain
+      // one, and folded here so the comparison below is a plain equality.
+      b.dataset.apps = (p.apps || [])
+        .map((a) => String(a).trim().toLowerCase())
+        .filter(Boolean).join('\n');
       row.appendChild(b);
     }
     wrap.hidden = !row.children.length;
@@ -1359,6 +1366,46 @@
       title.textContent = whose || title.dataset.plain || '';
     }
     if (!row) return;
+    // A BUTTON IS DRAWN ONLY IF PRESSING IT WOULD FIND SOMETHING.
+    //
+    // Signatures are adopted PER APP, deliberately: inMyTeam wants her full
+    // signature and the other two take her initials. The row ignored that
+    // and offered every adoption on every screen, which showed up twice on
+    // one check-out. Five patients on inMyTeam's patient pad, when four of
+    // them are enrolled only on other apps and their presses 404 — "only
+    // Carmen's does anything". And three identical "Sadia Amselem" buttons
+    // on the staff pad, because the store holds one entry per app scope and
+    // the roster emits one row per ENTRY.
+    //
+    // The app in front settles both, without anyone claiming to know WHICH
+    // patient the sheet is for — which matters, because `_role_signer`
+    // refuses to guess on a sheet that does not print a name, and the reason
+    // it refuses is a clock-based version that once put the wrong patient on
+    // Carmen's record ("Wrong patient. This is not Marina."). Narrowing by
+    // app is not identification and does not reopen that.
+    //
+    // MIRRORS `enrolled._covers`, and it has to: a stricter rule here hides
+    // a button that would have worked. An unscoped adoption covers every
+    // app. With no package known yet, nothing is filtered — the row falls
+    // back to what it did before.
+    const pkg = (currentPackage || '').trim().toLowerCase();
+    const appsOf = (b) => (b.dataset.apps || '').split('\n').filter(Boolean);
+    const covers = (b) => {
+      const apps = appsOf(b);
+      return !pkg || !apps.length || apps.indexOf(pkg) !== -1;
+    };
+    // ONE BUTTON PER PERSON. Several scopes can cover the same app, and
+    // `strokes_for` picks between them server-side — `_entries` sorts the
+    // scoped ones first — so the row must not put that choice back in front
+    // of her. It was already made, correctly, before the row was drawn.
+    const offered = new Map();
+    for (const b of row.children) {
+      if (!covers(b)) continue;
+      const prev = offered.get(b.dataset.name);
+      if (!prev || (!appsOf(prev).length && appsOf(b).length)) {
+        offered.set(b.dataset.name, b);
+      }
+    }
     // Only when the server resolved exactly one party. Without it every pill
     // stays filled, which is an honest picture of two people who could sign;
     // with it the one this screen asked for is the only filled one.
@@ -1397,9 +1444,10 @@
       //
       // Hidden rather than deleted, so the row rebuilds without a fetch the
       // moment the sheet asks for somebody else.
-      b.hidden = (signerAdopted ? !mine
-                  : !!(signerRole && b.dataset.role
-                       && b.dataset.role !== signerRole));
+      b.hidden = offered.get(b.dataset.name) !== b
+                 || (signerAdopted ? !mine
+                     : !!(signerRole && b.dataset.role
+                          && b.dataset.role !== signerRole));
       if (!b.hidden) shown += 1;
       if (mine) b.setAttribute('aria-current', 'true');
       else b.removeAttribute('aria-current');
