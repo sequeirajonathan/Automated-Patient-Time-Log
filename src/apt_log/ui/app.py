@@ -218,8 +218,11 @@ def _device_id(request: Request) -> str:
 # Identity here is a cookie and deliberately not a login — the tailnet is the
 # fence. But a cookie cannot be written on a sticky note, and iOS drops them:
 # "who is on" was a list of opaque ids, and the two people using this could
-# not be told apart on it. `prefs.rename` has existed the whole time with
-# nothing calling it.
+# not be told apart on it. There WAS a box on the console for typing one,
+# and it is gone: names come from the link now and from nowhere else, on the
+# owner's instruction — "delete the feature to set the identifier on the
+# app, we will strictly use url identifiers". One way to be named beats two
+# that can disagree.
 #
 # So the name rides in the URL, once, on a link saved to each home screen:
 #     /app?who=Sadia      /app?who=Bertha
@@ -560,18 +563,6 @@ def set_language(request: Request, language: str = Form(...),
         max_age=60 * 60 * 24 * 365, httponly=True, samesite="lax",
     )
     return _remember(response, request, device_id, _back_to(request, next))
-
-
-@app.post("/settings/name")
-def set_device_name(request: Request, name: str = Form(""),
-                    device: str = Form(""), next: str = Form("")):
-    """Name a device. A list of opaque ids answers nobody's question about
-    who is on; 'Sadia — iPhone' answers it at a glance."""
-    target = device or _device_id(request)
-    prefs.rename(target, name)
-    response = RedirectResponse(
-        url=_back_to(request, next, "/console") + "?saved=name", status_code=303)
-    return _remember(response, request, _device_id(request), "/console")
 
 
 @app.post("/settings/density")

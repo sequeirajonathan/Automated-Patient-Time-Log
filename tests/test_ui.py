@@ -164,7 +164,10 @@ class TestWritePaths:
                          # can reach the app, name a patient, or touch the
                          # record. /settings/density is the one with teeth,
                          # and it clamps rather than trusting — see prefs.
-                         "/settings/name", "/settings/density",
+                         # "/settings/name" was here and is deliberately
+                         # gone: a device is named by the link it opens, not
+                         # by a form. One writer, so two cannot disagree.
+                         "/settings/density",
                          "/settings/density/clear",
                          # A browser asking to be told when the login code
                          # arrives. It stores what the browser handed over

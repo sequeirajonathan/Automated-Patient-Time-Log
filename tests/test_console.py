@@ -338,10 +338,16 @@ class TestWhoIsOn:
         assert [d["where"] for d in prefs.devices()] == ["/console"]
 
     def test_naming_this_device_makes_the_list_readable(self, client):
-        client.get("/console")
-        client.post("/settings/name", data={"name": "Jonathan — laptop",
-                                            "next": "/console"})
-        assert "Jonathan — laptop" in client.get("/console").text
+        """The property is unchanged; the way it happens is not. The box for
+        typing a name is gone — "we will strictly use url identifiers" — so
+        the name arrives on the link the phone opens."""
+        client.get("/app?who=UNA%20LAPTOP")
+        assert "UNA LAPTOP" in client.get("/console").text
+
+    def test_and_there_is_no_longer_a_box_for_typing_one(self, client):
+        """Two ways to set the same thing are two ways for it to disagree."""
+        page = client.get("/console").text
+        assert "/settings/name" not in page
 
     def test_the_same_browser_stays_one_device(self, client):
         client.get("/console")

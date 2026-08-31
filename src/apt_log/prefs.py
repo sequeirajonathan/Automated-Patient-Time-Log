@@ -261,8 +261,17 @@ def language_of(device_id: str, path: Path | None = None) -> str:
 
 
 def rename(device_id: str, name: str, path: Path | None = None) -> None:
-    """Give a device a human name — 'Sadia's phone', 'the kitchen iPad'.
-    A list of opaque ids answers nobody's question about who is on."""
+    """Give a device a human name, for a device that is already known.
+
+    NOT THE PATH THE PORTAL USES. Names arrive with the sighting instead —
+    `seen(..., name=...)` — because a row that exists unnamed for even one
+    save can be merged into somebody else's before its name lands. The
+    console's "name this device" box that used to call this is gone, on the
+    owner's instruction: names come from the saved link and nowhere else.
+
+    Kept because it is the honest primitive for the operation and is covered
+    on its own; nothing in the request path should reach for it.
+    """
     def edit(doc):
         doc["devices"].setdefault(device_id, {})["name"] = name.strip()[:40]
     _mutate(edit, path)

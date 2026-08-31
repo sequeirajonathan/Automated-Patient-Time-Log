@@ -427,15 +427,6 @@
     {% else %}
     <p class="sub" style="margin:0">{{ t('console.who.empty') }}</p>
     {% endfor %}
-    <form method="post" action="/settings/name" style="margin-top:12px;
-          display:flex; gap:8px">
-      <input type="hidden" name="next" value="/console">
-      <input type="text" name="name" maxlength="40"
-             placeholder="{{ t('console.who.name_this') }}"
-             value="{{ (devices | selectattr('id', 'equalto', device_id)
-                       | map(attribute='name') | first) or '' }}">
-      <button type="submit" class="primary">{{ t('console.who.save') }}</button>
-    </form>
     <p class="sub">{{ t('console.who.explain') }}</p>
   </section>
 
