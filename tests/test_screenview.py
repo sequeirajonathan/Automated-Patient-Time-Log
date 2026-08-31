@@ -3093,6 +3093,70 @@ class TestACheckOutSheetIsNotASideMenu:
         assert 58 / 1080 < screenview.DRAWER_MIN_RIGHT < 400 / 1080
 
 
+class TestTheTitleBarDoesNotOfferABareNumber:
+    """"It's telling me that I have 5 open notifications every time
+    regardless."
+
+    inMyTeam's notification bell has no words of its own, so the only caption
+    the reflow could give it was its unread COUNT — and a nameless button in
+    the header reading "5" is neither a label nor a thing anybody asked for.
+    "Regardless" is the point: the app's unread count does not move, so the
+    number said the same thing every day and meant nothing on any of them.
+
+    Withheld from the BAR, not from the app: the bell is still on the phone.
+    The same argument the help icon was dropped on.
+    """
+
+    W, H = 1080, 2340
+
+    def _doc(self, app="com.inmyteam.inmyteam", badge="5"):
+        els = [
+            {"cls": "ImageButton", "rid": "", "txt": "Abrir panel lateral",
+             "b": [5, 92, 42, 134], "enabled": True, "checked": False,
+             "focused": False, "has_text": True},
+            {"cls": "FrameLayout",
+             "rid": f"{app}:id/notification_history", "txt": "",
+             "b": [1043, 97, 1075, 129], "enabled": True, "checked": False,
+             "focused": False, "has_text": False},
+        ]
+        sts = [{"cls": "TextView", "rid": "", "txt": "Visitas",
+                "b": [52, 99, 112, 126]},
+               {"cls": "TextView", "rid": f"{app}:id/badge_only",
+                "txt": badge, "b": [1061, 100, 1070, 109]}]
+        return {"app": app, "size": [self.W, self.H],
+                "elements": els, "statics": sts}
+
+    def test_the_bell_is_not_in_the_bar(self):
+        nav = screenview.build(self._doc())["nav"]
+        assert nav["trailing"] == []
+
+    def test_and_does_not_fall_into_the_list_instead(self):
+        """Dropping it from the bar only helps if it does not reappear as a
+        row — which is exactly what happened to the app's own Back once."""
+        model = screenview.build(self._doc())
+        drawn = [it.get("txt") for row in model["rows"]
+                 for it in row["items"]]
+        assert "5" not in drawn
+
+    def test_the_page_still_knows_where_it_is(self):
+        """The bar is dropped from, not dropped."""
+        assert screenview.build(self._doc())["nav"]["title"] == "Visitas"
+
+    def test_another_apps_bar_control_is_untouched(self):
+        """Withheld PER APP and by resource id. Nothing here may quietly
+        strip a control from an app nobody asked about."""
+        doc = self._doc(app="com.hhaexchange.uma", badge="5")
+        assert len(screenview.build(doc)["nav"]["trailing"]) == 1
+
+    def test_it_is_matched_by_id_and_not_by_a_caption(self):
+        """A caption is translated and a badge is a number; neither is a
+        thing to key on."""
+        src = (Path(__file__).resolve().parents[1]
+               / "src/apt_log/ui/screenview.py").read_text(encoding="utf-8")
+        table = src.split("WITHHELD_CONTROLS = {", 1)[1].split("}", 1)[0]
+        assert "notification_history" in table
+
+
 class TestASideMenuIsInFrontOfThePage:
     """"We need to work on what happens on menu click — the UIs are
     clashing."

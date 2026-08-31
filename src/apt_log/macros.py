@@ -81,6 +81,11 @@ FIRE_EVERY = 5.0
 # floor on how often it bothers to look.
 PREPARE_EVERY = 20.0
 
+# How often the five-minute reminder pass looks. The window it fires in is
+# five minutes wide, so asking oftener than this buys nothing and costs a
+# schedule parse every time.
+REMIND_EVERY = 20.0
+
 # ------------------------------------------------------------ auto sign-in
 # The app expires its session mid-use: the alert's only button lands on the
 # sign-in screen, which the portal (correctly) will not photograph and she
@@ -2406,10 +2411,16 @@ def _say_the_code_is_waiting() -> None:
     notification can only open Safari at a URL, which is the wrong app on the
     one notice whose entire job is to be tapped.
 
-    The relay stays as the fallback, and it is not redundant. Push reaches
-    only phones that have subscribed, and only where iOS granted it; the
-    relay reaches whoever configured it, from a machine that does not care
-    whether this portal is healthy. Neither is enough on its own.
+    THE RELAY NO LONGER CARRIES THIS ONE. It used to, as a fallback that was
+    genuinely not redundant — push reaches only phones that subscribed, the
+    relay reaches whoever configured it. But the relay is a PUBLIC TOPIC, and
+    this notice is now the least useful thing on it: the controller reads the
+    texted code off the handset's own SIM and types it unaided, and the portal
+    shows the live token besides. Nobody has to be at the wheel for a code, so
+    a public channel does not need to be told one is wanted.
+
+    The relay is untouched for what it was built for — REQ-9's machine
+    failures, which must go out even when this portal is the broken thing.
     """
     if _told_recently():
         # A SECOND GUARD, BEHIND THE COOLDOWN AND NOT INSTEAD OF IT.
@@ -2432,9 +2443,6 @@ def _say_the_code_is_waiting() -> None:
     except Exception as exc:  # noqa: BLE001
         log.warning("could not push the code notice (%s)", exc)
 
-    from apt_log import notify
-
-    notify.send(CODE_WAITING, url=PORTAL_URL)
     _mark_told()
     log.info("code notice: pushed to %d subscriber(s)", pushed)
 
@@ -5321,6 +5329,9 @@ class Runner:
         # re-FIRING one is not, which is why that ledger is on disk and this
         # set is not.
         self._prep_checked: float | None = None
+        # The same, for the five-minute reminder. None, not 0.0: "never
+        # looked" is a different fact from "looked at the epoch".
+        self._remind_checked: float | None = None
         self._prepared: set = set()
         # Whether each app's last substantive screen was a foldable page
         # (a run of date headers): a CHANGE in this is a page transition
@@ -5503,6 +5514,7 @@ class Runner:
                 self.maybe_auto_auth()
                 self.maybe_fire()
                 self.maybe_prepare()
+                self.maybe_remind()
                 self.maybe_warm()
                 self.maybe_stitch()
             except Exception as exc:  # noqa: BLE001
@@ -5582,6 +5594,33 @@ class Runner:
                          else ""})
         _tell_somebody_about_the_fire(item, outcome)
         return outcome == "done"
+
+    def maybe_remind(self) -> int:
+        """Tell her a visit is about to start. Five minutes' notice.
+
+        NOT GATED ON ARMING, and that is the difference between this and
+        everything else on the tick. Arming says whether the CONTROLLER may
+        act; this is a nudge for the person, and she works the visits nobody
+        armed too.
+
+        Nothing here touches the phone, so it does not queue behind a macro
+        and cannot interleave with one. It also never raises: a notification
+        that fails must not be able to stop a check-in.
+        """
+        tick = time.monotonic()
+        if self._remind_checked is not None \
+                and tick - self._remind_checked < REMIND_EVERY:
+            return 0
+        self._remind_checked = tick
+        try:
+            from apt_log import remind
+            from apt_log import schedule as schedule_mod
+
+            return remind.send(schedule_mod.load(),
+                               datetime.now().astimezone())
+        except Exception as exc:  # noqa: BLE001 — never break the tick
+            log.debug("no reminders sent (%s)", exc)
+            return 0
 
     def maybe_prepare(self) -> bool:
         """Get the app onto the patient's visit before the entry is due.

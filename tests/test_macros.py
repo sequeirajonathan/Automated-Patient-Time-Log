@@ -1467,9 +1467,14 @@ class TestTheCodeIsAnnounced:
     discovers is asking."""
 
     def test_reaching_the_code_screen_sends_a_notification(self):
+        """BY PUSH, which is now the only road it takes. The relay carried a
+        copy until the controller learned to read the code off the handset's
+        own SIM and type it unaided — at which point a public topic was being
+        told a code was wanted that nobody had to do anything about."""
         sent = []
-        with patch("apt_log.notify.send",
-                   side_effect=lambda m, url="": sent.append((m, url))):
+        with patch("apt_log.push.send",
+                   side_effect=lambda t, b, url="", tag="": (
+                       sent.append((b, url)) or 1)):
             macros._say_the_code_is_waiting()
         assert len(sent) == 1
         message, url = sent[0]
@@ -1505,12 +1510,15 @@ class TestTheCodeIsAnnounced:
         for leak in ("patient", "paciente", "visit", "visita"):
             assert leak not in message.lower()
 
-    def test_a_notification_that_cannot_be_sent_never_fails_the_sign_in(self):
-        with patch("apt_log.notify.send", side_effect=OSError("no network")):
-            with pytest.raises(OSError):
-                macros._say_the_code_is_waiting()
-        # ...which is why the real helper swallows it. Proven against the
-        # helper itself rather than assumed of the caller:
+    def test_a_notification_that_cannot_be_sent_never_fails_the_sign_in(self,
+                                                                        tmp_path):
+        """The sign-in is the job; telling somebody about it is not. A push
+        service that is down must not take the walk with it."""
+        with patch.object(macros, "TOLD_PATH", tmp_path / "told.json"), \
+                patch("apt_log.push.send", side_effect=OSError("no network")):
+            macros._say_the_code_is_waiting()   # does not raise
+        # And the relay, still used for the machine's OWN failures, swallows
+        # its own trouble the same way.
         from apt_log import notify
 
         with patch("apt_log.notify.subprocess.run",
@@ -4590,15 +4598,21 @@ class TestTheSameNoticeIsNotSentTwice:
             macros._say_the_code_is_waiting()
         assert pushed.call_count == 1
 
-    def test_the_relay_is_silenced_too_not_just_the_push(self, tmp_path):
-        """Both roads carry the same sentence; repeating either is the same
-        noise on a different screen."""
+    def test_the_relay_is_not_told_about_a_code_at_all(self, tmp_path):
+        """It used to carry a copy, and the repeat guard covered both roads.
+        It carries none now: the relay is a PUBLIC topic, and the controller
+        reads the texted code off the handset itself and types it unaided, so
+        there is nobody to summon and no reason to say so in the open.
+
+        The relay is untouched for what it was built for — REQ-9's machine
+        failures, which must go out even when this portal is the broken
+        thing."""
         with patch.object(macros, "TOLD_PATH", tmp_path / "told.json"), \
                 patch("apt_log.push.send", return_value=1), \
                 patch("apt_log.notify.send") as relayed:
             macros._say_the_code_is_waiting()
             macros._say_the_code_is_waiting()
-        assert relayed.call_count == 1
+        relayed.assert_not_called()
 
     def test_a_notice_speaks_for_the_same_window_as_the_cooldown(self):
         """It is the same event — a code asked for and not yet used."""

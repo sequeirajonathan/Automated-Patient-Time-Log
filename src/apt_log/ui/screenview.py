@@ -1992,7 +1992,8 @@ def build(doc: dict) -> dict | None:
             # trailing control under its own name.
             controls = [b for b in buttons
                         if not _is_up_affordance(b)
-                        and not _is_help_affordance(b)]
+                        and not _is_help_affordance(b)
+                        and not _is_withheld(b, doc.get("app") or "")]
             nav = {
                 "back": controls[0] if controls else None,
                 "title": title["txt"] if title else "",
@@ -2620,6 +2621,35 @@ def _is_refusal(text: str) -> bool:
 WITHHELD_TABS = {
     "com.tellus.evv.v2": ("action_tab_messages",),
 }
+
+# CONTROLS THE TITLE BAR IS BETTER OFF WITHOUT, by app and by resource id.
+#
+# inMyTeam's notification bell. It has no words of its own, so the only
+# caption it can offer is its unread COUNT — and the portal drew that number
+# as the button's name: a nameless control in the header reading "5", which
+# is neither a label nor a thing anybody asked for. Reported as "it's telling
+# me that I have 5 open notifications every time regardless", and "regardless"
+# is the point: the app's unread count does not move, so the number is the
+# same every day and means nothing on either.
+#
+# The same argument the help icon was dropped on, in the owner's words there:
+# "not a useful thing on our end honestly — I don't see me or my sister ever
+# pressing that." Withheld from the BAR, not from the app: the bell is still
+# on the phone and still works if anybody goes to it.
+#
+# By resource id, because a caption is translated and a count is a number.
+WITHHELD_CONTROLS = {
+    "com.inmyteam.inmyteam": ("notification_history",),
+}
+
+
+def _is_withheld(item: dict, app: str) -> bool:
+    """Whether this bar control is one this app is not to offer."""
+    ids = WITHHELD_CONTROLS.get(app or "")
+    if not ids:
+        return False
+    rid = ((item.get("aim") or {}).get("rid") or "").split("/")[-1]
+    return bool(rid) and rid in ids
 
 DRAWER_MAX_RIGHT = 0.6
 
