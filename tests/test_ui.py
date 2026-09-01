@@ -2351,6 +2351,43 @@ class TestTypingAName:
         prompt over one is the OTP confusion coming back."""
         assert "if (el.dataset.hint)" in self._js()
 
+    def test_a_repeat_on_the_same_control_is_swallowed(self):
+        """Live, on a fourteen-task check-out: the tick takes ~1s to come
+        back, nothing moved on the box she pressed, so she pressed again —
+        and the second press toggled it back off. Insisting was the one
+        thing guaranteed to undo the work."""
+        js = self._js()
+        i = js.index("const key = el.dataset.aim")
+        block = js[i:i + 320]
+        assert "key === lastAim" in block
+        assert "SAME_CONTROL_QUIET" in block
+        assert "return" in block
+
+    def test_but_a_different_control_is_never_swallowed(self):
+        """Fourteen tasks are fourteen elements. Only the repeat on ONE box
+        is never meant; a blanket lock would make ticking a plan crawl."""
+        js = self._js()
+        i = js.index("const key = el.dataset.aim")
+        block = js[i:i + 320]
+        # The guard is keyed on the element, not on a global in-flight flag.
+        assert "lastAim" in block and "body.classList.contains" not in block
+
+    def test_a_new_screen_clears_the_repeat_guard(self):
+        """The same coordinates on a new screen are a different control."""
+        js = self._js()
+        assert "if (frameId && frameId !== previous) lastAim = '';" in js
+
+    def test_the_control_she_pressed_is_marked(self):
+        """The page-wide shimmer says the portal is busy; it never said the
+        press landed on THIS row."""
+        js = self._js()
+        i = js.index("const key = el.dataset.aim")
+        assert "el.classList.add('sent')" in js[i:i + 500]
+        style = (Path(__file__).resolve().parents[1]
+                 / "src/apt_log/ui/templates/phone.html").read_text(
+                     encoding="utf-8")
+        assert "[data-aim].sent" in style
+
     def test_a_name_keeps_its_spaces(self):
         """The old sanitizer was OTP-shaped and stripped everything but
         letters and digits, which turned "Rojas Batista" into a search that

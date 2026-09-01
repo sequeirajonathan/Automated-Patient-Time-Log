@@ -18,6 +18,14 @@
   let socket = null;
   let backoff = 1000;
   let frameId = '';
+  // The last control tapped, and when — see the tap handler. Reset whenever
+  // the screen actually changes, because the same coordinates on a new screen
+  // are a different control and a different intention.
+  let lastAim = '';
+  let lastAimAt = 0;
+  // Long enough to cover the ~1s round trip and the 1.2s read behind it,
+  // short enough that a genuine second press on the same box still lands.
+  const SAME_CONTROL_QUIET = 1800;
   let frameImg = '';
   let lastScreenHtml = '';
   // Whether the screen before this one was a popup window rather than the
@@ -217,6 +225,30 @@
             return;
           }
         }
+        // A SECOND TAP ON THE SAME CONTROL IS AN UNDO, NOT AN INSISTENCE.
+        //
+        // A tick takes about a second to come back: the tap crosses the
+        // tailnet, the poke wakes the watcher, and the hierarchy read costs
+        // ~0.7s (HIERARCHY_EVERY is 1.2s behind it). Nothing moved on the
+        // control she pressed in the meantime — only the whole screen dimmed
+        // — so the honest reading of it was "that did not work", and she
+        // pressed again. On a checkbox the second press toggles it BACK, so
+        // insisting was the one thing guaranteed to undo the work. Found on
+        // a live check-out: fourteen tasks, pressed twice each, and she
+        // finally gave up and ticked them all at once.
+        //
+        // Only the SAME control is swallowed, and only briefly. Fourteen
+        // tasks are fourteen different elements and must stay as fast as she
+        // can press them; it is the repeat on one box that is never meant.
+        const key = el.dataset.aim;
+        const now = Date.now();
+        if (key === lastAim && now - lastAimAt < SAME_CONTROL_QUIET) return;
+        lastAim = key;
+        lastAimAt = now;
+        // WHICH one she hit, not merely that something is happening. The
+        // page-wide shimmer says the portal is busy; it never said the press
+        // landed on this row, which is the question being asked.
+        el.classList.add('sent');
         // No overlays and no sentences for a tap: the screen dims and
         // shimmers until its successor arrives, the way a native app treats
         // a moment of work as a state rather than an event.
@@ -440,6 +472,9 @@
         paintSentCode();
         const wire = root.querySelector('.wire');
         frameId = wire ? (wire.dataset.frame || '') : '';
+        // A new screen clears the repeat guard: the press she makes next is
+        // about what is in front of her now, however soon it comes.
+        if (frameId && frameId !== previous) lastAim = '';
         // Whether the peek's scroll arrows have anything to do. The phone is
         // the only thing that knows, and most screens fit whole at the tuned
         // density — so on those the arrows would be furniture sitting over
