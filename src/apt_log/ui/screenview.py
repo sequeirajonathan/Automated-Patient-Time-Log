@@ -492,35 +492,52 @@ def _shape_description(text: str) -> list[str] | None:
 # the reflow was drawing all five as one more muted line under the times —
 # the same grey as the clock, easy to read straight past. A status is not a
 # detail about a visit; on this screen it is the point of the row.
+# Matched in order, and the order is the whole design.
+#
+# A VISIT THAT IS HAPPENING IS NOT A VISIT WITH NOTHING TO SAY. The live
+# words matched nothing at first, so a running visit fell through to "" —
+# the grey, muted chip an UNRECOGNISED status gets. On a day with two
+# finished visits that reads exactly backwards: the two that are OVER are
+# bright green and the one actually in progress is the dullest thing on the
+# page. His sister read her own live visit that way and thought she had
+# missed the appointment completely.
+#
+# AND LIVENESS OUTRANKS LATENESS. Mobile Caregiver+ writes a running visit
+# that began late as "En Progreso, Tarde", and worst-first ordering matched
+# the "Tarde" — painting a live, properly-initiated visit amber. Read off
+# the portal as the patient having been missed, and reported as critical
+# while the visit was still running.
+#
+# Lateness is how a visit BEGAN; in-progress is what it IS, and the colour
+# has to answer "is this happening?" before "how did it go?". Nothing is
+# hidden by this: the chip still SAYS "En Progreso, Tarde", so the lateness
+# is right there in the words — only the colour changes.
+#
+# "Perdida" stays above everything: a visit the app itself calls missed is
+# not one to paint as live. Each app words the live state differently —
+# Mobile Caregiver+ "En Progreso", HHAeXchange+ "La visita está en curso" —
+# so both are here, with the English form for the mixed-locale screens.
 _STATUS_TONES = (
     ("perdida", "bad"),
     ("missed", "bad"),
-    ("tarde", "warn"),
-    ("late", "warn"),
-    # A VISIT THAT IS HAPPENING IS NOT A VISIT WITH NOTHING TO SAY.
-    #
-    # These matched nothing, so a running visit fell through to "" — the
-    # grey, muted chip an unrecognised status gets. On a day with two
-    # finished visits that reads exactly backwards: the two that are OVER
-    # are bright green and the one actually in progress is the dullest thing
-    # on the page. His sister read her own live visit that way and thought
-    # she had missed the appointment completely.
-    #
-    # Each app says it differently — Mobile Caregiver+ "En Progreso",
-    # HHAeXchange+ "La visita está en curso" — so both words are here.
     ("en progreso", "live"),
     ("en curso", "live"),
     ("in progress", "live"),
+    ("tarde", "warn"),
+    ("late", "warn"),
     ("completad", "ok"),
     ("complete", "ok"),
 )
 
 
 def status_tone(words: str) -> str:
-    """"ok", "warn", "bad", or "" for a status with no colour of its own.
+    """"ok", "warn", "live", "bad", or "" for a status with no colour.
 
-    Ordered worst-first: "Completadas, Tarde" is a visit that happened
-    outside its window, and the thing worth seeing about it is the Tarde.
+    See `_STATUS_TONES` for the order and why it is what it is: a missed
+    visit first, then a running one, then how it went. "Completadas, Tarde"
+    is a visit that happened outside its window and the Tarde is the thing
+    worth seeing; "En Progreso, Tarde" is a visit that is still happening,
+    and THAT is the thing worth seeing.
     """
     low = (words or "").strip().lower()
     if not low:

@@ -7303,10 +7303,42 @@ class TestAVisitThatIsHappeningLooksLikeIt:
         assert self._tone("Perdida") == "bad"
         assert self._tone("Completadas, Tarde") == "warn"
 
-    def test_worst_first_still_wins_over_live(self):
-        """Ordering is worst-first on purpose; a missed visit that also says
-        something else must still read as missed."""
+    def test_a_missed_visit_still_wins_over_live(self):
+        """A visit the app itself calls missed is not one to paint as live."""
         assert self._tone("Perdida, en progreso") == "bad"
+
+    def test_but_a_LATE_visit_that_is_running_reads_as_running(self):
+        """Mobile Caregiver+ writes it "En Progreso, Tarde". Worst-first
+        ordering matched the Tarde and painted a live, properly-initiated
+        visit amber — read off the portal as the patient having been missed,
+        and reported as critical while the visit was still running.
+
+        Lateness is how a visit BEGAN; in-progress is what it IS."""
+        assert self._tone("En Progreso, Tarde") == "live"
+
+    def test_and_the_lateness_is_still_in_the_words(self):
+        """Only the colour changes. A caregiver reading the chip still sees
+        Tarde, so nothing is hidden by ranking liveness first."""
+        from apt_log.ui import screenview as sv
+
+        doc = {"size": [1080, 2340], "app": "com.tellus.evv.v2",
+               "activity": "dashboardactivity",
+               "elements": [{"rid": "visits_event0_0", "cls": "View",
+                             "b": [0, 310, 1080, 421], "txt": ""}],
+               "statics": [{"cls": "View", "b": [0, 310, 1080, 421],
+                            "txt": "La visita está programada para UN "
+                                   "PACIENTE en martes, 1 de septiembre de "
+                                   "2026 de 6:00 PM a 8:00 PM y su estado "
+                                   "es En Progreso, Tarde"}]}
+        got = [it for r in sv.build(doc)["rows"] for it in r["items"]
+               if it.get("status")]
+        assert got, "the row lost its status entirely"
+        assert got[0]["status_tone"] == "live"
+        assert "Tarde" in got[0]["status"]
+
+    def test_a_finished_but_late_visit_still_warns(self):
+        """The case the worst-first rule existed for, and it must survive."""
+        assert self._tone("Completadas, Tarde") == "warn"
 
     def test_the_live_chip_has_a_style_of_its_own(self):
         """A tone with no CSS is the grey it was trying to escape."""
