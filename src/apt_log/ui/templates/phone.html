@@ -748,10 +748,24 @@
                font-variant-numeric:tabular-nums; }
   .a-row:has(> .a-summary) { padding:13px 14px; }
 
+  /* A CELL NEEDS ROOM FOR A COUPLE OF WORDS BEFORE IT GIVES UP.
+     Three items sharing a 390px row left the last one 29 pixels, so
+     "Agregar nota de servicio" came out as "Agre / gar...". The row already
+     wraps, so a floor here spills it onto its own line whole instead of
+     shredding it. 10ch is the floor .a-label already uses, so a cell and a
+     label in the same row give way at the same point — and measured against
+     the captured page it leaves the rows that were fine exactly as they
+     were. */
   .a-cell { flex:1; border:none; background:none; text-align:left; padding:0;
             cursor:pointer; display:flex; flex-direction:column; gap:2px;
-            min-width:0; position:relative; padding-right:20px;
+            min-width:min(10ch, 100%); position:relative; padding-right:20px;
             transition:opacity .25s ease; }
+  /* Nothing but a state chip: hug it. With an equal share of a narrow row
+     the cell is squeezed below the chip's own width and the chip, which
+     cannot shrink, spills over the text beside it — "COMPLETADA" printed
+     across "T1019". */
+  .a-cell.chip { flex:0 0 auto; min-width:0; padding-right:0; }
+  .a-cell.chip > .a-status { margin-top:0; }
   .a-cell:active { opacity:.45; transition-duration:.04s; }
   /* The row's title: one line by preference, wrapping to two before it
      ever clips — long patient names stay legible, runaway strings do not
