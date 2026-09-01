@@ -7264,3 +7264,88 @@ class TestTheAttributionWasNeverARow:
         alert = sv.build(doc).get("alert")
         assert alert is not None
         assert "caducada" in alert["title"]
+
+
+class TestAVisitThatIsHappeningLooksLikeIt:
+    """His sister looked at her own live visit and thought she had missed
+    the appointment completely.
+
+    "En Progreso" matched nothing in the tone table, so it fell through to
+    "" — the grey, muted chip an UNRECOGNISED status gets. On a day with two
+    finished visits that reads exactly backwards: the two that are over are
+    bright green and the one actually running is the dullest thing there.
+    """
+
+    def _tone(self, words):
+        from apt_log.ui import screenview as sv
+
+        return sv.status_tone(words)
+
+    def test_mobile_caregivers_wording(self):
+        assert self._tone("En Progreso") == "live"
+
+    def test_and_hhaexchanges_own_sentence(self):
+        """The two apps say it differently and both must read as live."""
+        assert self._tone("La visita está en curso") == "live"
+
+    def test_and_the_english_form(self):
+        assert self._tone("In Progress") == "live"
+
+    def test_a_live_visit_is_not_the_same_as_an_unknown_one(self):
+        """The whole defect: both used to come back "" and wear the same
+        grey. A status the portal does not recognise must still be blank —
+        it is the running one that had to stop being."""
+        assert self._tone("Programada") == ""
+        assert self._tone("En Progreso") != self._tone("Programada")
+
+    def test_the_severities_are_untouched(self):
+        assert self._tone("Completada") == "ok"
+        assert self._tone("Perdida") == "bad"
+        assert self._tone("Completadas, Tarde") == "warn"
+
+    def test_worst_first_still_wins_over_live(self):
+        """Ordering is worst-first on purpose; a missed visit that also says
+        something else must still read as missed."""
+        assert self._tone("Perdida, en progreso") == "bad"
+
+    def test_the_live_chip_has_a_style_of_its_own(self):
+        """A tone with no CSS is the grey it was trying to escape."""
+        style = (Path(__file__).resolve().parents[1]
+                 / "src/apt_log/ui/templates/phone.html").read_text(
+                     encoding="utf-8")
+        assert ".a-status.live" in style
+        i = style.index(".a-status.live")
+        assert "background" in style[i:i + 200]
+
+    def test_the_running_visit_on_a_real_day(self):
+        """The real shape, captured off the phone at 18:07: each row is one
+        View whose whole description is a sentence, and the status is the
+        tail of it. A finished visit beside a running one, so the contrast
+        that misled her is the thing under test."""
+        from apt_log.ui import screenview as sv
+
+        def row(rid, top, who, when, state):
+            box = [0, top, 1080, top + 111]
+            said = (f"La visita está programada para {who} en martes, 1 de "
+                    f"septiembre de 2026 de {when} y su estado es {state}")
+            return ({"rid": rid, "cls": "View", "b": box, "txt": ""},
+                    {"cls": "View", "b": box, "txt": said})
+
+        done_e, done_s = row("visits_event0_0", 310, "A PATIENT",
+                             "9:05 AM a 11:05 AM", "Completada")
+        live_e, live_s = row("visits_event0_2", 534, "UN PACIENTE",
+                             "6:00 PM a 8:00 PM", "En Progreso")
+        doc = {"size": [1080, 2340], "app": "com.tellus.evv.v2",
+               "activity": "dashboardactivity",
+               "elements": [done_e, live_e], "statics": [done_s, live_s]}
+
+        tones = {}
+        for r in sv.build(doc)["rows"]:
+            for it in r["items"]:
+                if it.get("status"):
+                    tones[it["status"]] = it.get("status_tone", "")
+        # The row she misread: it must carry a tone of its own, not the
+        # blank an unrecognised status wears. (`ok` and the severities have
+        # their own test above; this one is about the live row surviving a
+        # real row's shape.)
+        assert tones.get("En Progreso") == "live", tones

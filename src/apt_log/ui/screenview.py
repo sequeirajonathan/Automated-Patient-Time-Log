@@ -497,6 +497,20 @@ _STATUS_TONES = (
     ("missed", "bad"),
     ("tarde", "warn"),
     ("late", "warn"),
+    # A VISIT THAT IS HAPPENING IS NOT A VISIT WITH NOTHING TO SAY.
+    #
+    # These matched nothing, so a running visit fell through to "" — the
+    # grey, muted chip an unrecognised status gets. On a day with two
+    # finished visits that reads exactly backwards: the two that are OVER
+    # are bright green and the one actually in progress is the dullest thing
+    # on the page. His sister read her own live visit that way and thought
+    # she had missed the appointment completely.
+    #
+    # Each app says it differently — Mobile Caregiver+ "En Progreso",
+    # HHAeXchange+ "La visita está en curso" — so both words are here.
+    ("en progreso", "live"),
+    ("en curso", "live"),
+    ("in progress", "live"),
     ("completad", "ok"),
     ("complete", "ok"),
 )

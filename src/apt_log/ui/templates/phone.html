@@ -876,6 +876,16 @@
   .a-status.ok   { background:hsl(142 71% 40% / .16); color:var(--ok); }
   .a-status.warn { background:hsl(38 92% 50% / .16); color:var(--unknown); }
   .a-status.bad  { background:hsl(0 72% 51% / .14); color:var(--bad); }
+  /* HAPPENING NOW. Not a severity — the opposite of the grey an
+     unrecognised status wears. A live visit has to out-read the finished
+     ones beside it, so it carries the accent and a slow pulse; without
+     that, "En Progreso" sat greyer than two green "Completada" chips and
+     was read as the visit that never happened. */
+  .a-status.live { background:hsl(258 90% 66% / .16); color:var(--accent, #6c5ce7);
+                   animation:livepulse 2.4s ease-in-out infinite; }
+  @keyframes livepulse { 50% { background:hsl(258 90% 66% / .30); } }
+  @media (prefers-reduced-motion: reduce) {
+    .a-status.live { animation:none; } }
 
   /* Counts ride in bubbles, the way every native list draws them. */
   .a-badge { position:absolute; right:14px; top:50%;
