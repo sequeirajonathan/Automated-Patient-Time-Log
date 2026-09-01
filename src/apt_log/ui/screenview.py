@@ -283,6 +283,41 @@ def _is_icon_caption(s: dict) -> bool:
     return height > 0 and width / height <= ICON_CAPTION_MAX_ASPECT
 
 
+def _one_per_box(statics: list) -> list:
+    """One line per rectangle. Two things cannot occupy the same pixels.
+
+    Mobile Caregiver+'s running-visit screen draws a live timer, and the
+    published document carried TEN of them — same box to the pixel, seconds
+    apart:
+
+        'Visita en progreso - 00 : 25 : 25'
+        'Visita en progreso - 00 : 25 : 27'
+        ... eight more ...
+
+    Every one became its own row, so a screen with four real rows on it
+    reflowed into fourteen. The phone never showed ten clocks; it showed one,
+    ten times.
+
+    The LAST wins, because a box that keeps being rewritten is being updated
+    and the newest reading is the true one. Order is otherwise preserved, so
+    nothing moves on a screen that has no duplicates — which is nearly all of
+    them.
+    """
+    seen: dict[tuple, int] = {}
+    out: list = []
+    for s in statics:
+        key = tuple(s.get("b") or ())
+        if not key:
+            out.append(s)
+            continue
+        if key in seen:
+            out[seen[key]] = s      # same rectangle: the newer line wins
+        else:
+            seen[key] = len(out)
+            out.append(s)
+    return out
+
+
 def _is_spelled_out(txt: str) -> bool:
     """Text a screen reader was meant to say letter by letter.
 
@@ -1170,6 +1205,7 @@ def build(doc: dict) -> dict | None:
                for s in doc.get("statics") or [] if s.get("b")
                and not _is_annotation(s.get("txt", ""), s["b"], w)
                and not _is_map_furniture(s)]
+    statics = _one_per_box(statics)
 
     # A MODAL THE APP RAISED, LIFTED OUT BEFORE ANYTHING ELSE LOOKS AT THE
     # PAGE. See `_app_alert`: a dialog is its own window and the dump lists it

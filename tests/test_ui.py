@@ -7381,3 +7381,63 @@ class TestAVisitThatIsHappeningLooksLikeIt:
         # their own test above; this one is about the live row surviving a
         # real row's shape.)
         assert tones.get("En Progreso") == "live", tones
+
+
+class TestOneLinePerRectangle:
+    """Mobile Caregiver+'s running-visit screen draws a live timer, and the
+    published document carried TEN of them — same box to the pixel, seconds
+    apart. Every one became its own row, so a screen with four real rows
+    reflowed into fourteen. "This ui is a mess", with a screenshot."""
+
+    def _clock(self, second):
+        return {"cls": "TextView", "b": [349, 186, 765, 224],
+                "txt": f"Visita en progreso - 00 : 25 : {second}"}
+
+    def test_ten_clocks_in_one_box_become_one(self):
+        from apt_log.ui import screenview as sv
+
+        kept = sv._one_per_box([self._clock(s) for s in range(25, 35)])
+        assert len(kept) == 1
+
+    def test_and_the_newest_reading_is_the_one_kept(self):
+        """A box that keeps being rewritten is being updated."""
+        from apt_log.ui import screenview as sv
+
+        kept = sv._one_per_box([self._clock(25), self._clock(40)])
+        assert kept[0]["txt"].endswith("40")
+
+    def test_different_boxes_are_left_alone(self):
+        """Nearly every screen has no duplicates at all and must not move."""
+        from apt_log.ui import screenview as sv
+
+        rows = [{"cls": "TextView", "b": [0, y, 500, y + 40], "txt": f"line {y}"}
+                for y in (100, 200, 300)]
+        assert sv._one_per_box(rows) == rows
+
+    def test_order_survives(self):
+        from apt_log.ui import screenview as sv
+
+        a = {"cls": "TextView", "b": [0, 10, 50, 50], "txt": "first"}
+        b = {"cls": "TextView", "b": [0, 60, 50, 100], "txt": "second"}
+        assert [s["txt"] for s in sv._one_per_box([a, b, a])] == ["first",
+                                                                 "second"]
+
+    def test_a_static_without_a_box_is_never_dropped(self):
+        from apt_log.ui import screenview as sv
+
+        odd = {"cls": "TextView", "txt": "no bounds"}
+        assert sv._one_per_box([odd, odd]) == [odd, odd]
+
+    def test_the_running_visit_screen_stops_stuttering(self):
+        """End to end on the captured shape: one clock, not ten."""
+        from apt_log.ui import screenview as sv
+
+        doc = {"size": [1080, 2340], "app": "com.tellus.evv.v2",
+               "activity": "dashboardactivity", "elements": [],
+               "statics": [self._clock(s) for s in range(25, 35)]
+                          + [{"cls": "TextView", "b": [20, 418, 582, 456],
+                              "txt": "Hora de inicio real - 6:00:05 PM"}]}
+        said = [it.get("txt") for r in sv.build(doc)["rows"]
+                for it in r["items"]]
+        clocks = [t for t in said if t and "Visita en progreso" in t]
+        assert len(clocks) == 1, said
