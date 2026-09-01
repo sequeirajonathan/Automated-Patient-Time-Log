@@ -1062,9 +1062,25 @@ def _app_alert(doc: dict, w: int, h: int) -> dict | None:
     Returns the message lines, the button, and the box the whole thing
     occupies — the caller uses that box to take the alert out of the page.
     """
-    elements = [e for e in doc.get("elements") or [] if e.get("b")]
+    elements = [e for e in doc.get("elements") or [] if e.get("b")
+                and not _is_map_furniture(e)]
+    # AND THE MAP'S SMALL PRINT CANNOT BE A DIALOG'S HEADING.
+    #
+    # This is the path that actually produced "©2026 Google - Datos de mapas
+    # de ©2026 Google" over a Continuar button. Filtering the row lists in
+    # `build` was not enough and the live screen proved it: the alert is
+    # lifted out of the page BEFORE those lists are filtered, so the
+    # attribution never reached the filter — it had already been promoted to
+    # `alert.title`. The EVV location step draws its Continuar low on the
+    # screen and Google's line sits just above it, which is exactly the shape
+    # this function looks for.
+    #
+    # With the attribution gone there is usually nothing else above the
+    # button, `said` comes back empty, and the step renders as the ordinary
+    # page it is — title, "Paso 1 de 3", the GPS and FOB tabs, and Continuar.
     statics = [s for s in doc.get("statics") or [] if s.get("b")
-               and (s.get("txt") or "").strip()]
+               and (s.get("txt") or "").strip()
+               and not _is_map_furniture(s)]
     if not (w and h):
         return None
 

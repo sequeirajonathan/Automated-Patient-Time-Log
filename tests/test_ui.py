@@ -7200,3 +7200,67 @@ class TestTheMapsSmallPrintIsNotTheQuestion:
         blob = json.dumps(model, ensure_ascii=False)
         assert "Datos de mapas" not in blob
         assert "Continuar" in blob
+
+
+class TestTheAttributionWasNeverARow:
+    """The first fix filtered the row lists and the live screen proved it
+    was not enough: `_app_alert` lifts a modal out of the page BEFORE those
+    lists are filtered, so the attribution had already been promoted to
+    `alert.title`. Captured off the phone mid-check-out, 22:07."""
+
+    def _doc(self):
+        # The real shape, from /var/lib/aptlog/screen.json on the night.
+        return {
+            "size": [1080, 2340], "app": "com.hhaexchange.uma",
+            "activity": "homeactivity",
+            "elements": [
+                {"rid": "map_screen_gps_continue_button", "cls": "Button",
+                 "b": [100, 2230, 980, 2320], "txt": "Continuar"},
+                {"rid": "", "cls": "TextureView", "b": [0, 232, 1080, 2216],
+                 "txt": "Mapa de Google"}],
+            "statics": [
+                {"cls": "TextView", "b": [855, 2202, 1080, 2216],
+                 "txt": "©2026 Google - Datos de mapas de ©2026 Google"},
+                {"cls": "TextView", "b": [100, 300, 980, 380],
+                 "txt": "Verificación electrónica de visitas"},
+                {"cls": "TextView", "b": [100, 400, 980, 460],
+                 "txt": "Paso 1 de 3"}]}
+
+    def test_the_attribution_never_becomes_a_dialogs_heading(self):
+        from apt_log.ui import screenview as sv
+
+        model = sv.build(self._doc())
+        blob = json.dumps(model, ensure_ascii=False)
+        assert "Datos de mapas" not in blob
+
+    def test_and_no_dialog_is_invented_around_it(self):
+        """It was rendering as a modal card — the step's Continuar wearing
+        Google's copyright as its question."""
+        from apt_log.ui import screenview as sv
+
+        assert sv.build(self._doc()).get("alert") is None
+
+    def test_the_step_still_renders_everything_real(self):
+        from apt_log.ui import screenview as sv
+
+        blob = json.dumps(sv.build(self._doc()), ensure_ascii=False)
+        for word in ("Continuar", "Paso 1 de 3",
+                     "Verificaci\\u00f3n electr\\u00f3nica"):
+            assert word in blob or word.encode().decode("unicode_escape") in blob
+
+    def test_a_real_dialog_is_still_recognised(self):
+        """The guard must not cost us the alerts that matter — the session
+        expiry notice is answered by reading exactly this."""
+        from apt_log.ui import screenview as sv
+
+        doc = {"size": [1080, 2340], "app": "com.tellus.evv.v2",
+               "elements": [{"rid": "android:id/button1", "cls": "Button",
+                             "b": [400, 1200, 680, 1290], "txt": "OK"}],
+               "statics": [{"cls": "TextView", "b": [200, 1000, 880, 1080],
+                            "txt": "Sesión caducada"},
+                           {"cls": "TextView", "b": [200, 1090, 880, 1180],
+                            "txt": "Su sesión ha caducado, por favor vuelva "
+                                   "a iniciar sesión."}]}
+        alert = sv.build(doc).get("alert")
+        assert alert is not None
+        assert "caducada" in alert["title"]
