@@ -7129,3 +7129,74 @@ class TestTheCheckInFailureNoLongerBuzzes:
         """Only the sentence went; the evidence stays. The ledger keeps the
         outcome and the reason, and the journal keeps the walk."""
         assert "log.warning" in self._body()
+
+
+class TestTheMapsSmallPrintIsNotTheQuestion:
+    """HHAeXchange+'s EVV location step draws a Google map, at check-in AND
+    at check-out. The map publishes its own furniture into the tree, and the
+    attribution — tagged by the app as a LINK — outranked the step's real
+    words on the card: "©2026 Google - Datos de mapas de ©2026 Google" with
+    Continuar beneath it. Reported as "seems like an ad".
+    """
+
+    def _furniture(self, txt="", rid=""):
+        from apt_log.ui import screenview as sv
+
+        return sv._is_map_furniture({"rid": rid, "txt": txt})
+
+    def test_the_attribution_link_is_withheld_by_its_own_id(self):
+        assert self._furniture(
+            rid="map_screen_security_token_banner_map_link",
+            txt="©2026 Google - Datos de mapas de ©2026 Google")
+
+    def test_and_by_its_words_when_it_carries_no_id(self):
+        assert self._furniture(txt="Datos de mapas de ©2026 Google")
+        assert self._furniture(txt="Map data ©2026 Google")
+
+    def test_the_zoom_buttons_go_too(self):
+        """They were rendering as list rows on a page with no map visible."""
+        assert self._furniture(txt="Ampliar")
+        assert self._furniture(txt="Reducir")
+
+    def test_but_a_zoom_word_inside_a_sentence_is_left_alone(self):
+        """Exact match on purpose: "Ampliar" whole is a map control, but as a
+        substring it is anybody's sentence."""
+        assert not self._furniture(txt="Ampliar la información del paciente")
+
+    def test_the_steps_own_controls_survive(self):
+        """The whole point is that the question and its button come back."""
+        assert not self._furniture(txt="Continuar")
+        assert not self._furniture(txt="Dispositivo FOB")
+        assert not self._furniture(txt="Registro de salida de EVV")
+
+    def test_the_width_rule_could_never_have_caught_it(self):
+        """784px for 44 characters is 17.8 per character — honestly wide
+        text. This needed a content rule, not the geometry one."""
+        from apt_log.ui import screenview as sv
+
+        assert not sv._is_annotation(
+            "©2026 Google - Datos de mapas de ©2026 Google",
+            [214, 1741, 998, 1953], 1080)
+
+    def test_build_drops_it_from_both_halves(self):
+        """Elements and statics: it arrives as a tagged link in one and as
+        plain text in the other."""
+        from apt_log.ui import screenview as sv
+
+        doc = {"size": [1080, 2340], "app": "com.hhaexchange.uma",
+               "elements": [
+                   {"rid": "map_screen_security_token_banner_map_link",
+                    "cls": "TextView", "b": [214, 1741, 998, 1953],
+                    "txt": "©2026 Google - Datos de mapas de ©2026 Google"},
+                   {"rid": "", "cls": "Button", "b": [100, 400, 900, 520],
+                    "txt": "Continuar"}],
+               "statics": [
+                   {"cls": "TextView", "b": [214, 1741, 998, 1953],
+                    "txt": "Datos de mapas de ©2026 Google"},
+                   {"cls": "TextView", "b": [100, 200, 900, 320],
+                    "txt": "Confirme su ubicación"}]}
+        model = sv.build(doc)
+        assert model is not None
+        blob = json.dumps(model, ensure_ascii=False)
+        assert "Datos de mapas" not in blob
+        assert "Continuar" in blob

@@ -201,6 +201,47 @@ def _is_annotation(txt: str, b: list[int], screen_w: int) -> bool:
     return (b[2] - b[0]) / len(txt) < screen_w * ANNOTATION_WIDTH_PER_CHAR
 
 
+# A MAP'S SMALL PRINT IS NOT THE SCREEN'S QUESTION.
+#
+# HHAeXchange+ draws a map on the EVV location step — at check-in AND at
+# check-out, twice each — and the map publishes its own furniture into the
+# tree: Google's attribution as a TextView the app tags
+# `map_screen_security_token_banner_map_link`, and the zoom buttons as
+# "Ampliar" / "Reducir".
+#
+# The width rule above cannot catch the attribution: 784px for 44 characters
+# is 17.8 per character, honestly wide text. So it was kept, and being a
+# tagged LINK it outranked everything else on the card — the caregiver was
+# shown "©2026 Google - Datos de mapas de ©2026 Google" with the step's
+# Continuar button beneath it, which reads as an advertisement asking to be
+# accepted. Reported as exactly that: "seems like an ad".
+#
+# Withheld by identity, not by guesswork about position: an id the app itself
+# names, an attribution phrase, or a zoom word standing entirely alone. The
+# zoom match is EXACT for that reason — "Ampliar" as a whole label is a map
+# control, but as a substring it could be anybody's sentence.
+MAP_FURNITURE_IDS = ("map_screen_security_token_banner_map_link",)
+MAP_ATTRIBUTION_WORDS = ("datos de mapas", "map data")
+MAP_ZOOM_WORDS = ("ampliar", "reducir", "acercar", "alejar",
+                  "zoom in", "zoom out")
+
+
+def _is_map_furniture(item: dict) -> bool:
+    """Whether this is the map's own chrome rather than the app's content."""
+    rid = (item.get("rid") or "").split("/")[-1]
+    if rid and rid in MAP_FURNITURE_IDS:
+        return True
+    txt = (item.get("txt") or "").strip()
+    low = txt.lower()
+    if not low:
+        return False
+    if any(word in low for word in MAP_ATTRIBUTION_WORDS):
+        return True
+    if "google" in low and "©" in txt:
+        return True
+    return low in MAP_ZOOM_WORDS
+
+
 # AN ICON'S BOX IS SQUARE; A WORD'S BOX IS NOT.
 #
 # The width-per-character rule above catches a description hung on an icon
@@ -1076,10 +1117,12 @@ def build(doc: dict) -> dict | None:
     # captured (tap truth, preserved in aim_b). Viewport documents have
     # only `b`, and the two roles coincide.
     elements = [dict(e, b=e.get("vb") or e["b"], aim_b=e["b"])
-                for e in doc.get("elements") or [] if e.get("b")]
+                for e in doc.get("elements") or [] if e.get("b")
+                and not _is_map_furniture(e)]
     statics = [dict(s, b=s.get("vb") or s["b"], dev_b=s["b"])
                for s in doc.get("statics") or [] if s.get("b")
-               and not _is_annotation(s.get("txt", ""), s["b"], w)]
+               and not _is_annotation(s.get("txt", ""), s["b"], w)
+               and not _is_map_furniture(s)]
 
     # A MODAL THE APP RAISED, LIFTED OUT BEFORE ANYTHING ELSE LOOKS AT THE
     # PAGE. See `_app_alert`: a dialog is its own window and the dump lists it
