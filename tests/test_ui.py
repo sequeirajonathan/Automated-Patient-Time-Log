@@ -7441,3 +7441,91 @@ class TestOneLinePerRectangle:
                 for it in r["items"]]
         clocks = [t for t in said if t and "Visita en progreso" in t]
         assert len(clocks) == 1, said
+
+
+class TestTheRunningVisitScreenReadsLikeAPage:
+    """Mobile Caregiver+'s Visita Iniciada, reported as "so bad": every row
+    wearing a chevron so the page read as a stack of accordions, the one
+    action that finishes the visit styled as a grey cell, an icon's caption
+    wrapping to "Com ple...", and a pressable row with no words on it."""
+
+    def _page(self):
+        # The shape captured off the phone at 18:26, mid-visit.
+        return {
+            "size": [1080, 2340], "app": "com.tellus.evv.v2",
+            "activity": "dashboardactivity",
+            "elements": [
+                {"rid": "", "cls": "View", "b": [821, 407, 1060, 465]},
+                {"rid": "", "cls": "View", "b": [20, 465, 1060, 525]},
+                {"rid": "", "cls": "View", "b": [0, 535, 57, 595]},
+                {"rid": "", "cls": "View", "b": [1020, 534, 1080, 594]},
+                {"rid": "", "cls": "View", "b": [20, 2119, 1060, 2189]}],
+            "statics": [
+                {"cls": "TextView", "b": [20, 418, 582, 456],
+                 "txt": "Hora de inicio real - 6:00:05 PM (sept 01)"},
+                {"cls": "TextView", "b": [859, 418, 1060, 456],
+                 "txt": "Cancelar Inicio"},
+                {"cls": "TextView", "b": [58, 476, 491, 514],
+                 "txt": "Ayuda para completar las tareas"},
+                {"cls": "View", "b": [10, 548, 43, 581], "txt": "Completada"},
+                {"cls": "View", "b": [1030, 544, 1070, 584],
+                 "txt": "Agregar nota de servicio"},
+                {"cls": "View", "b": [20, 2119, 1060, 2189],
+                 "txt": "Finalize la visita"}]}
+
+    def _items(self):
+        from apt_log.ui import screenview as sv
+
+        return [it for r in sv.build(self._page())["rows"] for it in r["items"]]
+
+    def _find(self, needle):
+        for it in self._items():
+            words = (it.get("txt") or "") + " ".join(it.get("lines") or [])
+            if needle.lower() in words.lower():
+                return it
+        return None
+
+    def test_finalize_la_visita_is_the_call_to_action(self):
+        """"no CTA for finilize visit" — the one control that ends the
+        visit was drawing as one more grey chevroned cell."""
+        it = self._find("Finalize la visita")
+        assert it is not None and it["cta"] is True
+
+    def test_cancelling_a_check_in_is_marked_dangerous(self):
+        """It undoes a check-in already recorded against a live visit and
+        was styled exactly like the help row above it."""
+        it = self._find("Cancelar Inicio")
+        assert it is not None
+        assert it["danger"] is True and it["acts"] is True
+
+    def test_an_acting_row_loses_the_chevron(self):
+        """A chevron promises a next screen. "buttons are really confusing
+        lookin like accoridand"."""
+        assert self._find("Cancelar Inicio")["acts"] is True
+        assert self._find("Agregar nota")["acts"] is True
+
+    def test_but_a_row_that_really_opens_something_keeps_it(self):
+        """The help row does open a page; taking every chevron away would
+        be the same mistake in the other direction."""
+        it = self._find("Ayuda para completar")
+        assert it["cta"] is False and it["acts"] is False
+
+    def test_the_note_button_says_what_it_is(self):
+        """A 40px square captioned at 1.67px per character: the annotation
+        rule dropped it and left a pressable row with no words at all."""
+        it = self._find("Agregar nota de servicio")
+        assert it is not None, "the note button is still nameless"
+
+    def test_the_state_icon_is_a_chip_not_a_57px_text_column(self):
+        """"Completada" in a 33x33 square rendered as its own narrow row,
+        wrapping to "Com ple...". It is a state; it belongs in a chip."""
+        chips = [it for it in self._items() if it.get("status")]
+        assert any(c["status"] == "Completada" for c in chips)
+        assert not any("Completada" in (it.get("lines") or [])
+                       for it in self._items()), "still rendered as text"
+
+    def test_and_that_chip_promises_no_next_screen(self):
+        """A row with a chip and no words had a chevron on it."""
+        chip = next(it for it in self._items()
+                    if it.get("status") == "Completada")
+        assert not chip.get("lines") and not chip.get("txt")

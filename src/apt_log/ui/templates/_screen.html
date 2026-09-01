@@ -294,7 +294,7 @@
            one more grey row with a chevron. A data row is a list cell: its
            title on top, details muted below, verified check-ins as green
            status pills, a chevron saying "opens more". #}
-        <button type="button" class="a-cell{% if it.cta %} cta{% endif %}{% if not it.enabled %} off{% endif %}"
+        <button type="button" class="a-cell{% if it.cta %} cta{% endif %}{% if it.danger %} danger{% endif %}{% if not it.enabled %} off{% endif %}"
                 {% if not it.enabled %}disabled aria-disabled="true"{% endif %}
                 data-aim='{{ it.aim | tojson }}'>
         {# A disabled row that carries words became an info row above; what
@@ -323,7 +323,10 @@
             >{{ it.status }}</span>
           {% endif %}
           {% if it.badge %}<span class="a-badge">{{ it.badge }}</span>{% endif %}
-          {% if not it.cta %}
+          {# A chevron PROMISES A NEXT SCREEN. A row that acts on the spot
+             does not get one: with an arrow on every row the page reads as
+             a stack of accordions and nothing on it looks pressable. #}
+          {% if not it.cta and not it.acts and (it.lines or it.txt) %}
           <svg class="a-chev" viewBox="0 0 10 16" fill="none"
                stroke="currentColor" stroke-width="2.2" stroke-linecap="round"
             ><path d="M2 2 L8 8 L2 14"/></svg>

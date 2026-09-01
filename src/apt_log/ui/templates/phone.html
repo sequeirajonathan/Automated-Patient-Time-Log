@@ -849,6 +849,13 @@
   .a-cell.cta:active { opacity:1; transform:scale(.97); filter:brightness(.9); }
   .a-row:has(> .a-cell.cta) { background:none; box-shadow:none; border:none;
             padding:5px 2px; }
+  /* A CONTROL THAT UNDOES SOMETHING ALREADY RECORDED. "Cancelar Inicio"
+     cancels a live check-in and was drawn exactly like the help row above
+     it. Not filled like a call to action — the app does not want it
+     pressed and neither does this — but never again neutral. It also
+     carries no chevron, because it opens nothing. */
+  .a-cell.danger .a-line { color:var(--bad); font-weight:600; }
+  .a-cell.danger { padding-right:0; }
   /* A keypad reads as one when its keys are centred, not listed. */
   .a-row.a-keys { justify-content:center; gap:18px; }
   .a-row.a-keys .a-btn.sm, .a-row.a-keys .a-icon { min-width:64px;

@@ -607,7 +607,40 @@ ACTION_WORDS = (
     # filled pill and "verify" was not on it. It is the only thing to do on
     # that screen, at the one moment she is holding a code that expires.
     "verify", "verificar", "verificación", "verificacion",
+    # THE END OF A VISIT. Mobile Caregiver+'s running-visit screen has one
+    # thing on it that finishes the work — "Finalize la visita" — and it was
+    # drawing as one more grey chevroned cell under "Ayuda para completar
+    # las tareas". Reported as exactly that: "no CTA for finalize visit".
+    # Both spellings: the app ships "Finalice" and "Finalize" on different
+    # builds, and "terminar" is the wording HHAeXchange+ uses.
+    "finalice", "finalizar", "finalize", "terminar",
+    "finish visit", "end visit", "finish",
 )
+
+# A CONTROL THAT DOES SOMETHING IS NOT A DOOR.
+#
+# A chevron means "opens more". Every non-CTA row was getting one, so
+# "Cancelar Inicio" — which cancels a live check-in — wore the same arrow as
+# "Ayuda para completar las tareas", which opens a help page. Reported as
+# "buttons are really confusing lookin like accoridand": a page of chevrons
+# reads as a stack of accordions, and nothing on it looks pressable.
+#
+# These verbs ACT on the spot. They keep an ordinary row's shape — they are
+# not the page's call to action — but they lose the arrow that promises a
+# next screen.
+ACTING_WORDS = (
+    "cancelar", "cancel", "agregar", "añadir", "anadir", "add ",
+    "eliminar", "borrar", "delete", "remove", "quitar",
+    "reenviar", "resend", "actualizar", "refresh",
+)
+
+# And of those, the ones that TAKE SOMETHING AWAY. "Cancelar Inicio" undoes
+# a check-in that is already recorded against a live visit; it should not
+# look like the neutral row above it. Coloured as a warning rather than
+# filled like a call to action — the app does not want her to press it, and
+# neither does this.
+DESTRUCTIVE_WORDS = ("cancelar", "cancel", "eliminar", "borrar",
+                     "delete", "remove", "quitar")
 
 # NOT here on purpose: "resend" / "reenviar". It is a real control and it now
 # has a macro behind it, but it is the SECOND thing to reach for on that
@@ -650,6 +683,22 @@ def _looks_like_cta(text: str) -> bool:
     if t in EXACT_ACTION_WORDS:
         return True
     return bool(t) and any(t.startswith(w) for w in ACTION_WORDS)
+
+
+def _looks_like_an_act(text: str) -> bool:
+    """Whether this row DOES something rather than opening something.
+
+    Same prefix test as the call to action, against its own vocabulary —
+    see `ACTING_WORDS`. Used only to take the chevron away.
+    """
+    t = (text or "").strip().lower().replace("’", "'")
+    return bool(t) and any(t.startswith(w) for w in ACTING_WORDS)
+
+
+def _looks_destructive(text: str) -> bool:
+    """Whether pressing this UNDOES something already recorded."""
+    t = (text or "").strip().lower()
+    return bool(t) and any(t.startswith(w) for w in DESTRUCTIVE_WORDS)
 
 # Some apps draw their state marks as ImageViews instead \u2014 no text at all,
 # identity carried by the resource-id alone. The legacy visits list shows a
@@ -1206,6 +1255,18 @@ def build(doc: dict) -> dict | None:
                and not _is_annotation(s.get("txt", ""), s["b"], w)
                and not _is_map_furniture(s)]
     statics = _one_per_box(statics)
+    # THE CAPTIONS THE ANNOTATION RULE TOOK, KEPT ASIDE FOR NAMING ONLY.
+    #
+    # A square caption too long for its box is decoration when the row has
+    # real words — which is why it is dropped — but it is the ONLY name an
+    # unlabelled icon button has. Dropping it outright left Mobile
+    # Caregiver+'s note button as a pressable row with nothing written on
+    # it. These never become lines; they are consulted only when a row would
+    # otherwise have no words at all.
+    icon_names = [s for s in doc.get("statics") or []
+                  if s.get("b") and (s.get("txt") or "").strip()
+                  and _is_annotation(s.get("txt", ""), s["b"], w)
+                  and _is_icon_caption(s)]
 
     # A MODAL THE APP RAISED, LIFTED OUT BEFORE ANYTHING ELSE LOOKS AT THE
     # PAGE. See `_app_alert`: a dialog is its own window and the dump lists it
@@ -1471,6 +1532,23 @@ def build(doc: dict) -> dict | None:
                         if _is_icon_caption(s)}
             if captions and any(ln not in captions for ln in lines):
                 lines = [ln for ln in lines if ln not in captions]
+            # A STATE ICON STANDING ALONE IS A STATE, NOT A ROW OF TEXT.
+            #
+            # Mobile Caregiver+ puts the service's status icon in its own
+            # 57px container beside the service row, so its caption never
+            # shares a row with better words and the rule above cannot reach
+            # it. What rendered was a 57px-wide text column wrapping
+            # "Completada" to "Com ple...".
+            #
+            # Only when the word is a state the portal already knows how to
+            # colour: a square caption that is NOT a state is the name of an
+            # unlabelled control — the app's own back arrow is exactly that
+            # — and turning that into a chip would leave the control nameless.
+            elif (len(lines) == 1 and lines[0] in captions
+                    and status_tone(lines[0])):
+                item["status"] = lines[0]
+                item["status_tone"] = status_tone(lines[0])
+                lines = []
             # A cell whose whole content is one generated sentence becomes
             # the list row that sentence describes. Only when the sentence
             # accounts for itself — see _shape_description.
@@ -1524,6 +1602,22 @@ def build(doc: dict) -> dict | None:
                     (ICON_LABELS[t] for s in own
                      if (t := (s.get("txt") or "").strip()) in ICON_LABELS),
                     "")
+            # A ROW MUST SAY WHAT IT IS. Failing the named-icon table, the
+            # caption hung on the icon is the only name it has. The note
+            # button on Mobile Caregiver+'s running visit is a 40px square
+            # captioned "Agregar nota de servicio" — 1.67px per character,
+            # so the annotation rule dropped it — and what was left was a
+            # pressable row with no words at all. See `icon_names`.
+            #
+            # Not when the row already carries a state chip: that chip WAS
+            # the caption, and putting it back as text is the "Com ple..."
+            # column all over again.
+            if not lines and not item["txt"] and not item.get("status"):
+                item["txt"] = next(
+                    (t for s in icon_names
+                     if _contains(e["b"], s["b"])
+                     and (t := (s.get("txt") or "").strip())),
+                    "")
             # State marks stay their own field — a verified EVV check-in is
             # a green tick the caregiver scans for, not a "✓" buried in a
             # subtitle line. The template draws them as coloured status pills.
@@ -1532,6 +1626,13 @@ def build(doc: dict) -> dict | None:
                  **({"txt_key": key} if key else {})}
                 for m, key in marks]
             item["cta"] = _looks_like_cta(lines[0] if lines else "")
+            # DOES IT OPEN SOMETHING, OR DO SOMETHING? The chevron promises
+            # a next screen; a row that acts on the spot must not wear one,
+            # or the page reads as a stack of accordions with nothing
+            # pressable on it. See ACTING_WORDS and DESTRUCTIVE_WORDS.
+            _first = (lines[0] if lines else item["txt"]) or ""
+            item["acts"] = not item["cta"] and _looks_like_an_act(_first)
+            item["danger"] = item["acts"] and _looks_destructive(_first)
             # A content-hugging row carrying one status line is the app
             # STATING something, not offering a door: the expanded visit
             # card's "✓ Registros de entrada de EVV" hugs its text at a
