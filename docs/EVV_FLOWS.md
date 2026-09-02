@@ -186,6 +186,115 @@ one to three rows, and the detail is a short list.
   legacy app's signature gate reads that flag — but it is a way for any popup
   to look sideways.
 
+### The check-out, walked 2026-09-01
+
+Three pages, in this order. Every one of them is Compose — `compose_view_*`
+under the same `DashboardActivity` — so almost nothing carries a resource-id
+and almost every caption sits on a **child** of the thing that receives the
+tap. That is the single most important fact about this flow: a reflow that
+reads `text` off the clickable node draws a page of blank buttons.
+
+```
+Detalles de la visita        →  Resumen de la visita  →  Firmas de la visita
+(Comenzar / Cancelar Visita)    (Complete Actualizacion   (Complete la Visita)
+                                 de Salida)
+```
+
+**1. Resumen de la visita.** The times, already recorded, before anything is
+signed:
+
+```
+Hora de inicio real           - 6:00:05 PM
+Hora de finalización real     - 8:01:58 PM
+Duración de la visita         - 02H : 01M
+Diferencia de tiempo a aplicar- 00h : 00m
+Duración del servicio: 02h : 01m   ← editable, pencil affordance
+✅ T1019 (Personal care ser per 15 min)
+```
+
+So **the clock-out is captured before the signatures**, and the sign-off is a
+separate step that can sit unfinished for hours. Its footer is `Complete
+Actualizacion de Salida`.
+
+**2. Firmas de la visita** — `compose_view_visit_sign_off`. Top to bottom:
+
+| what | bounds (1080×2340) | notes |
+|---|---|---|
+| `main_back_button` "Regresar" | [20,101][156,180] | has an id |
+| `screen_title` | [385,119][696,162] | "Firmas de la visita" |
+| `action_edit_note` "Agregar nota" | [884,101][1070,181] | has an id |
+| visit header | [20,201][1060,349] | content-desc names the PATIENT |
+| section header, collapsible | [20,347][1060,405] | desc "…. Sección expandida" |
+| collapse chevron | [1000,347][1060,405] | its own clickable |
+| "Duración del servicio: 02h : 01m" | [13,419][444,457] | two TextViews |
+| service line | [13,467][1067,505] | desc "Estado del servicio, Completada . T1019 …" |
+| attestation | [30,538][1050,649] | "Los firmantes confirman que los servicios anteriores se prestaron en …" — the sentence the signatures attach to |
+| **Beneficiario** heading | [30,675][210,715] | |
+| "¿Quien está firmando?" + value | [30,735][1050,856] | `resource-id="dropDown"` on the wrapper |
+| **Capturar Firma** (patient) | [30,876][1050,946] | desc on a child |
+| **Cuidador/a** heading | [30,1026][211,1070] | |
+| "Marcar si el cuidador es ciego" | [30,1080][485,1140] | desc "no marcado. …" carries the state |
+| **Capturar Firma** (caregiver) | [30,1150][1050,1220] | desc on a child |
+| **Complete la Visita** | [20,2119][1060,2189] | `enabled="false"` until signed |
+
+**TWO BUTTONS, ONE CAPTION.** Both signature buttons say exactly `Capturar
+Firma`, on the button and in the content-desc. Nothing but the SECTION ABOVE
+THEM tells them apart, so anything that offers them must carry the section
+name with them — "Capturar Firma" alone is the same press twice.
+
+**Who signs what.** `Beneficiario` is the patient's signature and
+`Cuidador/a` is the caregiver's own; they are separate sections with separate
+buttons, and the visit cannot be completed from either alone.
+
+**The dropdown** — `¿Quien está firmando?`, on the BENEFICIARIO section only.
+It says who is signing *for the patient*, not which of the two signatures is
+being taken. Five options, read off the phone:
+
+```
+element0  Family Member
+element1  Legal Guardian
+element2  No Signature Gathered
+element3  Recipient          ← the default, and the patient herself
+element4  Representative
+```
+
+`Recipient` is the patient signing for herself. `No Signature Gathered` is
+the app's own escape hatch for a patient who cannot sign at all.
+
+**The open menu is a WINDOW OF ITS OWN and it arrives late.** Measured: the
+tap lands, and the tree still shows the page underneath for ~3 seconds; at
+about 4.5s it flips to a 15-node document that is only the menu. The option
+rows are clickable `View`s with the label on an `element<N>` TextView inside
+them. So it can be driven — but anything that reads the tree once, straight
+after the tap, will read the page it just left.
+
+**Regresar on this page leaves the sign-off entirely** — it goes back to
+Resumen, not merely closing whatever is open. Watched: a Back sent to
+dismiss the dropdown navigated a page up.
+
+**3. Complete la Visita** commits. It is disabled until the signatures the
+page wants are captured.
+
+#### The signature pad these buttons raise
+
+An AlertDialog, and the dialog is the whole published tree — eleven nodes,
+no patient name anywhere in it (see `ui/opened.py` for what fills that gap).
+
+```
+button_participant_signature  RECOPILE LA FIRMA DEL RECIPIENT A CONTINUACIÓN
+buttonDismiss                 ✕, top right of the title bar
+drawing_view_participant      the canvas
+buttonClearSignature          Borrar firma      plain text, quietest
+buttonCancel                  Descartar firma   FILLED RED — the destructive one
+buttonComplete                Confirmar firma   filled blue — the commit
+```
+
+**IT CAN WEDGE, AND NOTHING ON IT WILL ANSWER.** Watched on 2026-09-01: its
+✕, its own `Descartar firma` and the system Back were each pressed and each
+verified as landing, and not one of them moved the dialog. The app's window
+was drawing mostly black behind it. Only `restart_app` cleared it. The pad's
+splash offers that as a last resort for exactly this.
+
 ### Still to discover
 
 Two, and both need a visit that is actually **in progress**. Today's was
