@@ -651,6 +651,12 @@ ACTION_WORDS = (
     "continuar", "iniciar sesi\u00f3n", "iniciar visita", "guardar",
     "confirmar", "enviar", "comenzar", "empezar", "aceptar",
     "registrar entrada", "registrar salida", "ver detalles",
+    # THE TWO PRESSES THE SIGN-OFF PAGE EXISTS FOR. Mobile Caregiver+ draws
+    # both as filled blue buttons — the patient's and the caregiver's — and
+    # the reflow gave them chevrons, which promise a next screen and say
+    # nothing about collecting a signature. They are what the page is for,
+    # and they are the only two things on it that are not the commit.
+    "capturar firma", "capture signature",
     # The submit under a search form. "Visita Buscar" is the MENU ROW that
     # opens that form and starts with its own word, so it is untouched.
     "buscar", "search",

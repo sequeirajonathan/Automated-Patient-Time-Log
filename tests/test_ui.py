@@ -8256,3 +8256,18 @@ class TestTheSignOffPage:
                  if not it.get("aim")]
         assert "Beneficiario" not in loose
         assert "¿Quien está firmando?" not in loose
+
+    def test_capturar_firma_is_a_call_to_action(self):
+        """The app draws both as filled blue buttons; the reflow gave them
+        chevrons, which promise a next screen and say nothing about
+        collecting a signature. They are what the page is for."""
+        model, _ = self._model()
+        pair = self._named(model, "Capturar Firma")
+        assert [it["cta"] for it in pair] == [True, True]
+
+    def test_and_it_still_says_whose_signature_it_takes(self):
+        """A call to action that has stopped saying which of the two it is
+        would be a worse control than the chevroned row it replaced."""
+        model, _ = self._model()
+        assert [it.get("under") for it in self._named(model, "Capturar Firma")
+                ] == ["Beneficiario", "Cuidador/a"]

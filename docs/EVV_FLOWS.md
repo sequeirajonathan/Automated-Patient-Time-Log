@@ -273,7 +273,28 @@ Resumen, not merely closing whatever is open. Watched: a Back sent to
 dismiss the dropdown navigated a page up.
 
 **3. Complete la Visita** commits. It is disabled until the signatures the
-page wants are captured.
+page wants are captured. **Nothing automatic may ever press it** — see
+`screenview.COMMIT_WORDS`, and the test that fails if any macro contains one
+of those words. Completing a visit is a claim about care that was given, and
+the only party who can make it is the one who gave it.
+
+**REPORTED, NOT YET OBSERVED — the order the two signatures come in.** From
+the caregiver, who does this every day: the patient signs first, `Capturar
+Firma` is pressed, and *that* opens the caregiver's own signature. If so the
+second block is gated on the first rather than being two independent
+buttons, and the page is a sequence. It has not been watched, because
+watching it means being on a real check-out: the sign-off page cannot be
+reached except through a visit that is genuinely in progress. **Next real
+check-out, watch for it.**
+
+WHAT IT COST TO LEARN THIS PAGE THE WRONG WAY, written down so nobody
+repeats it. On 2026-09-01 the dropdown was opened to read its options and a
+system Back was sent to close it. Back on this page does not close what is
+open — it leaves the sign-off entirely, to Resumen. Getting back meant
+pressing `Complete Actualizacion de Salida`, and the visit came out the far
+side marked **Perdida**, its recorded 6:00:05 PM / 8:01:58 PM no longer
+offered anywhere. A live visit is not a place to explore: read the tree,
+photograph the screen, and press only what the flow itself requires.
 
 #### The signature pad these buttons raise
 
