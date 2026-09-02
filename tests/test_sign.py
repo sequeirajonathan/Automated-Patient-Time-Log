@@ -1937,3 +1937,63 @@ class TestWhichSignatureTheSheetIsAskingFor:
         patient = set(sign.SIGNER_ROLES["patient"])
         staff = set(sign.SIGNER_ROLES["staff"])
         assert not (patient & staff)
+
+
+class TestAPadInsideADialog:
+    """Mobile Caregiver+ puts its signature pad in an AlertDialog, so the
+    tree's whole extent is the DIALOG, not the phone: 1080x1419. Its canvas
+    is 994x198 — 12.8% of that — and CANVAS_MIN_SHARE is 22%, so a live
+    check-out came back `no_canvas` with the caregiver standing at the pad.
+
+    Bounds below are the ones read off the phone at 20:05 on 1 Sep.
+    """
+
+    # The dialog, to the pixel.
+    CANVAS = '<node class="android.view.View" resource-id="x/drawing_view_participant" bounds="[53,1010][1047,1208]"/>'
+    HEADER = '<node class="android.widget.Button" resource-id="x/button_participant_signature" bounds="[40,941][1060,997]"/>'
+    CLEAR = '<node class="android.widget.Button" resource-id="x/buttonClearSignature" bounds="[53,1316][367,1366]"/>'
+    CANCEL = '<node class="android.widget.Button" resource-id="x/buttonCancel" bounds="[392,1316][707,1366]"/>'
+    DONE = '<node class="android.widget.Button" resource-id="x/buttonComplete" bounds="[732,1316][1047,1366]"/>'
+    PANEL = '<node class="android.widget.FrameLayout" resource-id="x/customPanel" bounds="[40,941][1060,1379]"/>'
+
+    def _dialog(self):
+        return (self.PANEL + self.HEADER + self.CANVAS + self.CLEAR
+                + self.CANCEL + self.DONE)
+
+    def test_the_canvas_is_found_inside_the_dialog(self):
+        bounds, reason = sign.find_canvas(self._dialog(), dump=False)
+        assert reason == "", f"still refusing: {reason}"
+        assert bounds == [53, 1010, 1047, 1208]
+
+    def test_the_header_button_is_not_mistaken_for_it(self):
+        """`button_participant_signature` matches the id hint too, and it is
+        WIDER than the canvas — 1020 against 994. Width alone cannot tell
+        them apart; height can, by nearly four to one."""
+        bounds, _ = sign.find_canvas(self._dialog(), dump=False)
+        assert bounds != [40, 941, 1060, 997]
+
+    def test_nor_is_the_clear_button(self):
+        bounds, _ = sign.find_canvas(self._dialog(), dump=False)
+        assert bounds != [53, 1316, 367, 1366]
+
+    def test_a_thin_wide_control_alone_is_still_no_canvas(self):
+        """The floor has to keep refusing. A signature strip is wide AND
+        deep; a button is wide and thin, and inking one would press it."""
+        bounds, reason = sign.find_canvas(self.PANEL + self.HEADER,
+                                          dump=False)
+        assert bounds is None and reason == "no_canvas"
+
+    def test_the_full_screen_pad_still_works(self):
+        """HHAeXchange+'s pad is 1058x1246 on a 1080x2340 screen and has
+        signed twice for real. This change must not disturb it."""
+        xml = ('<node class="android.view.View" '
+               'resource-id="x/signature_screen_signature_pad" '
+               'bounds="[11,599][1069,1845]"/>'
+               '<node class="android.widget.FrameLayout" '
+               'bounds="[0,0][1080,2340]"/>'
+               '<node class="android.widget.Button" '
+               'resource-id="x/signature_screen_clear_button" '
+               'bounds="[100,1900][300,1960]"/>')
+        bounds, reason = sign.find_canvas(xml, dump=False)
+        assert reason == ""
+        assert bounds == [11, 599, 1069, 1845]

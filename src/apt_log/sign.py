@@ -98,6 +98,32 @@ CANVAS_CLASS_HINTS = ("signature", "signpad", "drawing", "sketch")
 CANVAS_CLASSES = ("View",)
 CANVAS_MIN_SHARE = 0.22
 
+# A SHARE OF THE SCREEN IS THE WRONG YARDSTICK INSIDE A DIALOG.
+#
+# Mobile Caregiver+ puts its signature pad in an AlertDialog — parentPanel,
+# customPanel, custom — so the tree's whole extent is the DIALOG, 1080x1419,
+# not the phone. Its canvas is `drawing_view_participant`, 994x198, which is
+# 12.8% of that and so failed the 22% test. Nothing else qualified either,
+# and a live check-out came back `no_canvas` with the caregiver standing at
+# the pad.
+#
+# Measured on that dialog, the things the id hints also match:
+#
+#     drawing_view_participant       994x198   <- the canvas
+#     button_participant_signature  1020x 56
+#     buttonClearSignature           314x 50
+#
+# Width cannot separate them: the header button is WIDER than the canvas.
+# Height does, by nearly four to one, and it is the honest measure of "big
+# enough to sign on" — a signature strip is wide and short, a button is wide
+# and thin. So a hinted node also counts when it is broad AND deep enough in
+# its own right, whatever share of its container that happens to be.
+#
+# Checked against HHAeXchange+'s full-screen pad too, which this must not
+# break: 1058x1246 on 1080x2340 passes both tests comfortably.
+CANVAS_MIN_WIDTH_SHARE = 0.40
+CANVAS_MIN_HEIGHT_SHARE = 0.08
+
 # Ink stays off the canvas edge. The app's own border, a watermark line, an "X"
 # baseline mark — the margin keeps the replay clear of all of it.
 CANVAS_INSET = 0.06
@@ -302,9 +328,14 @@ def find_canvas(xml: str, dump: bool = True) -> tuple[list[int] | None, str]:
         rid = _attr(raw, "resource-id").split("/")[-1].lower()
         cls = (_attr(raw, "class") or "").rsplit(".", 1)[-1]
         big = (b[2] - b[0]) * (b[3] - b[1]) >= screen_area * CANVAS_MIN_SHARE
+        # Or big enough to sign on in its OWN right — see the constants.
+        # A pad inside a dialog is a small share of a small tree, and the
+        # share test alone threw the real canvas away.
+        signable = ((b[2] - b[0]) >= max_x * CANVAS_MIN_WIDTH_SHARE
+                    and (b[3] - b[1]) >= max_y * CANVAS_MIN_HEIGHT_SHARE)
         if (any(hint in rid for hint in CANVAS_ID_HINTS)
                 or any(hint in cls.lower() for hint in CANVAS_CLASS_HINTS)):
-            (named if big else hinted).append(b)
+            (named if (big or signable) else hinted).append(b)
             continue
         if cls in CANVAS_CLASSES and not _attr(raw, "text") and big:
             surfaces.append((b, _attr(raw, "clickable") == "true"))
