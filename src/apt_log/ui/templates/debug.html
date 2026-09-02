@@ -1,13 +1,23 @@
 {#
-  The settings debugger — the phone's own Settings, mapped to a page.
+  The settings tab — the phone's own Settings, mapped to a page.
 
-  A control-centre annex for the person maintaining the machine, and it works
+  A control-centre tab for the person maintaining the machine, and it works
   the way that person actually works: pick a screen from the map (each button
   is one android.settings.* intent from a fixed table), then drive the opened
   screen on the live picture below it, with the same verified taps every other
-  press on this portal uses. The page never writes a settings value itself —
-  changing something means pressing the phone's own control for it, where the
-  phone runs its own validation and confirmation.
+  press on this portal uses. The one thing it writes directly is the clock —
+  three fixed commands, added because the Date & time screen is the one
+  screen testing visits constantly and four taps plus a scroll wheel every
+  time was the tedium this page exists to remove. Everything else changes by
+  pressing the phone's own control for it.
+
+  EVERY PRESS ANSWERS. The first cut of this page posted forms and reloaded,
+  and the reload landed above the fold — so a press at the bottom of the page
+  looked like nothing at all ("kinda feels like I'm pressing nothing"). Every
+  form here now posts in place when script is available: the button dims while
+  the phone is being asked, and a toast says what happened. With script broken
+  the forms still post the old way and the banners at the top still say the
+  same things — the script is a skin on the forms, not a replacement.
 
   Like /console, and unlike /app: nothing here is for the caregiver, so
   nothing is folded away, and the hazards are written on the page rather than
@@ -51,6 +61,18 @@
   .seg button[aria-pressed="true"] { background:var(--card);
                                      box-shadow:0 1px 3px rgb(0 0 0 / .12); }
 
+  /* The command-centre tabs. The control centre and this page are siblings
+     now, and the strip says so on both — same markup, same order, the
+     current one filled. */
+  .tabs { display:flex; gap:6px; padding:12px 12px 0; max-width:780px;
+          margin:0 auto; }
+  @media (min-width:820px) { .tabs { max-width:900px; } }
+  .tabs a { flex:1; text-align:center; padding:8px 10px; border-radius:10px;
+            text-decoration:none; color:var(--muted); font-weight:600;
+            font-size:14px; background:var(--track);
+            -webkit-tap-highlight-color:transparent; }
+  .tabs a[aria-current="page"] { background:var(--tint); color:#fff; }
+
   main { padding:14px 12px calc(28px + env(safe-area-inset-bottom));
          max-width:780px; margin:0 auto; }
   @media (min-width:820px) { main { max-width:900px; } }
@@ -79,9 +101,25 @@
                  background:var(--bg); color:var(--ink); cursor:pointer;
                  -webkit-tap-highlight-color:transparent; }
   button:active { transform:scale(.97); }
+  button.primary { background:var(--tint); color:#fff; border-color:var(--tint); }
   .actions { display:flex; flex-wrap:wrap; gap:8px; }
   .actions form { margin:0; }
   button.small { font-size:13px; padding:6px 11px; border-radius:8px; }
+
+  /* A form that is mid-flight says so on its own buttons: dimmed, and the
+     one that was pressed gets the working pulse. This is half the answer to
+     "it feels like I'm pressing nothing"; the toast is the other half. */
+  form.busy button { opacity:.55; pointer-events:none; }
+  button.pressed { animation:workpulse 1s ease-in-out infinite; }
+  @keyframes workpulse { 50% { opacity:.35; } }
+
+  .toast { position:fixed; left:50%; bottom:calc(18px + env(safe-area-inset-bottom));
+           transform:translateX(-50%) translateY(8px); background:var(--ink);
+           color:var(--bg); padding:9px 16px; border-radius:999px;
+           font-size:14px; font-weight:560; max-width:88vw; text-align:center;
+           opacity:0; transition:opacity .18s, transform .18s;
+           pointer-events:none; z-index:50; box-shadow:var(--shadow-pill); }
+  .toast.show { opacity:1; transform:translateX(-50%); }
 
   .banner { border-radius:10px; padding:10px 12px; margin:0 0 12px; font-size:14px;
             background:color-mix(in srgb, var(--unknown) 12%, transparent);
@@ -92,10 +130,6 @@
                border-color:color-mix(in srgb, var(--ok) 30%, transparent); }
 
   /* ------------------------------------------------------------ the screen */
-  /* The photograph with the tap map laid over it. Each box is one element
-     the feed published for the current frame; a press posts THAT element
-     back, and the server refuses if the screen moved (the same /tap the
-     phone view uses — this page adds no capability, only a vantage). */
   .glass { background:var(--peek-bed); border:.5px solid var(--line);
            border-radius:12px; overflow:hidden; position:relative;
            max-width:420px; margin:0 auto; }
@@ -114,6 +148,13 @@
   @media (min-width:560px) { .panelgrid { grid-template-columns:repeat(3,1fr); } }
   .panelgrid form { margin:0; display:contents; }
   .panelgrid button { width:100%; }
+
+  /* ------------------------------------------------------------- the clock */
+  .clockform { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px;
+               align-items:center; }
+  input[type=datetime-local] { font:inherit; padding:9px 12px; border-radius:10px;
+                               border:.5px solid var(--line); background:var(--bg);
+                               color:var(--ink); flex:1 1 200px; min-width:0; }
 </style>
 </head>
 <body>
@@ -121,12 +162,12 @@
 <span class="buildstamp" aria-hidden="true">{{ boot }}</span>
 
 <div class="bar">
-  {# This page is an annex of the control centre, and says so by being
-     leavable back into it. #}
-  <a class="back" href="/console">
+  {# Back to the phone — this page is a command-centre tab now, a sibling of
+     the control centre rather than its child, so it leaves the same way. #}
+  <a class="back" href="/app">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"
          stroke-linecap="round" stroke-linejoin="round"><path d="M15 5 L8 12 L15 19"/></svg>
-    {{ t('console.title') }}</a>
+    {{ t('console.back_to_app') }}</a>
   <h1>{{ t('debug.title') }}</h1>
   <form method="post" action="/language" class="seg">
     <input type="hidden" name="next" value="/debug">
@@ -138,6 +179,11 @@
   </form>
 </div>
 
+<nav class="tabs">
+  <a href="/console">{{ t('console.title') }}</a>
+  <a href="/debug" aria-current="page">{{ t('debug.tab') }}</a>
+</nav>
+
 <main>
   {% if opened == 'unknown' %}
     <div class="banner bad">{{ t('debug.open_unknown') }}</div>
@@ -146,6 +192,20 @@
   {% elif opened and opened in panel_index %}
     <div class="banner ok">{{ t('debug.opened',
         panel=t(panel_index[opened].label_key)) }}</div>
+  {% endif %}
+  {% if saved == 'switch' %}
+    <div class="banner ok">{{ t('debug.saved.switch') }}</div>
+  {% elif saved == 'clock' %}
+    <div class="banner ok">{{ t('debug.saved.clock') }}</div>
+  {% elif saved == 'bad_time' %}
+    <div class="banner bad">{{ t('debug.time.bad') }}</div>
+  {% elif saved == 'time_failed' %}
+    <div class="banner bad">{{ t('phone.failed') }}</div>
+  {% endif %}
+  {% if device_said == 'sent' %}
+    <div class="banner ok">{{ t('debug.sent') }}</div>
+  {% elif device_said == 'failed' %}
+    <div class="banner bad">{{ t('phone.failed') }}</div>
   {% endif %}
 
   <p class="sub" style="margin:0 0 12px">{{ t('debug.intro') }}</p>
@@ -169,7 +229,7 @@
        them — the same fixed /device allow-list as everywhere else. #}
     <div class="actions" style="margin-top:10px">
       {% for act in ['back', 'home', 'scroll_up', 'scroll_down', 'wake'] %}
-      <form method="post" action="/device">
+      <form method="post" action="/device" data-async>
         <input type="hidden" name="action" value="{{ act }}">
         <button type="submit" class="small">
           {{ t('papp.' ~ act) if act.startswith('scroll') else t('phone.' ~ act) }}</button>
@@ -186,7 +246,7 @@
     <h3>{{ t('debug.group.' ~ group) }}</h3>
     <div class="panelgrid">
       {% for p in panels %}
-      <form method="post" action="/debug/open">
+      <form method="post" action="/debug/open" data-async>
         <input type="hidden" name="panel" value="{{ p.id }}">
         <button type="submit">{{ t(p.label_key) }}</button>
       </form>
@@ -196,7 +256,47 @@
     <p class="sub">{{ t('debug.language_note') }}</p>
   </section>
 
+  {# ------------------------------------------------------------- the clock #}
+  {# The one section that writes, and the reason it may: see phonesettings'
+     clock section. The switches are segmented controls showing the state the
+     phone reported, refreshed after every press; the set control takes one
+     typed time and does the disable-then-set dance in a single press. #}
+  <section>
+    <h2>{{ t('debug.time.title') }}</h2>
+    <p class="sub" style="margin:0 0 4px">{{ t('debug.time.explain') }}</p>
+
+    <div class="row">
+      <div class="k"><b>{{ t('debug.reading.clock') }}</b></div>
+      <span class="v" data-reading="clock">{{ readings.by_id.clock.said }}</span>
+    </div>
+    {% for sid in ['auto_time', 'auto_zone'] %}
+    {% set row = readings.by_id[sid] %}
+    <div class="row">
+      <div class="k"><b>{{ t(row.label_key) }}</b></div>
+      <form method="post" action="/debug/time/switch" class="seg" data-async
+            data-switch="{{ sid }}">
+        <input type="hidden" name="switch" value="{{ sid }}">
+        <button type="submit" name="on" value="1" data-on="1"
+                aria-pressed="{{ 'true' if row.value == '1' else 'false' }}">
+          {{ t('debug.on') }}</button>
+        <button type="submit" name="on" value="0" data-on="0"
+                aria-pressed="{{ 'true' if row.value == '0' else 'false' }}">
+          {{ t('debug.off') }}</button>
+      </form>
+    </div>
+    {% endfor %}
+
+    <form method="post" action="/debug/time/set" class="clockform" data-async>
+      <input type="datetime-local" name="when" id="when" step="60" required>
+      <button type="button" class="small" id="fill-now">
+        {{ t('debug.time.fill_now') }}</button>
+      <button type="submit" class="small primary">{{ t('debug.time.set') }}</button>
+    </form>
+    <p class="sub">{{ t('debug.time.set_note') }}</p>
+  </section>
+
   {# ---------------------------------------------------------- the readings #}
+  {% set clock_rows = ['clock', 'auto_time', 'auto_zone'] %}
   <section>
     <h2>{{ t('debug.readings.title') }}
       {% if readings.front %}
@@ -207,7 +307,7 @@
     {% if not readings.ok %}
       <div class="banner bad">{{ t('debug.readings.unreachable') }}</div>
     {% endif %}
-    {% for r in readings.rows %}
+    {% for r in readings.rows if r.id not in clock_rows %}
     <div class="row">
       <div class="k"><b>{{ t(r.label_key) }}</b></div>
       <span class="v" data-reading="{{ r.id }}">{{ r.said }}</span>
@@ -217,23 +317,48 @@
   </section>
 </main>
 
+<div class="toast" id="toast" role="status"></div>
+
 <script>
-  // Two jobs, neither load-bearing: the tap map over the photograph, and a
-  // refresh of the readings for a page left open. The map buttons and every
-  // form above work with this file broken — the forms post, the photo still
-  // shows, only the overlay taps and the live values go quiet.
+  // Three jobs, none load-bearing: the tap map over the photograph, in-place
+  // posting with a visible outcome for every form, and a refresh of the
+  // readings for a page left open. With this file broken the forms post the
+  // old way, the banners still answer, only the overlay and the live values
+  // go quiet.
   (function () {
     var peek = document.getElementById('peek');
     var aims = document.getElementById('aims');
     var note = document.getElementById('tapnote');
+    var toastEl = document.getElementById('toast');
     var EXPLAIN = {{ t('debug.screen.explain')|tojson }};
     var LOOK_AGAIN = {{ t('debug.look_again')|tojson }};
     var SENT = {{ t('debug.tap_sent')|tojson }};
+    var WORDS = {
+      busy: {{ t('debug.toast.busy')|tojson }},
+      done: {{ t('debug.toast.done')|tojson }},
+      opened: {{ t('debug.toast.opened')|tojson }},
+      switched: {{ t('debug.saved.switch')|tojson }},
+      clock: {{ t('debug.saved.clock')|tojson }},
+      sent: {{ t('debug.sent')|tojson }},
+      bad_time: {{ t('debug.time.bad')|tojson }},
+      unknown: {{ t('debug.open_unknown')|tojson }},
+      failed: {{ t('phone.failed')|tojson }}
+    };
 
-    function say(text) {
-      if (note) note.textContent = text;
+    var toastTimer = null;
+    function toast(text, linger) {
+      if (!toastEl) return;
+      toastEl.textContent = text;
+      toastEl.classList.add('show');
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(function () {
+        toastEl.classList.remove('show');
+      }, linger || 2600);
     }
 
+    function say(text) { if (note) note.textContent = text; }
+
+    // ---------------------------------------------------------- the tap map
     function draw(frame) {
       if (!aims) return;
       aims.textContent = '';
@@ -260,6 +385,7 @@
       // The element she aimed at, posted back whole: /tap re-reads the
       // published frame and refuses if the screen moved. 409 is "look
       // again", not "failed" — the map refreshes and she re-aims.
+      toast(WORDS.busy, 1200);
       fetch('/tap', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -268,9 +394,10 @@
                                           b: el.b } })
       }).then(function (r) {
         say(r.ok ? SENT : LOOK_AGAIN);
+        toast(r.ok ? SENT : LOOK_AGAIN);
         setTimeout(refresh, 900);
         setTimeout(function () { say(EXPLAIN); }, 4000);
-      }).catch(function () { say(LOOK_AGAIN); });
+      }).catch(function () { say(LOOK_AGAIN); toast(WORDS.failed); });
     }
 
     function refresh() {
@@ -286,13 +413,78 @@
     refresh();
     setInterval(refresh, 3500);
 
-    setInterval(function () {
-      if (document.hidden) return;
+    // -------------------------------------------------- forms that answer
+    // Every form marked data-async posts in place: the pressed button
+    // pulses, the rest of the form dims, and the redirect the server
+    // answers with is read for its outcome word instead of being followed
+    // into a reload that lands above the fold.
+    function outcome(query) {
+      if (query.indexOf('failed') >= 0) return WORDS.failed;
+      if (query.indexOf('opened=unknown') >= 0) return WORDS.unknown;
+      if (query.indexOf('saved=bad_time') >= 0) return WORDS.bad_time;
+      if (query.indexOf('opened=') >= 0) return WORDS.opened;
+      if (query.indexOf('saved=switch') >= 0) return WORDS.switched;
+      if (query.indexOf('saved=clock') >= 0) return WORDS.clock;
+      if (query.indexOf('device=sent') >= 0) return WORDS.sent;
+      return WORDS.done;
+    }
+
+    document.querySelectorAll('form[data-async]').forEach(function (form) {
+      form.addEventListener('submit', function (event) {
+        if (!window.fetch || !window.FormData || !window.URLSearchParams) {
+          return; // the form posts the old way, banners answer
+        }
+        event.preventDefault();
+        var pressed = event.submitter || null;
+        var data;
+        try {
+          data = new FormData(form, pressed || undefined);
+        } catch (err) {
+          data = new FormData(form);
+        }
+        if (pressed && pressed.name && !data.has(pressed.name)) {
+          data.append(pressed.name, pressed.value);
+        }
+        form.classList.add('busy');
+        if (pressed) pressed.classList.add('pressed');
+        toast(WORDS.busy, 8000);
+        fetch(form.action, { method: 'POST',
+                             body: new URLSearchParams(data) })
+          .then(function (r) {
+            var query = '';
+            try { query = new URL(r.url, location.href).search; }
+            catch (err) { query = ''; }
+            toast(r.ok || r.redirected ? outcome(query) : WORDS.failed);
+            setTimeout(refresh, 900);
+            pollReadings();
+          })
+          .catch(function () { toast(WORDS.failed); })
+          .then(function () {
+            form.classList.remove('busy');
+            if (pressed) pressed.classList.remove('pressed');
+          });
+      });
+    });
+
+    // --------------------------------------------------------- the readings
+    var lastClock = {{ (readings.by_id.clock.value or '')|tojson }};
+
+    function pollReadings() {
       fetch('/api/phone-settings').then(function (r) { return r.json(); })
         .then(function (doc) {
           (doc.rows || []).forEach(function (row) {
             var cell = document.querySelector('[data-reading="' + row.id + '"]');
             if (cell) cell.textContent = row.said;
+            if (row.id === 'clock' && row.value) lastClock = row.value;
+            // The switch segs follow the phone, not the press: what shows
+            // filled is what the phone reported, refreshed after each post.
+            var seg = document.querySelector('[data-switch="' + row.id + '"]');
+            if (seg) {
+              seg.querySelectorAll('button[data-on]').forEach(function (b) {
+                b.setAttribute('aria-pressed',
+                               String(b.getAttribute('data-on') === row.value));
+              });
+            }
           });
           var chip = document.getElementById('front-chip');
           if (chip && doc.front) {
@@ -302,7 +494,23 @@
           }
         })
         .catch(function () { /* stale values say so by not moving */ });
+    }
+    setInterval(function () {
+      if (!document.hidden) pollReadings();
     }, 10000);
+
+    // Copy the phone's own clock into the set-time box: the honest starting
+    // point, because the typed time is read in the PHONE's zone and the
+    // browser's own "now" may be hours away from it.
+    var fill = document.getElementById('fill-now');
+    var when = document.getElementById('when');
+    if (fill && when) {
+      fill.addEventListener('click', function () {
+        if (!lastClock) return;
+        // "2026-09-02 15:30:12" -> "2026-09-02T15:30"
+        when.value = lastClock.replace(' ', 'T').slice(0, 16);
+      });
+    }
   })();
 </script>
 </body>

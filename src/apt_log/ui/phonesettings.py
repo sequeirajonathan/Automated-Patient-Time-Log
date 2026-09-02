@@ -23,11 +23,17 @@ to somewhere it wandered), and everything past the opened screen rides the
 same verified-tap path as every other press on the mirror.
 
 **READINGS** — what the phone says its settings currently are, read over adb.
-Read-only by construction: every probe is a `getprop` or a `settings get`,
-there is no `settings put` anywhere in this module, and changing a value means
-opening the screen and tapping the phone's own control for it — where the
-phone applies its own validation, confirmation dialogs and side effects,
-none of which a blind `settings put` would run.
+The readings never write: every probe is a `getprop` or a `settings get`, and
+changing a value normally means opening the screen and tapping the phone's own
+control for it — where the phone applies its own validation, confirmation
+dialogs and side effects, none of which a blind `settings put` would run.
+
+The ONE exception is the clock section at the bottom of this module, added on
+the owner's explicit ask: testing runs the phone's time forwards and backwards
+often enough that walking the Date & time screen by taps every time was the
+tedium this page exists to remove. It is three fixed commands — the two
+automatic-time switches and `cmd alarm set-time` — each allow-listed the same
+way the panels are, and nothing else here writes.
 
 Everything here degrades rather than breaks: a Pi whose adb has gone away
 renders a page of dashes, not a stack trace, because the person opening a
@@ -172,6 +178,11 @@ READINGS = (
      "probe": "getprop ro.build.version.release"},
     {"id": "model", "kind": "text", "label_key": "debug.reading.model",
      "probe": "getprop ro.product.model"},
+    # The phone's own clock, as the phone renders it. The clock section shows
+    # this next to its controls, so what a set-time press did is visible on
+    # the very next poll rather than taken on faith.
+    {"id": "clock", "kind": "text", "label_key": "debug.reading.clock",
+     "probe": "date '+%Y-%m-%d %H:%M:%S'"},
     {"id": "font_scale", "kind": "text",
      "label_key": "debug.reading.font_scale",
      "probe": "settings get system font_scale"},
@@ -288,3 +299,112 @@ def readings() -> dict:
         front = ""
 
     return {"ok": ok, "at": time.time(), "front": front, "rows": rows}
+
+
+# ------------------------------------------------------------------ the clock
+# The one place this module writes, and the shape of the allow-list is the
+# whole argument for letting it: two switch names fixed here, one clock
+# command whose only parameter is a number of milliseconds this module
+# computed itself. Nothing a browser posts is ever part of a command — a
+# switch id selects a row, a typed time is parsed and re-serialised.
+#
+# WHY WRITES AT ALL, when the panels exist precisely so the phone's own
+# controls do the changing: the Date & time screen is the one screen the
+# operator visits often (testing runs the clock forwards and back), and it
+# takes four taps and a scroll-wheel every time. The tedium was reported in
+# exactly those words. The rest of Settings stays tap-only.
+TIME_SWITCHES = {
+    "auto_time": "auto_time",
+    "auto_zone": "auto_time_zone",
+}
+
+
+def _adb_write(args: list[str], doing: str) -> None:
+    """One write to the phone, or SettingsUnavailable saying what refused."""
+    try:
+        result = subprocess.run(["adb", "shell"] + args, capture_output=True,
+                                timeout=ADB_TIMEOUT, check=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise SettingsUnavailable(f"adb did not answer while {doing} ({exc})") \
+            from exc
+    said = (result.stdout + result.stderr).decode("utf-8", "replace").strip()
+    # Like `am start`, the settings and cmd services report failure in words
+    # with exit code 0, so the words are read too.
+    if result.returncode != 0 or "error" in said.lower() \
+            or "exception" in said.lower():
+        raise SettingsUnavailable(
+            f"the phone refused {doing}: {said[:200]}")
+
+
+def set_time_switch(switch_id: str, on: bool) -> None:
+    """Throw one of the two automatic-time switches. KeyError otherwise.
+
+    The same security shape as open_panel: the id selects a row, only the
+    row knows a settings key, and there is no path from a form field to
+    `settings put`.
+    """
+    key = TIME_SWITCHES[switch_id]
+    _adb_write(["settings", "put", "global", key, "1" if on else "0"],
+               f"setting {key}")
+    log.info("phone switch %s set %s", key, "on" if on else "off")
+
+
+def _phone_timezone() -> str:
+    """The zone the phone keeps its clock in, or ""."""
+    try:
+        out = subprocess.run(
+            ["adb", "shell", "getprop", "persist.sys.timezone"],
+            capture_output=True, timeout=ADB_TIMEOUT, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return out.stdout.decode("utf-8", "replace").strip() if \
+        out.returncode == 0 else ""
+
+
+def set_clock(when: str) -> int:
+    """Set the phone's clock to `when`, read in the phone's own time zone.
+
+    `when` is a datetime-local string (2026-09-02T15:30). It is interpreted
+    in the zone the PHONE is in, never the browser's — the person typing may
+    be two time zones from the handset, and "set it to 3:05" means the
+    phone's 3:05 (the same rule every rendered hour on this portal follows).
+    Refuses when that zone cannot be read: a clock set in a guessed zone is
+    off by hours and looks fine.
+
+    Automatic date & time is switched OFF first, always: with it on the
+    network puts the time straight back within seconds, and a control that
+    visibly works and silently un-works is worse than one that refuses.
+    Turning it back on afterwards is the page's own switch, one press away.
+
+    The set itself is `cmd alarm set-time <millis>` — the alarm service's
+    own shell command, permitted to the adb shell user (SET_TIME), where a
+    bare `date -s` is not.
+
+    ValueError for a time that will not parse; nothing is written then.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    wanted = datetime.fromisoformat((when or "").strip())  # ValueError out
+    if wanted.tzinfo is not None:
+        # The page sends naive datetimes; an offset smuggled in would make
+        # "the phone's own zone" silently mean something else.
+        raise ValueError("a zone offset is not accepted here")
+
+    zone_name = _phone_timezone()
+    if not zone_name:
+        raise SettingsUnavailable(
+            "cannot read the phone's time zone — refusing to set a clock "
+            "whose meaning would be a guess")
+    try:
+        zone = ZoneInfo(zone_name)
+    except Exception as exc:  # noqa: BLE001 — an unknown zone name
+        raise SettingsUnavailable(
+            f"the phone names a zone this controller does not know "
+            f"({zone_name!r})") from exc
+
+    millis = int(wanted.replace(tzinfo=zone).timestamp() * 1000)
+    set_time_switch("auto_time", False)
+    _adb_write(["cmd", "alarm", "set-time", str(millis)], "setting the clock")
+    log.info("phone clock set to %s %s (%d)", when, zone_name, millis)
+    return millis

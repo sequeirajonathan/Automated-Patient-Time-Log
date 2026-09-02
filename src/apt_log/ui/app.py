@@ -640,6 +640,9 @@ def _readings_said(t: Translator, doc: dict) -> dict:
                            else "—")
         else:
             row["said"] = row.get("value") or "—"
+    # By id as well as in order: the clock section pulls its three rows out
+    # of the readings rather than probing the phone a second time.
+    doc["by_id"] = {row["id"]: row for row in doc.get("rows") or ()}
     return doc
 
 
@@ -678,6 +681,8 @@ def debug_settings(request: Request):
             "readings": _readings_said(t, phonesettings.readings()),
             "screen_doc": doc,
             "opened": opened,
+            "saved": (request.query_params.get("saved") or "")[:24],
+            "device_said": (request.query_params.get("device") or "")[:24],
         },
     )
     return _remember(response, request, device_id, "/debug")
@@ -704,6 +709,47 @@ def debug_open(request: Request, panel: str = Form(...)):
         log.warning("could not open the settings screen: %s", exc)
         return RedirectResponse(url="/debug?opened=failed", status_code=303)
     return RedirectResponse(url=f"/debug?opened={wanted}", status_code=303)
+
+
+@app.post("/debug/time/switch")
+def debug_time_switch(request: Request, switch: str = Form(...),
+                      on: str = Form(...)):
+    """Throw one of the two automatic-time switches, by id.
+
+    Same shape as /debug/open: the id selects a row of
+    `phonesettings.TIME_SWITCHES` and only the row knows a settings key.
+    """
+    from apt_log.ui import phonesettings
+
+    try:
+        phonesettings.set_time_switch((switch or "")[:16], on == "1")
+    except (KeyError, phonesettings.SettingsUnavailable) as exc:
+        log.warning("could not set the time switch: %s", exc)
+        return RedirectResponse(url="/debug?saved=time_failed",
+                                status_code=303)
+    return RedirectResponse(url="/debug?saved=switch", status_code=303)
+
+
+@app.post("/debug/time/set")
+def debug_time_set(request: Request, when: str = Form(...)):
+    """Set the phone's clock in one press, in the phone's own zone.
+
+    Turns Automatic date & time off first (or the network puts the time
+    straight back), then `cmd alarm set-time`. See phonesettings.set_clock
+    for the whole argument, including why a typed time is read in the
+    PHONE's zone and never the browser's.
+    """
+    from apt_log.ui import phonesettings
+
+    try:
+        phonesettings.set_clock((when or "")[:32])
+    except ValueError:
+        return RedirectResponse(url="/debug?saved=bad_time", status_code=303)
+    except phonesettings.SettingsUnavailable as exc:
+        log.warning("could not set the phone clock: %s", exc)
+        return RedirectResponse(url="/debug?saved=time_failed",
+                                status_code=303)
+    return RedirectResponse(url="/debug?saved=clock", status_code=303)
 
 
 @app.get("/api/phone-settings")

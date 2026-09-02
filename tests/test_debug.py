@@ -72,6 +72,7 @@ def _transcript(**overrides) -> bytes:
         "timezone": "America/New_York",
         "android": "13",
         "model": "SM-A156U",
+        "clock": "2026-09-02 15:30:12",
         "font_scale": "null",
         "brightness": "180",
         "screen_timeout": "120000",
@@ -116,12 +117,14 @@ class TestTheMapItself:
             "android.settings.LOCALE_SETTINGS"
 
     def test_readings_are_read_only_by_construction(self):
-        """No probe writes. `settings put` appearing here would be the page
-        growing the capability its docstring promises it does not have."""
+        """No probe writes. The writes live in the clock section, behind
+        their own allow-list — a `settings put` appearing HERE would be the
+        readings growing a capability their docstring promises they lack."""
         for reading in phonesettings.READINGS:
             probe = reading["probe"]
-            assert probe.startswith(("getprop ", "settings get ")), probe
-            assert "put" not in probe
+            assert probe.startswith(("getprop ", "settings get ", "date ")), \
+                probe
+            assert "put" not in probe and "-s" not in probe
 
 
 class TestOpenPanel:
@@ -209,6 +212,93 @@ class TestReadings:
         assert all(r["value"] is None for r in doc["rows"])
 
 
+def _clock_adb(calls: list, zone: str = "America/New_York"):
+    """An adb double for the clock paths: answers the timezone probe with a
+    real zone name and takes every write silently."""
+    def run(cmd, **_kwargs):
+        calls.append(cmd)
+        if "persist.sys.timezone" in cmd:
+            return SimpleNamespace(returncode=0,
+                                   stdout=(zone + "\n").encode(), stderr=b"")
+        return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+    return run
+
+
+class TestTheClock:
+    def test_an_unknown_switch_never_reaches_adb(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _fake_adb(b"", calls))
+        with pytest.raises(KeyError):
+            phonesettings.set_time_switch("adb_enabled", False)
+        assert calls == []
+
+    def test_the_switch_key_comes_from_the_table(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _fake_adb(b"", calls))
+        phonesettings.set_time_switch("auto_zone", False)
+        assert calls == [["adb", "shell", "settings", "put", "global",
+                          "auto_time_zone", "0"]]
+
+    def test_set_clock_reads_the_time_in_the_phones_zone(self, monkeypatch):
+        """15:30 typed means the PHONE's 15:30 — the person typing may be two
+        time zones from the handset, and a clock set in the browser's zone
+        would be hours off while looking exactly right."""
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        calls = []
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _clock_adb(calls))
+        millis = phonesettings.set_clock("2026-09-02T15:30")
+        wanted = datetime(2026, 9, 2, 15, 30,
+                          tzinfo=ZoneInfo("America/New_York"))
+        assert millis == int(wanted.timestamp() * 1000)
+        assert ["adb", "shell", "cmd", "alarm", "set-time",
+                str(millis)] in calls
+
+    def test_set_clock_switches_automatic_time_off_first(self, monkeypatch):
+        """With auto_time on, the network puts the time straight back within
+        seconds — a control that visibly works and silently un-works."""
+        calls = []
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _clock_adb(calls))
+        phonesettings.set_clock("2026-09-02T15:30")
+        auto_off = calls.index(["adb", "shell", "settings", "put", "global",
+                                "auto_time", "0"])
+        set_time = next(i for i, c in enumerate(calls) if "set-time" in c)
+        assert auto_off < set_time
+
+    def test_a_time_that_will_not_parse_writes_nothing(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _clock_adb(calls))
+        with pytest.raises(ValueError):
+            phonesettings.set_clock("half past nine")
+        assert calls == []
+
+    def test_an_offset_smuggled_into_the_time_is_refused(self, monkeypatch):
+        """The page sends naive datetimes; an offset would quietly make "the
+        phone's own zone" mean something else."""
+        calls = []
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _clock_adb(calls))
+        with pytest.raises(ValueError):
+            phonesettings.set_clock("2026-09-02T15:30+05:00")
+        assert calls == []
+
+    def test_an_unreadable_zone_refuses_rather_than_guessing(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _clock_adb(calls, zone=""))
+        with pytest.raises(phonesettings.SettingsUnavailable):
+            phonesettings.set_clock("2026-09-02T15:30")
+        # The timezone probe ran; no write did.
+        assert all("put" not in c and "set-time" not in c for c in calls)
+
+
 class TestTheRoutes:
     def test_the_page_renders_with_no_phone_at_all(self, client, no_adb):
         """The person opening a debug page is diagnosing why adb went away.
@@ -261,5 +351,39 @@ class TestTheRoutes:
         assert by_id["bluetooth"]["said"] == "Off"
         assert by_id["auto_zone"]["said"] == "—"
 
+    def test_the_switch_route_answers_with_the_notice(self, client,
+                                                      monkeypatch):
+        calls = []
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _fake_adb(b"", calls))
+        r = client.post("/debug/time/switch",
+                        data={"switch": "auto_time", "on": "0"},
+                        follow_redirects=False)
+        assert r.headers["location"] == "/debug?saved=switch"
+        assert ["adb", "shell", "settings", "put", "global",
+                "auto_time", "0"] in calls
+
+    def test_a_bad_time_reports_itself_and_writes_nothing(self, client,
+                                                          monkeypatch):
+        calls = []
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _fake_adb(b"", calls))
+        r = client.post("/debug/time/set", data={"when": "half past nine"},
+                        follow_redirects=False)
+        assert r.headers["location"] == "/debug?saved=bad_time"
+        assert calls == []
+
+    def test_the_set_route_lands_back_with_the_notice(self, client,
+                                                      monkeypatch):
+        calls = []
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _clock_adb(calls))
+        r = client.post("/debug/time/set", data={"when": "2026-09-02T15:30"},
+                        follow_redirects=False)
+        assert r.headers["location"] == "/debug?saved=clock"
+        assert any("set-time" in c for c in calls)
+
     def test_the_console_offers_the_way_in(self, client, no_adb):
+        """The tab strip, on both pages, each pointing at the other."""
         assert 'href="/debug"' in client.get("/console").text
+        assert 'href="/console"' in client.get("/debug").text
