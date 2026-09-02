@@ -289,6 +289,29 @@ class TestTheClock:
             phonesettings.set_clock("2026-09-02T15:30+05:00")
         assert calls == []
 
+    def test_reset_turns_both_switches_back_on(self, monkeypatch):
+        """The undo for the section, and deliberately BOTH switches whatever
+        a test flipped: "back on automatic" is one state, not a memory."""
+        calls = []
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _fake_adb(b"", calls))
+        phonesettings.reset_clock()
+        assert calls == [
+            ["adb", "shell", "settings", "put", "global", "auto_time", "1"],
+            ["adb", "shell", "settings", "put", "global",
+             "auto_time_zone", "1"],
+        ]
+
+    def test_reset_never_sets_a_time_itself(self, monkeypatch):
+        """The network is the one clock source that cannot be a stale guess;
+        a reset that wrote its own idea of "now" would just be a second
+        wrong clock."""
+        calls = []
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _fake_adb(b"", calls))
+        phonesettings.reset_clock()
+        assert all("set-time" not in c for c in calls)
+
     def test_an_unreadable_zone_refuses_rather_than_guessing(self, monkeypatch):
         calls = []
         monkeypatch.setattr(phonesettings.subprocess, "run",
@@ -382,6 +405,15 @@ class TestTheRoutes:
                         follow_redirects=False)
         assert r.headers["location"] == "/debug?saved=clock"
         assert any("set-time" in c for c in calls)
+
+    def test_the_reset_route_lands_back_with_the_notice(self, client,
+                                                        monkeypatch):
+        calls = []
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _fake_adb(b"", calls))
+        r = client.post("/debug/time/reset", follow_redirects=False)
+        assert r.headers["location"] == "/debug?saved=reset"
+        assert len(calls) == 2
 
     def test_the_console_offers_the_way_in(self, client, no_adb):
         """The tab strip, on both pages, each pointing at the other."""

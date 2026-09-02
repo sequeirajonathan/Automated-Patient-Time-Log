@@ -408,3 +408,22 @@ def set_clock(when: str) -> int:
     _adb_write(["cmd", "alarm", "set-time", str(millis)], "setting the clock")
     log.info("phone clock set to %s %s (%d)", when, zone_name, millis)
     return millis
+
+
+def reset_clock() -> None:
+    """Put the clock back: both automatic switches on, the network does the
+    rest.
+
+    The undo for everything else in this section, as one press — because the
+    dangerous state is not a wrong time, it is a wrong time LEFT BEHIND after
+    testing, quietly stamping real visit records. The reset does not set a
+    time itself: with both switches on the phone asks the network, which is
+    the one clock source that cannot be a stale guess. NITZ usually lands
+    within seconds; the clock reading beside the button shows it happen.
+
+    Both switches, deliberately, even if only one was touched: "back on
+    automatic" is one state, not a memory of which switch a test flipped.
+    """
+    set_time_switch("auto_time", True)
+    set_time_switch("auto_zone", True)
+    log.info("phone clock handed back to the network")

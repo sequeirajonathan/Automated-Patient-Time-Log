@@ -241,7 +241,11 @@ class TestWritePaths:
                          # on the owner's explicit ask (testing runs the
                          # phone's clock forwards and back); the argument
                          # lives in phonesettings' clock section.
-                         "/debug/time/switch", "/debug/time/set"}
+                         "/debug/time/switch", "/debug/time/set",
+                         # And the undo: both automatic switches back on, the
+                         # network restores the real time. No parameters at
+                         # all — the safest write on the page.
+                         "/debug/time/reset"}
 
     def test_no_route_accepts_a_raw_coordinate_or_keycode(self, client):
         """/tap takes an element from a named frame; /device takes an action

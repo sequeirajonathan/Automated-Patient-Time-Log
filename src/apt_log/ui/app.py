@@ -752,6 +752,23 @@ def debug_time_set(request: Request, when: str = Form(...)):
     return RedirectResponse(url="/debug?saved=clock", status_code=303)
 
 
+@app.post("/debug/time/reset")
+def debug_time_reset(request: Request):
+    """Put the clock back on automatic, one press: both switches on, the
+    network restores the real time and zone. The undo for the section —
+    see phonesettings.reset_clock for why it takes no parameters at all.
+    """
+    from apt_log.ui import phonesettings
+
+    try:
+        phonesettings.reset_clock()
+    except phonesettings.SettingsUnavailable as exc:
+        log.warning("could not reset the phone clock: %s", exc)
+        return RedirectResponse(url="/debug?saved=time_failed",
+                                status_code=303)
+    return RedirectResponse(url="/debug?saved=reset", status_code=303)
+
+
 @app.get("/api/phone-settings")
 def api_phone_settings(request: Request):
     """The readings, refreshed without a reload, for the page that sits open

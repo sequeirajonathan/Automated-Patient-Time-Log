@@ -197,6 +197,8 @@
     <div class="banner ok">{{ t('debug.saved.switch') }}</div>
   {% elif saved == 'clock' %}
     <div class="banner ok">{{ t('debug.saved.clock') }}</div>
+  {% elif saved == 'reset' %}
+    <div class="banner ok">{{ t('debug.saved.reset') }}</div>
   {% elif saved == 'bad_time' %}
     <div class="banner bad">{{ t('debug.time.bad') }}</div>
   {% elif saved == 'time_failed' %}
@@ -293,6 +295,15 @@
       <button type="submit" class="small primary">{{ t('debug.time.set') }}</button>
     </form>
     <p class="sub">{{ t('debug.time.set_note') }}</p>
+
+    {# The undo, one press, always in reach of the controls it undoes: both
+       switches back on, and the network — the one clock source that cannot
+       be a stale guess — restores the real time and zone. #}
+    <form method="post" action="/debug/time/reset" data-async
+          style="margin-top:10px">
+      <button type="submit" class="small">{{ t('debug.time.reset') }}</button>
+    </form>
+    <p class="sub">{{ t('debug.time.reset_note') }}</p>
   </section>
 
   {# ---------------------------------------------------------- the readings #}
@@ -339,6 +350,7 @@
       opened: {{ t('debug.toast.opened')|tojson }},
       switched: {{ t('debug.saved.switch')|tojson }},
       clock: {{ t('debug.saved.clock')|tojson }},
+      reset: {{ t('debug.saved.reset')|tojson }},
       sent: {{ t('debug.sent')|tojson }},
       bad_time: {{ t('debug.time.bad')|tojson }},
       unknown: {{ t('debug.open_unknown')|tojson }},
@@ -425,6 +437,7 @@
       if (query.indexOf('opened=') >= 0) return WORDS.opened;
       if (query.indexOf('saved=switch') >= 0) return WORDS.switched;
       if (query.indexOf('saved=clock') >= 0) return WORDS.clock;
+      if (query.indexOf('saved=reset') >= 0) return WORDS.reset;
       if (query.indexOf('device=sent') >= 0) return WORDS.sent;
       return WORDS.done;
     }
