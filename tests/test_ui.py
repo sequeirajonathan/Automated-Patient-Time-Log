@@ -3566,7 +3566,9 @@ class TestTheCardUnderIt:
 
     def test_no_timer_moves_anything_on_the_page(self):
         """Three intervals are left and each earns it: re-reading the
-        schedule, the clock (which is a clock), and the sign-in code's age.
+        schedule, the clock (which is a clock — `paintClock` now, since it
+        paints the PHONE's hour off the socket and only ticks for the
+        fallback), and the sign-in code's age.
 
         The property is not the COUNT — it is that no timer animates a
         control. So the allowed set is named rather than tallied, which says
@@ -3580,7 +3582,7 @@ class TestTheCardUnderIt:
         """
         js = self._js()
         intervals = [l.strip() for l in js.splitlines() if "setInterval" in l]
-        allowed = ("refreshSchedule", "tick", "refreshCode")
+        allowed = ("refreshSchedule", "paintClock", "refreshCode")
         for line in intervals:
             assert any(name in line for name in allowed), (
                 f"unexplained timer: {line}")

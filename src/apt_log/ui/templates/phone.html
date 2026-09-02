@@ -99,6 +99,70 @@
                    display:block; text-align:center; }
   #launcher .date { text-align:center; color:rgba(255,255,255,.72);
                     font-size:14px; font-weight:500; margin-top:2px; }
+  /* The clock is a button that does not look like one until it is pressed:
+     a home screen's clock has no chrome, and this one keeps that. */
+  #launcher .clockbtn { appearance:none; border:0; background:transparent;
+                        color:inherit; font:inherit; display:flex;
+                        flex-direction:column; align-items:center; gap:6px;
+                        margin:0 auto; padding:0; cursor:pointer;
+                        -webkit-tap-highlight-color:transparent;
+                        transition:transform .25s var(--spring); }
+  #launcher .clockbtn:active { transform:scale(.96); }
+  /* "Set by hand" — amber, because it is a warning and not a label: the
+     phone is stamping records with a time somebody typed. */
+  .clockflag { font-size:11.5px; font-weight:700; letter-spacing:.06em;
+               text-transform:uppercase; padding:3px 10px; border-radius:999px;
+               background:hsl(38 90% 55% / .22); color:hsl(40 100% 78%);
+               border:.5px solid hsl(38 90% 60% / .55); }
+  .clockflag[hidden] { display:none; }
+
+  /* ------------------------------------------------------- the clock sheet */
+  body.timing #clocksheet { transform:translateY(0); }
+  .clock-now { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;
+               margin:4px 0 2px; }
+  .clock-now b { font:600 30px/1.1 ui-rounded,-apple-system,system-ui,sans-serif;
+                 font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
+  .clock-now .chip { font-size:12px; font-weight:600; padding:3px 9px;
+                     border-radius:999px; background:var(--track);
+                     color:var(--muted); }
+  .clock-now .chip.manual { background:hsl(38 90% 55% / .18);
+                            color:hsl(38 70% 38%); }
+  @media (prefers-color-scheme: dark) {
+    .clock-now .chip.manual { color:hsl(40 100% 74%); } }
+  .clock-note { color:var(--muted); font-size:13.5px; margin:6px 0 12px; }
+  .clock-field { display:block; font-size:13px; font-weight:600;
+                 color:var(--muted); margin-bottom:12px; }
+  .clock-field input { display:block; width:100%; margin-top:6px; font:inherit;
+                       font-size:16px; padding:10px 12px; border-radius:10px;
+                       border:.5px solid var(--line); background:var(--bg);
+                       color:var(--ink); }
+  .clock-actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .clock-actions button { flex:1 1 auto; font:inherit; font-size:15px;
+                          font-weight:600; padding:11px 14px; border-radius:11px;
+                          border:.5px solid var(--line); background:var(--bg);
+                          color:var(--ink); cursor:pointer;
+                          -webkit-tap-highlight-color:transparent; }
+  .clock-actions button.primary { background:var(--tint); color:#fff;
+                                  border-color:var(--tint); }
+  .clock-actions button[hidden] { display:none; }
+
+  /* THE LOCK. While a clock change is in flight nothing on the page may be
+     pressed: an app opened halfway through would land on the Date & time
+     screen the change just left, or read the clock the change is about to
+     move. Over everything, including the sheets, and lifted only when the
+     phone's own reading agrees with what was asked. */
+  #clocklock { position:fixed; inset:0; z-index:40; display:none;
+               flex-direction:column; align-items:center; justify-content:center;
+               gap:16px; padding:28px; text-align:center; color:#fff;
+               background:rgba(11,15,29,.86);
+               backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
+  #clocklock p { margin:0; font-size:16px; font-weight:500; max-width:32ch; }
+  #clocklock .ring { width:34px; height:34px; border-radius:50%;
+                     border:3px solid rgba(255,255,255,.25);
+                     border-top-color:#fff; animation:clockspin .9s linear infinite; }
+  @keyframes clockspin { to { transform:rotate(360deg); } }
+  body.clocklocked #clocklock { display:flex; }
+  body.clocklocked .view, body.clocklocked .sheet { pointer-events:none; }
   /* ONE ROW. Three apps in a two-column grid left a hole where a fourth used
      to be and pushed everything below it down a whole tile — the page read as
      cramped because the launcher was spending a third of the screen on three
@@ -1909,7 +1973,18 @@
 </div>
 
 <div class="view" id="launcher">
-  <time id="clock"></time>
+  {# THE PHONE'S CLOCK, AND A WAY TO MOVE IT. The face shows the hour the
+     phone itself reports (the socket carries it), never the reader's; a
+     press opens the sheet below. The pill under it appears only when the
+     phone is off automatic time — the state every visit record then
+     rides, and the one thing on this screen that must not go unsaid. #}
+  <button type="button" id="clockbtn" class="clockbtn" aria-haspopup="dialog"
+          title="{{ t('papp.clock.hint') }}">
+    <time id="clock">{{ clock.said if clock and clock.ok else '' }}</time>
+    <span id="clockflag" class="clockflag"
+          {% if not (clock and clock.ok and clock.auto is sameas false) %}hidden{% endif %}>
+      {{ t('papp.clock.manual') }}</span>
+  </button>
   <div class="date">{{ t('app.title') }}</div>
   <div class="springboard">
     {% for a in apps %}
@@ -2803,6 +2878,31 @@
 
 {# The whole page, as a reading: the phone scrolled its own screen end to
    end and these are every line it showed, in order. Read-only on purpose. #}
+{# The clock sheet: the phone's time as the phone says it, a picker, and —
+   only while there is something to undo — the way back to automatic. #}
+<div id="clocksheet" class="sheet" role="dialog" aria-labelledby="clock-title">
+  <div class="scan-head">
+    <span id="clock-title">{{ t('papp.clock.title') }}</span>
+    <button type="button" id="clock-close">{{ t('papp.close_sheet') }}</button>
+  </div>
+  <div class="clock-now">
+    <b id="clock-now">—</b>
+    <span id="clock-mode" class="chip"></span>
+  </div>
+  <p class="clock-note">{{ t('papp.clock.explain') }}</p>
+  <label class="clock-field">{{ t('papp.clock.when') }}
+    <input type="datetime-local" id="clock-when" step="60"></label>
+  <div class="clock-actions">
+    <button type="button" id="clock-set" class="primary">{{ t('papp.clock.set') }}</button>
+    <button type="button" id="clock-reset" hidden>{{ t('papp.clock.reset') }}</button>
+  </div>
+</div>
+
+<div id="clocklock" role="alert" aria-live="assertive">
+  <div class="ring"></div>
+  <p id="clocklock-text"></p>
+</div>
+
 <div id="scansheet" class="sheet">
   <div class="scan-head">
     <span>{{ t('scan.title') }}</span>
@@ -2828,6 +2928,14 @@
        showing the READER's clock, which is how an owner in Central came to
        be comparing a 5am Eastern arm against a 4am local one. #}
     zone: {{ zone|tojson }},
+    clock: {{ clock|tojson }},
+    clockWorking: {{ t('papp.clock.working')|tojson }},
+    clockDone: {{ t('papp.clock.done')|tojson }},
+    clockResetDone: {{ t('papp.clock.reset_done')|tojson }},
+    clockUnconfirmed: {{ t('papp.clock.unconfirmed')|tojson }},
+    clockManual: {{ t('papp.clock.manual')|tojson }},
+    clockAuto: {{ t('papp.clock.auto')|tojson }},
+    clockUnknown: {{ t('papp.clock.unknown')|tojson }},
     appTitle: {{ t('app.title')|tojson }},
     opening: {{ t('papp.opening')|tojson }},
     backToApp: {{ t('papp.back_to_app')|tojson }},
