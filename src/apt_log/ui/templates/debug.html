@@ -1,0 +1,309 @@
+{#
+  The settings debugger — the phone's own Settings, mapped to a page.
+
+  A control-centre annex for the person maintaining the machine, and it works
+  the way that person actually works: pick a screen from the map (each button
+  is one android.settings.* intent from a fixed table), then drive the opened
+  screen on the live picture below it, with the same verified taps every other
+  press on this portal uses. The page never writes a settings value itself —
+  changing something means pressing the phone's own control for it, where the
+  phone runs its own validation and confirmation.
+
+  Like /console, and unlike /app: nothing here is for the caregiver, so
+  nothing is folded away, and the hazards are written on the page rather than
+  guarded by it — the person this page is for is past the guard rails.
+
+  Every visible string goes through t(). The catalogs are parity-tested, so
+  an untranslated addition fails in CI.
+#}
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#4f46e5">
+<title>{{ t('debug.title') }}</title>
+<link rel="stylesheet" href="/static/design.css?v={{ boot }}">
+<link rel="apple-touch-icon" href="/static/icons/icon-180.png">
+<style>
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:16px/1.5 -apple-system,BlinkMacSystemFont,system-ui,"Segoe UI",Roboto,sans-serif;
+         -webkit-text-size-adjust:100%; }
+
+  .bar { position:sticky; top:0; z-index:30;
+         padding:calc(8px + env(safe-area-inset-top)) 14px 8px;
+         background:var(--chrome); backdrop-filter:saturate(180%) blur(20px);
+         -webkit-backdrop-filter:saturate(180%) blur(20px);
+         border-bottom:.5px solid var(--line);
+         display:flex; align-items:center; gap:10px; }
+  .bar h1 { font-size:17px; font-weight:650; margin:0; letter-spacing:-.01em;
+            flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .back { display:inline-flex; align-items:center; gap:3px; text-decoration:none;
+          color:var(--tint); font-weight:560; font-size:16px; padding:6px 2px;
+          margin:-6px 0; white-space:nowrap; }
+  .back svg { width:17px; height:17px; }
+  .seg { display:inline-flex; background:var(--track); border-radius:9px;
+         padding:2px; gap:2px; }
+  .seg button { appearance:none; border:0; background:transparent; color:var(--ink);
+                font:inherit; font-size:13px; font-weight:600; padding:5px 11px;
+                border-radius:7px; cursor:pointer; line-height:1.2; }
+  .seg button[aria-pressed="true"] { background:var(--card);
+                                     box-shadow:0 1px 3px rgb(0 0 0 / .12); }
+
+  main { padding:14px 12px calc(28px + env(safe-area-inset-bottom));
+         max-width:780px; margin:0 auto; }
+  @media (min-width:820px) { main { max-width:900px; } }
+
+  section { background:var(--card); border:.5px solid var(--line);
+            border-radius:14px; padding:14px; margin:0 0 12px;
+            box-shadow:var(--shadow-card); }
+  h2 { font-size:13px; font-weight:640; letter-spacing:.04em;
+       text-transform:uppercase; color:var(--muted); margin:0 0 10px; }
+  h3 { font-size:12px; font-weight:640; letter-spacing:.04em;
+       text-transform:uppercase; color:var(--muted); margin:14px 0 6px; }
+  h3:first-of-type { margin-top:0; }
+  .sub { color:var(--muted); font-size:13.5px; margin:8px 0 0; }
+  .row { display:flex; align-items:center; justify-content:space-between;
+         gap:12px; padding:9px 0; border-bottom:.5px solid var(--line); }
+  .row:last-child { border-bottom:0; }
+  .row .k b { font-weight:560; display:block; }
+  .row .k small { color:var(--muted); font-size:12.5px; display:block; }
+  .v { font-variant-numeric:tabular-nums; font-weight:560; white-space:nowrap; }
+  .chip { font-size:12px; font-weight:600; padding:3px 9px; border-radius:999px;
+          background:var(--track); color:var(--muted); white-space:nowrap; }
+  .chip.ok { background:color-mix(in srgb, var(--ok) 16%, transparent); color:var(--ok); }
+
+  button, .btn { font:inherit; font-size:15px; font-weight:560; padding:10px 14px;
+                 border-radius:10px; border:.5px solid var(--line);
+                 background:var(--bg); color:var(--ink); cursor:pointer;
+                 -webkit-tap-highlight-color:transparent; }
+  button:active { transform:scale(.97); }
+  .actions { display:flex; flex-wrap:wrap; gap:8px; }
+  .actions form { margin:0; }
+  button.small { font-size:13px; padding:6px 11px; border-radius:8px; }
+
+  .banner { border-radius:10px; padding:10px 12px; margin:0 0 12px; font-size:14px;
+            background:color-mix(in srgb, var(--unknown) 12%, transparent);
+            border:.5px solid color-mix(in srgb, var(--unknown) 30%, transparent); }
+  .banner.bad { background:color-mix(in srgb, var(--bad) 12%, transparent);
+                border-color:color-mix(in srgb, var(--bad) 30%, transparent); }
+  .banner.ok { background:color-mix(in srgb, var(--ok) 12%, transparent);
+               border-color:color-mix(in srgb, var(--ok) 30%, transparent); }
+
+  /* ------------------------------------------------------------ the screen */
+  /* The photograph with the tap map laid over it. Each box is one element
+     the feed published for the current frame; a press posts THAT element
+     back, and the server refuses if the screen moved (the same /tap the
+     phone view uses — this page adds no capability, only a vantage). */
+  .glass { background:var(--peek-bed); border:.5px solid var(--line);
+           border-radius:12px; overflow:hidden; position:relative;
+           max-width:420px; margin:0 auto; }
+  .glass img { display:block; width:100%; height:auto; }
+  .aims { position:absolute; inset:0; }
+  .aim { position:absolute; margin:0; padding:0; background:transparent;
+         border:1.5px solid color-mix(in srgb, var(--tint) 55%, transparent);
+         border-radius:6px; cursor:pointer;
+         -webkit-tap-highlight-color:transparent; }
+  .aim:active { background:var(--tint-soft); transform:none; }
+  .peek-empty { padding:30px 14px; text-align:center; color:var(--muted);
+                font-size:14px; }
+  .tapnote { min-height:1.2em; }
+
+  .panelgrid { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
+  @media (min-width:560px) { .panelgrid { grid-template-columns:repeat(3,1fr); } }
+  .panelgrid form { margin:0; display:contents; }
+  .panelgrid button { width:100%; }
+</style>
+</head>
+<body>
+
+<span class="buildstamp" aria-hidden="true">{{ boot }}</span>
+
+<div class="bar">
+  {# This page is an annex of the control centre, and says so by being
+     leavable back into it. #}
+  <a class="back" href="/console">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"
+         stroke-linecap="round" stroke-linejoin="round"><path d="M15 5 L8 12 L15 19"/></svg>
+    {{ t('console.title') }}</a>
+  <h1>{{ t('debug.title') }}</h1>
+  <form method="post" action="/language" class="seg">
+    <input type="hidden" name="next" value="/debug">
+    {% for code in languages %}
+    <button type="submit" name="language" value="{{ code }}"
+            aria-pressed="{{ 'true' if code == lang else 'false' }}">
+      {{ 'ES' if code == 'es' else 'EN' }}</button>
+    {% endfor %}
+  </form>
+</div>
+
+<main>
+  {% if opened == 'unknown' %}
+    <div class="banner bad">{{ t('debug.open_unknown') }}</div>
+  {% elif opened == 'failed' %}
+    <div class="banner bad">{{ t('phone.failed') }}</div>
+  {% elif opened and opened in panel_index %}
+    <div class="banner ok">{{ t('debug.opened',
+        panel=t(panel_index[opened].label_key)) }}</div>
+  {% endif %}
+
+  <p class="sub" style="margin:0 0 12px">{{ t('debug.intro') }}</p>
+
+  {# The hazard, on the page rather than behind a guard: this page's whole
+     job is reaching controls the portal normally has no reason to touch,
+     and two of them can cut the portal itself off. #}
+  <div class="banner">{{ t('debug.warning') }}</div>
+
+  {# ------------------------------------------------------------ the screen #}
+  <section>
+    <h2>{{ t('debug.screen.title') }}</h2>
+    <div class="glass" id="glass">
+      <img id="peek" src="/screen.jpg?v={{ boot }}" alt=""
+           onerror="this.style.display='none'">
+      <div class="aims" id="aims"></div>
+    </div>
+    <p class="sub tapnote" id="tapnote">{{ t('debug.screen.explain') }}</p>
+
+    {# The phone's own keys, for the screens whose way out is not drawn on
+       them — the same fixed /device allow-list as everywhere else. #}
+    <div class="actions" style="margin-top:10px">
+      {% for act in ['back', 'home', 'scroll_up', 'scroll_down', 'wake'] %}
+      <form method="post" action="/device">
+        <input type="hidden" name="action" value="{{ act }}">
+        <button type="submit" class="small">
+          {{ t('papp.' ~ act) if act.startswith('scroll') else t('phone.' ~ act) }}</button>
+      </form>
+      {% endfor %}
+    </div>
+  </section>
+
+  {# --------------------------------------------------------------- the map #}
+  <section>
+    <h2>{{ t('debug.panels.title') }}</h2>
+    <p class="sub" style="margin:0 0 10px">{{ t('debug.panels.explain') }}</p>
+    {% for group, panels in groups %}
+    <h3>{{ t('debug.group.' ~ group) }}</h3>
+    <div class="panelgrid">
+      {% for p in panels %}
+      <form method="post" action="/debug/open">
+        <input type="hidden" name="panel" value="{{ p.id }}">
+        <button type="submit">{{ t(p.label_key) }}</button>
+      </form>
+      {% endfor %}
+    </div>
+    {% endfor %}
+    <p class="sub">{{ t('debug.language_note') }}</p>
+  </section>
+
+  {# ---------------------------------------------------------- the readings #}
+  <section>
+    <h2>{{ t('debug.readings.title') }}
+      {% if readings.front %}
+      <span class="chip {{ 'ok' if 'settings' in readings.front }}"
+            id="front-chip">{{ readings.front }}</span>
+      {% endif %}
+    </h2>
+    {% if not readings.ok %}
+      <div class="banner bad">{{ t('debug.readings.unreachable') }}</div>
+    {% endif %}
+    {% for r in readings.rows %}
+    <div class="row">
+      <div class="k"><b>{{ t(r.label_key) }}</b></div>
+      <span class="v" data-reading="{{ r.id }}">{{ r.said }}</span>
+    </div>
+    {% endfor %}
+    <p class="sub">{{ t('debug.readings.explain') }}</p>
+  </section>
+</main>
+
+<script>
+  // Two jobs, neither load-bearing: the tap map over the photograph, and a
+  // refresh of the readings for a page left open. The map buttons and every
+  // form above work with this file broken — the forms post, the photo still
+  // shows, only the overlay taps and the live values go quiet.
+  (function () {
+    var peek = document.getElementById('peek');
+    var aims = document.getElementById('aims');
+    var note = document.getElementById('tapnote');
+    var EXPLAIN = {{ t('debug.screen.explain')|tojson }};
+    var LOOK_AGAIN = {{ t('debug.look_again')|tojson }};
+    var SENT = {{ t('debug.tap_sent')|tojson }};
+
+    function say(text) {
+      if (note) note.textContent = text;
+    }
+
+    function draw(frame) {
+      if (!aims) return;
+      aims.textContent = '';
+      var size = frame.size || [0, 0];
+      if (!size[0] || !size[1] || !frame.elements) return;
+      frame.elements.forEach(function (el) {
+        // Elements past the fold carry a step count; they are not in the
+        // photograph, so a box for them would float over the wrong pixels.
+        if (el.step) return;
+        var b = el.b || [0, 0, 0, 0];
+        var box = document.createElement('button');
+        box.className = 'aim';
+        box.type = 'button';
+        box.style.left = (b[0] / size[0] * 100) + '%';
+        box.style.top = (b[1] / size[1] * 100) + '%';
+        box.style.width = ((b[2] - b[0]) / size[0] * 100) + '%';
+        box.style.height = ((b[3] - b[1]) / size[1] * 100) + '%';
+        box.addEventListener('click', function () { tap(frame.id, el); });
+        aims.appendChild(box);
+      });
+    }
+
+    function tap(frameId, el) {
+      // The element she aimed at, posted back whole: /tap re-reads the
+      // published frame and refuses if the screen moved. 409 is "look
+      // again", not "failed" — the map refreshes and she re-aims.
+      fetch('/tap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ frame: frameId,
+                               element: { rid: el.rid || '', cls: el.cls || '',
+                                          b: el.b } })
+      }).then(function (r) {
+        say(r.ok ? SENT : LOOK_AGAIN);
+        setTimeout(refresh, 900);
+        setTimeout(function () { say(EXPLAIN); }, 4000);
+      }).catch(function () { say(LOOK_AGAIN); });
+    }
+
+    function refresh() {
+      if (document.hidden) return;
+      if (peek) {
+        peek.style.display = '';
+        peek.src = '/screen.jpg?t=' + Date.now();
+      }
+      fetch('/frame.json').then(function (r) { return r.json(); })
+        .then(draw)
+        .catch(function () { /* the photo alone is still a mirror */ });
+    }
+    refresh();
+    setInterval(refresh, 3500);
+
+    setInterval(function () {
+      if (document.hidden) return;
+      fetch('/api/phone-settings').then(function (r) { return r.json(); })
+        .then(function (doc) {
+          (doc.rows || []).forEach(function (row) {
+            var cell = document.querySelector('[data-reading="' + row.id + '"]');
+            if (cell) cell.textContent = row.said;
+          });
+          var chip = document.getElementById('front-chip');
+          if (chip && doc.front) {
+            chip.textContent = doc.front;
+            chip.className = 'chip' +
+              (doc.front.indexOf('settings') >= 0 ? ' ok' : '');
+          }
+        })
+        .catch(function () { /* stale values say so by not moving */ });
+    }, 10000);
+  })();
+</script>
+</body>
+</html>
