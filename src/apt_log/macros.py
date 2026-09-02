@@ -971,6 +971,20 @@ SESSION_LAPSED_WORDS = ("sesión caducada", "sesion caducada",
                         "session expired", "session has expired")
 
 
+def _session_notice_up(driver) -> bool:
+    """Whether the session-expired dialog is on the screen.
+
+    The words live on plain TextViews, so this reads the page rather than
+    the controls. Never raises: not being able to tell is the same answer
+    as no.
+    """
+    try:
+        low = (driver.page_source or "").lower()
+    except Exception:  # noqa: BLE001
+        return False
+    return any(word in low for word in SESSION_LAPSED_WORDS)
+
+
 def _dismiss_session_notice(driver) -> bool:
     """Answer the "your session has expired" dialog, if that is what is up.
 
@@ -985,7 +999,23 @@ def _dismiss_session_notice(driver) -> bool:
     ends up agreeing to something nobody read.
     """
     try:
-        if _words(driver, *SESSION_LAPSED_WORDS) is None:
+        # READ FROM THE PAGE, NOT FROM THE CLICKABLES — and this is the whole
+        # bug this function was written to fix, reappearing inside the fix.
+        # `_words` only ever looks at nodes that are clickable or have a
+        # clickable ancestor, because it is for finding CONTROLS. The words
+        # here are on neither. Off the live phone, the whole dialog:
+        #
+        #   TextView  clickable=false  alertTitle  "Sesión caducada"
+        #   TextView  clickable=false  message     "Su sesión ha caducado…"
+        #   Button    clickable=true   button1     "OK"
+        #
+        # So the notice was never detected, this returned False at the first
+        # line, and the macro went on to look for a keypad that the dialog
+        # was covering: "the passcode keypad drew 0 of 10 keys and stopped",
+        # three times, and automatic sign-in latched off. The password path
+        # further down already reads `page_source` for exactly these words;
+        # only this one asked the wrong question.
+        if not _session_notice_up(driver):
             return False
         # The dialog's own confirm. Named by its words rather than by
         # `android:id/button1`, which is the platform's id for whatever the
@@ -1079,6 +1109,17 @@ def _mobile_caregiver_pin(driver, report) -> None:
         def keypad_ready() -> bool:
             nonlocal keys
             keys = _mc_keypad(driver)
+            # AND THE NOTICE CAN ARRIVE AFTER THE APP DOES. Answering it once
+            # on the way in is not enough: the dialog is raised by the server
+            # refusing a call, which lands a beat or two behind the activity,
+            # so a single check at launch can look at the keypad screen and
+            # find nothing wrong. The keypad is the thing being waited for,
+            # so this is where the wait must notice what is covering it.
+            #
+            # No key is a reason to look; a drawn keypad never is, so the
+            # ordinary path costs nothing extra.
+            if not keys and _dismiss_session_notice(driver):
+                keys = _mc_keypad(driver)
             # Every digit this passcode needs, not merely SOME buttons. A
             # keypad two buttons into being drawn satisfied "find the 4" and
             # failed on the "7" a moment later, and said the keypad had moved.

@@ -6296,38 +6296,123 @@ class TestTheSessionExpiryNotice:
         assert (head.index("_dismiss_session_notice(driver)")
                 < head.index("def on_pin_screen"))
 
-    def test_it_presses_only_a_dialog_about_the_session(self):
+    # ------------------------------------------------------------ driven
+    # THE FIX SHIPPED AND THE BUG CAME BACK ANYWAY, because every test above
+    # reads the source. On 1 Sep the notice sat on the phone for half an
+    # hour with automatic sign-in latched off, and the reason was inside the
+    # fix: it asked `_words` whether the notice was up, and `_words` only
+    # ever looks at clickable nodes. Read off the live dialog — the whole of
+    # it, seventeen nodes:
+    #
+    #   TextView  clickable=false  alertTitle  "Sesión caducada"
+    #   TextView  clickable=false  message     "Su sesión ha caducado…"
+    #   Button    clickable=true   button1     "OK"
+    #
+    # These drive the function against that, so a detector that cannot see
+    # plain text fails here instead of on the phone.
+
+    class Pressable:
+        def __init__(self):
+            self.pressed = False
+
+        def click(self):
+            self.pressed = True
+
+    class Phone:
+        """A driver whose words are where the real dialog's words are."""
+
+        def __init__(self, source):
+            self.page_source = source
+
+    LIVE_DIALOG = (
+        '<android.widget.TextView resource-id="android:id/alertTitle" '
+        'clickable="false" text="Sesión caducada"/>'
+        '<android.widget.TextView resource-id="android:id/message" '
+        'clickable="false" text="Su sesión ha caducado, por favor vuelva a '
+        'iniciar sesión."/>'
+        '<android.widget.Button resource-id="android:id/button1" '
+        'clickable="true" text="OK"/>')
+
+    def _driven(self, source, monkeypatch, *, ok=True):
+        """Run the dismissal with `_words` behaving as it does on a phone:
+        it finds the OK button, and it cannot see the notice's own words
+        because they are not on a clickable node."""
+        import apt_log.macros as macros_mod
+
+        button = self.Pressable()
+
+        def only_clickables(driver, *words):
+            if ok and set(w.lower() for w in words) & {"ok", "aceptar",
+                                                       "continuar"}:
+                return button
+            return None
+
+        monkeypatch.setattr(macros_mod, "_words", only_clickables)
+        monkeypatch.setattr(macros_mod.time, "sleep", lambda *_: None)
+        answered = macros_mod._dismiss_session_notice(self.Phone(source))
+        return answered, button
+
+    def test_it_answers_the_dialog_the_phone_actually_draws(self, monkeypatch):
+        answered, button = self._driven(self.LIVE_DIALOG, monkeypatch)
+        assert answered is True
+        assert button.pressed is True
+
+    def test_it_presses_only_a_dialog_about_the_session(self, monkeypatch):
         """A dialog on this phone can just as easily be a warning about a
         VISIT — inMyTeam raises one for a check-in outside its window — and
         an automatic OK on whatever is in front is how a machine agrees to
         something nobody read."""
-        src = (Path(__file__).resolve().parents[1]
-               / "src/apt_log/macros.py").read_text(encoding="utf-8")
-        i = src.index("def _dismiss_session_notice")
-        body = src[i:i + 1400]
-        assert "SESSION_LAPSED_WORDS" in body
-        assert "return False" in body
+        warning = (
+            '<android.widget.TextView clickable="false" text="Warning!"/>'
+            '<android.widget.TextView clickable="false" text="Invalid time"/>'
+            '<android.widget.Button clickable="true" text="OK"/>')
+        answered, button = self._driven(warning, monkeypatch)
+        assert answered is False
+        assert button.pressed is False
 
-    def test_it_does_not_press_by_the_platform_button_id(self):
-        """`android:id/button1` is whatever the positive button happens to
-        be, and would press a Delete just as readily on another dialog."""
-        src = (Path(__file__).resolve().parents[1]
-               / "src/apt_log/macros.py").read_text(encoding="utf-8")
-        i = src.index("def _dismiss_session_notice")
-        body = src[i:i + 1400]
-        # It finds its button BY ITS WORDS. Asserted as the positive
-        # property: the id is named in the comment that explains why it is
-        # not used, so its mere presence proves nothing either way.
-        assert '_words(driver, "ok", "aceptar", "continuar")' in body
-        assert "find_element" not in body
+    def test_a_notice_with_no_button_it_knows_is_left_alone(self, monkeypatch):
+        answered, button = self._driven(self.LIVE_DIALOG, monkeypatch, ok=False)
+        assert answered is False
+        assert button.pressed is False
 
-    def test_it_never_raises(self):
+    def test_it_never_raises(self, monkeypatch):
         """It runs before the macro knows what it is facing; a failure here
         must leave the caller exactly where it would have been."""
+        import apt_log.macros as macros_mod
+
+        class Broken:
+            @property
+            def page_source(self):
+                raise RuntimeError("the session went away")
+
+        monkeypatch.setattr(macros_mod, "_words",
+                            lambda *a, **k: (_ for _ in ()).throw(
+                                RuntimeError("no")))
+        assert macros_mod._dismiss_session_notice(Broken()) is False
+
+    def test_the_keypad_wait_answers_a_notice_that_arrives_late(self):
+        """Answering it once on the way in is not enough: the dialog is
+        raised by the server refusing a call, which lands a beat behind the
+        activity. The keypad is what is being waited for, so the wait is
+        where the covering has to be noticed."""
         src = (Path(__file__).resolve().parents[1]
                / "src/apt_log/macros.py").read_text(encoding="utf-8")
-        i = src.index("def _dismiss_session_notice")
-        assert "except Exception" in src[i:i + 1400]
+        i = src.index("def keypad_ready")
+        body = src[i:i + 1400]
+        assert "_dismiss_session_notice(driver)" in body
+        # And only when there is nothing to press, so a drawn keypad costs
+        # nothing extra.
+        assert "if not keys and _dismiss_session_notice(driver):" in body
+
+    def test_the_detector_reads_the_page_not_the_controls(self):
+        """`_words` is for finding CONTROLS. The notice is text."""
+        src = (Path(__file__).resolve().parents[1]
+               / "src/apt_log/macros.py").read_text(encoding="utf-8")
+        i = src.index("def _session_notice_up")
+        body = src[i:].split("\ndef ", 1)[0]
+        assert "page_source" in body
+        assert "SESSION_LAPSED_WORDS" in body
+        assert "_words(" not in body
 
 
 class TestTheSignInWalkStaysOffALiveSession:
