@@ -278,13 +278,19 @@
            is on"; a plan of care asks "did you do this", which is a tick in
            a box — reported exactly that way, and the switches were also
            three times the height of the line they belonged to. #}
-        <button type="button" class="a-check{% if it.checked %} on{% endif %}"
+        {# WITH ITS OWN WORDS, WHERE IT HAS THEM. The plan-of-care ticks sit
+           beside a separate label item and need none; Mobile Caregiver+'s
+           "Marcar si el cuidador es ciego" is one element that is both, and
+           drawn as a bare box it was an empty square with nothing beside
+           it — worse than the screen-reader sentence it replaced. #}
+        <button type="button" class="a-check{% if it.checked %} on{% endif %}{% if it.txt %} named{% endif %}"
                 role="checkbox" aria-checked="{{ 'true' if it.checked else 'false' }}"
                 data-aim='{{ it.aim | tojson }}'
-                aria-label="{{ it.aim.cls }}{% if it.aim.rid %} {{ it.aim.rid }}{% endif %}"
+                {% if not it.txt %}aria-label="{{ it.aim.cls }}{% if it.aim.rid %} {{ it.aim.rid }}{% endif %}"{% endif %}
           ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor"
                 stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"
-            ><path d="M3.5 8.5 L6.5 11.5 L12.5 4.5"/></svg></button>
+            ><path d="M3.5 8.5 L6.5 11.5 L12.5 4.5"/></svg>{% if it.txt %}<span
+             class="a-check-t">{{ it.txt }}</span>{% endif %}</button>
       {% elif it.kind == 'toggle' %}
         <button type="button" class="a-switch{% if it.checked %} on{% endif %}"
                 data-aim='{{ it.aim | tojson }}'
@@ -307,11 +313,18 @@
         {# A cell whose whole content is a state chip hugs it: given an equal
            share of a narrow row it is squeezed below the chip's own width,
            and the chip cannot shrink, so it spills across its neighbour. #}
-        <button type="button" class="a-cell{% if it.cta %} cta{% endif %}{% if it.danger %} danger{% endif %}{% if it.status and not it.lines and not it.txt %} chip{% endif %}{% if not it.enabled %} off{% endif %}"
+        <button type="button" class="a-cell{% if it.cta or it.commit %} cta{% endif %}{% if it.danger %} danger{% endif %}{% if it.status and not it.lines and not it.txt %} chip{% endif %}{% if not it.enabled %} off{% endif %}"
                 {% if not it.enabled %}disabled aria-disabled="true"{% endif %}
                 data-aim='{{ it.aim | tojson }}'>
         {# A disabled row that carries words became an info row above; what
-           reaches here disabled is a control with nothing to say. #}
+           reaches here disabled is a control with nothing to say — EXCEPT
+           the press that ends a visit, which stays a control and says so.
+           See screenview.mark_the_commit. #}
+        {# WHICH OF TWO IDENTICAL BUTTONS THIS ONE IS. The sign-off page has
+           two saying "Capturar Firma" — the patient's and the caregiver's —
+           and the section above each is the only thing telling them apart.
+           Drawn first and small, the way the phone stacks them. #}
+          {% if it.under %}<span class="a-under">{{ it.under }}</span>{% endif %}
           {% if it.txt %}<span class="a-line">{{ it.txt }}</span>{% endif %}
           {% for line in it.lines %}
           <span class="a-line{% if not loop.first or it.txt %} sub{% endif %}">{{ line }}</span>

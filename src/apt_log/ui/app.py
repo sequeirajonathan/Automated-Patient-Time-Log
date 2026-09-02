@@ -1646,7 +1646,15 @@ def _screen_model(doc: dict) -> dict | None:
     """
     from apt_log.ui import screenview
 
-    return screenview.build(doc)
+    model = screenview.build(doc)
+    if model is not None:
+        screenview.unwear_the_state(model)
+        screenview.name_the_twins(model, doc)
+        screenview.mark_the_commit(model)
+        # Last, because it removes lines the two passes above may have just
+        # moved onto a control.
+        screenview.drop_echoes(model)
+    return model
 
 # From the SPS the device actually emits: profile_idc 0x64 (High), level 0x29
 # (4.1). Read off the stream rather than assumed, because a wrong codec string

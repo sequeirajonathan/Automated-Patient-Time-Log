@@ -894,6 +894,13 @@
      pressed and neither does this — but never again neutral. It also
      carries no chevron, because it opens nothing. */
   .a-cell.danger .a-line { color:var(--bad); font-weight:600; }
+  /* WHICH SECTION A CONTROL BELONGS TO, where its caption alone cannot say.
+     Small, uppercase and above the words, so the eye reads "Beneficiario /
+     Capturar Firma" as one label rather than two lines of equal weight. */
+  .a-under { display:block; font-size:11px; font-weight:700;
+             letter-spacing:.06em; text-transform:uppercase;
+             color:var(--muted); margin-bottom:2px; }
+  .a-cell.cta .a-under { color:inherit; opacity:.75; }
   .a-cell.danger { padding-right:0; }
   /* A keypad reads as one when its keys are centred, not listed. */
   .a-row.a-keys { justify-content:center; gap:18px; }
@@ -1081,6 +1088,19 @@
              justify-content:center;
              transition:background .15s ease, border-color .15s ease; }
   .a-check::before { content:""; position:absolute; inset:-10px; }
+  /* A box that carries its own words is the whole control: the square stays
+     square and the caption rides beside it, so the tap target is the line
+     rather than a 24px dot. */
+  .a-check.named { width:auto; height:auto; min-height:44px; border:none;
+                   background:none; gap:10px; justify-content:flex-start;
+                   padding:6px 0; }
+  .a-check.named svg { flex:none; width:24px; height:24px; border-radius:7px;
+                       border:1.8px solid var(--line); padding:3px;
+                       color:transparent; }
+  .a-check.named.on svg { background:var(--tint); border-color:var(--tint);
+                          color:#fff; }
+  .a-check-t { font-size:15.5px; color:var(--ink); text-align:left;
+               line-height:1.3; }
   .a-check svg { width:16px; height:16px; }
   .a-check.on { background:var(--tint); border-color:var(--tint);
                 color:#fff; }

@@ -729,6 +729,32 @@ DEMOTED_HINTS = ("no programada", "unscheduled")
 EXACT_ACTION_WORDS = ("salida", "check out", "clock out")
 
 
+# THE ONE PRESS THAT ENDS A VISIT.
+#
+# Mobile Caregiver+'s sign-off page finishes with "Complete la Visita", and
+# the app ships it DISABLED until the signatures it wants are on the record.
+# Read as an ordinary disabled row it came out as a grey line of text — the
+# same shape the reflow gives HHAeXchange's "Registros de entrada de EVV",
+# which is information and not a control. This one is a control the app is
+# holding back, and the difference is worth drawing: greyed, but plainly the
+# button at the end of the page.
+#
+# NOTHING AUTOMATIC MAY EVER PRESS ONE. No macro walks to these words and
+# `test_macros` holds a test that fails if one ever does; the portal offers
+# them to a person and to nobody else. Completing a visit is a claim about
+# care that was given, and the only party who can make it is the one who
+# gave it.
+COMMIT_WORDS = (
+    "complete la visita", "completar la visita", "complete visit",
+    "complete actualizacion de salida", "complete actualización de salida",
+)
+
+
+def _looks_like_commit(text: str) -> bool:
+    t = " ".join((text or "").strip().lower().split())
+    return bool(t) and any(t.startswith(w) for w in COMMIT_WORDS)
+
+
 def _looks_like_cta(text: str) -> bool:
     # The curly apostrophe is the one apps actually ship ("Let\u2019s Get
     # Started"); the word list is written with the plain one.
@@ -1291,6 +1317,180 @@ def _app_alert(doc: dict, w: int, h: int) -> dict | None:
     return None
 
 
+# A HEADING IS SHORT. Anything longer is a sentence, and a sentence over a
+# button does not name it — it explains something. Four words is "Duración
+# del servicio:" and every section title on the sign-off page; the
+# attestation that sits between them is twenty-eight.
+TWIN_HEADING_MAX_WORDS = 4
+# How far above a control its section title may sit and still be its title.
+# The sign-off page's are 200 device pixels up on a 2340-pixel screen; a
+# heading half a screen away is heading something else.
+TWIN_HEADING_REACH = 0.14
+
+
+def _caption_of(item: dict) -> str:
+    """What a row actually says, from wherever it says it."""
+    return (item.get("txt")
+            or (item.get("lines") or [""])[0] or "").strip()
+
+
+def mark_the_commit(model: dict) -> None:
+    """Mark the press that ends a visit, and keep it a control.
+
+    A disabled row is ordinarily read as the app STATING something — see the
+    note beside `item["info"]` — which is right for HHAeXchange's EVV record
+    lines and wrong for this one. Mobile Caregiver+ ships "Complete la
+    Visita" disabled until the sign-off page has its signatures, and drawn as
+    a grey sentence it stopped looking like the button at the foot of the
+    page at all. It is a control the app is holding back, and the page reads
+    completely differently depending on which of those it looks like.
+    """
+    for row in model.get("rows") or ():
+        for item in row.get("items") or ():
+            if not item.get("aim"):
+                continue
+            if _looks_like_commit(_caption_of(item)):
+                item["commit"] = True
+                item["info"] = False
+
+
+def unwear_the_state(model: dict) -> None:
+    """A control that wears its state in front of its name takes it off.
+
+    Mobile Caregiver+ describes the caregiver's box "no marcado. Marcar si
+    el cuidador es ciego" and hangs no double-tap instruction on it, so
+    `feed.reader_control` — which is gated on that instruction, because it
+    is what makes a non-clickable node a control — leaves it alone. The
+    words then arrive as an ordinary caption and the page draws a line of
+    screen-reader grammar where a tick box belongs.
+
+    Done on the model rather than in the reading, because the words reach a
+    row through the STATIC folded into it, not through the clickable node's
+    own text, which on this page is empty.
+    """
+    from apt_log import feed as feed_mod
+
+    for row in model.get("rows") or ():
+        for item in row.get("items") or ():
+            if not item.get("aim"):
+                continue
+            words = _caption_of(item)
+            worn = feed_mod.reader_state(words) if words else None
+            if worn is None or not worn[0]:
+                continue
+            # ON `txt`, AND OFF `lines`. A tick box is drawn from its own
+            # caption; leaving the words where they arrived — folded in as
+            # the row's first line — rendered an empty box with nothing
+            # beside it, which is worse than the sentence it replaced.
+            if not item.get("txt"):
+                item["lines"] = list(item.get("lines") or ())[1:]
+            item["txt"] = worn[0]
+            item["kind"] = "toggle"
+            item["check"] = True
+            item["checked"] = worn[1]
+
+
+def drop_echoes(model: dict) -> None:
+    """Take away a loose line that a control on the page already says.
+
+    The sign-off page carried "Beneficiario" twice — once as its own heading
+    and again as the section tag on the button underneath it — and
+    "¿Quien está firmando?" twice, as the label above the dropdown and as
+    the dropdown's own caption. The app draws each of those once; both
+    copies exist only because the reflow reads the caption off a child and
+    the child is also a loose static.
+
+    Only exact repeats, and only LABELS are removed: a control is never
+    dropped for saying the same thing as another, because two controls
+    saying one thing is the problem `name_the_twins` exists to solve, not a
+    duplicate to tidy away.
+    """
+    said = set()
+    for row in model.get("rows") or ():
+        for item in row.get("items") or ():
+            if not item.get("aim"):
+                continue
+            for words in ([item.get("txt", ""), item.get("under", "")]
+                          + list(item.get("lines") or ())):
+                if (words or "").strip():
+                    said.add(" ".join(words.casefold().split()))
+    kept = []
+    for row in model.get("rows") or ():
+        items = [item for item in row.get("items") or ()
+                 if item.get("aim") or item.get("kind") != "label"
+                 or " ".join((item.get("txt") or "").casefold().split())
+                 not in said]
+        if items:
+            row["items"] = items
+            kept.append(row)
+    model["rows"] = kept
+
+
+def name_the_twins(model: dict, doc: dict) -> None:
+    """Say which of two identically-captioned controls is which.
+
+    MOBILE CAREGIVER+'S SIGN-OFF PAGE HAS TWO BUTTONS SAYING "Capturar
+    Firma" — one under `Beneficiario`, the patient's, and one under
+    `Cuidador/a`, the caregiver's own. The caption is identical on the
+    button and in its content description; the ONLY thing telling them apart
+    is the heading above each. Reflowed as two matching rows, the page asks
+    a person to press one of two identical buttons where pressing the wrong
+    one collects the wrong person's signature.
+
+    So where a caption appears more than once, each copy is given the
+    nearest short heading above it. Only where it repeats: a page whose
+    buttons already differ is left exactly as it was.
+    """
+    seen: dict[str, list] = {}
+    for row in model.get("rows") or ():
+        for item in row.get("items") or ():
+            if not item.get("aim"):
+                continue
+            words = _caption_of(item)
+            if words:
+                seen.setdefault(" ".join(words.casefold().split()),
+                                []).append(item)
+    twins = [items for items in seen.values() if len(items) > 1]
+    if not twins:
+        return
+    statics = [s for s in doc.get("statics") or [] if s.get("b")]
+    # A LABEL ON A CONTROL IS NOT A SECTION HEADING, and the sign-off page
+    # has one sitting directly above the patient's signature button: the
+    # dropdown's own "¿Quien está firmando?", twenty pixels up, against
+    # "Beneficiario" a hundred and sixty. Nearest alone therefore named the
+    # patient's button after the question beside it. A caption that some
+    # control on this page is already wearing belongs to that control.
+    # EVERY line a control claimed, not merely its first. The dropdown's
+    # VALUE — "Recipient", drawn inside the control the way a spinner draws
+    # its choice — is a single word directly above the patient's button, and
+    # excluding only the caption left the value to win instead.
+    spoken = set()
+    for row in model.get("rows") or ():
+        for item in row.get("items") or ():
+            if not item.get("aim"):
+                continue
+            for said in [item.get("txt", "")] + list(item.get("lines") or ()):
+                if (said or "").strip():
+                    spoken.add(" ".join(said.casefold().split()))
+    heads = [s for s in statics
+             if (s.get("txt") or "").strip()
+             and len((s["txt"]).split()) <= TWIN_HEADING_MAX_WORDS
+             and " ".join((s["txt"]).casefold().split()) not in spoken]
+    reach = TWIN_HEADING_REACH * max((s["b"][3] for s in statics), default=0)
+    for items in twins:
+        for item in items:
+            top = (item.get("aim") or {}).get("b", item.get("b") or [0, 0])[1]
+            above = [s for s in heads
+                     if s["b"][3] <= top and top - s["b"][3] <= reach
+                     and _caption_of(item).casefold()
+                     != (s["txt"] or "").strip().casefold()]
+            if not above:
+                continue
+            # The nearest one. A page's headings stack downwards, so the
+            # last one before this control is the section it is in.
+            item["under"] = max(above, key=lambda s: s["b"][3])["txt"].strip()
+
+
 def build(doc: dict) -> dict | None:
     """The semantic model: a nav bar (maybe) and a list of rows."""
     w, h = _effective_size(doc)
@@ -1741,6 +1941,8 @@ def build(doc: dict) -> dict | None:
             # saying outright what the shape rules above infer. Dimming
             # those to a greyed control would have hidden the very fact
             # they exist to show; they read as information instead.
+            # …EXCEPT THE ONE PRESS THAT ENDS A VISIT, which `mark_the_commit`
+            # takes back afterwards. See COMMIT_WORDS.
             item["info"] = (
                 (not item["enabled"] and bool(lines or marks))
                 or (narrow and left_anchored and line_shaped

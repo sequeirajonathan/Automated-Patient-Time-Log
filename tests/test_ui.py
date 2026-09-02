@@ -8116,3 +8116,143 @@ class TestTheSignaturePadHasAWayOutAndAHeading:
                     if "RECOPILE" in ((it.get("txt") or "")
                                       + " ".join(it.get("lines") or [])))
         assert head["kind"] == "button"
+
+
+class TestTheSignOffPage:
+    """Mobile Caregiver+'s "Firmas de la visita", walked 2026-09-01.
+
+    It is the page where a visit is ended, and it is the one the portal drew
+    worst: Compose throughout, so every control publishes an empty `text`
+    and its caption sits on a child with the same bounds.
+
+    The fixture beside this file is the document the phone actually
+    published, bounds and all, with the names replaced.
+    """
+
+    def _model(self):
+        import importlib
+
+        from tests import fixtures_signoff
+
+        uiapp = importlib.import_module("apt_log.ui.app")
+        return uiapp._screen_model(fixtures_signoff.doc()), fixtures_signoff
+
+    def _rows(self, model):
+        out = []
+        for row in model["rows"]:
+            for item in row["items"]:
+                out.append(item)
+        return out
+
+    def _named(self, model, words):
+        return [it for it in self._rows(model)
+                if (it.get("txt") or (it.get("lines") or [""])[0] or "").strip()
+                == words]
+
+    def test_two_buttons_say_capturar_firma_and_the_page_says_which(self):
+        """THE DANGEROUS ONE. Both signature buttons carry exactly the same
+        caption — on the button and in its content description — and the
+        only thing telling them apart is the heading above each. Reflowed as
+        two matching rows, the page asks a person to press one of two
+        identical buttons where the wrong one collects the wrong person's
+        signature."""
+        model, _ = self._model()
+        pair = self._named(model, "Capturar Firma")
+        assert len(pair) == 2, [it.get("lines") for it in self._rows(model)]
+        assert [it.get("under") for it in pair] == ["Beneficiario", "Cuidador/a"]
+
+    def test_the_patients_button_is_not_named_after_the_dropdown(self):
+        """The nearest short line above it is the dropdown's own "¿Quien
+        está firmando?", twenty pixels up, against "Beneficiario" a hundred
+        and sixty. A caption a control on this page is already wearing
+        belongs to that control, not to the section."""
+        model, _ = self._model()
+        assert self._named(model, "Capturar Firma")[0]["under"] == "Beneficiario"
+
+    def test_the_commit_stays_a_control_when_the_app_greys_it(self):
+        """"Complete la Visita" ships disabled until the signatures are in.
+        The disabled-rows-are-statements rule turned the button at the foot
+        of the page into a grey sentence."""
+        model, _ = self._model()
+        end = self._named(model, "Complete la Visita")
+        assert len(end) == 1
+        assert end[0]["commit"] is True
+        assert end[0]["enabled"] is False
+        assert end[0]["info"] is False
+
+    def test_an_ordinary_page_grows_no_section_tags(self):
+        """Only where a caption repeats. A page whose buttons already differ
+        is left exactly as it was."""
+        model, fixture = self._model()
+        doc = fixture.doc()
+        doc["elements"] = [e for e in doc["elements"]
+                           if e["b"] != [30, 1150, 1050, 1220]]
+        doc["statics"] = [s for s in doc["statics"]
+                          if s["b"] != [30, 1150, 1050, 1220]]
+        import importlib
+
+        uiapp = importlib.import_module("apt_log.ui.app")
+        alone = uiapp._screen_model(doc)
+        assert [it.get("under") for it in self._named(alone, "Capturar Firma")
+                ] == [None]
+
+    def test_the_signer_dropdown_says_what_it_is_set_to(self):
+        """A picker that cannot say its current value is a button labelled
+        nothing. "Recipient" is the patient signing for herself."""
+        model, _ = self._model()
+        rows = [it for it in self._rows(model)
+                if "Recipient" in (it.get("lines") or [])]
+        assert rows, [it.get("lines") for it in self._rows(model)]
+
+    def test_nothing_automatic_may_ever_press_a_commit(self):
+        """Completing a visit is a claim about care that was given, and the
+        only party who can make it is the one who gave it. No macro walks to
+        these words."""
+        from pathlib import Path
+
+        from apt_log.ui import screenview
+
+        macros = Path("src/apt_log/macros.py").read_text(encoding="utf-8")
+        low = macros.casefold()
+        for word in screenview.COMMIT_WORDS:
+            assert word not in low, word
+
+    def test_the_open_signer_menu_is_five_pressable_rows(self):
+        """Its own window, arriving about four and a half seconds after the
+        tap — the whole tree is the menu by then."""
+        import importlib
+
+        from tests import fixtures_signoff
+
+        uiapp = importlib.import_module("apt_log.ui.app")
+        menu = uiapp._screen_model(fixtures_signoff.menu())
+        said = [(it.get("txt") or (it.get("lines") or [""])[0] or "").strip()
+                for it in self._rows(menu) if it.get("aim")]
+        assert said == ["Family Member", "Legal Guardian",
+                        "No Signature Gathered", "Recipient",
+                        "Representative"]
+
+    def test_the_blind_box_is_a_tick_box_not_a_sentence(self):
+        """The app describes it "no marcado. Marcar si el cuidador es
+        ciego" and hangs no double-tap instruction on it, so the rule that
+        turns a spoken sentence into a control left it alone and the page
+        drew a line of screen-reader grammar where a tick box belongs."""
+        model, _ = self._model()
+        box = [it for it in self._rows(model)
+               if "ciego" in (it.get("txt") or "")
+               or any("ciego" in ln for ln in (it.get("lines") or []))]
+        assert len(box) == 1, [it.get("lines") for it in self._rows(model)]
+        assert box[0]["check"] is True
+        assert box[0]["checked"] is False
+        said = (box[0].get("txt") or (box[0].get("lines") or [""])[0])
+        assert said == "Marcar si el cuidador es ciego"
+
+    def test_the_page_says_each_heading_once(self):
+        """"Beneficiario" arrived twice — its own heading and the section
+        tag on the button under it — because the reflow reads a caption off
+        a child that is also a loose static. The app draws it once."""
+        model, _ = self._model()
+        loose = [(it.get("txt") or "").strip() for it in self._rows(model)
+                 if not it.get("aim")]
+        assert "Beneficiario" not in loose
+        assert "¿Quien está firmando?" not in loose

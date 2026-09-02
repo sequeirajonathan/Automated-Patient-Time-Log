@@ -2184,6 +2184,35 @@ _READER_OFF = ("no seleccionado", "no marcado", "not selected", "unselected",
 _READER_ON = ("seleccionado", "marcado", "selected", "checked")
 
 
+def reader_state(desc: str) -> tuple[str, bool] | None:
+    """A caption that OPENS with its own state, read back as (label, checked).
+
+    `reader_control` answers a different question — "is this non-clickable
+    node really a control?" — and is gated on the screen reader's "double
+    tap" instruction because that is what makes the claim. This is for a node
+    that is ALREADY clickable and simply wears its state in front of its
+    name.
+
+    Mobile Caregiver+'s sign-off page has one: the caregiver's box is
+    described "no marcado. Marcar si el cuidador es ciego", with no double-tap
+    anywhere in it. Read as a plain caption it drew a row of screen-reader
+    grammar and no tick box at all; read here it is an unticked control
+    called "Marcar si el cuidador es ciego".
+
+    None when the sentence does not open with a state, which is nearly every
+    caption on every screen.
+    """
+    text = (desc or "").strip()
+    low = text.lower()
+    for word in _READER_OFF:
+        if low.startswith(word):
+            return " ".join(text[len(word):].split()).strip(" ,.;:"), False
+    for word in _READER_ON:
+        if low.startswith(word):
+            return " ".join(text[len(word):].split()).strip(" ,.;:"), True
+    return None
+
+
 def reader_control(desc: str) -> tuple[str, bool] | None:
     """A screen reader's sentence, read back as (label, checked).
 
@@ -2370,6 +2399,16 @@ def elements(xml: str, label: bool = False, package: str = "",
             # para alternar" is a control named "Se realizó".
             entry["txt"] = (_clean(spoken[0]) if spoken is not None
                             else _clean(_label(raw)))
+            # A CONTROL THAT WEARS ITS STATE IN FRONT OF ITS NAME. See
+            # `reader_state`: this one is clickable already, so the double-tap
+            # gate above never fires and the state was left sitting in the
+            # caption — "no marcado. Marcar si el cuidador es ciego" drawn as
+            # a line of screen-reader grammar with no tick box on it.
+            worn = reader_state(entry["txt"])
+            if worn is not None and worn[0]:
+                entry["txt"] = worn[0]
+                entry["checked"] = worn[1]
+                entry["role"] = "toggle"
         found.append(entry)
     return found
 
