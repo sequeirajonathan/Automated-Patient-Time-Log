@@ -46,6 +46,7 @@ from apt_log import prefs
 from apt_log import schedule as schedule_mod
 from apt_log import video as video_mod
 from apt_log.ui import machine as machine_mod
+from apt_log.ui import opened as opened_mod
 from apt_log.ui import screenview as screenview_mod
 from apt_log.ui import state as state_mod
 from apt_log.ui.i18n import SUPPORTED, Translator, normalise
@@ -1147,7 +1148,7 @@ def _role_signer(role: str, doc: dict) -> str:
             return ""
     if role != "patient":
         return ""
-    return _patient_on_screen(doc) or _patient_seen_lately(doc.get("app") or "")
+    return _patient_on_screen(doc) or opened_mod.current(doc.get("app") or "")
 
 
 def _patient_on_screen(doc: dict) -> str:
@@ -1156,61 +1157,20 @@ def _patient_on_screen(doc: dict) -> str:
     The corroboration `_role_signer` is built on: the schedule supplies the
     list of names today can legitimately involve and the SCREEN has to carry
     exactly one of them.
+
+    ON MOBILE CAREGIVER+ NO PAGE IN THE CHECK-OUT EVER SATISFIES THIS, and
+    that is not a bug in the reading — it is what the app publishes. The pad
+    is a dialog and the dialog is the whole tree; the visit detail behind it
+    carries the service code, the address and the phone but no name; and the
+    only page that names anybody is the week list, which names every patient
+    of the day at once. So "" here is the honest answer on all three, and
+    `opened` is what fills the gap: it remembers the row she opened.
     """
-    from apt_log import schedule as schedule_mod
+    from apt_log.ui import opened
 
-    try:
-        plan = schedule_mod.load()
-    except Exception:  # noqa: BLE001
-        return ""
-    words = " ".join((s.get("txt") or "") for s in (doc.get("statics") or []))
-    folded = " ".join(words.casefold().split())
-    seen = {b.patient for b in getattr(plan, "blocks", []) or []
-            if b.patient and " ".join(b.patient.casefold().split()) in folded}
-    return seen.pop() if len(seen) == 1 else ""
-
-
-# HOW LONG A PATIENT SEEN ON THE SCREEN GOES ON MEANING THIS SIGNATURE.
-#
-# A signature pad reached from a visit is opened seconds after that visit's
-# own page, not a quarter of an hour later; the window is this wide only so a
-# pad left open while somebody answers the door still knows whose it is.
-_PATIENT_LATCH = 15 * 60
-_patient_seen: dict = {}
-
-
-def _note_patient_on_screen(doc: dict) -> None:
-    """Remember the patient this page named, for the modal about to cover it.
-
-    MOBILE CAREGIVER+ PUTS ITS PAD IN A DIALOG, and a dialog is the whole
-    tree: the published document ends at the dialog's own bounds, so the
-    visit page underneath — the page carrying the patient's name — is not in
-    it. `_patient_on_screen` therefore answers "" on the one screen where
-    the answer matters, and with no patient resolved the drawer offered
-    every enrolled patient at once: "why do we have 4 patients mapped to
-    this signature pad??"
-
-    THIS IS STILL THE SCREEN'S ANSWER, NOT THE CLOCK'S. The rule that
-    `_role_signer` documents — the name comes from the screen, never from
-    which visit is running — is what keeps a signature off the wrong record,
-    and it is kept here: the only names that ever land in this latch were
-    read off a page the phone was actually showing, and it is scoped to the
-    app that showed them so one app's page cannot name another's pad. What
-    changes is that the reading survives the moment the app covers it.
-    """
-    name = _patient_on_screen(doc)
-    if name:
-        _patient_seen.update({"name": name, "app": doc.get("app") or "",
-                              "at": time.time()})
-
-
-def _patient_seen_lately(package: str) -> str:
-    """The latched patient, if this app named her recently. Else ""."""
-    if not package or _patient_seen.get("app") != package:
-        return ""
-    if time.time() - float(_patient_seen.get("at") or 0) > _PATIENT_LATCH:
-        return ""
-    return str(_patient_seen.get("name") or "")
+    package = str(doc.get("app") or "")
+    found = opened.page_names(doc, opened._scheduled_for(package))
+    return found[0] if len(found) == 1 else ""
 
 
 def _sheet_actions(doc: dict, model: dict | None) -> list[dict]:
@@ -1797,12 +1757,12 @@ async def live(ws: WebSocket):
                 # Read once: it walks the statics, and the roster lookup below
                 # reads a file. Both are cheap and neither is free, and this
                 # runs on every screen change.
-                # BEFORE ANYTHING ASKS WHOSE PAD THIS IS. The patient is
-                # read off the page that names her, and on Mobile Caregiver+
-                # the pad's dialog is the whole published tree — so the
-                # reading has to be taken while the visit page is still the
-                # screen. See `_note_patient_on_screen`.
-                _note_patient_on_screen(screen_doc)
+                # BEFORE ANYTHING ASKS WHOSE PAD THIS IS. A page listing
+                # several patients is the list, and being back at the list
+                # means whatever visit was open is not open any more — the
+                # record goes rather than surviving into somebody else's
+                # pad. A page naming exactly one says so. See `ui.opened`.
+                opened_mod.note_screen(screen_doc)
                 _signer = sign.signer_named(screen_doc)
                 # WHEN THE SHEET NAMES A ROLE INSTEAD OF A PERSON, which is
                 # what these screens do nearly always. The role is not a
@@ -2153,6 +2113,14 @@ async def _do_tap(msg: dict) -> dict:
     frame = msg.get("frame") or ""
     if not frame or not isinstance(element, dict):
         return {"type": "tap_result", "ok": False, "reason": "malformed"}
+    # THE PAGE SHE PRESSED ON, read BEFORE the press.
+    #
+    # The words that say which visit this row opens are on the page being
+    # left, and by the time `tap` returns the phone is on the next one — the
+    # tap itself re-reads the hierarchy up to five times, and the feed
+    # publishes the new page behind it. Taken here it is the document the
+    # aim was built from.
+    was = _read_json(state_mod.STATE_DIR / "screen.json", {}) or {}
     try:
         # A tap dumps the hierarchy up to five times; on the event loop that
         # would freeze every other viewer's frames while she taps.
@@ -2163,6 +2131,15 @@ async def _do_tap(msg: dict) -> dict:
     except NotOnScreen as exc:
         log.warning("tap refused: %s", exc)
         return {"type": "tap_result", "ok": False, "reason": "stale"}
+    # WHICH VISIT SHE JUST OPENED, noted only once the press has landed.
+    #
+    # On Mobile Caregiver+ this is the ONLY unambiguous signal there is: the
+    # week list names every patient of the day and the page after it names
+    # none, so the difference between them is the row she pressed.
+    try:
+        opened_mod.note_tap(was, element)
+    except Exception:  # noqa: BLE001
+        log.exception("noting which visit was opened")
     return {"type": "tap_result", "ok": True}
 
 

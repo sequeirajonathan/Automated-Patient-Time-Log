@@ -60,6 +60,10 @@ rm -f /var/lib/aptlog/signings.jsonl 2>/dev/null || true
 # person's working week. It now also quotes the message of a failed fire, and
 # a macro's message can name whatever was on the screen.
 rm -f /var/lib/aptlog/fired.json 2>/dev/null || true
+# WHICH VISIT WAS OPEN when the image was taken. One patient's name and the
+# minute her visit was opened — small, and exactly the kind of small that has
+# no business travelling with a disk image.
+rm -f /var/lib/aptlog/visit-open.json 2>/dev/null || true
 rm -rf "/home/$SERVICE_USER/.local/share/python_keyring" \
        "/home/$SERVICE_USER/.android" 2>/dev/null || true
 

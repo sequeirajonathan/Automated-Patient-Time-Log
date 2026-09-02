@@ -448,6 +448,17 @@ class TestTheStoreLivesWhereTheServiceCanWrite:
             encoding="utf-8")
         assert "/var/lib/aptlog/signings.jsonl" in script
 
+    def test_the_sanitiser_sweeps_the_open_visit(self):
+        """`ui.opened` writes down one patient's name and the minute her
+        visit was opened, so the pad the check-out leads to knows whose it
+        is. Small, and exactly the kind of small that must not travel with a
+        disk image."""
+        from pathlib import Path
+
+        script = Path("scripts/sanitize-for-image.sh").read_text(
+            encoding="utf-8")
+        assert "/var/lib/aptlog/visit-open.json" in script
+
 
 class TestAStoreThatCannotBeWritten:
     """It answered 500, and the page said "that didn't reach the phone".

@@ -5151,87 +5151,179 @@ class TestThePadKnowsWhoseSignatureItIsCollecting:
 
 class TestFourPatientsOnOnePatientsPad:
     """"You happen to find the exact patient as well so why do we have 4
-    patients mapped to this signature pad??"
+    patients mapped to this signature pad??" — and, when the first answer
+    was not enough: "I'm still getting all patients in that app as possible
+    signatures."
 
-    Mobile Caregiver+ draws its pad in an AlertDialog, and a dialog is the
-    whole published tree: the visit page underneath — the page carrying the
-    patient's name — is not in the document at all. So the corroboration
-    that names the signer found nobody, nothing was narrowed, and every
-    enrolled patient was offered on one patient's pad.
+    THE APP NEVER SAYS IT AT THE MOMENT IT MATTERS. Read off the live phone:
+    the pad is an AlertDialog and the dialog is the whole published tree
+    (eleven nodes, no name); the visit detail behind it carries the service
+    code, the address and the phone and no name; and the only page that
+    names anybody is the week list, which names EVERY patient of the day at
+    once, one sentence per row. So the last page that could identify the
+    signer names three people.
+
+    Which leaves one honest signal: the row she opened.
     """
+
+    APP = "com.example.care"
 
     def _app(self):
         import importlib
 
         return importlib.import_module("apt_log.ui.app")
 
+    def _opened(self):
+        import importlib
+
+        return importlib.import_module("apt_log.ui.opened")
+
     def _plan(self):
         from types import SimpleNamespace
 
         return SimpleNamespace(
             caregiver="A CAREGIVER",
-            blocks=[SimpleNamespace(patient="UN PACIENTE"),
-                    SimpleNamespace(patient="OTRA PERSONA")])
+            blocks=[SimpleNamespace(patient="UN PACIENTE", app=self.APP),
+                    SimpleNamespace(patient="OTRA PERSONA", app=self.APP)])
 
-    def _visit_page(self):
-        return {"app": "com.example.care",
-                "statics": [{"txt": "UN PACIENTE"}, {"txt": "Detalle"}]}
+    def _week_list(self):
+        """Three rows with no text of their own, and one sentence per row
+        carrying the patient — at the row's OWN bounds. This is the shape
+        Mobile Caregiver+ actually publishes."""
+        return {"app": self.APP,
+                "elements": [
+                    {"rid": "x:id/visits_event0_0", "cls": "View",
+                     "b": [0, 237, 1080, 308], "txt": ""},
+                    {"rid": "x:id/visits_event0_1", "cls": "View",
+                     "b": [0, 309, 1080, 380], "txt": ""}],
+                "statics": [
+                    {"b": [0, 237, 1080, 308],
+                     "txt": "La visita está programada para UN PACIENTE en "
+                            "mar, 1 de septiembre"},
+                    {"b": [0, 309, 1080, 380],
+                     "txt": "La visita está programada para OTRA PERSONA en "
+                            "mar, 1 de septiembre"}]}
+
+    def _detail(self):
+        """What the app draws after the row is tapped: no name on it."""
+        return {"app": self.APP, "elements": [],
+                "statics": [{"txt": "Detalles de la visita"},
+                            {"txt": "Servicio 1234"}]}
 
     def _pad_dialog(self):
-        """What the phone publishes with the pad open: the dialog, and only
-        the dialog. No patient anywhere in it."""
-        return {"app": "com.example.care",
+        return {"app": self.APP, "elements": [],
                 "statics": [{"txt": "RECOPILE LA FIRMA DEL RECIPIENT A "
                                     "CONTINUACION"},
                             {"txt": "Firma en la linea"}]}
 
-    def test_the_dialog_alone_still_names_nobody(self):
-        """Unchanged, and it has to be: the rule that a name comes from the
-        screen is what keeps a signature off the wrong record."""
-        uiapp = self._app()
-        uiapp._patient_seen.clear()
+    def test_the_week_list_names_nobody_in_particular(self):
+        """Three patients is the same as none, and this is the page the old
+        rule was asked to answer from."""
         with patch("apt_log.schedule.load", return_value=self._plan()):
-            assert uiapp._patient_on_screen(self._pad_dialog()) == ""
+            assert self._app()._patient_on_screen(self._week_list()) == ""
 
-    def test_the_page_the_dialog_covered_is_remembered(self):
-        """The reading is still the SCREEN's — taken off the visit page a
-        moment before the app covered it with its own dialog."""
-        uiapp = self._app()
-        uiapp._patient_seen.clear()
+    def test_the_dialog_alone_names_nobody(self):
         with patch("apt_log.schedule.load", return_value=self._plan()):
-            uiapp._note_patient_on_screen(self._visit_page())
-            assert uiapp._role_signer(
-                "patient", self._pad_dialog()) == "UN PACIENTE"
+            assert self._app()._patient_on_screen(self._pad_dialog()) == ""
 
-    def test_another_apps_page_cannot_name_this_ones_pad(self):
-        uiapp = self._app()
-        uiapp._patient_seen.clear()
+    def test_the_row_she_opened_is_the_visit(self, tmp_path):
+        """The tap is the choosing. The row carries no text of its own — the
+        sentence naming the patient is a separate static at the row's own
+        bounds — so the row's box is what tells the three apart."""
+        store = tmp_path / "visit-open.json"
+        opened = self._opened()
+        page = self._week_list()
         with patch("apt_log.schedule.load", return_value=self._plan()):
-            uiapp._note_patient_on_screen(self._visit_page())
-            other = dict(self._pad_dialog(), app="com.example.other")
-            assert uiapp._role_signer("patient", other) == ""
+            got = opened.note_tap(page, page["elements"][1], path=store)
+        assert got == "OTRA PERSONA"
+        assert opened.open_visit(self.APP, path=store)["name"] == "OTRA PERSONA"
 
-    def test_a_stale_reading_names_nobody(self):
-        """A pad opened a quarter of an hour after the last page that named
-        anybody is not that page's pad."""
+    def test_it_survives_the_pages_that_name_nobody(self, tmp_path):
+        """The detail and then the dialog, which is the whole check-out."""
+        store = tmp_path / "visit-open.json"
+        opened = self._opened()
+        page = self._week_list()
+        with patch("apt_log.schedule.load", return_value=self._plan()):
+            opened.note_tap(page, page["elements"][0], path=store)
+            opened.note_screen(self._detail(), path=store)
+            opened.note_screen(self._pad_dialog(), path=store)
+            assert opened.current(self.APP, path=store) == "UN PACIENTE"
+
+    def test_going_back_to_the_list_ends_it(self, tmp_path):
+        """Being back at a page that names several patients means the visit
+        that was open is not open any more. It must not survive into
+        somebody else's pad."""
+        store = tmp_path / "visit-open.json"
+        opened = self._opened()
+        page = self._week_list()
+        import json as _json
         import time as _time
 
-        uiapp = self._app()
-        uiapp._patient_seen.clear()
         with patch("apt_log.schedule.load", return_value=self._plan()):
-            uiapp._note_patient_on_screen(self._visit_page())
-            uiapp._patient_seen["at"] = _time.time() - uiapp._PATIENT_LATCH - 1
-            assert uiapp._role_signer("patient", self._pad_dialog()) == ""
+            opened.note_tap(page, page["elements"][0], path=store)
+            # Past the settle window, which exists only to survive a second
+            # viewer meeting the list page a moment after the tap.
+            doc = _json.loads(store.read_text())
+            doc["at"] = _time.time() - opened.SETTLE_SECONDS - 1
+            store.write_text(_json.dumps(doc))
+            opened.note_screen(page, path=store)
+            assert opened.current(self.APP, path=store) == ""
+
+    def test_a_list_arriving_a_moment_late_does_not_erase_the_tap(self,
+                                                                 tmp_path):
+        """Every viewer runs its own screen loop, and one connecting just
+        after the tap meets the page she has already left."""
+        store = tmp_path / "visit-open.json"
+        opened = self._opened()
+        page = self._week_list()
+        with patch("apt_log.schedule.load", return_value=self._plan()):
+            opened.note_tap(page, page["elements"][0], path=store)
+            opened.note_screen(page, path=store)
+            assert opened.current(self.APP, path=store) == "UN PACIENTE"
+
+    def test_another_apps_pad_is_not_this_visit(self, tmp_path):
+        store = tmp_path / "visit-open.json"
+        opened = self._opened()
+        page = self._week_list()
+        with patch("apt_log.schedule.load", return_value=self._plan()):
+            opened.note_tap(page, page["elements"][0], path=store)
+            assert opened.current("com.example.other", path=store) == ""
+
+    def test_a_stale_reading_names_nobody(self, tmp_path):
+        import json as _json
+        import time as _time
+
+        store = tmp_path / "visit-open.json"
+        opened = self._opened()
+        page = self._week_list()
+        with patch("apt_log.schedule.load", return_value=self._plan()):
+            opened.note_tap(page, page["elements"][0], path=store)
+            doc = _json.loads(store.read_text())
+            doc["at"] = _time.time() - opened.LATCH_SECONDS - 1
+            store.write_text(_json.dumps(doc))
+            assert opened.current(self.APP, path=store) == ""
+
+    def test_a_tap_on_anything_else_changes_nothing(self, tmp_path):
+        """Most presses are not the opening of a visit, and a rule that
+        wrote on every one of them would be a rule about nothing."""
+        store = tmp_path / "visit-open.json"
+        opened = self._opened()
+        page = self._week_list()
+        with patch("apt_log.schedule.load", return_value=self._plan()):
+            opened.note_tap(page, page["elements"][0], path=store)
+            menu = {"rid": "x:id/visits_menu", "cls": "ImageButton",
+                    "b": [13, 101, 72, 152], "txt": ""}
+            opened.note_tap(page, menu, path=store)
+            assert opened.current(self.APP, path=store) == "UN PACIENTE"
 
     def test_the_screen_in_front_still_wins(self):
-        """The latch is a fallback, never an override: a page that names
+        """The record is a fallback, never an override: a page that names
         somebody names her, whatever was remembered."""
         uiapp = self._app()
-        uiapp._patient_seen.clear()
-        with patch("apt_log.schedule.load", return_value=self._plan()):
-            uiapp._note_patient_on_screen(self._visit_page())
-            named = {"app": "com.example.care",
-                     "statics": [{"txt": "OTRA PERSONA"}]}
+        named = {"app": self.APP, "elements": [],
+                 "statics": [{"txt": "OTRA PERSONA"}]}
+        with patch("apt_log.schedule.load", return_value=self._plan()), \
+             patch("apt_log.ui.opened.current", return_value="UN PACIENTE"):
             assert uiapp._role_signer("patient", named) == "OTRA PERSONA"
 
 
