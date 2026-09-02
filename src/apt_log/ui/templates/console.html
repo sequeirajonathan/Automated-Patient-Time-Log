@@ -587,6 +587,13 @@
           {{ t(macro.label_key) }}</button>
       </form>
       {% endfor %}
+      {# The settings debugger, beside the macro that opens Settings blind:
+         same destination, with the map and the readings around it. A link,
+         not a form — it changes nothing on its own. #}
+      <a class="btn small" href="/debug"
+         style="text-decoration:none; display:inline-flex; align-items:center;
+                font-size:13px; padding:6px 11px; border-radius:8px">
+        {{ t('debug.title') }}</a>
     </div>
     <p class="sub">
       {% if macro_status.state == 'running' %}{{ t(macro_status.step) }}

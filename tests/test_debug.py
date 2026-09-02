@@ -1,0 +1,265 @@
+"""The settings debugger, and the two properties it must keep.
+
+The page maps the phone's own Settings onto the portal, and the whole safety
+argument is the same one /macro and /device make: the browser posts an ID,
+the id selects a row of a table in code, and only the row knows an intent
+action. These tests pin that — a form field must never reach `am start` —
+and pin the degradation the page promises: a Pi whose adb is gone renders
+dashes, because the person opening a debug page is diagnosing exactly that.
+"""
+
+from __future__ import annotations
+
+import json
+import subprocess
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import pytest
+from fastapi.testclient import TestClient
+
+from apt_log.ui import phonesettings
+from apt_log.ui import state as state_mod
+from apt_log.ui.app import app, queue
+from apt_log.ui.i18n import catalog_keys
+
+
+SCREEN = {
+    "at": "2026-08-18T10:00:00",
+    "app": "com.android.settings",
+    "activity": ".Settings",
+    "size": [1080, 2400],
+    "blocked": "",
+    "elements": [],
+    "statics": [],
+}
+
+
+@pytest.fixture
+def client(tmp_path):
+    queue.cancel()
+    (tmp_path / "screen.json").write_text(json.dumps(SCREEN), encoding="utf-8")
+    with patch.object(state_mod, "STATE_DIR", tmp_path):
+        yield TestClient(app)
+
+
+@pytest.fixture
+def no_adb(monkeypatch):
+    """A Pi whose adb has gone away entirely."""
+    def missing(*_a, **_k):
+        raise OSError("No such file or directory: 'adb'")
+
+    monkeypatch.setattr(phonesettings.subprocess, "run", missing)
+
+
+def _fake_adb(transcript: bytes, recorded: list | None = None,
+              returncode: int = 0, stderr: bytes = b""):
+    """A subprocess.run double that answers every call with one transcript."""
+    def run(cmd, **_kwargs):
+        if recorded is not None:
+            recorded.append(cmd)
+        return SimpleNamespace(returncode=returncode, stdout=transcript,
+                               stderr=stderr)
+
+    return run
+
+
+def _transcript(**overrides) -> bytes:
+    """A full probe transcript in READINGS order, one value per probe."""
+    values = {
+        "locale": "es-US",
+        "locale_default": "en-US",
+        "timezone": "America/New_York",
+        "android": "13",
+        "model": "SM-A156U",
+        "font_scale": "null",
+        "brightness": "180",
+        "screen_timeout": "120000",
+        "wifi": "1",
+        "bluetooth": "0",
+        "airplane": "0",
+        "auto_time": "1",
+        "auto_zone": "null",
+    }
+    values.update(overrides)
+    parts = [values[r["id"]] for r in phonesettings.READINGS]
+    return ("\n~\n".join(parts) + "\n").encode()
+
+
+class TestTheMapItself:
+    def test_every_panel_is_wellformed_and_unique(self):
+        ids = [p["id"] for p in phonesettings.PANELS]
+        assert len(ids) == len(set(ids))
+        for panel in phonesettings.PANELS:
+            assert panel["action"].startswith("android."), panel
+            assert panel["group"] in phonesettings.GROUPS, panel
+
+    def test_every_panel_label_exists_in_both_catalogs(self):
+        """A button whose caption is its raw key is a button nobody can
+        read. The parity test guards en against es; this guards the table
+        against both."""
+        en, es = catalog_keys("en"), catalog_keys("es")
+        for panel in phonesettings.PANELS:
+            assert panel["label_key"] in en and panel["label_key"] in es
+
+    def test_every_visible_reading_label_exists_in_both_catalogs(self):
+        en, es = catalog_keys("en"), catalog_keys("es")
+        for reading in phonesettings.READINGS:
+            if reading["kind"] == "hidden":
+                continue
+            assert reading["label_key"] in en and reading["label_key"] in es
+
+    def test_language_is_the_first_panel(self):
+        """The reason the page exists comes first on it."""
+        assert phonesettings.PANELS[0]["id"] == "language"
+        assert phonesettings.PANELS[0]["action"] == \
+            "android.settings.LOCALE_SETTINGS"
+
+    def test_readings_are_read_only_by_construction(self):
+        """No probe writes. `settings put` appearing here would be the page
+        growing the capability its docstring promises it does not have."""
+        for reading in phonesettings.READINGS:
+            probe = reading["probe"]
+            assert probe.startswith(("getprop ", "settings get ")), probe
+            assert "put" not in probe
+
+
+class TestOpenPanel:
+    def test_an_unknown_id_never_reaches_adb(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _fake_adb(b"", calls))
+        with pytest.raises(KeyError):
+            phonesettings.open_panel("android.intent.action.CALL")
+        assert calls == []
+
+    def test_the_intent_comes_from_the_table_not_the_caller(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _fake_adb(b"Starting: Intent...", calls))
+        monkeypatch.setattr("apt_log.device.send_ui_action", lambda *_: None)
+        panel = phonesettings.open_panel("language")
+        assert panel["id"] == "language"
+        assert calls == [["adb", "shell", "am", "start", "-a",
+                          "android.settings.LOCALE_SETTINGS"]]
+
+    def test_am_reporting_an_error_on_stdout_is_a_refusal(self, monkeypatch):
+        """`am start` says "Error: Activity not started" and exits 0, so the
+        words have to be read — a phone without the screen must not report
+        "opened"."""
+        monkeypatch.setattr(
+            phonesettings.subprocess, "run",
+            _fake_adb(b"Error: Activity not started, unable to resolve"))
+        monkeypatch.setattr("apt_log.device.send_ui_action", lambda *_: None)
+        with pytest.raises(phonesettings.SettingsUnavailable):
+            phonesettings.open_panel("language")
+
+    def test_a_wake_that_fails_does_not_refuse_the_open(self, monkeypatch):
+        def refuse(*_a):
+            raise RuntimeError("screen is having a day")
+
+        monkeypatch.setattr("apt_log.device.send_ui_action", refuse)
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _fake_adb(b"Starting: Intent..."))
+        assert phonesettings.open_panel("wifi")["id"] == "wifi"
+
+
+class TestReadings:
+    def test_a_full_transcript_parses_onto_the_right_rows(self, monkeypatch):
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _fake_adb(_transcript()))
+        doc = phonesettings.readings()
+        assert doc["ok"]
+        by_id = {r["id"]: r for r in doc["rows"]}
+        assert by_id["locale"]["value"] == "es-US"
+        assert by_id["timezone"]["value"] == "America/New_York"
+        assert by_id["wifi"]["value"] == "1"
+        assert by_id["bluetooth"]["value"] == "0"
+        # 120000 ms is a screen timeout somebody can reason about in minutes.
+        assert by_id["screen_timeout"]["value"] == "2 min"
+        assert by_id["brightness"]["value"] == "180 / 255"
+        # `settings get` says "null" for never-set; for font scale that IS
+        # the default, and a dash there would read as "unknown".
+        assert by_id["font_scale"]["value"] == "1.0"
+        # never-set auto_time_zone has no default worth asserting.
+        assert by_id["auto_zone"]["value"] is None
+
+    def test_an_unset_locale_falls_back_to_the_factory_one(self, monkeypatch):
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _fake_adb(_transcript(locale="")))
+        doc = phonesettings.readings()
+        by_id = {r["id"]: r for r in doc["rows"]}
+        assert by_id["locale"]["value"] == "en-US"
+        # The fallback probe itself never renders as a row.
+        assert "locale_default" not in by_id
+
+    def test_no_adb_degrades_to_dashes_not_an_exception(self, no_adb):
+        doc = phonesettings.readings()
+        assert doc["ok"] is False
+        assert doc["rows"], "the rows still exist to render"
+        assert all(r["value"] is None for r in doc["rows"])
+
+    def test_half_a_transcript_is_refused_whole(self, monkeypatch):
+        """A phone mid-reboot answers with a truncated transcript; parsed
+        by position it would put the wifi answer on the bluetooth row."""
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _fake_adb(b"es-US\n~\nen-US\n"))
+        doc = phonesettings.readings()
+        assert doc["ok"] is False
+        assert all(r["value"] is None for r in doc["rows"])
+
+
+class TestTheRoutes:
+    def test_the_page_renders_with_no_phone_at_all(self, client, no_adb):
+        """The person opening a debug page is diagnosing why adb went away.
+        An exception page here is the tool failing at its one moment."""
+        body = client.get("/debug").text
+        assert "debug.title" not in body  # every key resolved
+        for panel in phonesettings.PANELS:
+            assert f'value="{panel["id"]}"' in body
+
+    def test_an_unknown_panel_is_refused_not_forwarded(self, client,
+                                                       monkeypatch):
+        calls = []
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _fake_adb(b"", calls))
+        r = client.post("/debug/open",
+                        data={"panel": "android.settings.SETTINGS"},
+                        follow_redirects=False)
+        assert r.status_code == 303
+        assert r.headers["location"] == "/debug?opened=unknown"
+        assert calls == []
+
+    def test_opening_language_lands_back_with_the_notice(self, client,
+                                                         monkeypatch):
+        calls = []
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _fake_adb(b"Starting: Intent...", calls))
+        monkeypatch.setattr("apt_log.device.send_ui_action", lambda *_: None)
+        r = client.post("/debug/open", data={"panel": "language"},
+                        follow_redirects=False)
+        assert r.status_code == 303
+        assert r.headers["location"] == "/debug?opened=language"
+        assert ["adb", "shell", "am", "start", "-a",
+                "android.settings.LOCALE_SETTINGS"] in calls
+
+    def test_a_phone_that_refuses_says_failed(self, client, monkeypatch):
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _fake_adb(b"Error: unable to resolve"))
+        monkeypatch.setattr("apt_log.device.send_ui_action", lambda *_: None)
+        r = client.post("/debug/open", data={"panel": "language"},
+                        follow_redirects=False)
+        assert r.headers["location"] == "/debug?opened=failed"
+
+    def test_the_api_translates_the_switches(self, client, monkeypatch):
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _fake_adb(_transcript()))
+        doc = client.get("/api/phone-settings",
+                         headers={"accept-language": "en"}).json()
+        by_id = {r["id"]: r for r in doc["rows"]}
+        assert by_id["wifi"]["said"] == "On"
+        assert by_id["bluetooth"]["said"] == "Off"
+        assert by_id["auto_zone"]["said"] == "—"
+
+    def test_the_console_offers_the_way_in(self, client, no_adb):
+        assert 'href="/debug"' in client.get("/console").text

@@ -626,6 +626,97 @@ def clear_density(request: Request, key: str = Form(...), next: str = Form("")):
     return _remember(response, request, _device_id(request), "/console")
 
 
+def _readings_said(t: Translator, doc: dict) -> dict:
+    """The readings with each value put into words, in the reader's language.
+
+    Done here rather than in phonesettings because on/off are WORDS — the
+    module reads the phone and knows nothing about who is looking. Every
+    other kind is already language-neutral ("es-US", "2 min", "180 / 255").
+    """
+    for row in doc.get("rows") or ():
+        if row.get("kind") == "onoff":
+            row["said"] = (t("debug.on") if row.get("value") == "1"
+                           else t("debug.off") if row.get("value") == "0"
+                           else "—")
+        else:
+            row["said"] = row.get("value") or "—"
+    return doc
+
+
+@app.get("/debug", response_class=HTMLResponse)
+def debug_settings(request: Request):
+    """The settings debugger: the phone's own Settings, mapped to a page.
+
+    A control-centre annex, and the same rules apply — this is the operator's
+    tool, not hers. It does three things: opens one of a FIXED list of the
+    phone's Settings screens (the list is `phonesettings.PANELS`; the browser
+    only ever posts an id from it), shows what the phone currently says those
+    settings are, and mirrors the screen with the same verified taps every
+    other press uses — which is how a setting actually gets CHANGED: on the
+    phone's own control for it, never by this server writing values blind.
+
+    The containment watchdog already sanctions Settings as somewhere the
+    phone can be sent (feed.SETTINGS_APPS), so nothing here fights it.
+    """
+    from apt_log.ui import phonesettings
+
+    device_id = _device_id(request)
+    t = _translator(request)
+    doc = _read_json(state_mod.STATE_DIR / "screen.json", None) or {}
+    opened = (request.query_params.get("opened") or "")[:32]
+    response = templates.TemplateResponse(
+        request=request,
+        name="debug.html",
+        headers={"Cache-Control": "no-store"},
+        context={
+            "t": t,
+            "boot": BOOT_ID,
+            "lang": t.language,
+            "languages": SUPPORTED,
+            "groups": phonesettings.panels_by_group(),
+            "panel_index": phonesettings.PANEL_INDEX,
+            "readings": _readings_said(t, phonesettings.readings()),
+            "screen_doc": doc,
+            "opened": opened,
+        },
+    )
+    return _remember(response, request, device_id, "/debug")
+
+
+@app.post("/debug/open")
+def debug_open(request: Request, panel: str = Form(...)):
+    """Open one Settings screen on the phone, by id.
+
+    The id selects a row of `phonesettings.PANELS` and only the row knows an
+    intent action — the same shape as /macro and /device, and for the same
+    reason: a route that forwarded an action string from a form would be a
+    remote control for every exported activity on the phone.
+    """
+    from apt_log.ui import phonesettings
+
+    wanted = (panel or "")[:32]
+    try:
+        phonesettings.open_panel(wanted)
+    except KeyError:
+        log.warning("unknown settings panel requested: %r", wanted)
+        return RedirectResponse(url="/debug?opened=unknown", status_code=303)
+    except phonesettings.SettingsUnavailable as exc:
+        log.warning("could not open the settings screen: %s", exc)
+        return RedirectResponse(url="/debug?opened=failed", status_code=303)
+    return RedirectResponse(url=f"/debug?opened={wanted}", status_code=303)
+
+
+@app.get("/api/phone-settings")
+def api_phone_settings(request: Request):
+    """The readings, refreshed without a reload, for the page that sits open
+    next to the phone screen it is describing."""
+    from apt_log.ui import phonesettings
+
+    return JSONResponse(
+        _readings_said(_translator(request), phonesettings.readings()),
+        headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/machine")
 def api_machine():
     """The metrics, for a page that is left open. Cached in the module, so a

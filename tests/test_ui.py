@@ -223,7 +223,16 @@ class TestWritePaths:
                          # rather than a timer: the stop exists because only
                          # a person can fix what caused it, so only a person
                          # can say it is fixed.
-                         "/auth/resume"}
+                         "/auth/resume",
+                         # Opens one screen of the phone's own Settings, by
+                         # an id that selects a row of phonesettings.PANELS —
+                         # the same shape as /macro and /device, and tested
+                         # in test_debug.py: only the row knows an intent
+                         # action, so the form cannot reach `am start`. The
+                         # watchdog sanctions Settings as somewhere the phone
+                         # can be SENT (feed.SETTINGS_APPS); everything past
+                         # the opened screen is ordinary verified taps.
+                         "/debug/open"}
 
     def test_no_route_accepts_a_raw_coordinate_or_keycode(self, client):
         """/tap takes an element from a named frame; /device takes an action
