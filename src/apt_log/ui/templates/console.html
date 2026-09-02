@@ -75,6 +75,17 @@
          max-width:780px; margin:0 auto; }
   @media (min-width:820px) { main { max-width:900px; } }
 
+  /* The command-centre tabs — this page and the settings tab are siblings,
+     and the strip says so on both. Same markup and CSS on debug.html. */
+  .tabs { display:flex; gap:6px; padding:12px 12px 0; max-width:780px;
+          margin:0 auto; }
+  @media (min-width:820px) { .tabs { max-width:900px; } }
+  .tabs a { flex:1; text-align:center; padding:8px 10px; border-radius:10px;
+            text-decoration:none; color:var(--muted); font-weight:600;
+            font-size:14px; background:var(--track);
+            -webkit-tap-highlight-color:transparent; }
+  .tabs a[aria-current="page"] { background:var(--tint); color:#fff; }
+
   /* ------------------------------------------------------------- sections */
   section { background:var(--card); border:.5px solid var(--line);
             border-radius:14px; padding:14px; margin:0 0 12px;
@@ -239,6 +250,11 @@
     {% endfor %}
   </form>
 </div>
+
+<nav class="tabs">
+  <a href="/console" aria-current="page">{{ t('console.title') }}</a>
+  <a href="/debug">{{ t('debug.tab') }}</a>
+</nav>
 
 <main>
   {% if notice %}
@@ -587,13 +603,6 @@
           {{ t(macro.label_key) }}</button>
       </form>
       {% endfor %}
-      {# The settings debugger, beside the macro that opens Settings blind:
-         same destination, with the map and the readings around it. A link,
-         not a form — it changes nothing on its own. #}
-      <a class="btn small" href="/debug"
-         style="text-decoration:none; display:inline-flex; align-items:center;
-                font-size:13px; padding:6px 11px; border-radius:8px">
-        {{ t('debug.title') }}</a>
     </div>
     <p class="sub">
       {% if macro_status.state == 'running' %}{{ t(macro_status.step) }}

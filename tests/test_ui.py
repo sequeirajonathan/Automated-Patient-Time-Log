@@ -232,7 +232,20 @@ class TestWritePaths:
                          # watchdog sanctions Settings as somewhere the phone
                          # can be SENT (feed.SETTINGS_APPS); everything past
                          # the opened screen is ordinary verified taps.
-                         "/debug/open"}
+                         "/debug/open",
+                         # The clock controls, the one place the settings tab
+                         # writes: two switch ids selecting rows of
+                         # phonesettings.TIME_SWITCHES, and a typed time that
+                         # is parsed and re-serialised server-side — nothing
+                         # a browser posts is ever part of a command. Added
+                         # on the owner's explicit ask (testing runs the
+                         # phone's clock forwards and back); the argument
+                         # lives in phonesettings' clock section.
+                         "/debug/time/switch", "/debug/time/set",
+                         # And the undo: both automatic switches back on, the
+                         # network restores the real time. No parameters at
+                         # all — the safest write on the page.
+                         "/debug/time/reset"}
 
     def test_no_route_accepts_a_raw_coordinate_or_keycode(self, client):
         """/tap takes an element from a named frame; /device takes an action
