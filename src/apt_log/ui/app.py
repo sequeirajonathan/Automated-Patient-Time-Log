@@ -410,6 +410,10 @@ def phone_app(request: Request):
             "arming": _arming_model(t),
             "screen_doc": screen_doc or {},
             "pending": queue.current(),
+            # The phone's clock for the first paint, so the launcher never
+            # shows the reader's hour even for a second. Cached, not fresh:
+            # a page open costs one adb read at most every few seconds.
+            "clock": _clock_payload(),
             "KIND_SIGNATURE": KIND_SIGNATURE,
             "KIND_TOKEN": KIND_TOKEN,
             "KIND_CHOICE": KIND_CHOICE,
@@ -739,14 +743,26 @@ def debug_time_set(request: Request, when: str = Form(...)):
     for the whole argument, including why a typed time is read in the
     PHONE's zone and never the browser's.
     """
-    from apt_log.ui import phonesettings
+    from datetime import datetime
 
+    from apt_log import macros as macros_mod
+
+    # THE SAME PRESS AS THE LAUNCHER'S. The first cut wrote the clock from
+    # this process directly; now that a change of clock owes the phone an
+    # app restart and a cleared Settings screen (macros' clock section),
+    # both pages ask the feed process to do the whole thing. The parse is
+    # repeated here only so a typo answers on this page instead of as a
+    # failed macro.
+    wanted = (when or "")[:32].strip()
     try:
-        phonesettings.set_clock((when or "")[:32])
+        if datetime.fromisoformat(wanted).tzinfo is not None:
+            raise ValueError("offset")
     except ValueError:
         return RedirectResponse(url="/debug?saved=bad_time", status_code=303)
-    except phonesettings.SettingsUnavailable as exc:
-        log.warning("could not set the phone clock: %s", exc)
+    try:
+        macros_mod.request("clock_set", arg=wanted)
+    except OSError as exc:
+        log.warning("could not ask for the clock change: %s", exc)
         return RedirectResponse(url="/debug?saved=time_failed",
                                 status_code=303)
     return RedirectResponse(url="/debug?saved=clock", status_code=303)
@@ -758,15 +774,36 @@ def debug_time_reset(request: Request):
     network restores the real time and zone. The undo for the section —
     see phonesettings.reset_clock for why it takes no parameters at all.
     """
-    from apt_log.ui import phonesettings
+    from apt_log import macros as macros_mod
 
     try:
-        phonesettings.reset_clock()
-    except phonesettings.SettingsUnavailable as exc:
-        log.warning("could not reset the phone clock: %s", exc)
+        macros_mod.request("clock_reset")
+    except OSError as exc:
+        log.warning("could not ask for the clock reset: %s", exc)
         return RedirectResponse(url="/debug?saved=time_failed",
                                 status_code=303)
     return RedirectResponse(url="/debug?saved=reset", status_code=303)
+
+
+def _clock_payload(fresh: bool = False) -> dict:
+    """The phone's clock as the socket and the launcher carry it: the
+    words, the pieces the sheet prefills from, and the one flag that
+    matters — whether the phone is keeping its own time."""
+    from apt_log.ui import phonesettings
+
+    doc = phonesettings.clock_state(fresh=fresh)
+    return {"ok": bool(doc.get("ok")), "said": doc.get("said") or "",
+            "date": doc.get("date") or "", "time": doc.get("time") or "",
+            "auto": doc.get("auto"), "auto_zone": doc.get("auto_zone")}
+
+
+@app.get("/api/clock")
+def api_clock():
+    """The phone's clock, read fresh. What the launcher asks after a change
+    to confirm the change is CONCRETE before it unlocks — the macro saying
+    "done" is the controller's word, this is the phone's."""
+    return JSONResponse(_clock_payload(fresh=True),
+                        headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/phone-settings")
@@ -2211,6 +2248,15 @@ async def live(ws: WebSocket):
                 mirror = _mirror_payload(s, t)
                 if mirror != last.get("mirror"):
                     payload["mirror"] = last["mirror"] = mirror
+                # THE PHONE'S CLOCK, NOT THE READER'S. The launcher used to
+                # render the building's hour from the browser's own clock —
+                # right until the phone's clock could be moved by hand, at
+                # which point a page showing 5:38 over a phone stamping
+                # 3:05 is a page telling a lie. One cached adb read per
+                # slow tick, shared by every viewer.
+                clock = await asyncio.to_thread(_clock_payload)
+                if clock != last.get("clock"):
+                    payload["clock"] = last["clock"] = clock
                 if s.paused != last.get("paused"):
                     payload["paused"] = last["paused"] = s.paused
 

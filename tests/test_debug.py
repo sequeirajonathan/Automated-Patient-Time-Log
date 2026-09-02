@@ -322,6 +322,44 @@ class TestTheClock:
         assert all("put" not in c and "set-time" not in c for c in calls)
 
 
+class TestTheClockReading:
+    def setup_method(self):
+        phonesettings.forget_clock()
+
+    def test_the_phones_own_hour_in_the_launchers_spelling(self, monkeypatch):
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _fake_adb(b"2026-09-02 05:07 EST\n~\n1\n~\n1\n"))
+        doc = phonesettings.clock_state(fresh=True)
+        assert doc["ok"]
+        assert doc["said"] == "5:07 AM EST"
+        assert doc["auto"] is True and doc["auto_zone"] is True
+
+    def test_a_never_set_switch_is_unknown_not_off(self, monkeypatch):
+        """`settings get` says "null" for a switch nothing has touched; on
+        this phone that is the default (automatic), and the page must not
+        raise the amber pill over it."""
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _fake_adb(b"2026-09-02 05:07 EST\n~\nnull\n~\nnull\n"))
+        doc = phonesettings.clock_state(fresh=True)
+        assert doc["auto"] is None and doc["auto_zone"] is None
+
+    def test_no_phone_is_not_ok_and_says_nothing(self, no_adb):
+        doc = phonesettings.clock_state(fresh=True)
+        assert doc["ok"] is False and doc["said"] == ""
+
+    def test_the_reading_is_cached_and_a_write_busts_it(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _fake_adb(b"2026-09-02 05:07 EST\n~\n1\n~\n1\n", calls))
+        phonesettings.clock_state()
+        phonesettings.clock_state()
+        assert len(calls) == 1, "the socket asks every tick for every viewer"
+        phonesettings.set_time_switch("auto_time", False)
+        phonesettings.clock_state()
+        # the switch write, then a fresh read
+        assert len(calls) == 3
+
+
 class TestTheRoutes:
     def test_the_page_renders_with_no_phone_at_all(self, client, no_adb):
         """The person opening a debug page is diagnosing why adb went away.
@@ -396,24 +434,56 @@ class TestTheRoutes:
         assert r.headers["location"] == "/debug?saved=bad_time"
         assert calls == []
 
-    def test_the_set_route_lands_back_with_the_notice(self, client,
-                                                      monkeypatch):
-        calls = []
+    def test_the_set_route_asks_the_feed_process_not_adb(self, client,
+                                                         monkeypatch):
+        """A change of clock owes the phone an app restart and a cleared
+        Settings screen, and only the feed process can do those — so the
+        page asks for the `clock_set` macro rather than writing the clock
+        itself. Nothing touches adb from this process."""
+        from apt_log import macros as macros_mod
+
+        calls, asked = [], []
         monkeypatch.setattr(phonesettings.subprocess, "run",
-                            _clock_adb(calls))
+                            _fake_adb(b"", calls))
+        monkeypatch.setattr(macros_mod, "request",
+                            lambda name, arg="", **_k: asked.append((name, arg)))
         r = client.post("/debug/time/set", data={"when": "2026-09-02T15:30"},
                         follow_redirects=False)
         assert r.headers["location"] == "/debug?saved=clock"
-        assert any("set-time" in c for c in calls)
+        assert asked == [("clock_set", "2026-09-02T15:30")]
+        assert calls == []
 
-    def test_the_reset_route_lands_back_with_the_notice(self, client,
-                                                        monkeypatch):
-        calls = []
-        monkeypatch.setattr(phonesettings.subprocess, "run",
-                            _fake_adb(b"", calls))
+    def test_an_offset_in_the_time_is_a_bad_time_here_too(self, client,
+                                                          monkeypatch):
+        from apt_log import macros as macros_mod
+
+        asked = []
+        monkeypatch.setattr(macros_mod, "request",
+                            lambda name, arg="", **_k: asked.append(name))
+        r = client.post("/debug/time/set",
+                        data={"when": "2026-09-02T15:30+05:00"},
+                        follow_redirects=False)
+        assert r.headers["location"] == "/debug?saved=bad_time"
+        assert asked == []
+
+    def test_the_reset_route_asks_the_feed_process(self, client, monkeypatch):
+        from apt_log import macros as macros_mod
+
+        asked = []
+        monkeypatch.setattr(macros_mod, "request",
+                            lambda name, arg="", **_k: asked.append(name))
         r = client.post("/debug/time/reset", follow_redirects=False)
         assert r.headers["location"] == "/debug?saved=reset"
-        assert len(calls) == 2
+        assert asked == ["clock_reset"]
+
+    def test_the_clock_api_reads_fresh(self, client, monkeypatch):
+        monkeypatch.setattr(phonesettings.subprocess, "run",
+                            _fake_adb(b"2026-09-02 17:38 EDT\n~\n0\n~\n1\n"))
+        phonesettings.forget_clock()
+        doc = client.get("/api/clock").json()
+        assert doc["ok"] and doc["said"] == "5:38 PM EDT"
+        assert doc["auto"] is False and doc["auto_zone"] is True
+        assert doc["date"] == "2026-09-02" and doc["time"] == "17:38"
 
     def test_the_console_offers_the_way_in(self, client, no_adb):
         """The tab strip, on both pages, each pointing at the other."""

@@ -6587,3 +6587,183 @@ class TestTheSignInWalkStaysOffALiveSession:
         assert typed == []
         box.clear.assert_not_called()
         assert "macro.step.signing_in" not in steps
+
+
+class TestTheClockRules:
+    """The phone's clock can be moved from the front page now, and every app
+    stamps records with it. So the opens have rules, and the rules live in
+    the runner — the one place every open passes through — rather than on
+    the page that asks.
+    """
+
+    def _quiet(self, monkeypatch, front="com.tellus.evv.v2"):
+        stopped, launched = [], []
+        monkeypatch.setattr(macros, "_force_stop", stopped.append)
+        monkeypatch.setattr(macros, "_forget_stitched", lambda _p: None)
+        monkeypatch.setattr(macros, "wake_display", lambda: None)
+        monkeypatch.setattr(macros.time, "sleep", lambda _s: None)
+        monkeypatch.setattr(macros, "_front_package", lambda: front)
+        from apt_log import feed as feed_mod
+
+        monkeypatch.setattr(feed_mod, "_adb",
+                            lambda args, *a, **k: launched.append(args))
+        macros._clock_dirty.clear()
+        return stopped, launched
+
+    def test_exchange_and_inmyteam_never_open_on_a_hand_set_clock(self, monkeypatch):
+        from apt_log.ui import phonesettings
+
+        stopped, _ = self._quiet(monkeypatch)
+        resets = []
+        monkeypatch.setattr(phonesettings, "clock_state",
+                            lambda fresh=False: {"ok": True, "auto": False,
+                                                 "auto_zone": True})
+        monkeypatch.setattr(phonesettings, "reset_clock",
+                            lambda: resets.append(True))
+        steps = []
+        for name, package in (("hhax_uma_login", "com.hhaexchange.uma"),
+                              ("open_inmyteam", "com.inmyteam.inmyteam")):
+            stopped.clear()
+            macros._clock_gate(name, steps.append)
+            assert package in stopped, "cold, so it reads the network's clock"
+        assert resets == [True, True]
+        assert "macro.step.clock_reset" in steps
+
+    def test_a_phone_already_on_automatic_is_left_alone(self, monkeypatch):
+        from apt_log.ui import phonesettings
+
+        stopped, _ = self._quiet(monkeypatch)
+        monkeypatch.setattr(phonesettings, "clock_state",
+                            lambda fresh=False: {"ok": True, "auto": True,
+                                                 "auto_zone": True})
+        monkeypatch.setattr(phonesettings, "reset_clock",
+                            lambda: (_ for _ in ()).throw(AssertionError("reset")))
+        macros._clock_gate("open_hhax_uma", lambda _k: None)
+        assert stopped == []
+
+    def test_a_phone_that_will_not_say_is_not_a_reason_to_refuse(self, monkeypatch):
+        from apt_log.ui import phonesettings
+
+        stopped, _ = self._quiet(monkeypatch)
+        monkeypatch.setattr(phonesettings, "clock_state",
+                            lambda fresh=False: {"ok": False, "auto": None})
+        macros._clock_gate("inmyteam_login", lambda _k: None)
+        assert stopped == []
+
+    def test_mobile_caregiver_bypasses_the_reset_but_restarts_after_a_change(self, monkeypatch):
+        from apt_log.ui import phonesettings
+
+        stopped, _ = self._quiet(monkeypatch)
+        monkeypatch.setattr(phonesettings, "clock_state",
+                            lambda fresh=False: {"ok": True, "auto": False,
+                                                 "auto_zone": False})
+        monkeypatch.setattr(phonesettings, "reset_clock",
+                            lambda: (_ for _ in ()).throw(AssertionError("reset")))
+        # Nothing changed: nothing to do, hand-set clock or not.
+        macros._clock_gate("mobile_caregiver_pin", lambda _k: None)
+        assert stopped == []
+        # A change happened and the app was not reopened: the next open is cold.
+        macros._clock_dirty["com.tellus.evv.v2"] = True
+        macros._clock_gate("open_mobile_caregiver", lambda _k: None)
+        assert stopped == ["com.tellus.evv.v2"]
+        assert "com.tellus.evv.v2" not in macros._clock_dirty
+
+    def test_landing_relaunches_once_then_refuses(self, monkeypatch):
+        """"Opened" must mean landed: the app the front end asked for is
+        the app in front, or the macro fails where she can see it."""
+        _, launched = self._quiet(monkeypatch, front="com.android.launcher3")
+        with pytest.raises(RuntimeError):
+            with patch.object(macros.time, "monotonic",
+                              side_effect=[i * 0.5 for i in range(400)]):
+                macros._land_check("open_hhax_uma", lambda _k: None)
+        assert launched and launched[0][1:3] == ["monkey", "-p"]
+        assert "com.hhaexchange.uma" in launched[0]
+
+    def test_landing_is_satisfied_by_the_right_app_and_skips_when_unreadable(self, monkeypatch):
+        _, launched = self._quiet(monkeypatch, front="com.hhaexchange.uma")
+        macros._land_check("open_hhax_uma", lambda _k: None)
+        assert launched == []
+        _, launched = self._quiet(monkeypatch, front="")
+        macros._land_check("open_hhax_uma", lambda _k: None)
+        assert launched == [], "no reading is not evidence of the wrong app"
+
+    def test_the_rules_do_not_touch_other_macros(self, monkeypatch):
+        stopped, launched = self._quiet(monkeypatch, front="com.wrong.app")
+        macros._clock_gate("read_page", lambda _k: None)
+        macros._land_check("read_page", lambda _k: None)
+        assert stopped == [] and launched == []
+
+    def test_the_runner_wraps_every_run_in_the_rules(self, tmp_path, monkeypatch):
+        seen = []
+        monkeypatch.setattr(macros, "_clock_gate",
+                            lambda name, report: seen.append(("gate", name)))
+        monkeypatch.setattr(macros, "_land_check",
+                            lambda name, report: seen.append(("land", name)))
+        runner = macros.Runner(tmp_path / "req.json", tmp_path / "status.json")
+        with patch("apt_log.resident.run", lambda work: work(MagicMock())), \
+             patch.object(macros.MACROS["read_page"], "run", lambda d, r: seen.append(("run", "read_page"))):
+            status = runner.execute("read_page", "rid")
+        assert status.state == "done"
+        assert seen == [("gate", "read_page"), ("run", "read_page"),
+                        ("land", "read_page")]
+
+    def test_setting_the_clock_restarts_mobile_caregiver_when_it_is_in_front(self, monkeypatch):
+        from apt_log.ui import phonesettings
+
+        stopped, launched = self._quiet(monkeypatch, front="com.tellus.evv.v2")
+        set_to = []
+        monkeypatch.setattr(phonesettings, "set_clock", set_to.append)
+        monkeypatch.setattr(phonesettings, "forget_clock", lambda: None)
+        steps = []
+        macros.MACROS["clock_set"].run(MagicMock(), steps.append, "2026-09-02T15:30")
+        assert set_to == ["2026-09-02T15:30"]
+        assert stopped == ["com.tellus.evv.v2"]
+        assert launched and "com.tellus.evv.v2" in launched[0]
+        assert "macro.step.clock_restart" in steps
+        assert "com.tellus.evv.v2" not in macros._clock_dirty
+
+    def test_setting_the_clock_marks_a_closed_mobile_caregiver_for_a_cold_open(self, monkeypatch):
+        from apt_log.ui import phonesettings
+
+        stopped, launched = self._quiet(monkeypatch, front="com.inmyteam.inmyteam")
+        monkeypatch.setattr(phonesettings, "set_clock", lambda _w: None)
+        monkeypatch.setattr(phonesettings, "forget_clock", lambda: None)
+        macros.MACROS["clock_set"].run(MagicMock(), lambda _k: None, "2026-09-02T15:30")
+        assert stopped == ["com.tellus.evv.v2"]
+        assert launched == [], "the app in front was not the one restarted"
+        assert macros._clock_dirty.get("com.tellus.evv.v2") is True
+
+    def test_a_change_made_on_the_settings_screen_leaves_it(self, monkeypatch):
+        """The debug tab opens Date & time on the phone; a change made there
+        must not leave the phone parked on it, or the next open lands on
+        the screen the change just left."""
+        from apt_log import feed as feed_mod
+        from apt_log.ui import phonesettings
+
+        _, launched = self._quiet(monkeypatch, front="com.android.settings")
+        monkeypatch.setattr(feed_mod, "last_care_app", lambda: "com.inmyteam.inmyteam")
+        monkeypatch.setattr(phonesettings, "reset_clock", lambda: None)
+        monkeypatch.setattr(phonesettings, "forget_clock", lambda: None)
+        steps = []
+        macros.MACROS["clock_reset"].run(MagicMock(), steps.append)
+        assert launched and "com.inmyteam.inmyteam" in launched[-1]
+        assert "macro.step.clearing" in steps
+
+    def test_a_time_that_will_not_parse_fails_the_macro_cleanly(self, monkeypatch):
+        from apt_log.ui import phonesettings
+
+        stopped, _ = self._quiet(monkeypatch)
+
+        def refuse(_w):
+            raise ValueError("no")
+
+        monkeypatch.setattr(phonesettings, "set_clock", refuse)
+        with pytest.raises(RuntimeError):
+            macros.MACROS["clock_set"].run(MagicMock(), lambda _k: None, "half nine")
+        assert stopped == [], "nothing restarted for a change that never happened"
+
+    def test_the_clock_macros_are_registered_the_page_can_ask_for_them(self):
+        assert macros.MACROS["clock_set"].takes_arg is True
+        assert macros.MACROS["clock_reset"].takes_arg is False
+        for name in ("clock_set", "clock_reset"):
+            assert name not in macros.OPERATIONS, "they have their own control"

@@ -40,6 +40,12 @@
   let macroEndedAt = 0;
   let busyTimer = 0;
   let toastTimer = 0;
+  // The phone's clock as the socket last reported it, and the change in
+  // flight, if any — what the whole page locks on until the phone itself
+  // confirms the change landed.
+  let phoneClock = (window.APTLOG_APP || {}).clock || null;
+  let clockPending = null;
+  let clockTimer = 0;
 
   // ------------------------------------------------------------------ helpers
   function toast(text) {
@@ -908,11 +914,146 @@
     if (img && frameImg) img.src = '/screen.jpg?f=' + encodeURIComponent(frameImg);
   }
 
+  // ---------------------------------------------------------------- the clock
+  // THE PHONE'S HOUR, when the phone has said it. A home screen shows the
+  // phone's own clock, and now that clock can be moved by hand from this
+  // page, so rendering the building's hour from the browser would be a lie
+  // exactly when it matters. The browser's render of the building's zone is
+  // the fallback for a phone that has not answered.
+  function paintClock() {
+    const clock = document.getElementById('clock');
+    const flag = document.getElementById('clockflag');
+    const btn = document.getElementById('clockbtn');
+    if (!clock) return;
+    const c = phoneClock || {};
+    if (c.ok && c.said) {
+      clock.textContent = c.said;
+    } else {
+      const opts = { hour: 'numeric', minute: '2-digit' };
+      const zone = (window.APTLOG_APP || {}).zone;
+      if (zone) { opts.timeZone = zone; opts.timeZoneName = 'short'; }
+      try {
+        clock.textContent = new Date().toLocaleTimeString([], opts);
+      } catch (e) {
+        clock.textContent = new Date().toLocaleTimeString([], {
+          hour: 'numeric', minute: '2-digit' });
+      }
+    }
+    // The pill is the state that must not go unsaid: the phone is
+    // stamping records with a time somebody typed.
+    const manual = !!(c.ok && c.auto === false);
+    if (flag) flag.hidden = !manual;
+    if (btn) btn.classList.toggle('manual', manual);
+  }
+
+  function applyClock(c) {
+    phoneClock = c || null;
+    paintClock();
+    if (body.classList.contains('timing')) fillClockSheet();
+  }
+
+  function fillClockSheet() {
+    const now = document.getElementById('clock-now');
+    const mode = document.getElementById('clock-mode');
+    const reset = document.getElementById('clock-reset');
+    const when = document.getElementById('clock-when');
+    const c = phoneClock || {};
+    if (now) now.textContent = c.ok && c.said ? c.said : '—';
+    if (mode) {
+      mode.textContent = !c.ok ? (i18n.clockUnknown || '')
+        : c.auto === false ? (i18n.clockManual || '')
+        : (i18n.clockAuto || '');
+      mode.classList.toggle('manual', !!(c.ok && c.auto === false));
+    }
+    // The way back is offered only while there is something to undo —
+    // a phone already on automatic has nothing to reset.
+    if (reset) reset.hidden = !(c.ok && (c.auto === false || c.auto_zone === false));
+    // Prefilled from the PHONE's clock, not the reader's, and left alone
+    // once she has started typing into it.
+    if (when && !when.dataset.touched && c.ok && c.date && c.time) {
+      when.value = c.date + 'T' + c.time;
+    }
+  }
+
+  function openClockSheet() {
+    if (clockPending) return;
+    const when = document.getElementById('clock-when');
+    if (when) delete when.dataset.touched;
+    fillClockSheet();
+    body.classList.add('timing');
+  }
+
+  // THE LOCK. Nothing on the page is pressable while a clock change is in
+  // flight: an app opened halfway through would land on the Date & time
+  // screen the change just left, or read the clock it is about to move.
+  function clockLock(text) {
+    const label = document.getElementById('clocklock-text');
+    if (label) label.textContent = text || i18n.clockWorking || '';
+    body.classList.add('clocklocked');
+    clearTimeout(clockTimer);
+    // A ceiling, not the plan: a lock that never lifts is worse than one
+    // that lifts unconfirmed and says so.
+    clockTimer = setTimeout(() => clockSettled(false), 120000);
+  }
+
+  function clockSettled(confirmed) {
+    const pending = clockPending;
+    clockPending = null;
+    clearTimeout(clockTimer);
+    body.classList.remove('clocklocked');
+    if (!pending) return;
+    toast(confirmed
+      ? (pending.expectAuto ? i18n.clockResetDone : i18n.clockDone) || ''
+      : i18n.clockUnconfirmed || '');
+  }
+
+  // After the macro says done, the PHONE's own word, asked fresh — up to
+  // three times, because the network takes a beat to answer a reset. The
+  // lock lifts on agreement, not on the controller's say-so.
+  function confirmClock(tries) {
+    fetch('/api/clock', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((c) => {
+        applyClock(c);
+        if (!clockPending) return;
+        if (c.ok && c.auto === clockPending.expectAuto) { clockSettled(true); return; }
+        if (tries > 1) setTimeout(() => confirmClock(tries - 1), 1500);
+        else clockSettled(false);
+      })
+      .catch(() => {
+        if (tries > 1) setTimeout(() => confirmClock(tries - 1), 1500);
+        else clockSettled(false);
+      });
+  }
+
+  function requestClock(name, arg, expectAuto) {
+    if (clockPending) return;
+    body.classList.remove('timing');
+    clockPending = { expectAuto: expectAuto, since: Date.now() };
+    clockLock(i18n.clockWorking || '');
+    const form = { name: name };
+    if (arg) form.arg = arg;
+    fetch('/macro', {
+      method: 'POST',
+      body: new URLSearchParams(form),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      redirect: 'follow'
+    }).catch(() => clockSettled(false));
+  }
+
   // ------------------------------------------------------------------- macros
   // Reflected whether or not this page started it: the controller signs in by
   // itself when the app lands on its login screen, and she should watch that
   // as "Signing in…" rather than wonder at a darkened page doing nothing.
   function applyMacro(m) {
+    // A clock change reports through the lock, not the screen's busy veil:
+    // running keeps the lock with the step's words, done asks the phone
+    // to confirm, failed lifts it and says so.
+    if (clockPending && (m.name === 'clock_set' || m.name === 'clock_reset')) {
+      if (m.state === 'running') { clockLock(m.text || ''); return; }
+      if (m.state === 'done') { confirmClock(3); return; }
+      if (m.state === 'failed') { clockSettled(false); toast(m.state_text || ''); return; }
+    }
     if (m.state === 'running') {
       busy(m.text || '', 45000);
       awaitingMacro = true;
@@ -943,6 +1084,9 @@
   function launch(tile) {
     const name = tile.dataset.macro;
     if (!name) return;
+    // Not while the clock is moving: the lock covers the tiles, and this is
+    // the belt for a press that arrived through some other path.
+    if (clockPending) return;
 
     // The tile of the app already in front is a switch, not a ceremony. The
     // screen on the phone is signed in and live; running the sign-in walk
@@ -2131,6 +2275,7 @@
                          : (i18n.watchers || ''));
         }
       }
+      if (msg.clock) applyClock(msg.clock);
       if (msg.macro) applyMacro(msg.macro);
       if (msg.sign) applySign(msg.sign);
       if (msg.relay_html !== undefined || msg.relay_nonce !== undefined) {
@@ -2746,26 +2891,27 @@
 
     // The launcher's clock — the one part of a home screen that makes it feel
     // inhabited. Local time, hers.
-    const clock = document.getElementById('clock');
-    if (clock) {
-      const tick = () => {
-        // The building's hour, with the zone said out loud — this clock
-        // mirrors a phone standing in Florida, and the person reading it
-        // may not be. Falls back to the reader's own clock only if the
-        // zone will not resolve, which is better than an empty face.
-        const opts = { hour: 'numeric', minute: '2-digit' };
-        const zone = (window.APTLOG_APP || {}).zone;
-        if (zone) { opts.timeZone = zone; opts.timeZoneName = 'short'; }
-        try {
-          clock.textContent = new Date().toLocaleTimeString([], opts);
-        } catch (e) {
-          clock.textContent = new Date().toLocaleTimeString([], {
-            hour: 'numeric', minute: '2-digit' });
-        }
-      };
-      tick();
-      setInterval(tick, 15000);
-    }
+    // See paintClock: the phone's own hour when it has said it, the
+    // building's zone rendered here when it has not. The 15s tick only
+    // matters for the fallback; the phone's reading arrives on the socket.
+    paintClock();
+    setInterval(paintClock, 15000);
+    const clockBtn = document.getElementById('clockbtn');
+    if (clockBtn) clockBtn.addEventListener('click', openClockSheet);
+    const clockClose = document.getElementById('clock-close');
+    if (clockClose) clockClose.addEventListener('click', () => body.classList.remove('timing'));
+    const clockWhen = document.getElementById('clock-when');
+    if (clockWhen) clockWhen.addEventListener('input', () => { clockWhen.dataset.touched = '1'; });
+    const clockSet = document.getElementById('clock-set');
+    if (clockSet) clockSet.addEventListener('click', () => {
+      const value = clockWhen ? clockWhen.value : '';
+      if (!value) { if (clockWhen) clockWhen.focus(); return; }
+      requestClock('clock_set', value, false);
+    });
+    const clockReset = document.getElementById('clock-reset');
+    if (clockReset) clockReset.addEventListener('click', () => requestClock('clock_reset', '', true));
+    swipeToDismiss(document.getElementById('clocksheet'),
+                   () => body.classList.remove('timing'));
     padWire(document.getElementById('signpad'));
     padWire(document.getElementById('enrolpad'));
     swipeToDismiss(document.getElementById('signsheet'),

@@ -347,6 +347,7 @@ def set_time_switch(switch_id: str, on: bool) -> None:
     _adb_write(["settings", "put", "global", key, "1" if on else "0"],
                f"setting {key}")
     log.info("phone switch %s set %s", key, "on" if on else "off")
+    forget_clock()
 
 
 def _phone_timezone() -> str:
@@ -407,7 +408,82 @@ def set_clock(when: str) -> int:
     set_time_switch("auto_time", False)
     _adb_write(["cmd", "alarm", "set-time", str(millis)], "setting the clock")
     log.info("phone clock set to %s %s (%d)", when, zone_name, millis)
+    forget_clock()
     return millis
+
+
+# ------------------------------------------------------- the clock, read
+# What the launcher clock shows and what the clock gate decides on: the
+# phone's own time, in the phone's own zone, and whether the phone is
+# keeping it or somebody set it by hand. One adb call, cached for a few
+# seconds because the socket asks on every slow tick for every viewer.
+CLOCK_CACHE_FOR = 4.0
+_clock_cache: dict = {"at": 0.0, "doc": None}
+_CLOCK_PROBE = ("date '+%Y-%m-%d %H:%M %Z'; echo '~'; "
+                "settings get global auto_time; echo '~'; "
+                "settings get global auto_time_zone")
+
+
+def _switch(raw: str) -> bool | None:
+    """1/0 as a bool; anything else — "null", nothing — is unknown."""
+    return True if raw == "1" else False if raw == "0" else None
+
+
+def clock_state(fresh: bool = False) -> dict:
+    """The phone's clock as the page shows it.
+
+    {"ok", "date": "2026-09-02", "time": "17:38", "zone": "EDT",
+     "said": "5:38 PM EDT", "auto": bool|None, "auto_zone": bool|None,
+     "at": epoch}
+
+    `auto` False is the state the page marks: the phone is on a time
+    somebody typed, and every visit record rides it. `ok` False means the
+    phone did not answer — the launcher then falls back to its own render
+    of the building's hour, which is the honest second-best.
+    """
+    now = time.time()
+    cached = _clock_cache["doc"]
+    if not fresh and cached is not None and now - _clock_cache["at"] < CLOCK_CACHE_FOR:
+        return dict(cached)
+    doc = {"ok": False, "date": "", "time": "", "zone": "", "said": "",
+           "auto": None, "auto_zone": None, "at": now}
+    try:
+        out = subprocess.run(["adb", "shell", _CLOCK_PROBE],
+                             capture_output=True, timeout=ADB_TIMEOUT,
+                             check=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.debug("cannot read the phone's clock (%s)", exc)
+        out = None
+    parts = ([p.strip() for p in
+              out.stdout.decode("utf-8", "replace").split(_MARK)]
+             if out is not None and out.returncode == 0 else [])
+    if len(parts) == 3 and parts[0]:
+        stamp = parts[0].split()
+        if len(stamp) >= 2:
+            doc.update(ok=True, date=stamp[0], time=stamp[1],
+                       zone=stamp[2] if len(stamp) > 2 else "",
+                       auto=_switch(parts[1]), auto_zone=_switch(parts[2]))
+            doc["said"] = _clock_words(doc["time"], doc["zone"])
+    _clock_cache["at"] = now
+    _clock_cache["doc"] = dict(doc)
+    return doc
+
+
+def _clock_words(hhmm: str, zone: str) -> str:
+    """`5:38 PM EDT` — the launcher's own spelling, zone always said."""
+    from datetime import datetime
+
+    try:
+        said = datetime.strptime(hhmm, "%H:%M").strftime("%-I:%M %p")
+    except ValueError:
+        said = hhmm
+    return f"{said} {zone}".strip()
+
+
+def forget_clock() -> None:
+    """Drop the cache: the next read must see what a write just did."""
+    _clock_cache["at"] = 0.0
+    _clock_cache["doc"] = None
 
 
 def reset_clock() -> None:

@@ -4983,6 +4983,164 @@ def _restart_phone(driver, report) -> None:
     # wedged while the phone is doing exactly what it was told.
 
 
+# ---------------------------------------------------------------- the clock
+# THE PHONE'S CLOCK IS SOMETHING THE FRONT PAGE CAN NOW MOVE, and every app
+# on the phone stamps records with it. So the clock has rules, and the rules
+# live here — in the one process that opens the apps — rather than on the
+# page that asks:
+#
+#   * HHAeXchange+ and inMyTeam are never opened on a hand-set clock. If the
+#     phone is off automatic when one of them is asked for, the clock goes
+#     back on automatic FIRST and the app starts cold, so what it stamps is
+#     the network's time and not a test's leftovers.
+#   * Mobile Caregiver+ is the app the clock is moved FOR, so it bypasses
+#     that — but it is restarted after every change, set or reset, because a
+#     running app keeps the clock it started with.
+#   * Whatever the front end asked to open is checked to be the app in
+#     front before the macro reports done: a change of clock closes and
+#     reopens apps, and "opened" must mean landed, not launched.
+CLOCK_RESETS = {
+    "hhax_uma_login": "com.hhaexchange.uma",
+    "open_hhax_uma": "com.hhaexchange.uma",
+    "inmyteam_login": "com.inmyteam.inmyteam",
+    "open_inmyteam": "com.inmyteam.inmyteam",
+}
+CLOCK_RESTARTS = {
+    "mobile_caregiver_pin": "com.tellus.evv.v2",
+    "open_mobile_caregiver": "com.tellus.evv.v2",
+}
+# Which of those apps a clock change has stopped without reopening: the
+# next open force-stops it again (a no-op on a dead process) so the launch
+# is cold, then clears the mark. Process-local, like `_freshened`.
+_clock_dirty: dict[str, bool] = {}
+# How long the network is given to answer after the switches go back on
+# before an app that reads the clock is started. NITZ on this carrier lands
+# in a second or two; three is a ceiling, not a duration.
+CLOCK_SETTLE = 3.0
+
+
+def _clock_gate(name: str, report) -> None:
+    """What the clock rules require BEFORE this macro runs. Never raises
+    for want of a reading: a phone that will not say is not a reason to
+    refuse to open an app."""
+    from apt_log.ui import phonesettings
+
+    package = CLOCK_RESETS.get(name)
+    if package:
+        state = phonesettings.clock_state(fresh=True)
+        if state.get("ok") and (state.get("auto") is False
+                                or state.get("auto_zone") is False):
+            report("macro.step.clock_reset")
+            phonesettings.reset_clock()
+            time.sleep(CLOCK_SETTLE)
+            # Cold, so the app reads the clock the network just set rather
+            # than the one it was started under.
+            _force_stop(package)
+            _forget_stitched(package)
+            time.sleep(1.5)
+    package = CLOCK_RESTARTS.get(name)
+    if package and _clock_dirty.pop(package, False):
+        report("macro.step.clock_restart")
+        _force_stop(package)
+        _forget_stitched(package)
+        time.sleep(1.5)
+
+
+def _land_check(name: str, report) -> None:
+    """After the macro: the app the front end asked for is the app in front.
+
+    One relaunch through the launcher intent if it is not, then a refusal
+    rather than a quiet "done" over the wrong screen. Skipped, not failed,
+    when the focus cannot be read at all — that is the feed's problem to
+    report, and it is not evidence of the wrong app.
+    """
+    package = CLOCK_RESETS.get(name) or CLOCK_RESTARTS.get(name)
+    if not package:
+        return
+    front = _front_package()
+    if not front or front == package:
+        return
+    report("macro.step.landing")
+    from apt_log import feed as feed_mod
+
+    wake_display()
+    feed_mod._adb(["shell", "monkey", "-p", package,
+                   "-c", "android.intent.category.LAUNCHER", "1"])
+    if not wait_for(lambda: _front_package() == package, timeout=25.0):
+        raise RuntimeError("the app asked for is not the one in front")
+
+
+def _after_clock_change(report) -> None:
+    """Everything a clock change owes the phone, set or reset alike.
+
+    Mobile Caregiver+ is stopped so its next start reads the new clock —
+    and reopened on the spot if it was the app in front, because a change
+    made while looking at it must not leave her on a launcher. Then, if the
+    phone is sitting on its own Settings (the debug tab opens it there),
+    the last care app is brought back so the next open lands on an app and
+    not on the Date & time screen she just left.
+    """
+    from apt_log import feed as feed_mod
+    from apt_log.ui import phonesettings
+
+    phonesettings.forget_clock()
+    mc = CLOCK_RESTARTS["open_mobile_caregiver"]
+    front = _front_package()
+    _force_stop(mc)
+    _forget_stitched(mc)
+    if front == mc:
+        report("macro.step.clock_restart")
+        time.sleep(1.5)
+        wake_display()
+        feed_mod._adb(["shell", "monkey", "-p", mc,
+                       "-c", "android.intent.category.LAUNCHER", "1"])
+        if not wait_for(lambda: _front_package() == mc, timeout=25.0):
+            _clock_dirty[mc] = True
+            raise RuntimeError("Mobile Caregiver+ did not come back")
+        _clock_dirty.pop(mc, None)
+        return
+    _clock_dirty[mc] = True
+    if front in feed_mod.SETTINGS_APPS:
+        report("macro.step.clearing")
+        back_to = feed_mod.last_care_app()
+        if back_to and back_to != mc:
+            wake_display()
+            feed_mod._adb(["shell", "monkey", "-p", back_to,
+                           "-c", "android.intent.category.LAUNCHER", "1"])
+            wait_for(lambda: _front_package() == back_to, timeout=15.0)
+        else:
+            from apt_log.device import send_ui_action
+
+            send_ui_action("home")
+
+
+def _clock_set(driver, report, arg: str) -> None:
+    """Set the phone's clock to a typed time, in the phone's own zone.
+
+    The parse and the write are phonesettings.set_clock's — this macro is
+    the same press with the app rules around it. A time that will not parse
+    fails the macro rather than the page: the page validates first, so this
+    is the belt for a request that did not come from the page.
+    """
+    from apt_log.ui import phonesettings
+
+    report("macro.step.clock_setting")
+    try:
+        phonesettings.set_clock(arg)
+    except ValueError as exc:
+        raise RuntimeError(f"not a time this macro can set ({exc})") from exc
+    _after_clock_change(report)
+
+
+def _clock_reset(driver, report) -> None:
+    """Both automatic switches back on; the network does the rest."""
+    from apt_log.ui import phonesettings
+
+    report("macro.step.clock_resetting")
+    phonesettings.reset_clock()
+    _after_clock_change(report)
+
+
 MACROS: dict[str, Macro] = {
     m.name: m for m in (
         Macro("hhax_legacy_login", "macro.hhax_legacy_login", _hhax_legacy_login),
@@ -5026,6 +5184,11 @@ MACROS: dict[str, Macro] = {
         # in wrong had to be undone one 32px box at a time.
         Macro("clear_tasks", "macro.clear_tasks", _clear_tasks),
         Macro("phone_settings", "macro.phone_settings", _phone_settings),
+        # The clock, from the front page. `clock_set` takes the typed time;
+        # both restart Mobile Caregiver+ and clear the Settings screen — see
+        # the clock section above for the rules the opens then apply.
+        Macro("clock_set", "macro.clock_set", _clock_set, takes_arg=True),
+        Macro("clock_reset", "macro.clock_reset", _clock_reset),
         Macro("restart_phone", "macro.restart_phone", _restart_phone),
         Macro("update_app", "macro.update_app", _update_app),
         # One per app, for the console's version panel. Named rather than
@@ -6212,11 +6375,19 @@ class Runner:
             # friends; a macro is the one time it can honestly say "working".
             mirror_mod.publish(screen="unknown", step="working")
 
-        try:
+        def run_with_the_clock_rules(driver) -> None:
+            # The clock gate before, the landing check after — for the
+            # opens and sign-ins in CLOCK_RESETS / CLOCK_RESTARTS, and a
+            # no-op for every other macro. See the clock section.
+            _clock_gate(name, report)
             if macro.takes_arg:
-                resident.run(lambda driver: macro.run(driver, report, arg))
+                macro.run(driver, report, arg)
             else:
-                resident.run(lambda driver: macro.run(driver, report))
+                macro.run(driver, report)
+            _land_check(name, report)
+
+        try:
+            resident.run(run_with_the_clock_rules)
         except Exception as exc:  # noqa: BLE001
             log.warning("macro %s failed: %s", name, exc)
             status.state = "failed"
