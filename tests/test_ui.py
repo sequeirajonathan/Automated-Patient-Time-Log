@@ -7593,3 +7593,79 @@ class TestATickBoxThatDoesNotSayItIsOne:
         items = [it for r in sv.build(doc)["rows"] for it in r["items"]]
         box = next(it for it in items if it.get("check"))
         assert box["checked"] is False
+
+
+class TestTheSignaturePadHasAWayOutAndAHeading:
+    """Mobile Caregiver+'s pad, mapped off the live dialog on 1 Sep.
+
+    Its exit is a named ✕ and its heading is a full-width Button that does
+    nothing — tapped at its own centre on the phone, the screen came back
+    byte for byte identical. The portal drew the heading as the largest,
+    most emphasised control on the page and gave the pad no way out at all.
+    """
+
+    def _pad(self):
+        return {
+            "size": [1080, 1419], "app": "com.tellus.evv.v2",
+            "activity": "dashboardactivity", "canvas": True,
+            "elements": [
+                {"rid": "com.tellus.evv.v2:id/button_participant_signature",
+                 "cls": "Button", "b": [40, 941, 1060, 997],
+                 "txt": "RECOPILE LA FIRMA DEL RECIPIENT A CONTINUACIÓN"},
+                {"rid": "com.tellus.evv.v2:id/buttonDismiss",
+                 "cls": "ImageButton", "b": [1014, 946, 1060, 992], "txt": ""},
+                {"rid": "com.tellus.evv.v2:id/buttonClearSignature",
+                 "cls": "Button", "b": [53, 1316, 367, 1366],
+                 "txt": "Borrar firma"},
+                {"rid": "com.tellus.evv.v2:id/buttonComplete",
+                 "cls": "Button", "b": [732, 1316, 1047, 1366],
+                 "txt": "Confirmar firma"}],
+            "statics": [{"cls": "TextView", "b": [40, 1222, 1060, 1303],
+                         "txt": "Firma en la línea"}]}
+
+    def _model(self):
+        from apt_log.ui import screenview as sv
+
+        return sv.build(self._pad())
+
+    def test_the_named_close_button_is_the_pads_way_out(self):
+        """No `touch_outside` scrim on this dialog, so the shape rule never
+        ran and the ✕ came through as one more grey button in the header."""
+        d = self._model().get("dismiss")
+        assert d is not None, "the pad still has no way out"
+        assert "buttonDismiss" in d["aim"]["rid"]
+
+    def test_and_it_is_not_left_in_the_page_as_well(self):
+        rids = [it.get("aim", {}).get("rid", "")
+                for r in self._model()["rows"] for it in r["items"]]
+        assert not any("buttonDismiss" in r for r in rids)
+
+    def test_the_instruction_is_a_heading_not_a_control(self):
+        """It is a Button by class and inert in fact."""
+        items = [it for r in self._model()["rows"] for it in r["items"]]
+        head = next(it for it in items
+                    if "RECOPILE" in ((it.get("txt") or "")
+                                      + " ".join(it.get("lines") or [])))
+        assert head["kind"] == "label", "still offered as a control"
+
+    def test_the_real_controls_are_untouched(self):
+        """Only the instruction goes. Borrar and Confirmar are the two
+        presses that matter and must still be pressable."""
+        items = [it for r in self._model()["rows"] for it in r["items"]]
+        words = [(it.get("txt") or "") for it in items
+                 if it.get("kind") == "button"]
+        assert "Borrar firma" in words
+        assert "Confirmar firma" in words
+
+    def test_a_long_caption_off_a_signature_screen_is_left_alone(self):
+        """The rule is scoped to a screen with a canvas, because that is
+        where the evidence is; elsewhere a long caption may be a real
+        control."""
+        from apt_log.ui import screenview as sv
+
+        doc = dict(self._pad(), canvas=False)
+        items = [it for r in sv.build(doc)["rows"] for it in r["items"]]
+        head = next(it for it in items
+                    if "RECOPILE" in ((it.get("txt") or "")
+                                      + " ".join(it.get("lines") or [])))
+        assert head["kind"] == "button"

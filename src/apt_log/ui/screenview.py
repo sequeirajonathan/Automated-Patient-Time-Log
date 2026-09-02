@@ -146,6 +146,29 @@ CURTAIN_MIN_HEIGHT = 0.55
 # a screen carrying one is a MODAL, and a modal has a way out.
 DISMISS_IDS = ("touch_outside",)
 
+# ...and some dialogs simply NAME their exit. Mobile Caregiver+'s signature
+# dialog carries no `touch_outside` scrim at all, so the whole shape rule
+# below was skipped and the pad had no way out drawn on it: the ✕ came
+# through as one more grey button in the header, beside a heading that
+# pressed nothing. An id that says "dismiss" is better evidence than any
+# guess from size and position, so it is taken first.
+SHEET_EXIT_IDS = ("buttondismiss", "button_dismiss", "btn_dismiss",
+                  "buttonclose", "button_close", "btn_close", "close_button")
+
+# A CAPTION THIS LONG IS AN INSTRUCTION, NOT A VERB.
+#
+# The same dialog draws "RECOPILE LA FIRMA DEL RECIPIENT A CONTINUACIÓN" as
+# an android.widget.Button spanning its whole width — and it is inert:
+# tapped at its own centre on the live phone, the screen came back byte for
+# byte identical. Rendered as a control it became the largest, most
+# emphasised thing on the page and did nothing at all.
+#
+# Buttons say "Confirmar firma" (15 characters). Headings say what to do
+# next. Only applied where the screen has a signature canvas, because that
+# is where the evidence is and a long caption elsewhere may well be a real
+# control.
+SIGN_HEADING_MIN_CHARS = 40
+
 # ...and on a modal, the way out is the small wordless control above the
 # sheet's own buttons. inMyTeam's is a 32px ✕ at the top-left of the sheet,
 # carrying a content-description ("Cancel Visit") that describes something it
@@ -1287,6 +1310,17 @@ def build(doc: dict) -> dict | None:
                and not _is_annotation(s.get("txt", ""), s["b"], w)
                and not _is_map_furniture(s)]
     statics = _one_per_box(statics)
+    # AN INSTRUCTION IS NOT A CONTROL. See SIGN_HEADING_MIN_CHARS: the
+    # signature dialog's "RECOPILE LA FIRMA DEL RECIPIENT A CONTINUACIÓN" is
+    # a Button by class, spans the dialog, and does nothing when pressed.
+    # Moved to the statics so it reads as the heading it is.
+    if doc.get("canvas"):
+        heading = [e for e in elements
+                   if len((e.get("txt") or "").strip()) >= SIGN_HEADING_MIN_CHARS]
+        if heading:
+            elements = [e for e in elements if e not in heading]
+            statics = statics + [dict(h, dev_b=h.get("aim_b") or h["b"])
+                                 for h in heading]
     # THE CAPTIONS THE ANNOTATION RULE TOOK, KEPT ASIDE FOR NAMING ONLY.
     #
     # A square caption too long for its box is decoration when the row has
@@ -1388,10 +1422,19 @@ def build(doc: dict) -> dict | None:
     # screen she cannot do without. Named in her own language, because the
     # app's word for it is an id.
     dismiss = None
+    named_exit = next((e for e in elements
+                       if (e.get("rid") or "").rsplit("/", 1)[-1].lower()
+                       in SHEET_EXIT_IDS), None)
     if drawer_exit is not None:
         dismiss = _item(drawer_exit, "button")
         dismiss["txt_key"] = "papp.close_menu"
         dismiss["small"] = True
+    elif named_exit is not None:
+        # The dialog said which control closes it. See SHEET_EXIT_IDS.
+        dismiss = _item(named_exit, "button")
+        dismiss["txt_key"] = "papp.close_sheet"
+        dismiss["small"] = True
+        elements = [e for e in elements if e is not named_exit]
     elif any(_is_dismiss(e) for e in elements):
         elements = [e for e in elements if not _is_dismiss(e)]
         sheet = [e for e in elements
