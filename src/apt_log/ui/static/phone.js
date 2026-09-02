@@ -179,6 +179,22 @@
     // away and unlabelled.
     const openPadBtn = root.querySelector('[data-open-pad]');
     if (openPadBtn) openPadBtn.addEventListener('click', () => openPad());
+    // A macro a control on the page asks for by name. One binding rather
+    // than one handler per button: the page is re-rendered on every screen
+    // push, and a hand-wired listener per control is a listener to forget.
+    for (const el of root.querySelectorAll('[data-macro]')) {
+      el.addEventListener('click', () => {
+        if (!driving()) return;
+        awaitingMacro = true;
+        busy(i18n.working || '', 60000);
+        fetch('/macro', {
+          method: 'POST',
+          body: new URLSearchParams({ name: el.dataset.macro }),
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          redirect: 'follow'
+        }).catch(() => { awaitingMacro = false; unbusy(); });
+      });
+    }
     bindAims(root);
   }
 
@@ -621,8 +637,15 @@
             const b = slot.children[i];
             const kind = (sheetActions[i] || {}).kind || '';
             if (kind) {
+              // THE APP'S OWN EMPHASIS, photographed rather than guessed.
+              // Mobile Caregiver+ draws Descartar firma as a filled RED
+              // button and Borrar firma as plain text — the discard is the
+              // destructive one there, and the clear only wipes ink that
+              // has not been committed. The drawer had them the other way
+              // round, which is muscle memory built on one screen becoming
+              // a wrong press on the other.
               b.classList.add(kind === 'confirm' ? 'primary'
-                              : kind === 'discard' ? 'discard' : 'wipe');
+                              : kind === 'discard' ? 'wipe' : 'quiet');
               continue;
             }
             const word = (b.textContent || '').trim();
@@ -823,6 +846,13 @@
     // sheet can be open while the screen underneath changes, and the name on
     // the heading has to change with it.
     const wasRole = signerRole;
+    // A NEW SHEET IS A NEW QUESTION. The patient's pad and the caregiver's
+    // arrive back to back on one check-out, and a picker left open on the
+    // first is a list of the wrong people on the second.
+    if ((meta.signer_role || '') !== signerRole
+        || (meta.signer_adopted || '') !== signerAdopted) {
+      padPickerOpen = false;
+    }
     padDismiss = (meta.pad_dismiss && meta.pad_dismiss.aim) || null;
     const closeBtn = document.getElementById('sign-close');
     if (closeBtn) closeBtn.hidden = !padHere;
@@ -1365,6 +1395,10 @@
   // front has none. The drawer's close presses it, because while the drawer
   // is open that corner of the phone's screen is underneath it.
   let padDismiss = null;
+  // Whether the names behind the picker are showing. Deliberately NOT
+  // remembered across sheets: the next pad is a different question, and a
+  // list left open from the last one is a row of names nobody asked for.
+  let padPickerOpen = false;
 
   function renderAdopted(parties) {
     const wrap = document.getElementById('sign-adopted');
@@ -1494,6 +1528,15 @@
     // stays filled, which is an honest picture of two people who could sign;
     // with it the one this screen asked for is the only filled one.
     row.classList.toggle('aimed', !!signerAdopted);
+    // COUNTED BEFORE ANYTHING IS DRAWN, because how many there are decides
+    // how they are shown: one eligible party is not a choice and goes
+    // straight onto the pad, which is what inMyTeam's patient pad has always
+    // done and what taking it away was reported as ("the auto sign is not
+    // even available on the pencil drawer anymore for either").
+    const eligibleFor = (b) => offered.get(b.dataset.name) === b
+      && !(signerRole && b.dataset.role && b.dataset.role !== signerRole);
+    let candidates = 0;
+    for (const b of row.children) if (eligibleFor(b)) candidates += 1;
     let shown = 0;
     for (const b of row.children) {
       const mine = !!signerAdopted && b.dataset.name === signerAdopted;
@@ -1528,13 +1571,31 @@
       //
       // Hidden rather than deleted, so the row rebuilds without a fetch the
       // moment the sheet asks for somebody else.
-      b.hidden = offered.get(b.dataset.name) !== b
-                 || (signerAdopted ? !mine
-                     : !!(signerRole && b.dataset.role
-                          && b.dataset.role !== signerRole));
+      // BEHIND A PICKER WHEN THERE IS MORE THAN ONE OF THEM.
+      //
+      // Everyone eligible used to be drawn at once, which is how a patient's
+      // pad came to carry four patient buttons. Now the screen's own answer
+      // is the one on show, the rest are behind "not her?", and where the
+      // screen has no answer and several people could sign, the names are
+      // behind "who is signing?" — a choice somebody makes deliberately
+      // rather than a row to pick from by reflex. Nothing is hidden that a
+      // press cannot reach in one tap.
+      b.hidden = !eligibleFor(b)
+                 || !(padPickerOpen
+                      || (signerAdopted ? mine : candidates === 1));
       if (!b.hidden) shown += 1;
       if (mine) b.setAttribute('aria-current', 'true');
       else b.removeAttribute('aria-current');
+    }
+    // The picker itself: offered when there is a choice to make, and never
+    // when there is exactly one eligible party already on show.
+    const pick = document.getElementById('sign-pick');
+    const needPick = candidates > 1 && !padPickerOpen;
+    if (pick) {
+      pick.hidden = !needPick;
+      pick.textContent = signerAdopted
+        ? (i18n.signNotHer || '')
+        : (i18n.signWhoSigns || '').replace('{n}', String(candidates));
     }
     // An empty row is a caption over a gap — "Firmas guardadas" with nothing
     // under it. With nobody to offer, the whole block goes and the pad is
@@ -1542,7 +1603,7 @@
     // it here as well is what makes the block follow the SHEET and not only
     // the roster.
     const wrap = document.getElementById('sign-adopted');
-    if (wrap) wrap.hidden = !shown;
+    if (wrap) wrap.hidden = !shown && !needPick;
   }
 
   function loadAdopted() {
@@ -2734,10 +2795,33 @@
     // mid-replay leaves half a signature on a record — and never as a side
     // effect of the swipe, which is too easy to do by accident over a
     // signature somebody has just drawn.
+    // Opening the picker is the only thing it does. Closing it again happens
+    // when the sheet changes, which is the moment the question changes.
+    const pick = document.getElementById('sign-pick');
+    if (pick) pick.addEventListener('click', () => {
+      padPickerOpen = true;
+      markSigner();
+    });
+
     const padClose = document.getElementById('sign-close');
     if (padClose) padClose.addEventListener('click', () => {
       if (pad.waitingId) { toast(i18n.signWaitPhone || ''); return; }
-      if (padDismiss && driving() && socket && socket.readyState === 1) {
+      // IT MUST NOT CLOSE ON A PRESS IT COULD NOT SEND.
+      //
+      // The first version shut the drawer whatever happened, so in watch-only
+      // — where `driving()` refuses and only toasts — the ✕ read as "closed"
+      // and left the pad standing on the phone with the page behind it now a
+      // splash. That is one half of "having a hard time exiting the signature
+      // pad": a control that looked like the way out and was not.
+      //
+      // With no ✕ on the screen at all there is nothing to send, and closing
+      // the drawer is all this can mean — so it still does that.
+      if (padDismiss) {
+        if (!driving()) return;
+        if (!socket || socket.readyState !== 1) {
+          toast(i18n.explainOffline || '');
+          return;
+        }
         tapping(true);
         socket.send(JSON.stringify({ type: 'tap', frame: frameId,
                                      element: padDismiss }));

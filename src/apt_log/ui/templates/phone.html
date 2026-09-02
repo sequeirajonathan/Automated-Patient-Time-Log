@@ -641,6 +641,16 @@
                  font-size:15.5px; font-weight:650; min-height:46px;
                  padding:0 20px; cursor:pointer; }
   .a-wait-open:active { transform:scale(.97); filter:brightness(.92); }
+  /* The two ways out, under the way in. Quiet, because leaving is not what
+     this screen is for — but present, because the drawer sits over the
+     phone's own ✕ and once did not offer one at all. */
+  .a-wait-out, .a-wait-stuck { margin-top:8px; border:none; background:none;
+                               font:inherit; font-size:14px; font-weight:600;
+                               color:var(--tint); cursor:pointer;
+                               min-height:40px; padding:0 12px;
+                               border-radius:10px; }
+  .a-wait-stuck { color:var(--muted); font-size:13px; font-weight:500; }
+  .a-wait-out:active, .a-wait-stuck:active { background:var(--track); }
   /* The splash IS the page while the pad is driving, so it sits in the
      middle of it rather than at the top with everything below it empty.
      The page's own tail marks go with the list they were describing: a
@@ -1666,6 +1676,14 @@
                         font-size:15px; font-weight:600; text-align:center;
                         white-space:normal; }
   .adopted-row button:disabled { opacity:.45; cursor:default; }
+  /* The picker. Plain and quiet: it opens a list, it does not apply
+     anybody's signature, and it must not look like the buttons that do. */
+  .adopted-pick { display:block; width:100%; margin-top:6px; border:none;
+                  background:none; font:inherit; font-size:13.5px;
+                  font-weight:600; color:var(--tint); cursor:pointer;
+                  min-height:38px; border-radius:10px; text-align:left; }
+  .adopted-pick[hidden] { display:none; }
+  .adopted-pick:active { background:var(--tint-soft); }
   /* WHEN THE SCREEN NAMES ONE OF THEM, THE OTHERS STAND DOWN.
      Every pill is filled by default and that is right when nothing is known:
      two equally-weighted names is an honest picture of two people who could
@@ -1827,11 +1845,12 @@
   #sign-appbtns button { min-height:46px; }
   /* Abandoning the signature is not wiping the ink and must not look like
      finishing it either. Amber: a way out, with a warning on it. */
-  .padrow .discard { background:hsl(38 92% 50% / .16); color:#8a5a00;
-                     font-weight:600; }
-  @media (prefers-color-scheme: dark) {
-    .padrow .discard { color:hsl(38 92% 72%); }
-  }
+  /* The app draws its own clear as plain text, and so does this. It wipes
+     ink that has not been committed to anything — the quietest of the
+     three, and the app agrees. */
+  .padrow .quiet { background:transparent; color:var(--tint);
+                   border:1px solid var(--hair, rgba(128,128,128,.35));
+                   font-weight:600; }
   .approw-label { flex:0 1 auto; font-size:13px; }
   .padrow button { flex:1; padding:12px; border-radius:13px;
                    border:none; background:var(--track);
@@ -2458,6 +2477,14 @@
   <div class="adopted" id="sign-adopted" hidden>
     <span class="adopted-label">{{ t('sign.adopted_label') }}</span>
     <div class="adopted-row" id="sign-adopted-row"></div>
+    {# A PICKER, NOT A WALL OF NAMES.
+       Where the screen settles who is signing there is one button and this
+       says "not her?"; where it does not, this is the only thing drawn and
+       the names are behind it. The old row put every eligible patient on
+       the pad at once — "why do we have 4 patients mapped to this signature
+       pad??" — which is both a hard thing to read and four chances to put
+       one person's signature on another's record. #}
+    <button type="button" class="adopted-pick" id="sign-pick" hidden></button>
   </div>
   <canvas id="signpad" width="10" height="10"></canvas>
   {# ONE STRIP UNDER THE CANVAS, not two bands.
@@ -2799,6 +2826,8 @@
     signEmpty:   {{ t('signature.empty')|tojson }},
     signLockLapsed: {{ t('sign.lock_lapsed')|tojson }},
     signWaitPhone: {{ t('sign.wait_phone')|tojson }},
+    signNotHer:   {{ t('sign.not_her')|tojson }},
+    signWhoSigns: {{ t('sign.who_signs')|tojson }},
     codeCopied:     {{ t('code.copied')|tojson }},
     codeCopyFailed: {{ t('code.copy_failed')|tojson }},
     codeJustNow: {{ t('code.just_now')|tojson }},
@@ -2831,6 +2860,7 @@
     syncing: {{ t('papp.syncing')|tojson }},
     webTitle: {{ t('papp.web')|tojson }},
     scanning: {{ t('papp.scanning')|tojson }},
+    working: {{ t('macro.state.running')|tojson }},
     clearing: {{ t('papp.clearing')|tojson }},
     sentLabel: {{ t('papp.sent')|tojson }},
     resending: {{ t('papp.resending')|tojson }},

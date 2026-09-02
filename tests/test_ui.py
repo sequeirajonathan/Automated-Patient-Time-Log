@@ -4868,11 +4868,12 @@ class TestThePadKnowsWhoseSignatureItIsCollecting:
         rendered?" A button on the screen can be pressed, and what it
         presses is one person's signature onto another person's record."""
         js = self._js()
-        # The wording moved when the row learned to narrow by app; the
-        # PROPERTY is what this is about, so it is asserted on behaviour —
-        # see `TestTheSavedSignatureRowFollowsTheAppInFront`, which drives
-        # the real function — and only the role rule is pinned here.
-        assert "signerAdopted ? !mine" in js
+        # The wording moved twice — when the row learned to narrow by app,
+        # and again when the rest went behind a picker. The PROPERTY is what
+        # this is about, so it is asserted on behaviour — see
+        # `TestTheSavedSignatureRowFollowsTheAppInFront`, which drives the
+        # real function — and only the role rule is pinned here.
+        assert "signerAdopted ? mine : candidates === 1" in js
         assert "b.dataset.role !== signerRole" in js
 
     def test_an_unresolved_signer_offers_nobody_rather_than_everybody(self):
@@ -4894,8 +4895,9 @@ class TestThePadKnowsWhoseSignatureItIsCollecting:
         assert "const wrong = !!signerAdopted && !mine;" not in js
         # An unresolved signer falls through to the ROLE, which is knowable.
         assert "signerRole && b.dataset.role" in js
-        # With nobody left to offer, the caption over the row goes too.
-        assert "wrap.hidden = !shown;" in js
+        # With nobody left to offer AND nothing to choose between, the
+        # caption over the row goes too.
+        assert "wrap.hidden = !shown && !needPick;" in js
 
     def test_the_patients_own_signature_survives_on_the_patients_pad(self):
         """THE OVERCORRECTION, AND IT COST THE FEATURE. Hiding every party
@@ -4908,8 +4910,8 @@ class TestThePadKnowsWhoseSignatureItIsCollecting:
         drops only the caregiver.
         """
         js = self._js()
-        i = js.index("signerAdopted ? !mine")
-        clause = js[i:i + 220]
+        i = js.index("b.dataset.role !== signerRole")
+        clause = js[i - 220:i + 220]
         # No role data, or no role on the sheet: nobody is hidden. That is the
         # branch that must not silently empty the row.
         assert "b.dataset.role" in clause and "signerRole" in clause
@@ -5316,6 +5318,55 @@ class TestFourPatientsOnOnePatientsPad:
             opened.note_tap(page, menu, path=store)
             assert opened.current(self.APP, path=store) == "UN PACIENTE"
 
+    def _live_week(self):
+        """THE APP'S OWN STATE MACHINE, read off the live phone at 21:35 on
+        1 Sep with one check-out half finished. Two visits done, one
+        running, and the app says which is which."""
+        return {"app": self.APP, "elements": [], "statics": [
+            {"b": [0, 310, 1080, 421],
+             "txt": "La visita está programada para OTRA PERSONA en martes, "
+                    "1 de septiembre de 2026 de 9:05 AM a 11:05 AM y su "
+                    "estado es Completada"},
+            {"b": [0, 422, 1080, 533],
+             "txt": "La visita está programada para UN PACIENTE en martes, "
+                    "1 de septiembre de 2026 de 6:00 PM a 8:00 PM y su "
+                    "estado es En Progreso, Tarde"}]}
+
+    def test_the_app_says_which_visit_is_running(self):
+        """The strongest signal there is, and it needs no tap at all: the
+        row that says "En Progreso" is the visit being checked out."""
+        opened = self._opened()
+        with patch("apt_log.schedule.load", return_value=self._plan()):
+            names = [b.patient for b in self._plan().blocks]
+            assert opened.running_row(self._live_week(), names) == "UN PACIENTE"
+
+    def test_a_finished_visit_is_not_the_one_in_hand(self):
+        opened = self._opened()
+        done = {"app": self.APP, "elements": [], "statics": [
+            {"txt": "La visita está programada para UN PACIENTE … y su "
+                    "estado es Completada"}]}
+        assert opened.running_row(done, ["UN PACIENTE"]) == ""
+
+    def test_the_running_row_beats_the_list_being_a_list(self, tmp_path):
+        """A page naming several patients normally ends the record — but not
+        when the app has just said which of them is in progress."""
+        store = tmp_path / "visit-open.json"
+        opened = self._opened()
+        with patch("apt_log.schedule.load", return_value=self._plan()):
+            opened.note_screen(self._live_week(), path=store)
+            assert opened.current(self.APP, path=store) == "UN PACIENTE"
+            assert opened.open_visit(
+                self.APP, path=store)["why"] == "in_progress"
+
+    def test_two_rows_claiming_it_name_nobody(self):
+        """Two answers is the same as none — a screen this code does not
+        understand, and understanding it wrongly is the whole risk."""
+        opened = self._opened()
+        both = {"app": self.APP, "elements": [], "statics": [
+            {"txt": "para UN PACIENTE … y su estado es En Progreso"},
+            {"txt": "para OTRA PERSONA … y su estado es En Progreso"}]}
+        assert opened.running_row(both, ["UN PACIENTE", "OTRA PERSONA"]) == ""
+
     def test_the_screen_in_front_still_wins(self):
         """The record is a fallback, never an override: a page that names
         somebody names her, whatever was remembered."""
@@ -5378,6 +5429,31 @@ class TestThePadsControlsLeaveThePageBehind:
         assert "{% if not m.pad_waiting %}" in page
         assert "{% if m.dismiss and not m.pad_waiting %}" in page
 
+    def test_the_splash_still_offers_the_way_out(self):
+        """THE SPLASH TOOK THE EXIT AWAY. It replaced the reflowed page, and
+        the reflowed page was where the pad's own ✕ lived — so with the
+        drawer closed there was no exit on the screen at all. "Having a hard
+        time exiting the signature pad"."""
+        from pathlib import Path
+
+        page = Path("src/apt_log/ui/templates/_screen.html").read_text(
+            encoding="utf-8")
+        at = page.index('class="a-waiting"')
+        card = page[at:at + 2200]
+        assert "a-wait-out" in card and "m.dismiss.aim" in card
+
+    def test_and_a_last_resort_when_the_pad_will_not_close(self):
+        """Watched live: the dialog's ✕, its own Descartar firma and the
+        system Back all landed on a wedged pad and not one of them moved it.
+        Only restarting the app cleared it."""
+        from pathlib import Path
+
+        page = Path("src/apt_log/ui/templates/_screen.html").read_text(
+            encoding="utf-8")
+        assert 'data-macro="restart_app"' in page
+        js = Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8")
+        assert "[data-macro]" in js
+
     def test_the_splash_offers_the_way_back_into_the_pad(self):
         """She can close the drawer, and with the page a splash the pencil
         in the toolbar was then the only way back to a signature standing
@@ -5398,10 +5474,16 @@ class TestThePadsControlsLeaveThePageBehind:
 
         js = Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8")
         at = js.index("padClose.addEventListener")
-        body = js[at:at + 600]
+        body = js[at:at + 1600]
         assert "if (pad.waitingId)" in body
         assert "padDismiss" in body
         assert "body.classList.remove('signing')" in body
+        # AND IT MUST NOT CLOSE ON A PRESS IT COULD NOT SEND. In watch-only
+        # `driving()` refuses and only toasts, so the first version shut the
+        # drawer and left the pad standing on the phone with the page behind
+        # it now a splash — half of "having a hard time exiting the
+        # signature pad".
+        assert "if (!driving()) return;" in body
 
     def test_an_ordinary_sheet_has_no_pad_exit(self):
         """`buttonDismiss` is an ordinary id that any sheet may carry, and a
@@ -5889,7 +5971,11 @@ HARNESS = """
 const parties = %(parties)s;
 let currentPackage = %(package)s;
 const signerRole = %(role)s, signerAdopted = %(adopted)s, signerNamed = '';
-const i18n = {signWaiting: {}, signWhose: ''};
+// Whether the names behind the picker are showing. A question about WHO IS
+// ELIGIBLE is asked with it open; the collapsed row is its own question.
+let padPickerOpen = %(picker)s;
+const i18n = {signWaiting: {}, signWhose: '',
+              signNotHer: 'not her', signWhoSigns: 'who signs ({n})'};
 
 function el() {
   return {dataset: {}, hidden: false, textContent: '', children: [],
@@ -5897,13 +5983,14 @@ function el() {
           setAttribute() {}, removeAttribute() {},
           appendChild(c) { this.children.push(c); }};
 }
-const row = el(), wrap = el(), title = el();
+const row = el(), wrap = el(), title = el(), pick = el();
 const document = {
   createElement() { return el(); },
   getElementById(id) {
     if (id === 'sign-adopted-row') return row;
     if (id === 'sign-adopted') return wrap;
     if (id === 'sign-step-title') return title;
+    if (id === 'sign-pick') return pick;
     return el();
   },
 };
@@ -5913,8 +6000,11 @@ const document = {
 %(mark)s
 
 renderAdopted(parties);
-console.log(JSON.stringify(
-  row.children.filter((b) => !b.hidden).map((b) => b.dataset.name)));
+console.log(JSON.stringify({
+  visible: row.children.filter((b) => !b.hidden).map((b) => b.dataset.name),
+  pick: pick.hidden ? '' : pick.textContent,
+  blockHidden: !!wrap.hidden,
+}));
 """
 
 
@@ -5952,12 +6042,16 @@ class TestTheSavedSignatureRowFollowsTheAppInFront:
                     return src[start:j + 1]
         raise AssertionError(f"{name} is not brace-balanced")
 
-    def _offered(self, parties, package, role="", adopted=""):
-        """The names still on the row after the real code has run.
+    def _run(self, parties, package, role="", adopted="", picker=True):
+        """What the row shows after the real code has run.
 
         Both functions are driven, not just the filter: the roster's JSON
         goes through `renderAdopted` exactly as it does in the browser, so a
         scope dropped on the way onto the button would fail here too.
+
+        `picker` opens the chooser by default, because every question in
+        this class is about WHO IS ELIGIBLE. Whether they are behind a
+        chooser is a different question, asked with it shut.
         """
         import json
         import shutil
@@ -5972,6 +6066,7 @@ class TestTheSavedSignatureRowFollowsTheAppInFront:
             "package": json.dumps(package),
             "role": json.dumps(role),
             "adopted": json.dumps(adopted),
+            "picker": "true" if picker else "false",
             "render": self._fn("renderAdopted"),
             "mark": self._fn("markSigner"),
         }
@@ -5982,6 +6077,11 @@ class TestTheSavedSignatureRowFollowsTheAppInFront:
         done = subprocess.run([node, path], capture_output=True, timeout=60)
         assert done.returncode == 0, done.stderr.decode("utf-8", "replace")
         return json.loads(done.stdout.decode("utf-8").strip().splitlines()[-1])
+
+    def _offered(self, parties, package, role="", adopted="", picker=True):
+        """Just the names, for the questions that only ask about those."""
+        return self._run(parties, package, role=role, adopted=adopted,
+                         picker=picker)["visible"]
 
     # The real store's shape, with placeholder names.
     PATIENTS = [
@@ -6058,6 +6158,64 @@ class TestTheSavedSignatureRowFollowsTheAppInFront:
         than offering buttons that cannot work."""
         assert self._offered(self.PATIENTS, "com.hhaexchange.caregiver",
                              role="patient") == []
+
+    # ------------------------------------------------- the picker
+    # "Instead of displaying all of them maybe a patient picker, worse case
+    # to change signature." Everyone eligible used to be drawn at once,
+    # which is how a patient's pad came to carry four patient buttons.
+
+    THREE_HERE = [
+        {"name": "UN PACIENTE", "role": "patient", "apps": ["com.x.app"]},
+        {"name": "OTRA PACIENTE", "role": "patient", "apps": ["com.x.app"]},
+        {"name": "TERCERA PACIENTE", "role": "patient", "apps": ["com.x.app"]},
+    ]
+
+    def test_an_unidentified_pad_shows_a_picker_and_no_names(self):
+        """The worst case, and the one that was reported. Three patients
+        could sign and the screen did not say which, so the pad drew three
+        buttons — three chances to put one person's signature on another's
+        record. Now it draws none and one question."""
+        got = self._run(self.THREE_HERE, "com.x.app", role="patient",
+                        picker=False)
+        assert got["visible"] == []
+        assert got["pick"] == "who signs (3)"
+        assert got["blockHidden"] is False
+
+    def test_the_named_signer_stands_alone_with_a_way_to_correct_it(self):
+        """Where the screen settled it there is one button — and, because a
+        match this got wrong must be correctable by the person looking at
+        it, one quiet way to reach the others."""
+        got = self._run(self.THREE_HERE, "com.x.app", role="patient",
+                        adopted="OTRA PACIENTE", picker=False)
+        assert got["visible"] == ["OTRA PACIENTE"]
+        assert got["pick"] == "not her"
+
+    def test_opening_the_picker_shows_the_rest(self):
+        assert sorted(self._offered(self.THREE_HERE, "com.x.app",
+                                    role="patient", adopted="OTRA PACIENTE",
+                                    picker=True)) == [
+            "OTRA PACIENTE", "TERCERA PACIENTE", "UN PACIENTE"]
+
+    def test_one_eligible_party_needs_no_picker(self):
+        """Nothing to choose between is not a choice, and a chooser over one
+        name is furniture."""
+        got = self._run(self.PATIENTS, "com.inmyteam.inmyteam",
+                        role="patient", picker=False)
+        assert got["pick"] == ""
+        # AND SHE IS DRAWN, not put behind a question with one answer. This
+        # is inMyTeam's ordinary patient pad, and hiding the one signature
+        # that works there was reported the last time it happened: "the auto
+        # sign is not even available on the pencil drawer anymore for
+        # either."
+        assert got["visible"] == ["UN PACIENTE"]
+        assert got["blockHidden"] is False
+
+    def test_the_picker_never_offers_the_other_side(self):
+        """Whatever is behind it, the caregiver is not on a patient's pad."""
+        row = self.THREE_HERE + [{"name": "LA CUIDADORA", "role": "staff",
+                                  "apps": ["com.x.app"]}]
+        assert "LA CUIDADORA" not in self._offered(
+            row, "com.x.app", role="patient", picker=True)
 
     def test_the_roster_still_sends_the_scopes_this_needs(self):
         """The filter is only as good as the field it reads, and that field

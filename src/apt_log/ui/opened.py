@@ -123,6 +123,60 @@ def row_words(doc: dict, element: dict) -> str:
     return " ".join(w for w in words if w)
 
 
+# THE APP'S OWN STATE MACHINE, in its own words.
+#
+# Every row of Mobile Caregiver+'s week list ends with `y su estado es <STATE>`,
+# and the states are machine-readable. Read off the live phone at 21:35 on
+# 1 Sep, with one check-out half finished:
+#
+#   ATANASIO … de 9:05 AM a 11:05 AM y su estado es Completada
+#   MARINA   … de 3:20 PM a 5:20 PM  y su estado es Completada
+#   ONORINA  … de 6:00 PM a 8:00 PM  y su estado es En Progreso, Tarde
+#
+# So the app says outright which visit is open, and that beats every other
+# signal here: it needs no tap, it survives a portal restart, it corrects
+# itself every time the list is on screen, and it cannot be confused by a
+# person navigating on the phone instead of through the portal.
+#
+# "En Progreso" is absent from the vocabulary in docs/EVV_FLOWS.md for an
+# honest reason — the discovery walk never had a running visit to look at.
+# The other apps' words are here too; a word this does not know costs the
+# fallback, never a wrong name.
+IN_PROGRESS_WORDS = ("en progreso", "en curso", "in progress",
+                     "iniciada", "comenzada", "started", "visita iniciada")
+
+
+def running_row(doc: dict, patients) -> str:
+    """The patient whose visit this page marks as IN PROGRESS, or "".
+
+    Per ROW, not per page: the page carries three sentences and only one of
+    them says in progress, so a rule that folded the page into one string
+    would find every patient and no state.
+
+    Two rows claiming it is the same as none — that is a screen this code
+    does not understand, and understanding it wrongly is how a signature
+    lands on the wrong record.
+    """
+    found = set()
+    for words in _row_sentences(doc):
+        low = _fold(words)
+        if not any(mark in low for mark in IN_PROGRESS_WORDS):
+            continue
+        name = named_in(words, patients)
+        if name:
+            found.add(name)
+    return found.pop() if len(found) == 1 else ""
+
+
+def _row_sentences(doc: dict) -> list[str]:
+    """Each line of the page on its own, statics and controls alike."""
+    out = [str(s.get("txt") or "") for s in (doc.get("statics") or [])]
+    for element in doc.get("elements") or []:
+        out.append(str(element.get("txt") or ""))
+        out.extend(str(line) for line in (element.get("lines") or []))
+    return [line for line in out if line]
+
+
 def page_names(doc: dict, patients) -> list[str]:
     """Every scheduled patient this whole page names.
 
@@ -159,10 +213,17 @@ def open_visit(package: str, path: Path | None = None) -> dict:
     return doc
 
 
-def remember(name: str, package: str, path: Path | None = None) -> None:
-    """Record that this patient's visit is the one open on this app."""
+def remember(name: str, package: str, path: Path | None = None,
+             why: str = "opened") -> None:
+    """Record that this patient's visit is the one open on this app.
+
+    `why` says which signal wrote it — "in_progress" where the app said so
+    itself, "opened" where it is the row she pressed. Kept because the two
+    are not equally strong and because a record nobody can account for is a
+    record nobody can debug.
+    """
     target = _path(path)
-    doc = {"name": name, "app": package, "at": time.time()}
+    doc = {"name": name, "app": package, "at": time.time(), "why": why}
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp = target.with_suffix(".otmp")
@@ -210,7 +271,17 @@ def note_screen(doc: dict, path: Path | None = None) -> None:
     package = str(doc.get("app") or "")
     if not package:
         return
-    found = page_names(doc, _scheduled_for(package))
+    patients = _scheduled_for(package)
+    # THE APP'S OWN ANSWER FIRST, wherever it gives one. A row that says it
+    # is in progress is the visit in hand, said by the only party that
+    # actually knows — and it re-establishes itself every time the list is
+    # on screen, so a person navigating on the phone rather than through the
+    # portal cannot leave this pointing at somebody else.
+    running = running_row(doc, patients)
+    if running:
+        remember(running, package, path, why="in_progress")
+        return
+    found = page_names(doc, patients)
     if len(found) > 1:
         # NOT A RECORD THAT WAS JUST WRITTEN. Every viewer runs its own copy
         # of the screen loop, and one that connects a moment after the tap

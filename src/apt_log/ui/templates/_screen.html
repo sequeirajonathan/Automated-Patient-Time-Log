@@ -411,6 +411,27 @@
        words, where she is already looking. #}
     <button type="button" class="a-wait-open" data-open-pad>
       {{ t('sign.open_pad') }}</button>
+    {# AND THE WAY OUT, WHICH THIS CARD ONCE TOOK AWAY.
+       The splash replaced the reflowed page, and the reflowed page was
+       where the pad's own ✕ lived — so with the drawer closed there was no
+       exit on the screen at all. Reported as exactly that: "having a hard
+       time exiting the signature pad." It is the same aim the drawer's ✕
+       presses; there are simply two places to reach it from, because the
+       drawer covers the phone's own corner. #}
+    {% if m.dismiss %}
+    <button type="button" class="a-wait-out" data-aim='{{ m.dismiss.aim | tojson }}'>
+      {{ m.dismiss.txt or t('sign.pad_close') }}</button>
+    {% endif %}
+    {# AND WHEN THE PAD WILL NOT CLOSE AT ALL.
+       Watched on the live phone: its ✕, its own Descartar firma and the
+       system Back all landed on a wedged dialog and not one of them moved
+       it. Nothing in the app could be pressed, and the only thing that
+       cleared it was restarting the app. So the last resort is offered
+       where the person is stuck, rather than being something only the
+       controller knows how to do. It commits nothing: a force-stop cannot
+       save a signature or close a visit. #}
+    <button type="button" class="a-wait-stuck" data-macro="restart_app">
+      {{ t('sign.pad_stuck') }}</button>
   </div>
   {% endif %}
   {# The page's tail says whether the map is complete, without a sentence:
