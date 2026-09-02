@@ -48,6 +48,38 @@ TOGGLES = ("CheckBox", "Switch", "CompoundButton", "ToggleButton", "RadioButton"
 # rules and the segmented ✓/✗ pairs all key off "toggle" — and differ only
 # in how they are drawn.
 CHECKS = ("CheckBox", "RadioButton")
+
+# A TICK BOX THAT DOES NOT SAY IT IS ONE.
+#
+# Mobile Caregiver+'s running visit lists the services to tick off, and each
+# one's box is a bare View — no CheckBox class, no `checked` attribute —
+# carrying two descriptions: the control's name ("Estado del servicio") and
+# its state ("Completada"). So `CHECKS` above cannot see it.
+#
+# Rendered as a state label it read as a badge, and the owner said what that
+# cost: "This is the check off list!! I was really confused at the purpose
+# when it was really a check". A caregiver has to know at a glance which
+# services are still to do; a green pill saying COMPLETADA does not ask to
+# be pressed, and a tick box does.
+#
+# Matched on the STATE word, because that is the half that varies. The
+# control's own name is not needed and differs between screens.
+CHECKED_WORDS = ("completad", "completed", "realizad", "hecho", "done", "sí")
+UNCHECKED_WORDS = ("pendiente", "incompleta", "incompleto", "not completed",
+                   "sin completar", "no realizad", "pending")
+
+
+def check_state(txt: str):
+    """True/False if this caption is a tick box's state, else None."""
+    low = (txt or "").strip().lower()
+    if not low:
+        return None
+    # Unchecked first: "no realizado" contains "realizad".
+    if any(w in low for w in UNCHECKED_WORDS):
+        return False
+    if any(w in low for w in CHECKED_WORDS):
+        return True
+    return None
 IMAGES = ("ImageView",)
 TEXTS = ("TextView",)
 
@@ -1532,23 +1564,31 @@ def build(doc: dict) -> dict | None:
                         if _is_icon_caption(s)}
             if captions and any(ln not in captions for ln in lines):
                 lines = [ln for ln in lines if ln not in captions]
-            # A STATE ICON STANDING ALONE IS A STATE, NOT A ROW OF TEXT.
+            # A TICK BOX STANDING ALONE IS A TICK BOX, NOT A ROW OF TEXT.
             #
-            # Mobile Caregiver+ puts the service's status icon in its own
-            # 57px container beside the service row, so its caption never
-            # shares a row with better words and the rule above cannot reach
-            # it. What rendered was a 57px-wide text column wrapping
-            # "Completada" to "Com ple...".
+            # Mobile Caregiver+ puts each service's tick box in its own 57px
+            # container beside the service row, as a bare View captioned with
+            # its state. It first rendered as a 57px text column wrapping
+            # "Completada" to "Com ple...", then as a status chip — and the
+            # chip was still wrong, because this is the CHECK-OFF LIST. A
+            # pill saying COMPLETADA does not ask to be pressed; a tick box
+            # does, and the caregiver has to see at a glance what is left.
             #
-            # Only when the word is a state the portal already knows how to
-            # colour: a square caption that is NOT a state is the name of an
-            # unlabelled control — the app's own back arrow is exactly that
-            # — and turning that into a chip would leave the control nameless.
-            elif (len(lines) == 1 and lines[0] in captions
-                    and status_tone(lines[0])):
-                item["status"] = lines[0]
-                item["status_tone"] = status_tone(lines[0])
-                lines = []
+            # Only a square caption that is a tick box's STATE. One that is
+            # not is the name of an unlabelled control — the app's own back
+            # arrow is exactly that — and taking its words away would leave
+            # the control nameless.
+            elif len(lines) == 1 and lines[0] in captions:
+                ticked = check_state(lines[0])
+                if ticked is not None:
+                    item["kind"] = "toggle"
+                    item["check"] = True
+                    item["checked"] = ticked
+                    lines = []
+                elif status_tone(lines[0]):
+                    item["status"] = lines[0]
+                    item["status_tone"] = status_tone(lines[0])
+                    lines = []
             # A cell whose whole content is one generated sentence becomes
             # the list row that sentence describes. Only when the sentence
             # accounts for itself — see _shape_description.

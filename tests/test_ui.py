@@ -7516,16 +7516,80 @@ class TestTheRunningVisitScreenReadsLikeAPage:
         it = self._find("Agregar nota de servicio")
         assert it is not None, "the note button is still nameless"
 
-    def test_the_state_icon_is_a_chip_not_a_57px_text_column(self):
-        """"Completada" in a 33x33 square rendered as its own narrow row,
-        wrapping to "Com ple...". It is a state; it belongs in a chip."""
-        chips = [it for it in self._items() if it.get("status")]
-        assert any(c["status"] == "Completada" for c in chips)
+    def test_the_state_icon_is_a_TICK_BOX(self):
+        """It rendered first as a 57px text column wrapping "Completada" to
+        "Com ple...", then as a status chip — and the chip was still wrong.
+        This is the check-off list: "I was really confused at the purpose
+        when it was really a check". A pill does not ask to be pressed."""
+        boxes = [it for it in self._items() if it.get("check")]
+        assert boxes, "the service tick box is still not a checkbox"
+        assert boxes[0]["checked"] is True
+        assert boxes[0]["kind"] == "toggle"
+
+    def test_and_it_is_not_rendered_as_words_any_more(self):
         assert not any("Completada" in (it.get("lines") or [])
                        for it in self._items()), "still rendered as text"
+        assert not any(it.get("status") == "Completada"
+                       for it in self._items()), "still a chip"
 
-    def test_and_that_chip_promises_no_next_screen(self):
-        """A row with a chip and no words had a chevron on it."""
-        chip = next(it for it in self._items()
-                    if it.get("status") == "Completada")
-        assert not chip.get("lines") and not chip.get("txt")
+
+class TestATickBoxThatDoesNotSayItIsOne:
+    """Mobile Caregiver+ draws each service's tick box as a bare View with
+    no CheckBox class and no `checked` attribute — only two descriptions,
+    the control's name and its state. So the class-based rule cannot see
+    it, and it rendered as a label. "This is the check off list!! I was
+    really confused at the purpose when it was really a check"."""
+
+    def _state(self, word):
+        from apt_log.ui import screenview as sv
+
+        return sv.check_state(word)
+
+    def test_a_done_service_reads_as_ticked(self):
+        assert self._state("Completada") is True
+        assert self._state("Realizado") is True
+
+    def test_an_outstanding_one_reads_as_unticked(self):
+        assert self._state("Pendiente") is False
+        assert self._state("Sin completar") is False
+
+    def test_a_negated_word_is_not_read_as_its_positive(self):
+        """"No realizado" contains "realizad" — checked first for that
+        reason. Reading it as done would tick a service nobody did."""
+        assert self._state("No realizado") is False
+
+    def test_a_caption_that_is_not_a_state_stays_none(self):
+        """The control's own name, and the back arrow's caption: turning
+        either into a tick box would be inventing a control."""
+        assert self._state("Estado del servicio") is None
+        assert self._state("Atrás") is None
+        assert self._state("") is None
+
+    def test_the_service_row_becomes_a_real_checkbox(self):
+        from apt_log.ui import screenview as sv
+
+        doc = {"size": [1080, 2340], "app": "com.tellus.evv.v2",
+               "activity": "dashboardactivity",
+               "elements": [{"rid": "", "cls": "View", "b": [0, 535, 57, 595]}],
+               "statics": [
+                   {"cls": "View", "b": [10, 548, 43, 581],
+                    "txt": "Estado del servicio"},
+                   {"cls": "View", "b": [10, 548, 43, 581],
+                    "txt": "Completada"}]}
+        items = [it for r in sv.build(doc)["rows"] for it in r["items"]]
+        box = next((it for it in items if it.get("check")), None)
+        assert box is not None, "still not a tick box"
+        assert box["checked"] is True
+        assert box["kind"] == "toggle"
+
+    def test_an_unticked_service_comes_through_unticked(self):
+        from apt_log.ui import screenview as sv
+
+        doc = {"size": [1080, 2340], "app": "com.tellus.evv.v2",
+               "activity": "dashboardactivity",
+               "elements": [{"rid": "", "cls": "View", "b": [0, 535, 57, 595]}],
+               "statics": [{"cls": "View", "b": [10, 548, 43, 581],
+                            "txt": "Pendiente"}]}
+        items = [it for r in sv.build(doc)["rows"] for it in r["items"]]
+        box = next(it for it in items if it.get("check"))
+        assert box["checked"] is False
