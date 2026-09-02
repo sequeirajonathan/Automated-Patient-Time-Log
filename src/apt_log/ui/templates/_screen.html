@@ -119,7 +119,7 @@
   </div>
   {% endif %}
 
-  {% if m.dismiss %}
+  {% if m.dismiss and not m.pad_waiting %}
   {# The way out of a modal. Drawn ABOVE the sheet's own controls because
      that is where the phone puts it, and because the whole point is that it
      is found before anything is pressed. The phone's Back does not close a
@@ -135,7 +135,17 @@
   </div>
   {% endif %}
 
-  <div class="a-list">
+  <div class="a-list{% if m.pad_waiting %} a-splash{% endif %}">
+  {# WHILE THE PAD IS DRIVING, THIS PAGE IS A SPLASH AND NOTHING ELSE.
+     Not a reflow with a waiting card at the bottom of it: on Mobile
+     Caregiver+ that left the dialog's own heading, the sentence describing
+     its canvas — drawn as a tappable row, with a chevron on it, over a
+     canvas nothing on this page can draw on — and a ✕ whose job the
+     drawer's own ✕ now does. Every one of those is a press with nothing
+     behind it on the one screen where a stray press wipes a signature.
+     "The front end should be like the other in my team app where we show a
+     splash screen." #}
+  {% if not m.pad_waiting %}
   {% for row in m.rows %}
     {% if row.tabs %}
     <div class="a-row a-tabs">
@@ -374,6 +384,7 @@
     </div>
     {% endif %}
   {% endfor %}
+  {% endif %}
   {% if m.pad_waiting %}
   {# WHAT THIS PAGE IS FOR WHILE THE PAD IS OPEN.
      The sheet's controls are in the pencil drawer and the canvas is under
@@ -384,8 +395,22 @@
      resolved to a person. #}
   <div class="a-waiting" role="status">
     <span class="a-wait-pulse" aria-hidden="true"></span>
-    <span class="a-wait-t">{{ t('sign.waiting.' ~ m.pad_waiting) }}</span>
+    {# WITH THE NAME WHERE THERE IS ONE. "Waiting for the patient's
+       signature" is the right sentence on a pad the screen never named;
+       on one it did, the person's own name is what tells this pad from
+       the next patient's. Both sentences are whole in both languages —
+       never a name glued onto a translated fragment. #}
+    <span class="a-wait-t">{% if m.pad_signer
+      %}{{ t('sign.waiting.named').replace('{who}', m.pad_signer) }}{%
+      else %}{{ t('sign.waiting.' ~ m.pad_waiting) }}{% endif %}</span>
     <span class="a-wait-sub">{{ t('sign.pad_drives') }}</span>
+    {# AND THE WAY BACK TO IT. The drawer opens itself on arrival, but she
+       can close it — and with the page now a splash, a closed drawer left
+       the pencil in the toolbar as the only way back to a signature that
+       is standing open on the phone. This is the same press, said in
+       words, where she is already looking. #}
+    <button type="button" class="a-wait-open" data-open-pad>
+      {{ t('sign.open_pad') }}</button>
   </div>
   {% endif %}
   {# The page's tail says whether the map is complete, without a sentence:

@@ -1788,6 +1788,25 @@ class TestARoleIsNotAName:
         a surname."""
         assert self.named("Firma de Ana Pacientes") == "Ana Pacientes"
 
+    def test_a_sentence_is_not_a_title(self):
+        """THE SECOND TIME PROSE WAS READ AS A PERSON. Mobile Caregiver+
+        describes its canvas as "Área de firma del partícipe, apague el modo
+        de lector de pantalla…", and the prefix rule — which exists for the
+        app that renders "«NAME» Firma de" — took "Área de" out of it. The
+        drawer then announced, on a live pad: "This screen is asking for
+        Área de's signature."
+
+        Both accepted shapes put the name on ONE side of the marker and
+        nothing on the other. Text on both sides is prose."""
+        assert self.named(
+            "Área de firma del partícipe, apague el modo de lector de "
+            "pantalla para dibujar la firma") == ""
+
+    def test_nor_is_an_instruction(self):
+        """The same app's heading. "RECOPILE LA" is not a person either."""
+        assert self.named(
+            "RECOPILE LA FIRMA DEL RECIPIENT A CONTINUACION") == ""
+
 
 class TestADotIsNotADrag:
     """"Two straight lines that look like they were done programmatically."
@@ -1938,6 +1957,23 @@ class TestWhichSignatureTheSheetIsAskingFor:
         staff = set(sign.SIGNER_ROLES["staff"])
         assert not (patient & staff)
 
+    def test_mobile_caregivers_own_word_for_the_patient(self):
+        """Its pad is headed "RECOPILE LA FIRMA DEL RECIPIENT A
+        CONTINUACION". Neither "recipient" nor "partícipe" was in the role
+        list, so the app's patient pad named no role at all — and no role
+        means no narrowing: four patients were offered on one patient's
+        pad."""
+        assert sign.signer_role(self.doc(
+            "RECOPILE LA FIRMA DEL RECIPIENT A CONTINUACION")) == "patient"
+
+    def test_the_word_is_found_with_its_punctuation_on(self):
+        """The line naming the party has a comma directly after it, and
+        splitting on whitespace alone hands back "participe," — which
+        matches nothing."""
+        assert sign.signer_role(self.doc(
+            "Área de firma del partícipe, apague el modo de lector de "
+            "pantalla")) == "patient"
+
 
 class TestAPadInsideADialog:
     """Mobile Caregiver+ puts its signature pad in an AlertDialog, so the
@@ -2026,24 +2062,36 @@ class TestMobileCaregiversPadControls:
 
         return importlib.import_module("apt_log.ui.app")._canvas_actions(doc)
 
-    def test_both_controls_reach_the_pad(self):
+    def test_every_control_reaches_the_pad(self):
         """A Borrar with no Confirmar beside it is worse than neither: the
-        one press that finishes a signature was the one missing."""
+        one press that finishes a signature was the one missing. And all
+        three belong here — "I want all controls to be mapped on the pencil
+        drawer"."""
         got = self._actions(self._pad())
-        assert len(got) == 2, got
+        assert len(got) == 3, got
 
     def test_clear_comes_first_and_confirm_last(self):
         """The pad emphasises the last one, and the last one has to be the
-        affirmative."""
+        affirmative. The way out sits between them: it is not a wipe and it
+        is not a finish."""
         got = self._actions(self._pad())
         assert "buttonClearSignature" in got[0]["aim"]["rid"]
-        assert "buttonComplete" in got[1]["aim"]["rid"]
+        assert "buttonCancel" in got[1]["aim"]["rid"]
+        assert "buttonComplete" in got[2]["aim"]["rid"]
 
     def test_they_wear_the_apps_own_words(self):
         """Not the fallback "Enviar", which the phone shows nowhere."""
         got = self._actions(self._pad())
-        assert got[0]["txt"] == "Borrar firma"
-        assert got[1]["txt"] == "Confirmar firma"
+        assert [a["txt"] for a in got] == [
+            "Borrar firma", "Descartar firma", "Confirmar firma"]
+
+    def test_each_says_what_it_does(self):
+        """The dressing is decided from the resource-id here, not from the
+        caption in the browser: the caption rule knows "Borrar" and
+        "Enviar" and had never heard of "Descartar firma", so the one
+        control that throws a signature away arrived undressed."""
+        assert [a["kind"] for a in self._actions(self._pad())] == [
+            "clear", "discard", "confirm"]
 
     def test_the_camelcase_ids_are_recognised(self):
         """Every pattern was snake_case, so `buttonComplete` and
@@ -2062,8 +2110,11 @@ class TestMobileCaregiversPadControls:
              "b": [10, 80, 200, 130], "txt": "Check in"}], "statics": []}
         assert self._actions(detail) == []
 
-    def test_the_discard_button_is_not_offered(self):
-        """"Descartar firma" throws the signature away and closes the
-        dialog. It is not one of the pad's two steps."""
-        rids = [a["aim"]["rid"] for a in self._actions(self._pad())]
-        assert not any("buttonCancel" in r for r in rids)
+    def test_no_automatic_press_can_reach_the_discard(self):
+        """The drawer offers it because a person presses it deliberately.
+        `_app_buttons` is what a REPLAY presses, unattended, and the note
+        over `_SAVE_IDS` says why a cancel must never be reachable from
+        there: "a rule loose enough to catch it would eventually press
+        it"."""
+        assert not any(i in "buttoncancel" for i in sign._SAVE_IDS)
+        assert not any(i in "buttoncancel" for i in sign._CLEAR_IDS)

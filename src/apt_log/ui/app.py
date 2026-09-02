@@ -1138,21 +1138,79 @@ def _role_signer(role: str, doc: dict) -> str:
     """
     from apt_log import schedule as schedule_mod
 
-    try:
-        plan = schedule_mod.load()
-    except Exception:  # noqa: BLE001
-        return ""
     if role == "staff":
         # One caregiver on this round, named in the schedule itself. No
         # corroboration to do and nobody to confuse her with.
-        return plan.caregiver or ""
+        try:
+            return schedule_mod.load().caregiver or ""
+        except Exception:  # noqa: BLE001
+            return ""
     if role != "patient":
+        return ""
+    return _patient_on_screen(doc) or _patient_seen_lately(doc.get("app") or "")
+
+
+def _patient_on_screen(doc: dict) -> str:
+    """The one scheduled patient this page names, or "".
+
+    The corroboration `_role_signer` is built on: the schedule supplies the
+    list of names today can legitimately involve and the SCREEN has to carry
+    exactly one of them.
+    """
+    from apt_log import schedule as schedule_mod
+
+    try:
+        plan = schedule_mod.load()
+    except Exception:  # noqa: BLE001
         return ""
     words = " ".join((s.get("txt") or "") for s in (doc.get("statics") or []))
     folded = " ".join(words.casefold().split())
     seen = {b.patient for b in getattr(plan, "blocks", []) or []
             if b.patient and " ".join(b.patient.casefold().split()) in folded}
     return seen.pop() if len(seen) == 1 else ""
+
+
+# HOW LONG A PATIENT SEEN ON THE SCREEN GOES ON MEANING THIS SIGNATURE.
+#
+# A signature pad reached from a visit is opened seconds after that visit's
+# own page, not a quarter of an hour later; the window is this wide only so a
+# pad left open while somebody answers the door still knows whose it is.
+_PATIENT_LATCH = 15 * 60
+_patient_seen: dict = {}
+
+
+def _note_patient_on_screen(doc: dict) -> None:
+    """Remember the patient this page named, for the modal about to cover it.
+
+    MOBILE CAREGIVER+ PUTS ITS PAD IN A DIALOG, and a dialog is the whole
+    tree: the published document ends at the dialog's own bounds, so the
+    visit page underneath — the page carrying the patient's name — is not in
+    it. `_patient_on_screen` therefore answers "" on the one screen where
+    the answer matters, and with no patient resolved the drawer offered
+    every enrolled patient at once: "why do we have 4 patients mapped to
+    this signature pad??"
+
+    THIS IS STILL THE SCREEN'S ANSWER, NOT THE CLOCK'S. The rule that
+    `_role_signer` documents — the name comes from the screen, never from
+    which visit is running — is what keeps a signature off the wrong record,
+    and it is kept here: the only names that ever land in this latch were
+    read off a page the phone was actually showing, and it is scoped to the
+    app that showed them so one app's page cannot name another's pad. What
+    changes is that the reading survives the moment the app covers it.
+    """
+    name = _patient_on_screen(doc)
+    if name:
+        _patient_seen.update({"name": name, "app": doc.get("app") or "",
+                              "at": time.time()})
+
+
+def _patient_seen_lately(package: str) -> str:
+    """The latched patient, if this app named her recently. Else ""."""
+    if not package or _patient_seen.get("app") != package:
+        return ""
+    if time.time() - float(_patient_seen.get("at") or 0) > _PATIENT_LATCH:
+        return ""
+    return str(_patient_seen.get("name") or "")
 
 
 def _sheet_actions(doc: dict, model: dict | None) -> list[dict]:
@@ -1191,6 +1249,14 @@ def _sheet_actions(doc: dict, model: dict | None) -> list[dict]:
     # the signature screen and the action, which no ordinary page carries.
     named = _canvas_actions(doc)
     if named:
+        # STAMPED AS HANDED OVER, exactly as the reflowed path below does it.
+        #
+        # Only that path used to stamp anything, so on Mobile Caregiver+ —
+        # the app whose pad is found HERE, by id — the drawer got the three
+        # buttons and the page behind went on drawing the same three. Two
+        # live copies of Borrar firma, and the page was left looking like the
+        # place to finish when the pad is the place to finish.
+        _hand_over(model, named)
         return named
     # THE DISMISS GATE WAS TOO NARROW, AND THE PAD PAID FOR IT.
     #
@@ -1234,6 +1300,26 @@ def _sheet_actions(doc: dict, model: dict | None) -> list[dict]:
                             "aim": it["aim"]}
                            for it in row["items"] if it.get("aim")])
     return []
+
+
+def _hand_over(model: dict | None, actions: list[dict]) -> None:
+    """Mark the rows holding these controls as the pad's, so the page behind
+    stops drawing them.
+
+    Matched on the resource-id, which is what `_canvas_actions` found them
+    by. A row is stamped whole: on both pads the app draws its signature
+    buttons as one actions row, and half a row left on the page is a
+    Confirmar with no Borrar beside it.
+    """
+    ids = {(action.get("aim") or {}).get("rid", "").lower()
+           for action in actions}
+    ids.discard("")
+    if not ids or not model:
+        return
+    for row in model.get("rows") or ():
+        if any((item.get("aim") or {}).get("rid", "").lower() in ids
+               for item in row.get("items") or ()):
+            row["handed"] = True
 
 
 # THE PAD READS THE SAME WHICHEVER APP IS BEHIND IT.
@@ -1300,7 +1386,12 @@ def _canvas_actions(doc: dict) -> list[dict]:
     """
     from apt_log import sign as sign_mod
 
-    order = {"clear": 0, "confirm": 1}
+    # DESTRUCTIVE, THEN THE WAY OUT, THEN THE FINISH. Mobile Caregiver+ draws
+    # three: Borrar firma wipes the ink, Descartar firma abandons the
+    # signature, Confirmar firma commits it. All three belong in the drawer —
+    # "I want all controls to be mapped on the pencil drawer" — and the
+    # affirmative has to be last, because that is where the pad emphasises.
+    order = {"clear": 0, "discard": 1, "confirm": 2}
     found: list[tuple[int, dict]] = []
     # IS THIS A SIGNATURE SCREEN AT ALL? Asked once, of the whole page.
     #
@@ -1323,6 +1414,7 @@ def _canvas_actions(doc: dict) -> list[dict]:
     for element in doc.get("elements") or []:
         rid = (element.get("rid") or "").lower()
         for kind, ids in (("clear", sign_mod._CLEAR_IDS),
+                          ("discard", sign_mod._DISCARD_IDS),
                           ("confirm", sign_mod._SAVE_IDS)):
             if not any(i in rid for i in ids):
                 continue
@@ -1340,11 +1432,49 @@ def _canvas_actions(doc: dict) -> list[dict]:
                        or _FALLBACK_WORD[kind])
             found.append((order[kind],
                           {"txt": caption,
+                           # WHAT THIS PRESS DOES, decided here from the id
+                           # rather than in the browser from the word. The
+                           # dressing used to be a regular expression over
+                           # the caption, which knows "Borrar" and "Enviar"
+                           # and has never heard of "Descartar firma" — the
+                           # one control on this pad that throws a signature
+                           # away would have arrived wearing no warning at
+                           # all.
+                           "kind": kind,
                            "aim": {"rid": element.get("rid", ""),
                                    "cls": element.get("cls", ""),
                                    "b": element["b"]}}))
             break
     return [action for _, action in sorted(found, key=lambda p: p[0])]
+
+
+def _canvas_exit(doc: dict) -> dict:
+    """The signature dialog's own ✕, as an aim. {} where there is none.
+
+    Mobile Caregiver+ draws its pad in an AlertDialog with a close button in
+    the corner, and that corner is behind the drawer while the drawer is
+    open. Carried so the drawer's own close can press it: "you can map the
+    modal X to closing the pencil drawer event."
+
+    Gated on the page being a signature screen by the same page-level test
+    `_canvas_actions` uses, because `buttonDismiss` is an ordinary id that
+    any sheet in any app may carry — and a control that closes whatever
+    happens to be in front is not what this is.
+    """
+    from apt_log import sign as sign_mod
+
+    elements = doc.get("elements") or []
+    if not any(any(h in (e.get("rid") or "").lower()
+                   for h in sign_mod.CANVAS_ID_HINTS) for e in elements):
+        return {}
+    for element in elements:
+        rid = (element.get("rid") or "").lower().rsplit("/", 1)[-1]
+        if any(exit_id in rid for exit_id in screenview_mod.SHEET_EXIT_IDS):
+            return {"txt": (element.get("txt") or "").strip(),
+                    "aim": {"rid": element.get("rid", ""),
+                            "cls": element.get("cls", ""),
+                            "b": element["b"]}}
+    return {}
 
 
 def _caption_over(doc: dict, bounds: list[int]) -> str:
@@ -1667,6 +1797,12 @@ async def live(ws: WebSocket):
                 # Read once: it walks the statics, and the roster lookup below
                 # reads a file. Both are cheap and neither is free, and this
                 # runs on every screen change.
+                # BEFORE ANYTHING ASKS WHOSE PAD THIS IS. The patient is
+                # read off the page that names her, and on Mobile Caregiver+
+                # the pad's dialog is the whole published tree — so the
+                # reading has to be taken while the visit page is still the
+                # screen. See `_note_patient_on_screen`.
+                _note_patient_on_screen(screen_doc)
                 _signer = sign.signer_named(screen_doc)
                 # WHEN THE SHEET NAMES A ROLE INSTEAD OF A PERSON, which is
                 # what these screens do nearly always. The role is not a
@@ -1798,6 +1934,13 @@ async def live(ws: WebSocket):
                     # front end". They are ordinary aims and press through the
                     # ordinary verified tap; nothing here is a new capability.
                     "sheet_actions": _sheet_actions(screen_doc, model),
+                    # THE PAD'S OWN WAY OUT, so the drawer has one control
+                    # that closes both. The ✕ is drawn in the dialog's
+                    # corner, which is underneath the drawer while the
+                    # drawer is open, so without this the way out of the pad
+                    # was to close the drawer, find the corner, and press
+                    # it. {} on every screen without a pad.
+                    "pad_dismiss": _canvas_exit(screen_doc),
                     # The app's own tab bar, lifted out of the list to ride
                     # the control bar beside Back and Home. Empty on screens
                     # without one.
@@ -1864,6 +2007,12 @@ async def live(ws: WebSocket):
                         _role if _role and any(r.get("handed")
                                                for r in model.get("rows") or ())
                         else "")
+                    # AND WHOSE, WHERE THE SCREEN SETTLED IT. The role alone
+                    # says "the patient", which on a round with four of them
+                    # is the sentence that let one person's pad look like
+                    # another's. Empty is the ordinary case and the card
+                    # falls back to the role.
+                    model["pad_signer"] = _signer if model["pad_waiting"] else ""
                 payload["screen_html"] = (
                     "" if model is None
                     else templates.get_template("_screen.html").render(

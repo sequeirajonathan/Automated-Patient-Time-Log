@@ -634,6 +634,21 @@
   .a-wait-t { font-size:1.02rem; font-weight:650; }
   .a-wait-sub { font-size:.88rem; color:var(--muted); max-width:26ch;
                 line-height:1.35; }
+  /* The splash's one control. Filled, because with the drawer closed it is
+     the only way back to a signature standing open on the phone. */
+  .a-wait-open { margin-top:10px; border:none; border-radius:13px;
+                 background:var(--tint); color:#fff; font:inherit;
+                 font-size:15.5px; font-weight:650; min-height:46px;
+                 padding:0 20px; cursor:pointer; }
+  .a-wait-open:active { transform:scale(.97); filter:brightness(.92); }
+  /* The splash IS the page while the pad is driving, so it sits in the
+     middle of it rather than at the top with everything below it empty.
+     The page's own tail marks go with the list they were describing: a
+     sweep saying "still reading" over a page with nothing on it reads as
+     the portal having lost the screen. */
+  .a-splash { display:flex; flex-direction:column; min-height:56vh;
+              align-items:center; justify-content:center; }
+  .a-splash .a-pageend, .a-splash .a-scanning { display:none; }
 
   /* The webview honesty line: a web page's pixels can carry what its
      accessibility tree does not. */
@@ -1549,6 +1564,33 @@
   #signpad { width:100%; aspect-ratio:2.2/1; display:block; border-radius:14px;
              border:1.5px dashed var(--line); background:var(--bg);
              touch-action:none; color:var(--ink); }
+  /* THE THIRD CONTROL COST A ROW, AND A SHORT PHONE DOES NOT HAVE ONE.
+     Measured with a patient's saved signature on the row: 622px of pad in
+     a 600px sheet at 375x667 — 22 over, which is a scroll on the one sheet
+     that must not have one ("Make them fit nicely as possible avoiding
+     scrolling"). Only where the room is actually short: on an ordinary
+     phone the canvas keeps its full depth. The pad reports its own
+     measured aspect when it sends, so a shallower box draws a shallower
+     signature rather than a distorted one. */
+  @media (max-height: 720px) {
+    #signpad { aspect-ratio:2.6/1; }
+    .signsend { min-height:46px; margin-top:10px; }
+    .approw { margin-top:12px; padding-top:12px; }
+    .signstep { margin-bottom:7px; }
+  }
+  /* A narrow phone costs more than a short one: at 360 the heading wraps to
+     three lines and the pad ran 57px over. The preview is the one thing here
+     that can go — it says what the ink will look like, and the canvas two
+     inches above it already does — and the sheet takes the last of the
+     screen. Every CONTROL stays. */
+  @media (max-height: 660px) {
+    #signsheet { max-height:96%; }
+    .signpreview-wrap { display:none; }
+    /* A signature is a wide mark anyway; this is the shallowest the box
+       gets, and only on a screen that has no other room to give. */
+    #signpad { aspect-ratio:3.2/1; }
+    #sign-appbtns { gap:6px; }
+  }
   #signpreview { width:56%; aspect-ratio:2.6/1; display:block; margin:8px auto 0;
                  border-radius:8px; background:#fff; color:#1c1c2e;
                  border:.5px solid var(--line); }
@@ -1697,6 +1739,15 @@
   /* A numbered step. Two of them, because the pad is two places — hers and
      the phone's — and the confusion was that nothing said so. */
   .signstep { display:flex; align-items:center; gap:9px; margin:0 0 10px; }
+  /* The drawer's ✕. Last in its row and pushed to the edge, where a modal
+     keeps one — this drawer IS the modal now that the phone's own ✕ is
+     underneath it. */
+  .signclose { margin-left:auto; flex:none; border:none; background:none;
+               color:var(--muted); cursor:pointer; padding:6px;
+               min-width:40px; min-height:40px; border-radius:12px;
+               display:flex; align-items:center; justify-content:center; }
+  .signclose svg { width:19px; height:19px; }
+  .signclose:active { background:var(--track); }
   .signstep-n { flex:none; width:22px; height:22px; border-radius:50%;
                 background:var(--tint); color:#fff; font-size:12.5px;
                 font-weight:700; display:flex; align-items:center;
@@ -1761,7 +1812,26 @@
      the button that finishes. */
   .padrow .wipe { background:hsl(0 72% 51% / .12); color:var(--bad);
                   font-weight:600; }
+  /* A THIRD CONTROL ARRIVED AND THE ROW HAD TO STOP BEING A ROW.
+     Mobile Caregiver+'s pad has Borrar firma, Descartar firma and Confirmar
+     firma, and three of those words side by side on a phone is three
+     buttons of clipped text. So up to two stay a row, and at three the row
+     becomes a grid: the two that undo share a line, and the one that
+     finishes takes a line of its own — which is also the right emphasis,
+     since it is the only one of the three that ends the signature. */
+  #sign-appbtns { display:grid; gap:8px;
+                  grid-auto-flow:column; grid-auto-columns:1fr; }
+  #sign-appbtns:has(> button:nth-child(3)) {
+    grid-auto-flow:row; grid-template-columns:1fr 1fr; }
+  #sign-appbtns:has(> button:nth-child(3)) > .primary { grid-column:1 / -1; }
   #sign-appbtns button { min-height:46px; }
+  /* Abandoning the signature is not wiping the ink and must not look like
+     finishing it either. Amber: a way out, with a warning on it. */
+  .padrow .discard { background:hsl(38 92% 50% / .16); color:#8a5a00;
+                     font-weight:600; }
+  @media (prefers-color-scheme: dark) {
+    .padrow .discard { color:hsl(38 92% 72%); }
+  }
   .approw-label { flex:0 1 auto; font-size:13px; }
   .padrow button { flex:1; padding:12px; border-radius:13px;
                    border:none; background:var(--track);
@@ -2348,10 +2418,26 @@
   {# `data-plain` is what this says when the screen has named nobody — the
      heading is rewritten in place with whose pad it is, so the two never sit
      on the page as separate lines saying the same thing. #}
+  {# THE PAD'S OWN WAY OUT, AND THE PHONE'S, ARE ONE CONTROL.
+     The dialog Mobile Caregiver+ draws its pad in has a ✕ in the corner,
+     and that corner is under this drawer while the drawer is open — so
+     leaving meant closing the drawer, hunting for the ✕ in the phone view
+     and pressing it there. Pressing this presses that: "you can map the
+     modal X to closing the pencil drawer event." Where the screen has no
+     such ✕ it still closes the drawer, which is what it did before it
+     existed. Hidden until there is a pad, so it cannot be the thing that
+     closes a sheet nobody opened. #}
   <div class="signstep">
     <span class="signstep-n">1</span>
     <span class="signstep-t" id="sign-step-title"
           data-plain="{{ t('sign.step_draw') }}">{{ t('sign.step_draw') }}</span>
+    <button type="button" id="sign-close" class="signclose"
+            aria-label="{{ t('sign.pad_close') }}"
+            title="{{ t('sign.pad_close') }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2.2" stroke-linecap="round" aria-hidden="true"
+        ><path d="M6 6 L18 18 M18 6 L6 18"/></svg>
+    </button>
   </div>
   {# ONE PRESS, FOR A HAND THAT CANNOT DRAW.
 
@@ -2712,6 +2798,7 @@
     signSendAgain: {{ t('sign.send_again')|tojson }},
     signEmpty:   {{ t('signature.empty')|tojson }},
     signLockLapsed: {{ t('sign.lock_lapsed')|tojson }},
+    signWaitPhone: {{ t('sign.wait_phone')|tojson }},
     codeCopied:     {{ t('code.copied')|tojson }},
     codeCopyFailed: {{ t('code.copy_failed')|tojson }},
     codeJustNow: {{ t('code.just_now')|tojson }},

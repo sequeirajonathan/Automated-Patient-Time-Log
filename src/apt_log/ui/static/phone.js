@@ -173,6 +173,12 @@
         redirect: 'follow'
       }).catch(() => { awaitingMacro = false; awaitingScan = false; unbusy(); });
     });
+    // The splash's own way back into the pad. The page behind a signature
+    // draws nothing else, so with the drawer closed this is the control that
+    // reopens it — the pencil in the toolbar does the same thing, further
+    // away and unlabelled.
+    const openPadBtn = root.querySelector('[data-open-pad]');
+    if (openPadBtn) openPadBtn.addEventListener('click', () => openPad());
     bindAims(root);
   }
 
@@ -604,7 +610,21 @@
           // the last one is Clear, so the pad filled in the destructive
           // button and left Done looking secondary. A word this does not
           // recognise simply gets no emphasis, which is the safe direction.
-          for (const b of slot.children) {
+          //
+          // THE SERVER'S OWN WORD FOR WHAT THE BUTTON DOES COMES FIRST.
+          // It read the resource-id — `buttonClearSignature`, `buttonCancel`,
+          // `buttonComplete` — which is a fact about the button; the regular
+          // expression below is a guess about its caption, and it had never
+          // heard of "Descartar firma". Guessing wrong there dresses the
+          // control that throws a signature away as an ordinary grey button.
+          for (let i = 0; i < slot.children.length; i += 1) {
+            const b = slot.children[i];
+            const kind = (sheetActions[i] || {}).kind || '';
+            if (kind) {
+              b.classList.add(kind === 'confirm' ? 'primary'
+                              : kind === 'discard' ? 'discard' : 'wipe');
+              continue;
+            }
             const word = (b.textContent || '').trim();
             if (/^(done|save|salvar|guardar|confirm|confirmar|ok|aceptar|enviar|submit|send)$/i
                 .test(word)) {
@@ -803,6 +823,9 @@
     // sheet can be open while the screen underneath changes, and the name on
     // the heading has to change with it.
     const wasRole = signerRole;
+    padDismiss = (meta.pad_dismiss && meta.pad_dismiss.aim) || null;
+    const closeBtn = document.getElementById('sign-close');
+    if (closeBtn) closeBtn.hidden = !padHere;
     signerNamed = meta.signer || '';
     signerAdopted = meta.signer_adopted || '';
     signerRole = meta.signer_role || '';
@@ -1338,6 +1361,10 @@
   // for, read off its own heading. The name may be unknown while this is
   // not, and it is what holds back the party this screen is NOT for.
   let signerRole = '';
+  // The pad dialog's own ✕ on the phone, as an aim — {} where the screen in
+  // front has none. The drawer's close presses it, because while the drawer
+  // is open that corner of the phone's screen is underneath it.
+  let padDismiss = null;
 
   function renderAdopted(parties) {
     const wrap = document.getElementById('sign-adopted');
@@ -2697,6 +2724,27 @@
     });
     const send = document.getElementById('sign-send');
     if (send) send.addEventListener('click', padSend);
+
+    // THE DRAWER'S ✕ IS THE MODAL'S ✕.
+    //
+    // The pad the phone is showing is a dialog with its own close in the
+    // corner, and the drawer covers that corner. So this closes both: the
+    // press goes to the phone's ✕ where the screen has one, and the drawer
+    // shuts either way. Never while the ink is landing — a dialog dismissed
+    // mid-replay leaves half a signature on a record — and never as a side
+    // effect of the swipe, which is too easy to do by accident over a
+    // signature somebody has just drawn.
+    const padClose = document.getElementById('sign-close');
+    if (padClose) padClose.addEventListener('click', () => {
+      if (pad.waitingId) { toast(i18n.signWaitPhone || ''); return; }
+      if (padDismiss && driving() && socket && socket.readyState === 1) {
+        tapping(true);
+        socket.send(JSON.stringify({ type: 'tap', frame: frameId,
+                                     element: padDismiss }));
+      }
+      body.classList.remove('signing');
+      padFit();
+    });
 
     // Adopted signatures (REQ-10.6a). Delegated, because the row is rebuilt
     // every time the roster is read and per-button listeners would not

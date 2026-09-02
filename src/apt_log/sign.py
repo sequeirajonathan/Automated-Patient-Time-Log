@@ -750,6 +750,17 @@ _CLEAR_IDS = ("button_clear", "btn_clear", "clear_button", "button_erase",
               "buttonclearsignature")
 _SAVE_WORDS = ("salvar", "save", "guardar", "enviar", "submit", "send")
 _CLEAR_WORDS = ("borrar", "clear", "limpiar")
+# ABANDONING THE SIGNATURE IS NOT THE SAME AS WIPING THE INK, and Mobile
+# Caregiver+ draws both: Borrar firma clears the canvas, Descartar firma
+# leaves without one. Used ONLY by the drawer, which shows what the pad has
+# and lets a person press it — never by `_app_buttons`, whose whole job is to
+# find the button a replay may press unattended. The note over `_SAVE_IDS`
+# says why an automatic press must never reach a cancel: "ANULAR IS NEITHER
+# of these — it is cancel, it throws the signature away, and a rule loose
+# enough to catch it would eventually press it." That still holds.
+_DISCARD_IDS = ("buttoncancel", "button_cancel", "btn_cancel",
+                "buttondiscard", "button_discard", "btn_discard",
+                "buttondiscardsignature")
 
 
 # Ids that name a LAYOUT holding the pad rather than the pad itself. A
@@ -1584,6 +1595,13 @@ _SIGNS_FOR = ("firma de la", "firma del", "firma de", "signature of the",
 # pad say nothing instead of something wrong.
 _ROLE_WORDS = frozenset((
     "paciente", "patient", "cliente", "client",
+    # Mobile Caregiver+'s own words for the person being cared for. Its pad
+    # is titled "RECOPILE LA FIRMA DEL RECIPIENT A CONTINUACIÓN" and its
+    # canvas is described as the "Área de firma del partícipe" — neither
+    # word was here, so the app's patient pad named no role at all and the
+    # drawer offered every enrolled patient on it.
+    "recipient", "recipiente", "receptor", "receptora",
+    "participe", "participante", "beneficiario", "beneficiaria",
     "cuidador", "cuidadora", "caregiver", "personal", "staff",
     "empleado", "empleada", "employee", "trabajador", "trabajadora",
     "testigo", "witness", "representante", "representative",
@@ -1605,11 +1623,30 @@ _ROLE_WORDS = frozenset((
 # about, so they are absent here on purpose and read as "" — the same
 # conservative answer the rest of this file gives.
 SIGNER_ROLES = {
-    "patient": ("paciente", "patient", "cliente", "client"),
+    # "recipient" and "partícipe" are Mobile Caregiver+'s words for the same
+    # party — the person receiving the care. Without them its patient pad
+    # answered "" here, and "" means no narrowing at all: read off the live
+    # dialog, the drawer offered four patients on one patient's signature
+    # pad. "why do we have 4 patients mapped to this signature pad??"
+    "patient": ("paciente", "patient", "cliente", "client",
+                "recipient", "recipiente", "receptor", "receptora",
+                "participe", "participante",
+                "beneficiario", "beneficiaria"),
     "staff": ("cuidador", "cuidadora", "caregiver", "personal", "staff",
               "empleado", "empleada", "employee",
               "trabajador", "trabajadora"),
 }
+
+
+def _bare_words(low: str) -> set[str]:
+    """The folded line's words with their punctuation off.
+
+    `low.split()` alone hands back "participe," with the comma still on it,
+    which matches nothing in `SIGNER_ROLES` — and the one line naming the
+    party on Mobile Caregiver+'s pad has a comma directly after that word.
+    """
+    return {"".join(c for c in word if c.isalnum())
+            for word in low.split()} - {""}
 
 
 def signer_role(doc: dict) -> str:
@@ -1628,7 +1665,7 @@ def signer_role(doc: dict) -> str:
         low = _fold(text)
         if not any(marker in low for marker in _SIGNS_FOR):
             continue
-        words = set(low.split())
+        words = _bare_words(low)
         for role, names in SIGNER_ROLES.items():
             if words & set(names):
                 found.add(role)
@@ -1663,7 +1700,26 @@ def signer_named(doc: dict) -> str:
         if not best:
             continue
         at = low.find(best)
-        name = (text[:at] or text[at + len(best):]).strip(" \t:·-–—,")
+        before = text[:at].strip(" \t:·-–—,")
+        after = text[at + len(best):].strip(" \t:·-–—,")
+        # A TITLE HAS THE PHRASE AT ONE END. A SENTENCE HAS IT IN THE MIDDLE.
+        #
+        # Both accepted shapes put the name on ONE side of the marker and
+        # nothing on the other: "Firma de Ana Ruiz", and the app's own broken
+        # "Ana Ruiz Firma de". Text on both sides is prose, and prose was
+        # read as a person twice on Mobile Caregiver+: its canvas is
+        # described as "Área de firma del partícipe, apague el modo de
+        # lector de pantalla…", from which the prefix rule took the name
+        # "Área de" and the drawer announced "This screen is asking for Área
+        # de's signature"; its heading, "RECOPILE LA FIRMA DEL RECIPIENT A
+        # CONTINUACIÓN", would have given "RECOPILE LA" the same way.
+        #
+        # Refused rather than trimmed, for the reason the whole function
+        # gives: there is no name in either line to recover, and "" makes
+        # the pad say which ROLE it is waiting for instead of a wrong name.
+        if before and after:
+            continue
+        name = before or after
         # Role words shed from either end: "Firma del Paciente Ana Ruiz" is
         # asking Ana Ruiz, and the word before her name is a label.
         words = name.split()

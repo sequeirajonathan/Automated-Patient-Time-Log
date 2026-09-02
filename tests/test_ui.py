@@ -5144,6 +5144,181 @@ class TestThePadKnowsWhoseSignatureItIsCollecting:
                     encoding="utf-8"))
             assert words["sign.waiting.patient"]
             assert words["sign.waiting.staff"]
+            # AND WITH THE NAME, where the screen settled it. A whole
+            # sentence in each language, never a name glued to a fragment.
+            assert "{who}" in words["sign.waiting.named"]
+
+
+class TestFourPatientsOnOnePatientsPad:
+    """"You happen to find the exact patient as well so why do we have 4
+    patients mapped to this signature pad??"
+
+    Mobile Caregiver+ draws its pad in an AlertDialog, and a dialog is the
+    whole published tree: the visit page underneath — the page carrying the
+    patient's name — is not in the document at all. So the corroboration
+    that names the signer found nobody, nothing was narrowed, and every
+    enrolled patient was offered on one patient's pad.
+    """
+
+    def _app(self):
+        import importlib
+
+        return importlib.import_module("apt_log.ui.app")
+
+    def _plan(self):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            caregiver="A CAREGIVER",
+            blocks=[SimpleNamespace(patient="UN PACIENTE"),
+                    SimpleNamespace(patient="OTRA PERSONA")])
+
+    def _visit_page(self):
+        return {"app": "com.example.care",
+                "statics": [{"txt": "UN PACIENTE"}, {"txt": "Detalle"}]}
+
+    def _pad_dialog(self):
+        """What the phone publishes with the pad open: the dialog, and only
+        the dialog. No patient anywhere in it."""
+        return {"app": "com.example.care",
+                "statics": [{"txt": "RECOPILE LA FIRMA DEL RECIPIENT A "
+                                    "CONTINUACION"},
+                            {"txt": "Firma en la linea"}]}
+
+    def test_the_dialog_alone_still_names_nobody(self):
+        """Unchanged, and it has to be: the rule that a name comes from the
+        screen is what keeps a signature off the wrong record."""
+        uiapp = self._app()
+        uiapp._patient_seen.clear()
+        with patch("apt_log.schedule.load", return_value=self._plan()):
+            assert uiapp._patient_on_screen(self._pad_dialog()) == ""
+
+    def test_the_page_the_dialog_covered_is_remembered(self):
+        """The reading is still the SCREEN's — taken off the visit page a
+        moment before the app covered it with its own dialog."""
+        uiapp = self._app()
+        uiapp._patient_seen.clear()
+        with patch("apt_log.schedule.load", return_value=self._plan()):
+            uiapp._note_patient_on_screen(self._visit_page())
+            assert uiapp._role_signer(
+                "patient", self._pad_dialog()) == "UN PACIENTE"
+
+    def test_another_apps_page_cannot_name_this_ones_pad(self):
+        uiapp = self._app()
+        uiapp._patient_seen.clear()
+        with patch("apt_log.schedule.load", return_value=self._plan()):
+            uiapp._note_patient_on_screen(self._visit_page())
+            other = dict(self._pad_dialog(), app="com.example.other")
+            assert uiapp._role_signer("patient", other) == ""
+
+    def test_a_stale_reading_names_nobody(self):
+        """A pad opened a quarter of an hour after the last page that named
+        anybody is not that page's pad."""
+        import time as _time
+
+        uiapp = self._app()
+        uiapp._patient_seen.clear()
+        with patch("apt_log.schedule.load", return_value=self._plan()):
+            uiapp._note_patient_on_screen(self._visit_page())
+            uiapp._patient_seen["at"] = _time.time() - uiapp._PATIENT_LATCH - 1
+            assert uiapp._role_signer("patient", self._pad_dialog()) == ""
+
+    def test_the_screen_in_front_still_wins(self):
+        """The latch is a fallback, never an override: a page that names
+        somebody names her, whatever was remembered."""
+        uiapp = self._app()
+        uiapp._patient_seen.clear()
+        with patch("apt_log.schedule.load", return_value=self._plan()):
+            uiapp._note_patient_on_screen(self._visit_page())
+            named = {"app": "com.example.care",
+                     "statics": [{"txt": "OTRA PERSONA"}]}
+            assert uiapp._role_signer("patient", named) == "OTRA PERSONA"
+
+
+class TestThePadsControlsLeaveThePageBehind:
+    """Widening the drawer's reach put the app's buttons in the drawer
+    WITHOUT taking them off the reflowed page — "I'm still getting the
+    actions for hecho and borrar on the front end" — and two live copies of
+    a control that wipes a signature is one copy too many. Only the reflowed
+    path stamped them; the path that finds them by id did not, which is the
+    path Mobile Caregiver+'s pad goes through.
+    """
+
+    def _app(self):
+        import importlib
+
+        return importlib.import_module("apt_log.ui.app")
+
+    def test_the_row_holding_them_is_stamped(self):
+        uiapp = self._app()
+        model = {"rows": [
+            {"actions": True,
+             "items": [{"aim": {"rid": "x:id/buttonClearSignature"}},
+                       {"aim": {"rid": "x:id/buttonComplete"}}]},
+            {"items": [{"aim": {"rid": "x:id/somethingelse"}}]}]}
+        uiapp._hand_over(model, [
+            {"aim": {"rid": "x:id/buttonClearSignature"}},
+            {"aim": {"rid": "x:id/buttonComplete"}}])
+        assert model["rows"][0]["handed"] is True
+        assert "handed" not in model["rows"][1]
+
+    def test_the_dialogs_own_exit_rides_along(self):
+        """So the drawer's ✕ can press it: the dialog's corner is
+        underneath the drawer while the drawer is open."""
+        uiapp = self._app()
+        pad = {"elements": [
+            {"rid": "x:id/buttonClearSignature", "cls": "Button",
+             "b": [53, 1316, 367, 1366], "txt": "Borrar firma"},
+            {"rid": "x:id/buttonDismiss", "cls": "ImageButton",
+             "b": [1014, 946, 1060, 992], "txt": "Cerrar"}]}
+        assert uiapp._canvas_exit(pad)["aim"]["rid"] == "x:id/buttonDismiss"
+
+    def test_the_page_behind_the_pad_is_only_the_splash(self):
+        """Not a reflow with a waiting card under it. On Mobile Caregiver+
+        that left the dialog's heading, the sentence describing its canvas
+        drawn as a tappable row, and a ✕ whose job the drawer's own ✕ now
+        does — three presses with nothing behind them on the one screen
+        where a stray press wipes a signature."""
+        from pathlib import Path
+
+        page = Path("src/apt_log/ui/templates/_screen.html").read_text(
+            encoding="utf-8")
+        assert "{% if not m.pad_waiting %}" in page
+        assert "{% if m.dismiss and not m.pad_waiting %}" in page
+
+    def test_the_splash_offers_the_way_back_into_the_pad(self):
+        """She can close the drawer, and with the page a splash the pencil
+        in the toolbar was then the only way back to a signature standing
+        open on the phone."""
+        from pathlib import Path
+
+        page = Path("src/apt_log/ui/templates/_screen.html").read_text(
+            encoding="utf-8")
+        assert "data-open-pad" in page
+        js = Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8")
+        assert "[data-open-pad]" in js
+
+    def test_the_drawers_close_presses_the_phones_own_exit(self):
+        """"You can map the modal X to closing the pencil drawer event." And
+        never mid-replay: a dialog dismissed while the ink is landing leaves
+        half a signature on a record."""
+        from pathlib import Path
+
+        js = Path("src/apt_log/ui/static/phone.js").read_text(encoding="utf-8")
+        at = js.index("padClose.addEventListener")
+        body = js[at:at + 600]
+        assert "if (pad.waitingId)" in body
+        assert "padDismiss" in body
+        assert "body.classList.remove('signing')" in body
+
+    def test_an_ordinary_sheet_has_no_pad_exit(self):
+        """`buttonDismiss` is an ordinary id that any sheet may carry, and a
+        control that closes whatever happens to be in front is not this."""
+        uiapp = self._app()
+        sheet = {"elements": [
+            {"rid": "x:id/buttonDismiss", "cls": "ImageButton",
+             "b": [1014, 946, 1060, 992], "txt": "Cerrar"}]}
+        assert uiapp._canvas_exit(sheet) == {}
 
 
 class TestEveryHourSaysWhichZoneItIsIn:
