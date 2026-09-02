@@ -737,8 +737,17 @@ _MIN_STRIP = 12
 _SAVE_IDS = ("button_save", "btn_save", "save_button",
              # HHAeXchange+ calls it submit, and its caption is "Enviar" —
              # the word for sending the signature on, not for saving it.
-             "submit_button", "button_submit")
-_CLEAR_IDS = ("button_clear", "btn_clear", "clear_button", "button_erase")
+             "submit_button", "button_submit",
+             # AND MOBILE CAREGIVER+ WRITES ITS IDS IN camelCase. Every
+             # pattern above has an underscore in it, so `buttonComplete`
+             # and `buttonClearSignature` matched nothing at all and this
+             # app's pad reached the drawer with no controls on it —
+             # leaving the caregiver to switch to the phone view to finish
+             # a signature, which is the switching the drawer exists to
+             # remove. Read off the live dialog on 1 Sep.
+             "buttoncomplete")
+_CLEAR_IDS = ("button_clear", "btn_clear", "clear_button", "button_erase",
+              "buttonclearsignature")
 _SAVE_WORDS = ("salvar", "save", "guardar", "enviar", "submit", "send")
 _CLEAR_WORDS = ("borrar", "clear", "limpiar")
 

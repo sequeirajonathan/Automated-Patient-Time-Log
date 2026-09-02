@@ -1302,15 +1302,42 @@ def _canvas_actions(doc: dict) -> list[dict]:
 
     order = {"clear": 0, "confirm": 1}
     found: list[tuple[int, dict]] = []
+    # IS THIS A SIGNATURE SCREEN AT ALL? Asked once, of the whole page.
+    #
+    # The per-button gate below demands an id that names the signature
+    # screen, which is what keeps Visit Detail's "Check in" and "Note &
+    # Check out" out of the pad. Mobile Caregiver+ satisfies it for its
+    # clear — `buttonClearSignature` — and fails it for its confirm, which
+    # is only `buttonComplete`. So the pad got a Borrar with no Confirmar
+    # beside it, which is worse than neither: the one press that finishes a
+    # signature was the one missing.
+    #
+    # A button does not have to name the screen if something else on the
+    # screen already has. Visit Detail carries no such id anywhere, so it
+    # is still refused — the gate moves from the button to the page, which
+    # is the thing it was really asking about.
+    signature_screen = any(
+        any(h in (e.get("rid") or "").lower()
+            for h in sign_mod.CANVAS_ID_HINTS)
+        for e in doc.get("elements") or [])
     for element in doc.get("elements") or []:
         rid = (element.get("rid") or "").lower()
         for kind, ids in (("clear", sign_mod._CLEAR_IDS),
                           ("confirm", sign_mod._SAVE_IDS)):
             if not any(i in rid for i in ids):
                 continue
-            if not any(h in rid for h in sign_mod.CANVAS_ID_HINTS):
+            if not (signature_screen
+                    or any(h in rid for h in sign_mod.CANVAS_ID_HINTS)):
                 continue          # see sign._app_buttons: a generic id is not
-            caption = _caption_over(doc, element["b"]) or _FALLBACK_WORD[kind]
+            # THE BUTTON'S OWN WORD FIRST. HHAeXchange+ draws its captions as
+            # separate labels over blank buttons, which is what
+            # `_caption_over` is for; Mobile Caregiver+ writes them on the
+            # button. Without this its Confirmar firma reached the pad
+            # wearing the fallback "Enviar" — a word the phone does not show
+            # anywhere, for the one press that finishes a signature.
+            caption = ((element.get("txt") or "").strip()
+                       or _caption_over(doc, element["b"])
+                       or _FALLBACK_WORD[kind])
             found.append((order[kind],
                           {"txt": caption,
                            "aim": {"rid": element.get("rid", ""),

@@ -1997,3 +1997,73 @@ class TestAPadInsideADialog:
         bounds, reason = sign.find_canvas(xml, dump=False)
         assert reason == ""
         assert bounds == [11, 599, 1069, 1845]
+
+
+class TestMobileCaregiversPadControls:
+    """Its pad reached the pencil drawer with no controls on it, so the
+    caregiver had to leave the drawer for the phone view to finish a
+    signature — the switching the drawer exists to remove.
+
+    Two reasons, both read off the live dialog on 1 Sep.
+    """
+
+    def _pad(self):
+        return {"elements": [
+            {"rid": "com.tellus.evv.v2:id/button_participant_signature",
+             "cls": "Button", "b": [40, 941, 1060, 997],
+             "txt": "RECOPILE LA FIRMA DEL RECIPIENT A CONTINUACION"},
+            {"rid": "com.tellus.evv.v2:id/buttonClearSignature",
+             "cls": "Button", "b": [53, 1316, 367, 1366],
+             "txt": "Borrar firma"},
+            {"rid": "com.tellus.evv.v2:id/buttonCancel", "cls": "Button",
+             "b": [392, 1316, 707, 1366], "txt": "Descartar firma"},
+            {"rid": "com.tellus.evv.v2:id/buttonComplete", "cls": "Button",
+             "b": [732, 1316, 1047, 1366], "txt": "Confirmar firma"}],
+            "statics": []}
+
+    def _actions(self, doc):
+        import importlib
+
+        return importlib.import_module("apt_log.ui.app")._canvas_actions(doc)
+
+    def test_both_controls_reach_the_pad(self):
+        """A Borrar with no Confirmar beside it is worse than neither: the
+        one press that finishes a signature was the one missing."""
+        got = self._actions(self._pad())
+        assert len(got) == 2, got
+
+    def test_clear_comes_first_and_confirm_last(self):
+        """The pad emphasises the last one, and the last one has to be the
+        affirmative."""
+        got = self._actions(self._pad())
+        assert "buttonClearSignature" in got[0]["aim"]["rid"]
+        assert "buttonComplete" in got[1]["aim"]["rid"]
+
+    def test_they_wear_the_apps_own_words(self):
+        """Not the fallback "Enviar", which the phone shows nowhere."""
+        got = self._actions(self._pad())
+        assert got[0]["txt"] == "Borrar firma"
+        assert got[1]["txt"] == "Confirmar firma"
+
+    def test_the_camelcase_ids_are_recognised(self):
+        """Every pattern was snake_case, so `buttonComplete` and
+        `buttonClearSignature` matched nothing at all."""
+        assert any(i in "buttonclearsignature" for i in sign._CLEAR_IDS)
+        assert any(i in "buttoncomplete" for i in sign._SAVE_IDS)
+
+    def test_visit_detail_is_still_refused(self):
+        """The gate this relaxes exists to keep "Check in" and "Note &
+        Check out" out of the signature pad. No signature-named id
+        anywhere on that page, so it stays out."""
+        detail = {"elements": [
+            {"rid": "com.tellus.evv.v2:id/buttonComplete", "cls": "Button",
+             "b": [10, 10, 200, 60], "txt": "Note & Check out"},
+            {"rid": "com.tellus.evv.v2:id/buttonClear", "cls": "Button",
+             "b": [10, 80, 200, 130], "txt": "Check in"}], "statics": []}
+        assert self._actions(detail) == []
+
+    def test_the_discard_button_is_not_offered(self):
+        """"Descartar firma" throws the signature away and closes the
+        dialog. It is not one of the pad's two steps."""
+        rids = [a["aim"]["rid"] for a in self._actions(self._pad())]
+        assert not any("buttonCancel" in r for r in rids)
