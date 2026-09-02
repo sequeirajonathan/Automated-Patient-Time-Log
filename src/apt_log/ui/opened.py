@@ -190,7 +190,18 @@ def page_names(doc: dict, patients) -> list[str]:
         + [str(line) for e in (doc.get("elements") or [])
            for line in (e.get("lines") or [])])
     folded = _fold(words)
-    return [p for p in patients if p and _fold(p) in folded]
+    # DE-DUPLICATED, and the lack of it cost the whole rule. A patient with
+    # two blocks in the schedule — the ordinary case; five of the eleven on
+    # this round are split — appeared twice in `patients`, so her OWN visit
+    # page came back naming "two patients" and was read as the list. Caught
+    # on the live phone: the visit detail named exactly one person and the
+    # record was cleared instead of written.
+    seen: list[str] = []
+    for name in patients:
+        if name and _fold(name) in folded and not any(
+                _fold(name) == _fold(had) for had in seen):
+            seen.append(name)
+    return seen
 
 
 # ------------------------------------------------------------------ the store

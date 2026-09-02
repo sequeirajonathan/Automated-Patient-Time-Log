@@ -5358,6 +5358,28 @@ class TestFourPatientsOnOnePatientsPad:
             assert opened.open_visit(
                 self.APP, path=store)["why"] == "in_progress"
 
+    def test_a_patient_with_two_blocks_is_still_one_patient(self, tmp_path):
+        """CAUGHT ON THE LIVE PHONE, and it cost the whole rule. Five of the
+        eleven visits on this round are split into two blocks, so a patient
+        appeared twice in the schedule's list — and her own visit page came
+        back naming "two patients", was read as the week list, and cleared
+        the record instead of writing it."""
+        from types import SimpleNamespace
+
+        store = tmp_path / "visit-open.json"
+        opened = self._opened()
+        split = SimpleNamespace(
+            caregiver="A CAREGIVER",
+            blocks=[SimpleNamespace(patient="UN PACIENTE", app=self.APP),
+                    SimpleNamespace(patient="UN PACIENTE", app=self.APP),
+                    SimpleNamespace(patient="OTRA PERSONA", app=self.APP)])
+        page = {"app": self.APP, "elements": [], "statics": [
+            {"txt": "La visita está programada para UN PACIENTE en martes"},
+            {"txt": "Duración de la visita - 02H : 01M"}]}
+        with patch("apt_log.schedule.load", return_value=split):
+            opened.note_screen(page, path=store)
+            assert opened.current(self.APP, path=store) == "UN PACIENTE"
+
     def test_two_rows_claiming_it_name_nobody(self):
         """Two answers is the same as none — a screen this code does not
         understand, and understanding it wrongly is the whole risk."""
