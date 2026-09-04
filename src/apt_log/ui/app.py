@@ -414,6 +414,7 @@ def phone_app(request: Request):
             # shows the reader's hour even for a second. Cached, not fresh:
             # a page open costs one adb read at most every few seconds.
             "clock": _clock_payload(),
+            "auth_stops": _auth_stops(),
             "KIND_SIGNATURE": KIND_SIGNATURE,
             "KIND_TOKEN": KIND_TOKEN,
             "KIND_CHOICE": KIND_CHOICE,
@@ -2257,6 +2258,13 @@ async def live(ws: WebSocket):
                 clock = await asyncio.to_thread(_clock_payload)
                 if clock != last.get("clock"):
                     payload["clock"] = last["clock"] = clock
+                # A STOP NOBODY CAN SEE LOOKS LIKE A BROKEN APP — and until
+                # now nothing on either page read /auth/stopped, so it was
+                # exactly that. The launcher draws a card per stopped app
+                # with the switch that clears it.
+                stops = await asyncio.to_thread(_auth_stops)
+                if stops != last.get("auth_stops"):
+                    payload["auth_stops"] = last["auth_stops"] = stops
                 if s.paused != last.get("paused"):
                     payload["paused"] = last["paused"] = s.paused
 
@@ -2705,6 +2713,13 @@ def auth_stopped():
     somebody starts pressing the tile by hand at five in the morning without
     knowing the account is one attempt from a lockout.
     """
+    return JSONResponse({"stopped": _auth_stops()})
+
+
+def _auth_stops() -> list[dict]:
+    """Every app whose automatic sign-in is standing down, for the page
+    and the socket alike — one shape, so the launcher's card and the API
+    can never disagree about what is stopped."""
     from apt_log import macros as macros_mod
 
     runner = macros_mod.Runner()
@@ -2716,7 +2731,7 @@ def auth_stopped():
                         "macro": tile["macro"],
                         "why": stop.get("why", ""),
                         "at": stop.get("at", 0)})
-    return JSONResponse({"stopped": out})
+    return out
 
 
 @app.post("/auth/resume")
