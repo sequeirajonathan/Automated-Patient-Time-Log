@@ -135,6 +135,22 @@ CREDENTIALS_REJECTED = (
 # because a sign-in that has failed three times running is not about to
 # succeed on the fourth, whatever it says.
 AUTH_MAX_TRIES = 3
+# How long a `too_many_failures` stop holds before the sign-in may try
+# again on its own. See Runner.auth_stopped: a refused password never
+# lapses, a broken walk does — long enough that a genuinely broken walk
+# costs a few attempts a day rather than one every tick, short enough
+# that a walk fixed by the morning deploy is back by lunch.
+AUTH_STOP_RETRY_AFTER = 2 * 3600.0
+# What to call the app in a notification about its sign-in. Spelled out
+# here rather than imported from the portal's tile table: this runs in the
+# feed process, and a push about a stand-down must not depend on the UI
+# package importing cleanly.
+AUTH_APP_NAMES = {
+    "hhax_legacy_login": "HHAeXchange",
+    "hhax_uma_login": "HHAeXchange+",
+    "mobile_caregiver_pin": "Mobile Caregiver+",
+    "inmyteam_login": "inMyTeam",
+}
 # And how long before a macro that TEXTS SOMEBODY may try again. Fifteen
 # minutes rather than ninety seconds, because the cost of a retry here is not
 # a wasted second, it is another message on a real person's phone. The common
@@ -5632,9 +5648,38 @@ class Runner:
                       "for this app may keep retrying", exc)
 
     def auth_stopped(self, macro_name: str) -> dict:
-        """Why automatic sign-in is standing down for this macro, or {}."""
+        """Why automatic sign-in is standing down for this macro, or {}.
+
+        TWO KINDS OF STOP, and only one of them is forever. A REFUSED
+        PASSWORD stays stopped until a person clears it — what fixes it is
+        somebody typing the right one, and a timer would put the account
+        back in front of the same wall at 3am. `too_many_failures` is
+        different: three RuntimeErrors in a row is a walk that broke, not
+        an account that refused, and the walk gets fixed by a deploy the
+        stop never hears about. Seen live: HHAeXchange+ stood down on
+        Sep 1 under a dialog-reading bug fixed on Sep 2, and stayed down —
+        invisibly — for three days, the app expiring every fifteen idle
+        minutes with nothing allowed to revive it. So that kind of stop
+        lapses after AUTH_STOP_RETRY_AFTER and buys itself three more
+        tries; if the walk is still broken it stops again, and says so.
+        """
         entry = self._read_stops().get(macro_name)
-        return entry if isinstance(entry, dict) else {}
+        if not isinstance(entry, dict):
+            return {}
+        if entry.get("why") == "too_many_failures":
+            try:
+                age = time.time() - float(entry.get("at") or 0.0)
+            except (TypeError, ValueError):
+                age = 0.0
+            if age > AUTH_STOP_RETRY_AFTER:
+                stops = self._read_stops()
+                stops.pop(macro_name, None)
+                self._write_stops(stops)
+                self._auth_fails.pop(macro_name, None)
+                log.warning("automatic sign-in for %s trying again after "
+                            "%.0f minutes stood down", macro_name, age / 60)
+                return {}
+        return entry
 
     def stop_auth(self, macro_name: str, why: str, tries: int = 0) -> None:
         """Stand automatic sign-in down for one app until somebody clears it.
@@ -5650,6 +5695,24 @@ class Runner:
         stops[macro_name] = {"at": time.time(), "why": why, "tries": tries}
         self._write_stops(stops)
         log.error("automatic sign-in STOPPED for %s: %s", macro_name, why)
+        # SAID OUT LOUD, ON A PHONE. The journal line above is where this
+        # went for three days without anybody reading it; a stop nobody
+        # can see looks exactly like a broken app. The same push channel
+        # that carries the sign-in code carries this, tappable to the
+        # portal, where the launcher now shows the stop with the switch
+        # that clears it. Never raises: a notification that fails is not
+        # allowed to fail the stand-down that needed announcing.
+        try:
+            from apt_log import push
+            from apt_log.ui.i18n import DEFAULT_LANGUAGE, Translator
+
+            t = Translator(DEFAULT_LANGUAGE)
+            app = AUTH_APP_NAMES.get(macro_name, macro_name)
+            push.send(t("push.auth_stopped.title", app=app),
+                      t("push.auth_stopped.body", app=app),
+                      url="/app", tag=f"auth-stop-{macro_name}")
+        except Exception as exc:  # noqa: BLE001
+            log.warning("could not push the stand-down notice (%s)", exc)
 
     def resume_auth(self, macro_name: str = "") -> bool:
         """Clear a stop, once the credentials have been seen to."""

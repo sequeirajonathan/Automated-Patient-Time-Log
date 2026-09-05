@@ -6767,3 +6767,76 @@ class TestTheClockRules:
         assert macros.MACROS["clock_reset"].takes_arg is False
         for name in ("clock_set", "clock_reset"):
             assert name not in macros.OPERATIONS, "they have their own control"
+
+
+class TestAStopThatCanBeSeenAndOutgrown:
+    """HHAeXchange+ stood down on Sep 1 under a walk bug fixed on Sep 2, and
+    stayed down — invisibly — for three days. Two kinds of stop now, and a
+    stand-down that announces itself."""
+
+    def _runner(self, tmp_path):
+        return macros.Runner(tmp_path / "req.json", tmp_path / "status.json")
+
+    def test_a_refused_password_still_never_lapses(self, tmp_path, monkeypatch):
+        runner = self._runner(tmp_path)
+        runner.stop_auth("hhax_uma_login", "credentials_refused")
+        # `macros.time` IS the `time` module: capture the real clock before
+        # patching it, or the lambda calls itself.
+        real = time.time
+        monkeypatch.setattr(macros.time, "time",
+                            lambda: real() + macros.AUTH_STOP_RETRY_AFTER * 50)
+        assert runner.auth_stopped("hhax_uma_login")["why"] == "credentials_refused"
+
+    def test_three_failures_lapse_after_the_cooldown_and_buy_three_more_tries(
+            self, tmp_path, monkeypatch):
+        runner = self._runner(tmp_path)
+        for _ in range(macros.AUTH_MAX_TRIES):
+            runner._auth_failed("hhax_uma_login")
+        assert runner.auth_stopped("hhax_uma_login")["why"] == "too_many_failures"
+        real = time.time
+        # Not a second before.
+        monkeypatch.setattr(macros.time, "time",
+                            lambda: real() + macros.AUTH_STOP_RETRY_AFTER - 60)
+        assert runner.auth_stopped("hhax_uma_login")
+        monkeypatch.setattr(macros.time, "time",
+                            lambda: real() + macros.AUTH_STOP_RETRY_AFTER + 60)
+        assert runner.auth_stopped("hhax_uma_login") == {}
+        # The count starts over: two more failures do not stop it again.
+        for _ in range(macros.AUTH_MAX_TRIES - 1):
+            runner._auth_failed("hhax_uma_login")
+        assert runner.auth_stopped("hhax_uma_login") == {}
+        runner._auth_failed("hhax_uma_login")
+        assert runner.auth_stopped("hhax_uma_login")["why"] == "too_many_failures"
+
+    def test_a_stand_down_is_pushed_to_a_phone(self, tmp_path, monkeypatch):
+        from apt_log import push
+
+        sent = []
+        monkeypatch.setattr(push, "send",
+                            lambda title, body, url="/app", tag="": sent.append((title, body, url, tag)))
+        self._runner(tmp_path).stop_auth("hhax_uma_login", "too_many_failures", tries=3)
+        assert len(sent) == 1
+        title, body, url, tag = sent[0]
+        assert "HHAeXchange+" in title and "HHAeXchange+" in body
+        assert url == "/app" and tag == "auth-stop-hhax_uma_login"
+
+    def test_the_same_stop_twice_is_announced_once(self, tmp_path, monkeypatch):
+        from apt_log import push
+
+        sent = []
+        monkeypatch.setattr(push, "send", lambda *a, **k: sent.append(a))
+        runner = self._runner(tmp_path)
+        runner.stop_auth("inmyteam_login", "too_many_failures")
+        runner.stop_auth("inmyteam_login", "too_many_failures")
+        assert len(sent) == 1
+
+    def test_a_push_that_fails_does_not_fail_the_stop(self, tmp_path, monkeypatch):
+        from apt_log import push
+
+        def boom(*_a, **_k):
+            raise RuntimeError("no channel")
+
+        monkeypatch.setattr(push, "send", boom)
+        runner = self._runner(tmp_path)
+        runner.stop_auth("inmyteam_login", "credentials_refused")
+        assert runner.auth_stopped("inmyteam_login")["why"] == "credentials_refused"

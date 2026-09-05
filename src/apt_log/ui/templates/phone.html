@@ -240,6 +240,22 @@
      The module she opens the portal to read. It sits under the tiles because
      the tiles are what she came for when something is wrong; this is what she
      came for when nothing is. */
+  /* The stand-down card: amber like the clock's pill, because it is the
+     same kind of fact — something is off that will cost a record. */
+  .authstops[hidden] { display:none; }
+  .authstop { margin-top:18px; border-radius:18px; padding:13px 15px;
+              background:hsl(38 90% 55% / .16);
+              border:1px solid hsl(38 90% 60% / .45); text-align:left; }
+  .authstop b { display:block; font-size:15px; font-weight:650;
+                color:hsl(40 100% 82%); }
+  .authstop p { margin:5px 0 10px; font-size:13.5px; line-height:1.4;
+                color:rgba(255,255,255,.82); }
+  .authstop button { appearance:none; border:0; border-radius:10px;
+                     padding:9px 14px; font:inherit; font-size:14px;
+                     font-weight:650; background:rgba(255,255,255,.92);
+                     color:#111; cursor:pointer;
+                     -webkit-tap-highlight-color:transparent; }
+  .authstop button[disabled] { opacity:.55; }
   .upnext { margin-top:20px; border-radius:20px; padding:14px 16px;
             background:rgba(255,255,255,.09);
             border:1px solid rgba(255,255,255,.14);
@@ -2002,6 +2018,23 @@
      this is the module she opens the portal to read, and a skeleton that
      fills in half a second later is a module that looks broken on a bad
      connection. The client re-reads /api/schedule as time passes. #}
+  {# AUTOMATIC SIGN-IN STANDING DOWN, said where she is looking. The stop
+     exists so a refused password cannot walk an account into a lockout;
+     but for three days it was a journal line and nothing else, and the app
+     it protected expired every fifteen idle minutes with nothing allowed
+     to revive it. One card per stopped app, with the switch that clears
+     it — drawn from the same list the socket refreshes. #}
+  <div id="authstops" class="authstops" {% if not auth_stops %}hidden{% endif %}>
+    {% for stop in auth_stops %}
+    <div class="authstop" data-macro="{{ stop.macro }}">
+      <b>{{ t('papp.authstop.title', app=stop.app) }}</b>
+      <p>{{ t('papp.authstop.' ~ stop.why) if stop.why in ('too_many_failures', 'credentials_refused')
+             else t('papp.authstop.other', why=stop.why) }}</p>
+      <button type="button" class="authstop-resume">{{ t('papp.authstop.resume') }}</button>
+    </div>
+    {% endfor %}
+  </div>
+
   <div id="upnext-wrap" data-configured="{{ '1' if plan.configured else '0' }}">
     {% if not plan.ok %}
     {# A file that will not parse says so. An empty week looks exactly like a
@@ -2936,6 +2969,14 @@
     clockManual: {{ t('papp.clock.manual')|tojson }},
     clockAuto: {{ t('papp.clock.auto')|tojson }},
     clockUnknown: {{ t('papp.clock.unknown')|tojson }},
+    authStopTitle: {{ t('papp.authstop.title', app='{app}')|tojson }},
+    authStopWhy: {
+      too_many_failures: {{ t('papp.authstop.too_many_failures')|tojson }},
+      credentials_refused: {{ t('papp.authstop.credentials_refused')|tojson }},
+      other: {{ t('papp.authstop.other', why='{why}')|tojson }}
+    },
+    authStopResume: {{ t('papp.authstop.resume')|tojson }},
+    authStopResumed: {{ t('papp.authstop.resumed')|tojson }},
     appTitle: {{ t('app.title')|tojson }},
     opening: {{ t('papp.opening')|tojson }},
     backToApp: {{ t('papp.back_to_app')|tojson }},

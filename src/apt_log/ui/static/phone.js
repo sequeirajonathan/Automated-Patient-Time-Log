@@ -1041,6 +1041,56 @@
     }).catch(() => clockSettled(false));
   }
 
+  // --------------------------------------------------------- stand-downs
+  // One card per app whose automatic sign-in is standing down, with the
+  // switch that clears it. Rendered from the socket's list so the card
+  // appears the moment a stop is recorded and leaves the moment it clears —
+  // including when it lapses on its own.
+  function applyAuthStops(list) {
+    const box = document.getElementById('authstops');
+    if (!box) return;
+    const stops = Array.isArray(list) ? list : [];
+    box.textContent = '';
+    for (const stop of stops) {
+      const card = document.createElement('div');
+      card.className = 'authstop';
+      card.dataset.macro = stop.macro || '';
+      const title = document.createElement('b');
+      title.textContent = (i18n.authStopTitle || '{app}').replace('{app}', stop.app || '');
+      const why = document.createElement('p');
+      const whys = i18n.authStopWhy || {};
+      why.textContent = whys[stop.why] || (whys.other || '{why}').replace('{why}', stop.why || '');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'authstop-resume';
+      btn.textContent = i18n.authStopResume || '';
+      btn.addEventListener('click', () => resumeAuth(stop.macro, btn));
+      card.append(title, why, btn);
+      box.appendChild(card);
+    }
+    box.hidden = stops.length === 0;
+  }
+
+  function resumeAuth(macro, btn) {
+    if (btn) btn.disabled = true;
+    fetch('/auth/resume', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ macro: macro })
+    }).then((r) => r.json()).then((doc) => {
+      if (doc && doc.ok) {
+        toast(i18n.authStopResumed || '');
+        const card = btn && btn.closest('.authstop');
+        if (card) card.remove();
+        const box = document.getElementById('authstops');
+        if (box && !box.querySelector('.authstop')) box.hidden = true;
+      } else {
+        if (btn) btn.disabled = false;
+        toast(i18n.failed || '');
+      }
+    }).catch(() => { if (btn) btn.disabled = false; toast(i18n.failed || ''); });
+  }
+
   // ------------------------------------------------------------------- macros
   // Reflected whether or not this page started it: the controller signs in by
   // itself when the app lands on its login screen, and she should watch that
@@ -2276,6 +2326,7 @@
         }
       }
       if (msg.clock) applyClock(msg.clock);
+      if (msg.auth_stops !== undefined) applyAuthStops(msg.auth_stops);
       if (msg.macro) applyMacro(msg.macro);
       if (msg.sign) applySign(msg.sign);
       if (msg.relay_html !== undefined || msg.relay_nonce !== undefined) {
@@ -2896,6 +2947,10 @@
     // matters for the fallback; the phone's reading arrives on the socket.
     paintClock();
     setInterval(paintClock, 15000);
+    for (const btn of document.querySelectorAll('.authstop-resume')) {
+      const card = btn.closest('.authstop');
+      btn.addEventListener('click', () => resumeAuth(card ? card.dataset.macro : '', btn));
+    }
     const clockBtn = document.getElementById('clockbtn');
     if (clockBtn) clockBtn.addEventListener('click', openClockSheet);
     const clockClose = document.getElementById('clock-close');
