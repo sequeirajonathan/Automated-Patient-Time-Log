@@ -1214,6 +1214,19 @@
                 background:var(--tint); color:#fff;
                 transition:transform .15s var(--spring); }
   .a-modal-go:active { transform:scale(.97); }
+  /* Two answers sit side by side, the way the phone draws them. They stack
+     when the words are long enough that a row would clip them. */
+  .a-modal-acts { display:flex; flex-direction:column; gap:8px; }
+  .a-modal-acts.two { flex-direction:row; flex-wrap:wrap; }
+  .a-modal-acts.two .a-modal-go { flex:1 1 46%; margin-top:14px; }
+  .a-modal-acts.two .a-modal-go + .a-modal-go { margin-top:14px; }
+  /* The one that takes something away — undoing a live check-in — is a
+     warning, never the filled ordinary way on. */
+  .a-modal-go.danger { background:hsl(38 90% 55% / .18);
+                       color:hsl(24 90% 42%); }
+  @media (prefers-color-scheme: dark) {
+    .a-modal-go.danger { background:hsl(38 90% 55% / .22);
+                         color:hsl(40 100% 76%); } }
 
   /* ANDROID'S PERMISSION PROMPT. Every button here gets a rule of its own:
      an unstyled <button> paints the user-agent's control chrome, which this

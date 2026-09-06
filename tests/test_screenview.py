@@ -3476,3 +3476,89 @@ class TestTheSessionExpiryDialog:
         doc = self._doc()
         doc["statics"] = []
         assert screenview.build(doc)["alert"] is None
+
+
+class TestADialogKeepsEveryAnswerItOffers:
+    """Mobile Caregiver+ asks before it undoes a live check-in, and the
+    portal could only ever reply one way.
+
+    `_app_alert` returned a single `action`, and `build` lifts the whole
+    alert box OUT of the page — so the second button of a two-button
+    confirmation was not merely unrendered, it was deleted. Found while a
+    visit sat "in progress" for thirteen and a half hours with its
+    "Cancelar Inicio" confirmation unanswerable from the front end.
+    """
+
+    def _doc(self, left="Cancelar", right="Aceptar"):
+        return {"app": "com.tellus.evv.v2", "size": [1080, 2340],
+                "activity": "dashboardactivity", "screen": "home",
+                "blocked": "",
+                "elements": [
+                    {"cls": "Button", "rid": "button2", "txt": left,
+                     "b": [219, 1232, 617, 1292], "enabled": True,
+                     "checked": False, "focused": False, "has_text": True},
+                    {"cls": "Button", "rid": "button1", "txt": right,
+                     "b": [617, 1232, 893, 1292], "enabled": True,
+                     "checked": False, "focused": False, "has_text": True}],
+                "statics": [
+                    {"cls": "TextView", "rid": "alertTitle",
+                     "txt": "¿Confirmar?", "b": [201, 1106, 878, 1157]},
+                    {"cls": "TextView", "rid": "message",
+                     "txt": "¿Desea cancelar el inicio de la visita?",
+                     "b": [171, 1167, 908, 1209]}]}
+
+    def test_both_buttons_survive(self):
+        alert = screenview.build(self._doc())["alert"]
+        assert [a["txt"] for a in alert["actions"]] == ["Cancelar", "Aceptar"]
+
+    def test_the_other_button_is_not_left_on_the_page_as_well(self):
+        """Lifted, not duplicated: a dialog answered twice is worse than one
+        answered once."""
+        model = screenview.build(self._doc())
+        page = [it for r in model["rows"] for it in r["items"]]
+        assert page == []
+
+    def test_they_are_drawn_in_the_phone_s_own_order(self):
+        """She is looking at the photograph of the phone as well as at this;
+        re-ordering would put her muscle memory on the wrong button of a
+        dialog that undoes a visit."""
+        alert = screenview.build(self._doc())["alert"]
+        assert [a["aim"]["rid"] for a in alert["actions"]] == \
+            ["button2", "button1"]
+
+    def test_a_dialog_no_word_names_is_left_on_the_page_with_both_answers(self):
+        """Unrecognised is not lost. A "Sí / No" confirmation matches none of
+        ALERT_ACTION_WORDS — deliberately, since both a message and a known
+        way-out word are required or this would claim any OK-ish control on
+        an ordinary form. It renders as the page it is, and BOTH answers stay
+        pressable, which is the property that actually matters."""
+        model = screenview.build(self._doc("No", "Sí"))
+        assert model["alert"] is None
+        pressable = [it.get("txt") or (it.get("lines") or [""])[0]
+                     for r in model["rows"] for it in r["items"]
+                     if it.get("aim")]
+        assert "No" in pressable and "Sí" in pressable
+
+    def test_the_one_that_takes_something_away_is_marked(self):
+        alert = screenview.build(self._doc())["alert"]
+        by = {a["txt"]: a["danger"] for a in alert["actions"]}
+        assert by["Cancelar"] is True and by["Aceptar"] is False
+
+    def test_a_second_button_s_word_is_not_read_as_the_question(self):
+        """Its caption names a button; it is never a line of the message."""
+        doc = self._doc()
+        doc["elements"][0]["txt"] = ""
+        doc["statics"].append({"cls": "TextView", "rid": "cap",
+                               "txt": "Cancelar",
+                               "b": [300, 1245, 540, 1285]})
+        alert = screenview.build(doc)["alert"]
+        assert "Cancelar" not in alert["lines"]
+        assert [a["txt"] for a in alert["actions"]] == ["Cancelar", "Aceptar"]
+
+    def test_a_one_button_alert_still_answers_the_old_way(self):
+        """The single-button alerts this was written for keep `action`."""
+        doc = self._doc()
+        doc["elements"] = [doc["elements"][1]]
+        alert = screenview.build(doc)["alert"]
+        assert alert["action"]["txt"] == "Aceptar"
+        assert [a["txt"] for a in alert["actions"]] == ["Aceptar"]
