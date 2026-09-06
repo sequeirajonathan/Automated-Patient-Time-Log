@@ -1305,20 +1305,83 @@ def _app_alert(doc: dict, w: int, h: int) -> dict | None:
             continue
         # The message: text ABOVE the button, in the button's own column.
         middle = (box[0] + box[2]) / 2
+        # A caption INSIDE any small control on the button band is that
+        # button's name, never the dialog's message — checked against every
+        # element rather than only the matched one, so a second button's
+        # word cannot arrive as a line of the question.
+        def _on_a_button(s: dict) -> bool:
+            return any(_contains(e["b"], s["b"]) for e in elements
+                       if 0 < (e["b"][2] - e["b"][0]) * (e["b"][3] - e["b"][1])
+                       <= w * h * ALERT_ACTION_MAX_AREA)
+
         said = [s for s in statics
-                if s is not caption
+                if s is not caption and not _on_a_button(s)
                 and 0 <= box[1] - s["b"][3] <= ALERT_MESSAGE_REACH
                 and abs((s["b"][0] + s["b"][2]) / 2 - middle) <= w * ALERT_COLUMN]
         if not said:
             continue
         said.sort(key=lambda s: s["b"][1])
         lines = [(s.get("txt") or "").strip() for s in said]
-        whole = [min([box[0]] + [s["b"][0] for s in said]),
-                 min([box[1]] + [s["b"][1] for s in said]),
-                 max([box[2]] + [s["b"][2] for s in said]),
-                 max([box[3]] + [s["b"][3] for s in said])]
+
+        # EVERY BUTTON THE DIALOG HAS, NOT JUST THE ONE THAT NAMED IT.
+        #
+        # This returned a single `action` for a long time, and the caller
+        # takes the whole alert box OUT of the page — so on a dialog with
+        # two buttons the second one was not merely unrendered, it was
+        # deleted. The page then showed one answer to a question with two,
+        # and the missing one is the half she needs whenever the recognised
+        # word is the dismissive one: "Cerrar" renders, the confirm does
+        # not, and the dialog can be closed forever without ever being
+        # answered. Found on Mobile Caregiver+'s confirmation for
+        # "Cancelar Inicio" — the app asks before undoing a live check-in,
+        # and the portal could only ever reply to it one way.
+        #
+        # A sibling is a button by the same test this function already
+        # trusts for the action itself: small, on the dialog's own button
+        # band, and carrying a word. Nothing is inferred from the word —
+        # an unrecognised caption is exactly what the second button of a
+        # confirmation looks like, which is why it could not be found by
+        # the word list in the first place.
+        band = [element]
+        for other in elements:
+            if other is element:
+                continue
+            spot = other["b"]
+            size = (spot[2] - spot[0]) * (spot[3] - spot[1])
+            if size <= 0 or size > w * h * ALERT_ACTION_MAX_AREA:
+                continue
+            # Level with the action: a dialog lays its answers in one row.
+            if _overlap(spot, box) < BAND_OVERLAP:
+                continue
+            named = next((c for c in statics if _contains(spot, c["b"])), None)
+            if ((other.get("txt") or "").strip()
+                    or (named.get("txt") if named else "")):
+                band.append(other)
+        # In the order the phone draws them, because she is looking at the
+        # photograph of the phone as well as at this. The affirmative is on
+        # the right on both apps, and re-ordering it here would put her
+        # muscle memory on the wrong button of a dialog that undoes a visit.
+        band.sort(key=lambda e: e["b"][0])
+        actions = []
+        for e in band:
+            named = next((c for c in statics if _contains(e["b"], c["b"])), None)
+            txt = ((e.get("txt") or "").strip()
+                   or (named.get("txt") if named else "") or "").strip()
+            actions.append({"txt": txt, "aim": _aim(e),
+                            # Coloured as a warning, never filled like the
+                            # ordinary way on: one of these undoes a check-in.
+                            "danger": _looks_destructive(txt)})
+
+        # The box has to cover every button it lifts, or the ones outside it
+        # stay on the page underneath and the dialog is answered twice.
+        boxes = [e["b"] for e in band] + [s["b"] for s in said]
+        whole = [min(b[0] for b in boxes), min(b[1] for b in boxes),
+                 max(b[2] for b in boxes), max(b[3] for b in boxes)]
         return {"title": lines[0], "lines": lines[1:],
+                # `action` stays the recognised one: it is what the
+                # single-button alerts this was written for still mean.
                 "action": {"txt": word, "aim": _aim(element)},
+                "actions": actions,
                 "box": whole}
     return None
 

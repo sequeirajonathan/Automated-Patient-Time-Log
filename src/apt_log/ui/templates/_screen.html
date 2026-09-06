@@ -84,9 +84,20 @@
     {% for line in m.alert.lines %}
     <p class="a-modal-l">{{ line }}</p>
     {% endfor %}
-    <button type="button" class="a-modal-go"
-            data-aim='{{ m.alert.action.aim | tojson }}'
-      >{{ m.alert.action.txt }}</button>
+    {# EVERY ANSWER THE DIALOG OFFERS. It drew one — the button whose word
+       named the alert — and the caller lifts the whole dialog out of the
+       page, so a second button was deleted rather than merely hidden. A
+       confirmation then had one reply, and on "Cancelar Inicio" that reply
+       was the wrong one. Drawn in the phone's own left-to-right order; the
+       one that takes something away is toned as a warning rather than
+       filled, and the last is the affirmative on both apps. #}
+    <div class="a-modal-acts{% if (m.alert.actions | default([])) | length > 1 %} two{% endif %}">
+      {% for a in m.alert.actions | default([m.alert.action]) %}
+      <button type="button" class="a-modal-go{% if a.danger %} danger{% endif %}"
+              data-aim='{{ a.aim | tojson }}'
+        >{{ a.txt }}</button>
+      {% endfor %}
+    </div>
   </div>
   {% endif %}
 
