@@ -642,6 +642,37 @@ def sideways(xml: str, package: str = "") -> bool:
     return bool(max_x) and max_x < max_y
 
 
+# How much bigger than the old whole-pad fit a signature may be drawn. A
+# short dash or a single initial is a small mark on purpose, and blown up to
+# fill a wide strip it stops being the thing she adopted.
+INK_MAX_MAGNIFY = 2.5
+
+
+def _ink_box(strokes, aspect: float):
+    """The signature's own box in pad units, or None if unmeasurable.
+
+    Pad units put the pad at `aspect` wide and 1 tall, so both axes are
+    comparable before any scaling. Returns (x, y, width, height); a stroke
+    of a single point has no extent and is treated as unmeasurable rather
+    than magnified to infinity.
+    """
+    xs, ys = [], []
+    for stroke in strokes or ():
+        points = stroke.get("points") if isinstance(stroke, dict) else stroke
+        for p in points or ():
+            try:
+                xs.append(min(max(float(p[0]), 0.0), 1.0) * aspect)
+                ys.append(min(max(float(p[1]), 0.0), 1.0))
+            except (TypeError, ValueError, IndexError):
+                continue
+    if not xs:
+        return None
+    box_w, box_h = max(xs) - min(xs), max(ys) - min(ys)
+    if box_w <= 0 or box_h <= 0:
+        return None
+    return min(xs), min(ys), box_w, box_h
+
+
 # --------------------------------------------------------------------- paths
 def build_paths(strokes, bounds: list[int],
                 aspect: float = 1.0,
@@ -670,11 +701,43 @@ def build_paths(strokes, bounds: list[int],
     left, top = x1 + inset_x, y1 + inset_y
     width, height = (x2 - x1) - 2 * inset_x, (y2 - y1) - 2 * inset_y
 
-    # Fit the pad's rectangle uniformly inside the canvas, centred.
-    k = min(width / aspect, height)
-    draw_w, draw_h = k * aspect, k
-    off_x = left + (width - draw_w) / 2
-    off_y = top + (height - draw_h) / 2
+    # FIT THE SIGNATURE, NOT THE PAD IT WAS DRAWN ON.
+    #
+    # This fitted the pad's whole rectangle, which wastes every part of the
+    # pad she did not write on — and she never writes edge to edge. On a
+    # canvas the same shape as the pad that is only a little small; on one
+    # of a different shape it is the difference between a signature and a
+    # smudge. Measured on Mobile Caregiver+, whose participant strip is
+    # 994x198 (aspect 5.0) against a pad of 2.2: Atanasio's signature landed
+    # 270x97 — 27% of the width, 49% of the height — a mark adrift in the
+    # middle of an empty box with 360px of white on either side. His sister
+    # pressed it ten times in fifteen minutes.
+    #
+    # So the INK's own box is what gets fitted. The scale stays uniform, so
+    # the signature keeps the shape she drew — that principle is the whole
+    # reason this does not simply stretch to fill — it is just no longer
+    # scaled by the blank paper around it. Same signature, drawn at the size
+    # a person signing that box would have used.
+    #
+    # In pad units, where the pad is `aspect` wide and 1 tall, so the two
+    # axes are comparable before anything is scaled.
+    span = _ink_box(strokes, aspect)
+    if span is None:
+        # Nothing measurable — a signature of one point, or none. Fall back
+        # to the pad fit rather than dividing by zero.
+        k = min(width / aspect, height)
+        ink_x0, ink_y0, ink_w, ink_h = 0.0, 0.0, aspect, 1.0
+    else:
+        ink_x0, ink_y0, ink_w, ink_h = span
+        # AND A CEILING ON THE MAGNIFICATION. A short dash or a single
+        # initial is a small mark on purpose; blown up to fill a strip it
+        # stops being what she adopted. Bounded against the pad fit, which
+        # is what this drew before.
+        k_pad = min(width / aspect, height)
+        k = min(width / ink_w, height / ink_h, k_pad * INK_MAX_MAGNIFY)
+    draw_w, draw_h = ink_w * k, ink_h * k
+    off_x = left + (width - draw_w) / 2 - ink_x0 * k
+    off_y = top + (height - draw_h) / 2 - ink_y0 * k
 
     paths = []
     for stroke in strokes:
@@ -689,8 +752,10 @@ def build_paths(strokes, bounds: list[int],
             v = min(max(float(p[1]), 0.0), 1.0)
             if rotate:
                 u, v = 1.0 - v, u
-            px = off_x + u * draw_w
-            py = off_y + v * draw_h
+            # Pad units at the fitted scale — `off_x`/`off_y` already carry
+            # the ink box's own offset, so this lands the ink centred.
+            px = off_x + u * aspect * k
+            py = off_y + v * k
             px = min(max(px, left), left + width)
             py = min(max(py, top), top + height)
             path.append((int(px), int(py)))

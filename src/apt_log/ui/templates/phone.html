@@ -1779,6 +1779,20 @@
   .adopted[hidden] { display:none; }
   .adopted-label { display:block; font-size:11.5px; color:var(--muted);
                    margin-bottom:5px; }
+  /* WHILE THE INK IS ON ITS WAY, SAID HERE — beside the button she pressed.
+     The sheet's own waiting line lives down in step two, past the fold on a
+     phone, so a press at the top of the sheet had no visible effect for the
+     ten to twelve seconds a replay takes. The row dims, the buttons go dead
+     (see padWaiting), and the reason says so on the label above them. */
+  .adopted-wait { display:none; }
+  #signsheet.waiting .adopted-wait { display:inline-flex; align-items:center;
+                                     gap:7px; margin-left:10px;
+                                     font-weight:500; color:var(--muted);
+                                     text-transform:none; letter-spacing:0; }
+  #signsheet.waiting .adopted-wait .spin { flex:none; width:12px; height:12px;
+      border-radius:50%; border:2px solid var(--tint-soft);
+      border-top-color:var(--tint); animation:spin .8s linear infinite; }
+  #signsheet.waiting .adopted-row { opacity:.45; }
   .adopted-row { display:flex; flex-wrap:wrap; gap:8px; }
   /* The name is the whole button. A row of identical "Sign" pills is how the
      wrong person's signature gets applied, so the name never truncates to an
@@ -2616,7 +2630,8 @@
      the app names the signer in its title bar. It used to be a second line
      of its own here, under a heading that said nearly the same thing. #}
   <div class="adopted" id="sign-adopted" hidden>
-    <span class="adopted-label">{{ t('sign.adopted_label') }}</span>
+    <span class="adopted-label">{{ t('sign.adopted_label') }}<span
+      class="adopted-wait"><span class="spin"></span>{{ t('sign.wait_phone') }}</span></span>
     <div class="adopted-row" id="sign-adopted-row"></div>
     {# A PICKER, NOT A WALL OF NAMES.
        Where the screen settles who is signing there is one button and this
