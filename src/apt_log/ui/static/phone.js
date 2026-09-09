@@ -1377,8 +1377,18 @@
   function padWaiting(on) {
     const sheet = document.getElementById('signsheet');
     if (sheet) sheet.classList.toggle('waiting', !!on);
+    // AND THE ADOPTED ROW, which was missing and is the one she presses.
+    //
+    // A replay takes ten to twelve seconds on this phone, and for all of it
+    // the "apply <name>" button stayed live while the only waiting line on
+    // the sheet sat down in step two, past the fold. So the press looked
+    // like nothing at all, and the audit trail shows what anyone would do
+    // about that: ten presses of Atanasio's signature in fifteen minutes on
+    // 9 September, three of them a single second apart. Every one of them
+    // cleared the canvas and drew the same signature again.
     const rows = [document.getElementById('sign-appbtns'),
-                  document.getElementById('sign-legacyrow')];
+                  document.getElementById('sign-legacyrow'),
+                  document.getElementById('sign-adopted-row')];
     for (const row of rows) {
       if (!row) continue;
       for (const b of row.querySelectorAll('button')) b.disabled = !!on;

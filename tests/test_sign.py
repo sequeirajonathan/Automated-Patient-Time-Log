@@ -2118,3 +2118,91 @@ class TestMobileCaregiversPadControls:
         it"."""
         assert not any(i in "buttoncancel" for i in sign._SAVE_IDS)
         assert not any(i in "buttoncancel" for i in sign._CLEAR_IDS)
+
+
+class TestTheSignatureIsFittedNotThePaperAroundIt:
+    """Atanasio's signature landed as a smudge in the middle of Mobile
+    Caregiver+'s participant strip, and the audit trail shows what that cost:
+    ten presses in fifteen minutes on 9 September, three of them a second
+    apart, each one clearing the canvas and drawing the same thing again.
+
+    The strip is 994x198 — aspect 5.0 — against a pad of 2.2. Fitting the
+    PAD meant the signature could never be wider than the strip's height
+    times 2.2, and the blank paper she had not written on ate most of that
+    again: 270x97 measured off the phone, 27% of the width, with 360px of
+    white on either side.
+    """
+
+    CANVAS = [53, 1010, 1047, 1208]          # read off the live handset
+    ASPECT = 2.20
+
+    def _strokes(self):
+        return [{"points": [(0.18, 0.30), (0.30, 0.68), (0.42, 0.30)]},
+                {"points": [(0.22, 0.55), (0.38, 0.58)]},
+                {"points": [(0.55, 0.32), (0.70, 0.70), (0.86, 0.34)]}]
+
+    def _box(self, paths):
+        xs = [p[0] for path in paths for p in path]
+        ys = [p[1] for path in paths for p in path]
+        return max(xs) - min(xs), max(ys) - min(ys), min(xs), max(xs)
+
+    def test_it_uses_the_canvas_it_is_given(self):
+        w, h, _, _ = self._box(
+            sign.build_paths(self._strokes(), self.CANVAS, aspect=self.ASPECT))
+        canvas_w = self.CANVAS[2] - self.CANVAS[0]
+        canvas_h = self.CANVAS[3] - self.CANVAS[1]
+        assert w / canvas_w > 0.55, "a signature, not a mark adrift in a box"
+        assert h / canvas_h > 0.75
+
+    def test_it_is_still_the_signature_she_drew(self):
+        """Uniform scale. Stretching to fill would make it fit and stop being
+        hers, which is the whole reason this does not simply fill."""
+        paths = sign.build_paths(self._strokes(), self.CANVAS,
+                                 aspect=self.ASPECT)
+        w, h, _, _ = self._box(paths)
+        drawn = (0.86 - 0.18) * self.ASPECT / (0.70 - 0.30)
+        assert abs((w / h) - drawn) < 0.1
+
+    def test_it_stays_centred_on_the_canvas(self):
+        _, _, x0, x1 = self._box(
+            sign.build_paths(self._strokes(), self.CANVAS, aspect=self.ASPECT))
+        middle = (self.CANVAS[0] + self.CANVAS[2]) / 2
+        assert abs(((x0 + x1) / 2) - middle) <= 2
+
+    def test_a_small_mark_is_not_blown_up_to_fill_the_strip(self):
+        """A short dash or a single initial is small on purpose; magnified to
+        fill a wide box it stops being the thing she adopted."""
+        paths = sign.build_paths([{"points": [(0.48, 0.49), (0.52, 0.51)]}],
+                                 self.CANVAS, aspect=self.ASPECT)
+        w, _, _, _ = self._box(paths)
+        assert w < (self.CANVAS[2] - self.CANVAS[0]) * 0.25
+
+    def test_nothing_measurable_falls_back_rather_than_dividing_by_zero(self):
+        """One point has no extent. It must not raise and must not scale to
+        infinity."""
+        for strokes in ([{"points": [(0.5, 0.5)]}],
+                        [{"points": [(0.5, 0.2), (0.5, 0.8)]}]):
+            paths = sign.build_paths(strokes, self.CANVAS, aspect=self.ASPECT)
+            for path in paths:
+                for x, y in path:
+                    assert self.CANVAS[0] <= x <= self.CANVAS[2]
+                    assert self.CANVAS[1] <= y <= self.CANVAS[3]
+
+    def test_every_point_still_lands_inside_the_canvas(self):
+        paths = sign.build_paths(self._strokes(), self.CANVAS,
+                                 aspect=self.ASPECT)
+        for path in paths:
+            for x, y in path:
+                assert self.CANVAS[0] <= x <= self.CANVAS[2]
+                assert self.CANVAS[1] <= y <= self.CANVAS[3]
+
+    def test_a_rotated_pad_still_fits_its_ink(self):
+        """The legacy app draws its page a quarter turn round; the fit has to
+        survive that, and stay inside the canvas."""
+        paths = sign.build_paths(self._strokes(), self.CANVAS,
+                                 aspect=self.ASPECT, rotate=True)
+        assert paths
+        for path in paths:
+            for x, y in path:
+                assert self.CANVAS[0] <= x <= self.CANVAS[2]
+                assert self.CANVAS[1] <= y <= self.CANVAS[3]
