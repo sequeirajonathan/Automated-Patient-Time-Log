@@ -1598,6 +1598,7 @@ class TestContainment:
         feed._out_since[0] = 0.0
         feed._last_return[0] = 0.0
         feed._last_care_app[0] = ""
+        feed._settings_since[0] = 0.0
 
     def _run(self, focuses, dt=3.0, status_state="idle"):
         """Feed a sequence of focus sightings dt seconds apart; return the
@@ -1644,6 +1645,74 @@ class TestContainment:
         to work and does not."""
         out = self._run([self.CARE, self.SETTINGS, self.SETTINGS,
                          self.SETTINGS])
+        assert out == []
+
+    def test_a_settings_screen_nobody_is_using_does_not_stay_forever(self):
+        """SANCTIONED WAS WRITTEN AS FOREVER, AND FOREVER IS WHAT IT DID.
+
+        Seen on 9 September: the Date & time screen, opened after a clock
+        change, still in front nine minutes later with a visit due at 21:05
+        and the portal drawing an unmapped page where Mobile Caregiver+
+        should have been. Somewhere the phone can be SENT is not somewhere
+        it may be abandoned.
+        """
+        with patch.object(feed, "_last_driven", return_value=0.0):
+            out = self._run([self.CARE] + [self.SETTINGS] * 5, dt=200.0)
+        assert len(out) == 1
+        assert "com.hhaexchange.uma" in out[0]
+
+    def test_but_a_visit_at_a_human_pace_is_never_interrupted(self):
+        """Six minutes is longer than anybody spends reading one screen, and
+        the clock below only runs while nobody is touching the phone."""
+        with patch.object(feed, "_last_driven", return_value=0.0):
+            out = self._run([self.CARE] + [self.SETTINGS] * 4, dt=60.0)
+        assert out == []
+
+    def test_working_through_a_screen_keeps_the_visit_open(self):
+        """The clock is measured from the last press, not from arrival. An
+        operator walking a Settings screen for half an hour is working, and
+        yanking the phone out from under her would be the same bug wearing
+        the opposite coat."""
+        clock = [1000.0]
+
+        # Always "somebody pressed something a moment ago".
+        def driving():
+            return clock[0] - 5.0
+
+        self._reset()
+        calls = []
+
+        class S:
+            state = "idle"
+
+        import apt_log.macros as macros_mod
+        with patch.object(feed.time, "time", side_effect=lambda: clock[0]), \
+             patch.object(feed, "_last_driven", side_effect=driving), \
+             patch.object(feed, "_adb",
+                          side_effect=lambda a, *_, **__: calls.append(a)
+                          or MagicMock(returncode=0)), \
+             patch.object(macros_mod, "read_status", return_value=S()):
+            for focus in [self.CARE] + [self.SETTINGS] * 12:
+                feed._watch_containment(focus)
+                clock[0] += 200.0
+        assert not [c for c in calls if c[:2] == ["shell", "monkey"]]
+
+    def test_leaving_settings_gives_the_next_visit_its_own_full_length(self):
+        """Otherwise a second trip inherits the remains of the first and gets
+        bounced almost at once."""
+        with patch.object(feed, "_last_driven", return_value=0.0):
+            self._run([self.CARE, self.SETTINGS, self.SETTINGS], dt=200.0)
+            assert feed._settings_since[0]
+            feed._watch_containment(self.CARE)
+        assert feed._settings_since[0] == 0.0
+
+    def test_a_lapsed_visit_still_waits_for_a_macro_to_finish(self):
+        """Falling through to containment means falling through to ALL of
+        it — the dwell, the cooldown, and the stand-down for a macro that is
+        driving the phone through Settings on purpose."""
+        with patch.object(feed, "_last_driven", return_value=0.0):
+            out = self._run([self.CARE] + [self.SETTINGS] * 5, dt=200.0,
+                            status_state="running")
         assert out == []
 
     def test_chromes_custom_tab_is_part_of_the_flow(self):
@@ -3845,3 +3914,50 @@ class TestTheLoopActuallyRunsBothOfThem:
             adb.return_value.stdout = b""
             feed.capture()
         assert order == ["floating", "contain"]
+
+
+class TestTheDriveSignalCrossesProcesses:
+    """The watchdog runs in the feed process and she presses buttons in the
+    web one, so a variable set beside the tap would never be seen here.
+
+    The hierarchy poke already crosses that gap — the web process touches it
+    on every tap, every typed field and every scroll — and it already means
+    exactly "a person just did something to the phone". Reading it is what
+    makes the Settings visit measure idleness rather than arrival.
+    """
+
+    def test_the_poke_is_what_says_somebody_is_driving(self, tmp_path):
+        from apt_log.ui import state as state_mod
+
+        poke = tmp_path / feed.POKE_NAME
+        poke.write_text("1000.0", encoding="utf-8")
+        with patch.object(state_mod, "STATE_DIR", tmp_path):
+            assert feed._last_driven() == pytest.approx(poke.stat().st_mtime)
+
+    def test_no_poke_yet_reads_as_nobody_driving(self, tmp_path):
+        """A controller that has never been touched must not hold a Settings
+        screen open on the strength of a file that does not exist."""
+        from apt_log.ui import state as state_mod
+
+        with patch.object(state_mod, "STATE_DIR", tmp_path):
+            assert feed._last_driven() == 0.0
+
+    def test_a_tap_writes_the_poke_this_reads(self, tmp_path):
+        """The two halves have to be the same file, or the visit measures
+        nothing. This is the test that fails if either side is renamed."""
+        from apt_log.ui import state as state_mod
+
+        els = feed.elements(TestElements.XML)
+        button = next(e for e in els if e["rid"] == "btn_clock_in")
+        frame = tmp_path / "frame.json"
+        import datetime as dt
+        frame.write_text(json.dumps({
+            "at": dt.datetime.now().isoformat(),
+            "id": feed.frame_id(els), "elements": els}), encoding="utf-8")
+
+        with patch.object(state_mod, "STATE_DIR", tmp_path), \
+             patch.object(feed, "_adb") as adb:
+            adb.return_value.returncode = 0
+            assert feed._last_driven() == 0.0
+            feed.tap("", button, frame_path=frame)
+            assert feed._last_driven() > 0.0
