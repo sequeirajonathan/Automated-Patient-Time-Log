@@ -1297,7 +1297,43 @@ def _watch_density(focus: str, serial: str | None = None,
 # running, because macros drive the phone through surfaces on purpose.
 CONTAIN_DWELL = 5.0
 CONTAIN_COOLDOWN = 20.0
+
+# HOW LONG THE PHONE MAY STAY IN SETTINGS BEFORE IT IS BROUGHT BACK.
+#
+# Settings is somewhere the phone can be SENT rather than somewhere it
+# wandered, so containment lets it be. But "sanctioned" was written as
+# "forever", and forever is what it did: once in Settings the phone stayed
+# there until a person noticed. Seen on 9 September — the Date & time
+# screen, opened after a clock change, still in front nine minutes later
+# with a visit due at 21:05 and the portal drawing an unmapped page where
+# Mobile Caregiver+ should have been.
+#
+# So the pass becomes a VISIT. Long enough to walk a Settings screen at a
+# human pace, and measured from the last time anybody actually drove the
+# phone (see `_last_driven`) rather than from arrival — an operator working
+# through a screen is never interrupted, and a screen nobody has touched
+# for six minutes is a screen that was left open.
+SETTINGS_VISIT = 6 * 60.0
 _out_since = [0.0]
+_settings_since = [0.0]
+
+
+def _last_driven() -> float:
+    """When somebody last drove the phone from the portal, or 0.0.
+
+    Read off the hierarchy poke, which the WEB process already touches on
+    every tap, every typed field and every scroll. That is the point: this
+    watchdog runs in the feed process and she is pressing buttons in
+    another one, so a variable set beside the tap would never be seen here.
+    The file already exists for the watcher's sake and already means
+    exactly "a person just did something to the phone".
+    """
+    try:
+        from apt_log.ui.state import STATE_DIR
+
+        return (STATE_DIR / POKE_NAME).stat().st_mtime
+    except (OSError, ImportError):
+        return 0.0
 _last_return = [0.0]
 _last_care_app = [""]
 
@@ -1341,6 +1377,12 @@ def _publish_last_care_app(pkg: str) -> None:
 
 def _watch_containment(focus: str, serial: str | None = None) -> None:
     pkg = (focus or "").split("/")[0]
+    if pkg not in SETTINGS_APPS:
+        # The visit clock runs only while the phone is actually in
+        # Settings, and leaving by ANY route ends it — including the
+        # bounce below, so a second visit gets its own full length rather
+        # than the remains of the first.
+        _settings_since[0] = 0.0
     if pkg in CARE_APPS:
         # Only on a change: this runs on every tick, and the file exists so
         # a page loading cold has somewhere to point, not to be rewritten
@@ -1360,8 +1402,19 @@ def _watch_containment(focus: str, serial: str | None = None) -> None:
     if pkg in SETTINGS_APPS:
         # Opened on purpose, from the control centre. The watchdog exists to
         # stop the phone WANDERING; it must not undo somewhere it was sent.
-        _out_since[0] = 0.0
-        return
+        #
+        # For a while. See SETTINGS_VISIT: a pass that never expires is how
+        # the phone came to sit on Date & time through a visit's start.
+        now = time.time()
+        if not _settings_since[0]:
+            _settings_since[0] = now
+        if now - max(_settings_since[0], _last_driven()) < SETTINGS_VISIT:
+            _out_since[0] = 0.0
+            return
+        # The visit has run out. Fall through to the ordinary containment
+        # below — which still waits out the dwell, still holds off while a
+        # macro is in flight, and still refuses to guess at a care app it
+        # has never seen.
     if pkg in PERMISSION_APPS:
         # The care app asked for this. HHAeXchange+ requests location at
         # check-in and Android answers with its own dialog, from its own

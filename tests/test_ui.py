@@ -7506,8 +7506,15 @@ class TestTheWayBackFromTheHomeScreen:
         somewhere to point, not to be rewritten twice a second."""
         src = (Path(__file__).resolve().parents[1]
                / "src/apt_log/feed.py").read_text(encoding="utf-8")
+        # THE WHOLE FUNCTION, not a byte count from its start. A window of
+        # 500 characters passed for as long as the guard happened to sit
+        # inside it and then failed on a comment added above it — which is a
+        # test failing for a reason that has nothing to do with what it
+        # protects. The care-app branch is where the guard belongs and the
+        # function is where to look for it.
         i = src.index("def _watch_containment")
-        assert "if _last_care_app[0] != pkg:" in src[i:i + 500]
+        body = src[i:src.index("\ndef ", i + 1)]
+        assert "if _last_care_app[0] != pkg:" in body
 
 
 class TestEachPhoneCanSayWhoItIs:
