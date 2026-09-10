@@ -344,6 +344,7 @@
     var EXPLAIN = {{ t('debug.screen.explain')|tojson }};
     var LOOK_AGAIN = {{ t('debug.look_again')|tojson }};
     var SENT = {{ t('debug.tap_sent')|tojson }};
+    var COVERED = {{ t('papp.floating_covered')|tojson }};
     var WORDS = {
       busy: {{ t('debug.toast.busy')|tojson }},
       done: {{ t('debug.toast.done')|tojson }},
@@ -405,8 +406,18 @@
                                element: { rid: el.rid || '', cls: el.cls || '',
                                           b: el.b } })
       }).then(function (r) {
-        say(r.ok ? SENT : LOOK_AGAIN);
-        toast(r.ok ? SENT : LOOK_AGAIN);
+        if (r.ok) {
+          say(SENT); toast(SENT);
+        } else {
+          // A refusal has two flavours and only one of them is answered by
+          // looking again. A floating window is still there on the next
+          // read, over the same button.
+          return r.json().catch(function () { return {}; }).then(function (d) {
+            var w = (d && d.error === 'covered') ? COVERED : LOOK_AGAIN;
+            say(w); toast(w);
+          });
+        }
+      }).then(function () {
         setTimeout(refresh, 900);
         setTimeout(function () { say(EXPLAIN); }, 4000);
       }).catch(function () { say(LOOK_AGAIN); toast(WORDS.failed); });

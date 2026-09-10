@@ -3423,3 +3423,163 @@ class TestTheJournalSaysWhichColumnATickWentInto:
         with caplog.at_level(logging.INFO, logger="apt_log.feed"):
             feed._tick_columns([{"cls": "CheckBox", "b": None},
                                 {"cls": "CheckBox"}])
+
+
+class TestAWindowFloatingOverTheApp:
+    """A picture-in-picture window, which nothing else in this file can see.
+
+    Reported on 10 September as "a mini map getting in the way of starting a
+    visit". Mobile Caregiver+ draws the patient's address as a link; tapping
+    it opens Google Maps navigation; coming back leaves Maps pinned over the
+    bottom-right corner — where "Comenzar Visita" is.
+
+    Every check the portal had said the screen was fine. `mCurrentFocus`
+    named the care app, so it was not `covered`; the accessibility dump is
+    the app's alone, so the tree drew the button as if nothing were on top of
+    it. Only `dumpsys window` knows, and only as a pinned task well away from
+    the focus line — so that is where it is read, off the dump the focus
+    already costs.
+    """
+
+    FOCUS = ("  mCurrentFocus=Window{a1 u0 "
+             "com.tellus.evv.v2/com.tellus.evv.v2.DashboardActivity}\n"
+             "  mAwake=true\n")
+    PINNED = (
+        "    Task{7afa3b3 #5028 type=standard "
+        "A=10254:com.google.android.apps.maps U=0 visible=true "
+        "visibleRequested=true mode=pinned translucent=false sz=1}\n"
+        "      bounds=[480,1300][920,1880]\n")
+
+    def test_a_pinned_task_is_read_off_the_dump(self):
+        with patch.object(feed, "_adb") as adb:
+            adb.return_value.stdout = (self.FOCUS + self.PINNED).encode()
+            focus, awake, _ = feed.window_state()
+        assert focus.startswith("com.tellus.evv.v2/")
+        assert awake is True
+        assert feed.pinned_window() == {
+            "app": "com.google.android.apps.maps",
+            "b": [480, 1300, 920, 1880]}
+
+    def test_an_ordinary_screen_floats_nothing(self):
+        with patch.object(feed, "_adb") as adb:
+            adb.return_value.stdout = self.FOCUS.encode()
+            feed.window_state()
+        assert feed.pinned_window() == {}
+
+    def test_a_pinned_task_nobody_can_see_is_not_in_the_way(self):
+        """Android keeps the task around after the window is gone. An
+        invisible window covers no button, and a strip warning about one
+        that is not there is a strip she learns to ignore."""
+        gone = self.PINNED.replace("visible=true", "visible=false")
+        with patch.object(feed, "_adb") as adb:
+            adb.return_value.stdout = (self.FOCUS + gone).encode()
+            feed.window_state()
+        assert feed.pinned_window() == {}
+
+    def test_the_reading_does_not_escape_by_reference(self):
+        """The publisher must not be able to edit what the reader recorded."""
+        with patch.object(feed, "_adb") as adb:
+            adb.return_value.stdout = (self.FOCUS + self.PINNED).encode()
+            feed.window_state()
+        got = feed.pinned_window()
+        got["app"] = "com.something.else"
+        assert feed.pinned_window()["app"] == "com.google.android.apps.maps"
+
+    def test_it_reaches_the_screen_document(self, tmp_path):
+        with patch.object(feed, "_pinned_now",
+                          {"app": "com.google.android.apps.maps",
+                           "b": [480, 1300, 920, 1880]}):
+            target = tmp_path / "screen.json"
+            frame = {"id": "a", "img": "", "at": "now", "size": [1080, 2400]}
+            feed.write_screen(target, frame, "unknown", "", "<node/>",
+                              focus="com.tellus.evv.v2/.Dashboard")
+        doc = json.loads(target.read_text())
+        assert doc["floating"]["app"] == "com.google.android.apps.maps"
+        # And is NOT the same fact as a system panel over the app: the page
+        # hides the screen for one and draws a strip over it for the other.
+        assert doc["covered"] is False
+
+    def test_and_an_empty_reading_reaches_it_too(self, tmp_path):
+        with patch.object(feed, "_pinned_now", {}):
+            target = tmp_path / "screen.json"
+            frame = {"id": "a", "img": "", "at": "now", "size": [1080, 2400]}
+            feed.write_screen(target, frame, "unknown", "", "<node/>",
+                              focus="com.tellus.evv.v2/.Dashboard")
+        assert json.loads(target.read_text())["floating"] == {}
+
+
+class TestATapDoesNotGoIntoSomebodyElsesWindow:
+    """`input tap` addresses the screen, not the app.
+
+    Whatever is topmost at that point receives it, so a perfectly verified
+    element under a floating window is a tap delivered to the floating
+    window. That is the one refusal that cannot be undone by looking again —
+    and on the screen this was found on, the button underneath starts a
+    visit.
+    """
+
+    XML = TestElements.XML
+
+    def _frame(self, tmp_path, floating=None):
+        import datetime as dt
+        path = tmp_path / "frame.json"
+        els = feed.elements(self.XML)
+        path.write_text(json.dumps({
+            "at": dt.datetime.now().isoformat(),
+            "id": feed.frame_id(els),
+            "elements": els,
+            "floating": floating or {},
+        }), encoding="utf-8")
+        return path
+
+    def _button(self):
+        return next(e for e in feed.elements(self.XML)
+                    if e["rid"] == "btn_clock_in")
+
+    def test_a_tap_under_it_is_refused_and_names_what_is_in_the_way(
+            self, tmp_path):
+        over = {"app": "com.google.android.apps.maps", "b": [400, 700, 740, 900]}
+        with patch.object(feed, "_adb") as adb:
+            with pytest.raises(feed.Covered) as caught:
+                feed.tap("", self._button(),
+                         frame_path=self._frame(tmp_path, over))
+            adb.assert_not_called()
+        assert caught.value.app == "com.google.android.apps.maps"
+
+    def test_a_button_clear_of_it_still_taps(self, tmp_path):
+        """The rest of the screen is hers. A floating window covers a corner,
+        and refusing the whole page over it would be the worse answer."""
+        corner = {"app": "com.google.android.apps.maps",
+                  "b": [400, 1300, 740, 1500]}
+        with patch.object(feed, "_adb") as adb:
+            adb.return_value.returncode = 0
+            feed.tap("", self._button(),
+                     frame_path=self._frame(tmp_path, corner))
+        assert adb.call_args.args[0][:3] == ["shell", "input", "tap"]
+
+    def test_a_frame_that_predates_the_reading_taps_as_before(self, tmp_path):
+        """Frames written before this existed carry no `floating` key at all,
+        and must not become untappable because of it."""
+        with patch.object(feed, "_adb") as adb:
+            adb.return_value.returncode = 0
+            feed.tap("", self._button(), frame_path=self._frame(tmp_path))
+        assert adb.called
+
+    @pytest.mark.parametrize("other, touching", [
+        ([0, 0, 19, 1600], False),        # ends exactly where the button starts
+        ([731, 0, 1080, 1600], False),    # starts exactly where it ends
+        ([0, 0, 720, 744], False),        # above it, sharing the edge
+        ([0, 804, 720, 1600], False),     # below it, sharing the edge
+        ([0, 0, 20, 745], True),          # one pixel in
+        ([19, 744, 731, 804], True),      # exactly over it
+    ])
+    def test_sharing_an_edge_is_not_covering(self, other, touching):
+        """A window that stops where the button starts covers none of it.
+        Anything past that does — any overlap at all, not just the centre:
+        half a button eaten is half of what she is most likely to press."""
+        assert feed._overlaps(other, [19, 744, 731, 804]) is touching
+
+    def test_a_reading_that_makes_no_sense_covers_nothing(self):
+        """A malformed dump must not make the whole screen untappable."""
+        assert feed._overlaps(None, [19, 744, 731, 804]) is False
+        assert feed._overlaps([1, 2], [19, 744, 731, 804]) is False

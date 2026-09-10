@@ -202,6 +202,52 @@ _ANR = re.compile(
 # while the screen is off, so "no focus" catches only some sleeps — observed
 # on the owner's phone as a green Live over a photograph of a black screen.
 _AWAKE = re.compile(r"mAwake=(true|false)")
+# A FLOATING WINDOW OVER THE APP, WHICH THE TREE DOES NOT MENTION AT ALL.
+#
+# Android's picture-in-picture is its own task, pinned above everything, and
+# it is invisible to every check this file makes: the accessibility dump is
+# the app's, `mCurrentFocus` still names the app, and `screen_is_covered`
+# knows only the shade family. So the portal published a button as tappable
+# while a floating window sat on top of it, and the tap went to the floating
+# window.
+#
+# Seen live on 10 September and reported as "a mini map getting in the way of
+# starting a visit": Mobile Caregiver+'s Visit Detail draws the patient's
+# address as a link, tapping it opens Google Maps navigation, and coming back
+# leaves Maps pinned in the bottom-right corner — exactly where "Comenzar
+# Visita" is. Confirmed in the dump as
+#   Task{... A=10254:com.google.android.apps.maps ... mode=pinned ...}
+#   bounds=[480,1300][920,1880]
+# with the care app still holding the focus.
+#
+# Read off the dump `window_state` already costs, so it is free.
+_PINNED = re.compile(
+    r"Task\{[^}]*?A=\d+:([A-Za-z0-9_.]+)[^}]*?visible=true[^}]*?"
+    r"mode=pinned[^}]*?\}\s*\n\s*"
+    r"bounds=\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]")
+# What the last dump said was floating, for the publisher to read. Module
+# level like `_last_care_app` and the ANR clocks above, and for the same
+# reason: the read happens in one place and is wanted in another.
+_pinned_now: dict = {}
+
+
+def pinned_window() -> dict:
+    """The floating window over the app, or {}.
+
+    {"app": package, "b": [x0, y0, x1, y1]} — the package so the page can
+    name it and a macro can close it, the bounds so a tap underneath can be
+    refused rather than delivered to the wrong window.
+    """
+    return dict(_pinned_now)
+
+
+def _read_pinned(dump: str) -> dict:
+    m = _PINNED.search(dump or "")
+    if not m:
+        return {}
+    return {"app": m.group(1),
+            "b": [int(m.group(2)), int(m.group(3)),
+                  int(m.group(4)), int(m.group(5))]}
 _PASSWORD_NODE = re.compile(r'password="true"')
 
 # Why no picture was published, as a code rather than a sentence. The prose is
@@ -504,6 +550,10 @@ def window_state(serial: str | None = None) -> tuple[str, bool, str]:
     m = _FOCUS.search(out)
     awake = _AWAKE.search(out)
     anr = _ANR.search(out)
+    # From the same read — see `_PINNED`. Recorded rather than returned so
+    # the four callers that unpack this triple keep working.
+    global _pinned_now
+    _pinned_now = _read_pinned(out)
     focus = m.group(1) if m else ""
     # A popup owns the focus while it is open and Android titles that window
     # instead of naming a package, so the read comes back "Window" and the app
@@ -1760,6 +1810,12 @@ def write_screen(target: Path, frame: dict, screen: str, reason: str,
         # one button that does — rather than leaving her tapping a screen
         # that will not answer.
         "covered": screen_is_covered(focus),
+        # And something of ANOTHER APP'S floating over this one — a
+        # picture-in-picture window. Unlike the shade it takes no focus and
+        # covers only a corner, so most of the page still works; what does
+        # not is whatever is underneath it, and the tree gives no hint that
+        # anything is. See `_PINNED`.
+        "floating": pinned_window(),
         # Whether this document is the WHOLE page (a stitched walk) or the
         # viewport. Full documents leave nothing to wonder about.
         "full": bool(stitched),
@@ -1882,6 +1938,9 @@ def write_frame(path: Path, serial: str | None = None,
         # Stitched elements carry original bounds plus their scroll step,
         # so a below-the-fold aim verifies here exactly like any other.
         "elements": stitched["elements"] if stitched else els,
+        # The floating window, carried on the FRAME because that is what a
+        # tap is checked against. See `_PINNED`.
+        "floating": pinned_window(),
         "captured": bool(png),
     }
     target = path.parent / FRAME_NAME
@@ -2775,6 +2834,33 @@ class NotOnScreen(RuntimeError):
     """The element posted back is not one this frame offered."""
 
 
+class Covered(RuntimeError):
+    """Another app's floating window is over the control she aimed at.
+
+    Carries the package so the page can name it and offer to close it —
+    "something is in the way" with no way to move it is a dead end.
+    """
+
+    def __init__(self, app: str = ""):
+        self.app = app
+        super().__init__(f"a floating window ({app or 'unknown'}) is over "
+                         "that button")
+
+
+def _overlaps(a, b) -> bool:
+    """Whether two rectangles share any pixel at all.
+
+    Any overlap counts, not just the centre: a floating window across half a
+    button still eats the half of it she is most likely to press, and the
+    edge of a wide button is a worse thing to aim at than nothing.
+    """
+    try:
+        return not (a[2] <= b[0] or b[2] <= a[0]
+                    or a[3] <= b[1] or b[3] <= a[1])
+    except (TypeError, IndexError):
+        return False
+
+
 def published_frame(path: Path | None = None) -> dict:
     """The whole published frame, freshness-checked. See published_elements."""
     from apt_log.ui.state import STATE_DIR
@@ -2879,6 +2965,20 @@ def tap(claimed_frame: str, element: dict, serial: str | None = None,
 
     x1, y1, x2, y2 = match["b"]
     cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+    # NOT INTO A WINDOW THAT IS NOT THE APP'S.
+    #
+    # A pinned picture-in-picture window sits above the app and appears
+    # nowhere in its accessibility tree, so everything above this line can
+    # verify the element perfectly and the tap still land somewhere else
+    # entirely. `input tap` addresses the SCREEN, not the app: whatever is
+    # topmost at that point gets it. Refused rather than sent, because a tap
+    # delivered to the wrong window is the one outcome that cannot be
+    # undone by looking again — and on the screen this was found on, the
+    # button underneath starts a visit.
+    floating = (frame.get("floating") or {}).get("b")
+    if floating and _overlaps(floating, match["b"]):
+        raise Covered(
+            (frame.get("floating") or {}).get("app", ""))
     result = _adb(["shell", "input", "tap", str(cx), str(cy)], serial, timeout=20.0)
     if result.returncode != 0:
         raise StaleAim(

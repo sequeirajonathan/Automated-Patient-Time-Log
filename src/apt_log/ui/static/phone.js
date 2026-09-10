@@ -764,6 +764,10 @@
     // what "somehow inMyTeam ended up in the phone settings" felt like from
     // the other end.
     body.classList.toggle('covered', !!meta.covered);
+    // ...and its quieter cousin: another app's window floating over a
+    // corner of this one. Said in a strip rather than a card, because the
+    // rest of the screen is still hers to use. See applyFloating.
+    applyFloating(meta.floating);
     // The app in front will not do anything until it is updated. Its own
     // screen has one button, which opens the Store and gets bounced back —
     // so the page says what is happening and offers the act that works.
@@ -1069,6 +1073,35 @@
       box.appendChild(card);
     }
     box.hidden = stops.length === 0;
+  }
+
+  // ANOTHER APP'S WINDOW, FLOATING OVER THIS ONE.
+  //
+  // A picture-in-picture window is its own pinned task above the app. It
+  // takes no focus, so `covered` is false and the header still reads Live;
+  // it appears nowhere in the accessibility tree, so the sketch below draws
+  // every button as if nothing were on top of them. From this page it is
+  // invisible in every way except the one that matters — the tap goes to
+  // the floating window instead of the button. Hence a strip that names it
+  // and one button that takes it away.
+  function applyFloating(f) {
+    const box = document.getElementById('floating');
+    if (!box) return;
+    const pkg = (f && f.app) || '';
+    box.hidden = !pkg;
+    if (!pkg) return;
+    const said = document.getElementById('floating-said');
+    if (said) said.textContent = (i18n.floatingSaid || '{app}')
+      .replace('{app}', floatingName(pkg));
+  }
+
+  // "Maps", not "com.google.android.apps.maps". The tail of the package is
+  // the fallback and it is usually close enough to recognise.
+  function floatingName(pkg) {
+    const names = i18n.floatingNames || {};
+    if (names[pkg]) return names[pkg];
+    const tail = String(pkg).split('.').pop() || pkg;
+    return tail.charAt(0).toUpperCase() + tail.slice(1);
   }
 
   function resumeAuth(macro, btn) {
@@ -2222,7 +2255,13 @@
       if (msg.type === 'tap_result') {
         if (!msg.ok) {
           tapping(false);
-          toast(msg.reason === 'stale' ? (i18n.moved || '') : (i18n.failed || ''));
+          // "It moved, look again" is the wrong thing to say about a
+          // floating window: looking again shows the same button under the
+          // same window. Say what is in the way instead — the strip above
+          // the screen carries the button that moves it.
+          toast(msg.reason === 'covered' ? (i18n.floatingCovered || '')
+                : msg.reason === 'stale' ? (i18n.moved || '')
+                : (i18n.failed || ''));
         }
         return;
       }
@@ -2727,6 +2766,26 @@
     // swipe from the top actually shuts the shade. The macro swipes, checks,
     // and brings the care app back — nothing is force-stopped and no visit
     // is touched, so pressing it at a bad moment costs a second.
+    // The way out from under a floating window. The same macro as the
+    // covered card's, because clear_screen already does exactly this: it
+    // shuts every panel it knows about, force-stops the app that owns the
+    // floating window — never a care app — and brings the care app back to
+    // the front. Nothing of hers is force-stopped and no visit is touched.
+    const unfloat = document.getElementById('floating-clear');
+    if (unfloat) unfloat.addEventListener('click', () => {
+      if (!driving()) return;
+      unfloat.disabled = true;
+      awaitingMacro = true;
+      busy(i18n.clearing || '', 30000);
+      fetch('/macro', {
+        method: 'POST',
+        body: new URLSearchParams({ name: 'clear_screen' }),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        redirect: 'follow'
+      }).catch(() => {
+        awaitingMacro = false; unbusy(); toast(i18n.failed || '');
+      }).finally(() => { unfloat.disabled = false; });
+    });
     const uncover = document.getElementById('covered-clear');
     if (uncover) uncover.addEventListener('click', () => {
       if (!driving()) return;

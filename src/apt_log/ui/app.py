@@ -552,7 +552,7 @@ async def tap_element(request: Request):
 
     409 means "look again", not "failed". The page refreshes and she re-aims.
     """
-    from apt_log.feed import NotOnScreen, StaleAim, tap
+    from apt_log.feed import Covered, NotOnScreen, StaleAim, tap
 
     payload = await request.json()
     frame = payload.get("frame")
@@ -562,6 +562,15 @@ async def tap_element(request: Request):
 
     try:
         result = tap(frame, element)
+    except Covered as exc:
+        # A DIFFERENT REFUSAL, and it must not be dressed as "look again".
+        # Looking again changes nothing here: the floating window will still
+        # be there, over the same button, and the page would send her round
+        # the same loop. Named so the page can say what is in the way and
+        # offer the button that moves it.
+        log.info("tap refused: %s", exc)
+        return JSONResponse({"error": "covered", "app": exc.app},
+                            status_code=409)
     except StaleAim as exc:
         log.info("tap refused: %s", exc)
         return JSONResponse({"error": "stale"}, status_code=409)
@@ -2063,6 +2072,15 @@ async def live(ws: WebSocket):
                     # reach the app underneath while this is true, so the page
                     # stops pretending otherwise and offers the way out.
                     "covered": bool(screen_doc.get("covered")),
+                    # ...and something of ANOTHER app's floating over this
+                    # one. Not the same fact as `covered` and not drawn the
+                    # same way: a picture-in-picture window takes no focus
+                    # and covers one corner, so the rest of the page is
+                    # perfectly usable and hiding it would be a lie. What is
+                    # NOT usable is whatever is under it, and the tree gives
+                    # no hint that anything is — so the package and its
+                    # bounds go out and the page says so above the screen.
+                    "floating": screen_doc.get("floating") or {},
                     # How many required tasks this plan of care is still
                     # missing — 0 on every other screen in both apps. The
                     # button that ticks them appears on the strength of this
@@ -2323,7 +2341,7 @@ async def live(ws: WebSocket):
 
 
 async def _do_tap(msg: dict) -> dict:
-    from apt_log.feed import NotOnScreen, StaleAim, tap
+    from apt_log.feed import Covered, NotOnScreen, StaleAim, tap
 
     element = msg.get("element") or {}
     frame = msg.get("frame") or ""
@@ -2341,6 +2359,11 @@ async def _do_tap(msg: dict) -> dict:
         # A tap dumps the hierarchy up to five times; on the event loop that
         # would freeze every other viewer's frames while she taps.
         await asyncio.to_thread(tap, frame, element)
+    except Covered as exc:
+        # Not "stale": see the /tap route. Re-aiming cannot help.
+        log.info("tap refused: %s", exc)
+        return {"type": "tap_result", "ok": False, "reason": "covered",
+                "app": exc.app}
     except StaleAim as exc:
         log.info("tap refused: %s", exc)
         return {"type": "tap_result", "ok": False, "reason": "stale"}
