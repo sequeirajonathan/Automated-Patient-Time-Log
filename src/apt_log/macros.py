@@ -3439,11 +3439,18 @@ def _clear_screen(driver, report) -> None:
     # the four of them are exactly what this button exists to return her to.
     floating = feed_mod.pinned_window()
     owner = floating.get("app") or ""
-    if owner and owner not in feed_mod.CARE_APPS:
+    if owner:
         report("macro.step.closing_overlay")
-        _force_stop(owner)
-        time.sleep(1.0)
-        log.info("closed the floating window owned by %s", owner)
+        # THE PERMISSION FIRST, and for a care app it is the only thing
+        # done: `appops ... PICTURE_IN_PICTURE ignore` stops the app
+        # floating again without touching the screen she is working on.
+        # The watchdog does this by itself within a tick; pressing the
+        # button must not be a weaker act than not pressing it.
+        feed_mod.deny_pip(owner)
+        if owner not in feed_mod.CARE_APPS:
+            _force_stop(owner)
+            time.sleep(1.0)
+            log.info("closed the floating window owned by %s", owner)
 
     # The shade is the case that produced this, but it is not the only panel
     # that can sit over the app — the volume dialog is the other one she can

@@ -81,6 +81,7 @@ def _transcript(**overrides) -> bytes:
         "airplane": "0",
         "auto_time": "1",
         "auto_zone": "null",
+        "pip": "No operations.",
     }
     values.update(overrides)
     parts = [values[r["id"]] for r in phonesettings.READINGS]
@@ -122,9 +123,15 @@ class TestTheMapItself:
         readings growing a capability their docstring promises they lack."""
         for reading in phonesettings.READINGS:
             probe = reading["probe"]
-            assert probe.startswith(("getprop ", "settings get ", "date ")), \
-                probe
+            # `appops query-op` is the fourth read, and it is a read: it
+            # ASKS which packages an op is denied on. Its writing sibling is
+            # `appops set`, which belongs to the controller's own sweep and
+            # must never appear on this page — hence the prefix, not the
+            # bare command name.
+            assert probe.startswith(("getprop ", "settings get ", "date ",
+                                     "appops query-op ")), probe
             assert "put" not in probe and "-s" not in probe
+            assert "appops set" not in probe
 
 
 class TestOpenPanel:
@@ -223,6 +230,41 @@ def _clock_adb(calls: list, zone: str = "America/New_York"):
         return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
 
     return run
+
+
+class TestTheFloatingCount:
+    """What the phone says about the promise the controller makes in a loop
+    nobody watches: that no app on it may float over another one.
+
+    `appops query-op PICTURE_IN_PICTURE ignore` lists the packages the op is
+    denied on, and the page counts them. Near the package count means the
+    sweep has run; 0 means it has not, and that is worth SEEING rather than
+    deducing from a log on the Pi.
+    """
+
+    def _said(self, raw):
+        reading = next(r for r in phonesettings.READINGS if r["id"] == "pip")
+        return phonesettings._value_of(reading, raw, {})
+
+    def test_a_phone_that_has_never_been_swept_counts_zero(self):
+        assert self._said("No operations.") == "0"
+
+    def test_a_bare_list_is_counted(self):
+        assert self._said("com.google.android.apps.maps\n"
+                          "com.android.chrome") == "2"
+
+    def test_and_so_is_one_under_uid_headings(self):
+        """Some builds group the answer by uid. The heading is not a
+        package and must not be counted as one."""
+        assert self._said("Uid 10254:\n  com.google.android.apps.maps\n"
+                          "Uid 10101:\n  com.android.chrome") == "2"
+
+    def test_it_reaches_the_page(self, monkeypatch):
+        monkeypatch.setattr(phonesettings.subprocess, "run", _fake_adb(
+            _transcript(pip="com.google.android.apps.maps")))
+        doc = phonesettings.readings()
+        row = next(r for r in doc["rows"] if r["id"] == "pip")
+        assert row["value"] == "1"
 
 
 class TestTheClock:

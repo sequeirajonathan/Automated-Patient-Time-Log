@@ -152,6 +152,7 @@
  "debug.reading.clock": "Phone clock",
  "debug.reading.font_scale": "Font scale",
  "debug.reading.locale": "Phone language",
+ "debug.reading.pip": "Apps blocked from floating",
  "debug.reading.model": "Model",
  "debug.reading.screen_timeout": "Screen sleeps after",
  "debug.reading.timezone": "Time zone",

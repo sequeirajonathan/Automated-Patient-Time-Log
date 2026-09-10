@@ -3583,3 +3583,265 @@ class TestATapDoesNotGoIntoSomebodyElsesWindow:
         """A malformed dump must not make the whole screen untappable."""
         assert feed._overlaps(None, [19, 744, 731, 804]) is False
         assert feed._overlaps([1, 2], [19, 744, 731, 804]) is False
+
+
+class TestNoAppMayFloatOverAnother:
+    """The prevention, which is the half that actually answers the ask.
+
+    "We can't afford this pip or any pip to interfere with app components
+    and their functionality." Refusing to tap through a floating window is a
+    safety net; a guarantee that rests on somebody reading a warning strip is
+    not a guarantee. Android's PICTURE_IN_PICTURE app-op is the switch — the
+    one Settings' own "Special app access" writes — and the controller takes
+    it away from every package on the phone.
+
+    Read off the phone before this existed, the op stood at "Default mode:
+    allow" for Google Maps, which is how it came to be pinned over "Comenzar
+    Visita".
+    """
+
+    def test_the_op_is_taken_away_by_name(self):
+        with patch.object(feed, "_adb") as adb:
+            adb.return_value.returncode = 0
+            assert feed.deny_pip("com.google.android.apps.maps") is True
+        assert adb.call_args.args[0] == [
+            "shell", "appops", "set", "com.google.android.apps.maps",
+            "PICTURE_IN_PICTURE", "ignore"]
+
+    @pytest.mark.parametrize("pkg", ["android", "system", "com.android.systemui"])
+    def test_the_system_is_left_alone(self, pkg):
+        """Picture-in-picture is entered by an APP and these are not apps, so
+        the op means nothing on them — and this project does not send
+        commands at the system process to fix a corner of a screen."""
+        with patch.object(feed, "_adb") as adb:
+            assert feed.deny_pip(pkg) is False
+            adb.assert_not_called()
+
+    def test_a_phone_that_refuses_says_so_rather_than_raising(self):
+        """This runs inside the capture loop. A phone that will not answer
+        costs a warning, never the mirror."""
+        with patch.object(feed, "_adb", side_effect=OSError("no device")):
+            assert feed.deny_pip("com.google.android.apps.maps") is False
+        with patch.object(feed, "_adb") as adb:
+            adb.return_value.returncode = 1
+            adb.return_value.stderr = b"Unknown package"
+            assert feed.deny_pip("com.google.android.apps.maps") is False
+
+    def test_every_package_is_read_off_the_phone(self):
+        out = ("package:com.google.android.apps.maps\n"
+               "package:com.tellus.evv.v2\n"
+               "package:com.android.chrome\n")
+        with patch.object(feed, "_adb") as adb:
+            adb.return_value.stdout = out.encode()
+            assert feed.installed_packages() == [
+                "com.android.chrome", "com.google.android.apps.maps",
+                "com.tellus.evv.v2"]
+
+    def test_a_phone_that_cannot_be_listed_lists_nothing(self):
+        with patch.object(feed, "_adb", side_effect=OSError("no device")):
+            assert feed.installed_packages() == []
+
+
+class TestTheSweepRidesTheLoop:
+    """A hundred and fifty `appops set` calls in one tick is a visible stall
+    in the mirror for no reason, so the sweep goes a batch at a time — the
+    same arrangement as the version check and the code forward, where the
+    timer lives inside the call and the loop that is always running carries
+    it."""
+
+    PACKAGES = "\n".join(f"package:com.app{n}" for n in range(30))
+
+    def setup_method(self):
+        feed._pip_queue.clear()
+        feed._pip_swept[0] = 0.0
+
+    teardown_method = setup_method
+
+    def _adb(self, calls):
+        def fake(args, serial=None, **kw):
+            calls.append(args)
+            return type("R", (), {"stdout": self.PACKAGES.encode(),
+                                  "stderr": b"", "returncode": 0})()
+        return fake
+
+    def test_the_first_tick_only_reads_the_list(self):
+        """The read is that tick's work. Queueing and then immediately
+        spending a batch would make the one tick that starts a sweep the
+        most expensive one there is."""
+        calls = []
+        with patch.object(feed, "_adb", side_effect=self._adb(calls)):
+            feed._watch_pip()
+        assert len(calls) == 1 and "pm" in calls[0]
+        assert len(feed._pip_queue) == 30
+
+    def test_and_the_ticks_after_it_spend_a_batch_each(self):
+        calls = []
+        with patch.object(feed, "_adb", side_effect=self._adb(calls)):
+            feed._watch_pip()                      # the list
+            feed._watch_pip()                      # one batch
+        sets = [c for c in calls if "appops" in c]
+        assert len(sets) == feed.PIP_SWEEP_BATCH
+        assert len(feed._pip_queue) == 30 - feed.PIP_SWEEP_BATCH
+
+    def test_until_every_package_has_been_done_once(self):
+        calls = []
+        with patch.object(feed, "_adb", side_effect=self._adb(calls)):
+            for _ in range(10):
+                feed._watch_pip()
+        done = {c[3] for c in calls if "appops" in c}
+        assert done == {f"com.app{n}" for n in range(30)}
+        assert not feed._pip_queue
+
+    def test_a_finished_sweep_does_not_start_again_the_next_tick(self):
+        calls = []
+        with patch.object(feed, "_adb", side_effect=self._adb(calls)):
+            for _ in range(10):
+                feed._watch_pip()
+            before = len(calls)
+            feed._watch_pip()
+        assert len(calls) == before, "the sweep restarted immediately"
+
+    def test_but_it_does_come_round_again(self):
+        """An app installed since the last sweep, or an op an update put
+        back. The op survives a reboot, so this is not upkeep — it is the
+        only thing that catches a package the last pass never saw."""
+        calls = []
+        with patch.object(feed, "_adb", side_effect=self._adb(calls)):
+            for _ in range(10):
+                feed._watch_pip()
+            feed._pip_swept[0] -= feed.PIP_SWEEP_EVERY + 1
+            feed._watch_pip()
+        assert [c for c in calls if "pm" in c].__len__() == 2
+
+    def test_a_phone_that_will_not_answer_is_tried_again_next_tick(self):
+        """Not written off for half a day on the strength of a failed read."""
+        with patch.object(feed, "_adb", side_effect=OSError("no device")):
+            feed._watch_pip()
+        assert feed._pip_swept[0] == 0.0
+
+    def test_the_system_never_enters_the_queue(self):
+        calls = []
+
+        def fake(args, serial=None, **kw):
+            calls.append(args)
+            listed = "\n".join(f"package:{p}" for p in
+                               ("android", "com.android.systemui",
+                                "com.tellus.evv.v2"))
+            return type("R", (), {"stdout": listed.encode(),
+                                  "stderr": b"", "returncode": 0})()
+
+        with patch.object(feed, "_adb", side_effect=fake):
+            feed._watch_pip()
+        assert feed._pip_queue == ["com.tellus.evv.v2"]
+
+
+class TestAFloatingWindowIsClosedWithoutBeingAskedTo:
+    """The warning strip on the portal is for the seconds before this runs,
+    not instead of it. Nobody should have to press anything to get another
+    app's window off the button that starts a visit."""
+
+    def setup_method(self):
+        feed._last_unfloat[0] = 0.0
+        feed._pinned_now.clear()
+
+    teardown_method = setup_method
+
+    def _run(self, floating):
+        calls = []
+
+        def fake(args, serial=None, **kw):
+            calls.append(args)
+            return type("R", (), {"stdout": b"", "stderr": b"",
+                                  "returncode": 0})()
+
+        with patch.object(feed, "pinned_window", return_value=floating), \
+             patch.object(feed, "_adb", side_effect=fake):
+            feed._watch_floating()
+        return calls
+
+    def test_the_app_that_owns_it_loses_the_permission_and_the_window(self):
+        calls = self._run({"app": "com.google.android.apps.maps",
+                           "b": [480, 1300, 920, 1880]})
+        assert ["shell", "appops", "set", "com.google.android.apps.maps",
+                "PICTURE_IN_PICTURE", "ignore"] in calls
+        assert ["shell", "am", "force-stop",
+                "com.google.android.apps.maps"] in calls
+
+    def test_the_permission_goes_first(self):
+        """Closing the window fixes this minute. Taking the op is what stops
+        the same app doing it again the next time she taps an address."""
+        calls = self._run({"app": "com.google.android.apps.maps",
+                           "b": [0, 0, 10, 10]})
+        assert calls.index(
+            ["shell", "appops", "set", "com.google.android.apps.maps",
+             "PICTURE_IN_PICTURE", "ignore"]) < calls.index(
+            ["shell", "am", "force-stop", "com.google.android.apps.maps"])
+
+    def test_a_care_app_loses_the_permission_and_nothing_else(self):
+        """Force-stopping one of the four to clear a corner would throw away
+        the screen she is working on. The op costs it nothing."""
+        calls = self._run({"app": "com.tellus.evv.v2", "b": [0, 0, 10, 10]})
+        assert ["shell", "appops", "set", "com.tellus.evv.v2",
+                "PICTURE_IN_PICTURE", "ignore"] in calls
+        assert not [c for c in calls if "force-stop" in c]
+
+    def test_nothing_floating_means_nothing_done(self):
+        assert self._run({}) == []
+
+    def test_it_does_not_thrash_a_window_that_will_not_go(self):
+        """A close that does not take must not become a force-stop every
+        tick for as long as the window is up."""
+        floating = {"app": "com.google.android.apps.maps", "b": [0, 0, 10, 10]}
+        first = self._run(floating)
+        second = self._run(floating)
+        assert first and second == []
+
+
+class TestTheLoopActuallyRunsBothOfThem:
+    """A watchdog nothing calls is a comment. Both of these live on the
+    capture tick, which is the loop that is always running — the same place
+    the shade, containment, the version check and the code forward ride."""
+
+    def _capture(self):
+        with patch.object(feed, "window_state",
+                          return_value=("com.tellus.evv.v2/.Dash", True, "")), \
+             patch.object(feed, "_watch_focus"), \
+             patch.object(feed, "_watch_shade"), \
+             patch.object(feed, "_watch_containment"), \
+             patch.object(feed, "_watch_density"), \
+             patch.object(feed, "_watch_floating") as floating, \
+             patch.object(feed, "_watch_pip") as sweep, \
+             patch.object(feed, "_adb") as adb:
+            adb.return_value.returncode = 0
+            adb.return_value.stdout = b""
+            feed.capture()
+        return floating, sweep
+
+    def test_the_floating_check_runs_on_every_tick(self):
+        floating, _ = self._capture()
+        assert floating.called
+
+    def test_and_so_does_the_sweep(self):
+        _, sweep = self._capture()
+        assert sweep.called
+
+    def test_the_floating_check_runs_before_containment(self):
+        """Containment asks which app is in front. A floating window is not
+        in front and never will be, so containment looks straight past it and
+        calls the screen well — this is the check that does not."""
+        order = []
+        with patch.object(feed, "window_state",
+                          return_value=("com.tellus.evv.v2/.Dash", True, "")), \
+             patch.object(feed, "_watch_focus"), \
+             patch.object(feed, "_watch_shade"), \
+             patch.object(feed, "_watch_density"), \
+             patch.object(feed, "_watch_pip"), \
+             patch.object(feed, "_watch_floating",
+                          side_effect=lambda *a, **k: order.append("floating")), \
+             patch.object(feed, "_watch_containment",
+                          side_effect=lambda *a, **k: order.append("contain")), \
+             patch.object(feed, "_adb") as adb:
+            adb.return_value.returncode = 0
+            adb.return_value.stdout = b""
+            feed.capture()
+        assert order == ["floating", "contain"]
