@@ -782,6 +782,171 @@ def _shade_has_focus(serial: str | None = None) -> bool:
     return _is_a_system_panel(focus) and "shade" in (focus or "").lower()
 
 
+# ---------------------------------------------------------------------------
+# PICTURE-IN-PICTURE, TAKEN AWAY RATHER THAN SWEPT UP.
+#
+# Seeing the floating window and refusing to tap through it is the safety
+# half, and it is not the answer. The answer is that no app on this phone is
+# allowed to float over another one at all — "we can't afford this pip or any
+# pip to interfere with app components and their functionality", and a
+# guarantee that depends on somebody reading a warning strip is not one.
+#
+# Android has exactly the switch for it, per app: the PICTURE_IN_PICTURE
+# app-op. It is what Settings' own "Special app access -> Picture-in-picture"
+# writes, and with it on `ignore` a request to enter picture-in-picture
+# fails and the app simply stays where it was. Nothing else about the app
+# changes: it opens, it runs, it backgrounds normally. Read off the phone
+# before this was written, the op stood at its factory default —
+#
+#     $ appops get com.google.android.apps.maps PICTURE_IN_PICTURE
+#     No operations.
+#     Default mode: allow
+#
+# — which is how Maps came to be pinned over "Comenzar Visita".
+#
+# TAKEN FROM EVERY PACKAGE, not from a list of known offenders. A list of
+# offenders is a list that is wrong the first time an app updates or a new
+# one arrives, and the failure mode is a caregiver in someone's kitchen with
+# a video window over the button that starts her visit. Setting the op on an
+# app that cannot do picture-in-picture costs one adb call and does nothing,
+# which is a much cheaper kind of wrong.
+PIP_OP = "PICTURE_IN_PICTURE"
+
+# Never touched. Not because their picture-in-picture is wanted — it is not —
+# but because picture-in-picture is entered by an APP and these are not apps,
+# so the op means nothing on them, and this project does not send commands at
+# the system process to fix a corner of a screen. The same names `_watch_anr`
+# refuses to force-stop, for the same reason.
+PIP_UNTOUCHABLE = ("android", "system", "com.android.systemui")
+
+# How long before the whole package list is walked again. An app-op survives
+# a reboot, so this is not upkeep — it is the sweep that catches an app
+# installed since the last one, and an op an update put back.
+PIP_SWEEP_EVERY = 12 * 3600.0
+
+# How many packages the sweep does per tick. The phone has on the order of a
+# hundred and fifty, and an `appops set` is tens of milliseconds — done in
+# one go that is a visible stall in the mirror for no reason, so it rides the
+# loop a batch at a time and finishes about half a minute after start. Same
+# arrangement as the version check and the code forward: the timer lives
+# inside the call, and the loop that is always running carries it.
+PIP_SWEEP_BATCH = 12
+
+# And how long between attempts on a window that is ALREADY floating, so a
+# close that does not take cannot become a force-stop every tick.
+UNFLOAT_COOLDOWN = 20.0
+
+_pip_swept = [0.0]
+_pip_queue: list[str] = []
+_last_unfloat = [0.0]
+
+
+def deny_pip(package: str, serial: str | None = None) -> bool:
+    """Take away one app's permission to float over the screen.
+
+    True when the phone accepted it. Never raises: this runs inside the
+    capture loop, and a phone that will not answer must cost a warning, not
+    the mirror.
+    """
+    pkg = (package or "").strip()
+    if not pkg or pkg in PIP_UNTOUCHABLE:
+        return False
+    try:
+        done = _adb(["shell", "appops", "set", pkg, PIP_OP, "ignore"], serial)
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("could not take picture-in-picture from %s (%s)", pkg, exc)
+        return False
+    if done.returncode != 0:
+        log.warning("the phone refused to take picture-in-picture from %s: %s",
+                    pkg, done.stderr.decode("utf-8", "replace").strip())
+        return False
+    return True
+
+
+def installed_packages(serial: str | None = None) -> list[str]:
+    """Every package on the phone, by name. Empty when it cannot be read."""
+    try:
+        out = _adb(["shell", "pm", "list", "packages"], serial).stdout.decode(
+            "utf-8", "replace")
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("cannot list the phone's packages (%s)", exc)
+        return []
+    names = set()
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("package:"):
+            name = line.split(":", 1)[1].strip()
+            if name:
+                names.add(name)
+    return sorted(names)
+
+
+def _watch_pip(serial: str | None = None) -> None:
+    """Walk the phone's packages, taking picture-in-picture off each.
+
+    A batch a tick — see PIP_SWEEP_BATCH. The first tick after the timer
+    lapses spends itself on the package list and queues the rest, so no
+    single pass through the loop does more than about a second of adb.
+    """
+    if not _pip_queue:
+        now = time.time()
+        if _pip_swept[0] and now - _pip_swept[0] < PIP_SWEEP_EVERY:
+            return
+        packages = installed_packages(serial)
+        if not packages:
+            # Nothing was read, so nothing was swept. Leaving the stamp
+            # alone means the next tick tries again rather than waiting
+            # half a day on the strength of a failed read.
+            return
+        _pip_swept[0] = now
+        _pip_queue.extend(p for p in packages if p not in PIP_UNTOUCHABLE)
+        log.info("taking picture-in-picture from %d packages", len(_pip_queue))
+        return
+    for _ in range(PIP_SWEEP_BATCH):
+        if not _pip_queue:
+            log.info("picture-in-picture is off on every package")
+            return
+        deny_pip(_pip_queue.pop(), serial)
+
+
+def _watch_floating(serial: str | None = None) -> None:
+    """Get another app's floating window off the screen, and keep it off.
+
+    The sweep above is why one should never appear. This is what happens on
+    the day one does anyway — an app the sweep has not reached yet, an op an
+    update put back — and it must not need anybody to press anything: the
+    warning strip on the portal is for the seconds before this runs, not
+    instead of it.
+    """
+    owner = (pinned_window().get("app") or "").strip()
+    if not owner:
+        return
+    now = time.time()
+    if now - _last_unfloat[0] < UNFLOAT_COOLDOWN:
+        return
+    _last_unfloat[0] = now
+
+    # THE PERMISSION FIRST, whatever happens to the window on the screen
+    # now. Closing it fixes this minute; this is what stops the app doing
+    # it again the next time she taps the address on a visit.
+    deny_pip(owner, serial)
+
+    if owner in CARE_APPS:
+        # Never force-stopped, whatever the dump says — that would throw
+        # away the screen she is working on. The op is taken all the same,
+        # and containment brings the app back to the front, which is what
+        # takes it out of picture-in-picture.
+        log.info("%s is floating over the screen — took its "
+                 "picture-in-picture, left the app alone", owner)
+        return
+
+    log.info("%s is floating over the app — closing it", owner)
+    try:
+        _adb(["shell", "am", "force-stop", owner], serial)
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("could not close the floating window (%s)", exc)
+
+
 # Density, PER APP. One global density (84) was chosen for HHAeXchange+,
 # whose six-day schedule only fits one capture that small — but every app
 # is different (the owner's observation), and inMyTeam's sparse pages
@@ -1344,8 +1509,17 @@ def capture(serial: str | None = None,
     _anr_since.clear()
     if awake:
         _watch_shade(hierarchy, serial)
+        # BEFORE containment, and deliberately. Containment asks which app
+        # is in front; a floating window is not in front and never will be,
+        # so containment looks straight past it and calls the screen well.
+        # This is the check that does not.
+        _watch_floating(serial)
         _watch_containment(focus, serial)
         _watch_density(focus, serial, hierarchy)
+        # Free on all but a handful of ticks in half a day — the timer is
+        # inside the call, like the version check and the code forward. What
+        # it buys is that the check above almost never has anything to do.
+        _watch_pip(serial)
     if not focus or not awake:
         # A dark display and a missing focus are the same fact for the page:
         # the phone is not showing anyone anything. Publishing the focused

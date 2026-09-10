@@ -3399,6 +3399,28 @@ class TestClearScreen:
         stops = [c for c in calls if "force-stop" in c]
         assert stops and stops[0][-1] == "com.google.android.apps.maps"
 
+    def test_the_floating_app_also_loses_the_permission(self):
+        """Pressing the button must not be a weaker act than not pressing
+        it: the watchdog takes the app-op by itself within a tick, so the
+        hand-operated version does too. Otherwise the same map is back over
+        the same button the next time she taps an address."""
+        calls, _ = self._run(
+            ["com.tellus.evv.v2/.Dashboard"], ["com.tellus.evv.v2"],
+            last_care="com.tellus.evv.v2",
+            floating={"app": "com.google.android.apps.maps",
+                      "b": [480, 1300, 920, 1880]})
+        assert ["shell", "appops", "set", "com.google.android.apps.maps",
+                "PICTURE_IN_PICTURE", "ignore"] in calls
+
+    def test_a_care_app_loses_the_permission_but_keeps_its_screen(self):
+        calls, _ = self._run(
+            ["com.tellus.evv.v2/.Dashboard"], ["com.tellus.evv.v2"],
+            last_care="com.tellus.evv.v2",
+            floating={"app": "com.tellus.evv.v2", "b": [0, 0, 100, 100]})
+        assert ["shell", "appops", "set", "com.tellus.evv.v2",
+                "PICTURE_IN_PICTURE", "ignore"] in calls
+        assert not [c for c in calls if "force-stop" in c]
+
     def test_a_care_app_is_never_the_one_stopped(self):
         """Whatever the dump says. Force-stopping one of the four to clear a
         corner would throw away the screen she is working on — and those four

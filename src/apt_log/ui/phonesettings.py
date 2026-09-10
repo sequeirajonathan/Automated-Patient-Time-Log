@@ -183,6 +183,17 @@ READINGS = (
     # the very next poll rather than taken on faith.
     {"id": "clock", "kind": "text", "label_key": "debug.reading.clock",
      "probe": "date '+%Y-%m-%d %H:%M:%S'"},
+    # HOW MANY APPS CANNOT FLOAT OVER THE SCREEN.
+    #
+    # The controller takes picture-in-picture off every package on the
+    # phone, because one of them floating over "Comenzar Visita" is how a
+    # visit fails to start. That is a promise made in a loop nobody watches,
+    # so here is the phone's own answer to it: `appops query-op` lists the
+    # packages the op is denied on, and this counts them. A number near the
+    # package count means the sweep has run; a 0 means it has not, and that
+    # is a thing worth seeing on the page rather than deducing from a log.
+    {"id": "pip", "kind": "packages", "label_key": "debug.reading.pip",
+     "probe": "appops query-op PICTURE_IN_PICTURE ignore"},
     {"id": "font_scale", "kind": "text",
      "label_key": "debug.reading.font_scale",
      "probe": "settings get system font_scale"},
@@ -257,6 +268,15 @@ def _value_of(reading: dict, raw: str, fallbacks: dict[str, str]) -> str | None:
         return f"{ms // 60000} min" if ms >= 60000 else f"{ms // 1000} s"
     if reading["kind"] == "range":
         return f"{raw} / 255"
+    if reading["kind"] == "packages":
+        # `appops query-op` answers "No operations." for none, and otherwise
+        # a package per line — under a "Uid 10254:" heading on some builds
+        # and bare on others. A line that is one dotted word is a package
+        # name on either; nothing else here is.
+        names = [line.strip() for line in raw.splitlines()]
+        return str(len([n for n in names
+                        if n and " " not in n and "." in n
+                        and not n.endswith(":")]))
     return raw
 
 

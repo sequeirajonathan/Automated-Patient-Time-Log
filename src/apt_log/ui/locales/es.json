@@ -152,6 +152,7 @@
  "debug.reading.clock": "Reloj del teléfono",
  "debug.reading.font_scale": "Escala de letra",
  "debug.reading.locale": "Idioma del teléfono",
+ "debug.reading.pip": "Aplicaciones sin permiso para flotar",
  "debug.reading.model": "Modelo",
  "debug.reading.screen_timeout": "La pantalla se apaga tras",
  "debug.reading.timezone": "Zona horaria",
