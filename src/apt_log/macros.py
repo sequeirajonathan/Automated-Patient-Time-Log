@@ -3424,6 +3424,27 @@ def _clear_screen(driver, report) -> None:
     report("macro.step.clearing")
     feed_mod.collapse_shade()
 
+    # AND A FLOATING WINDOW, which is not a panel and does not answer a
+    # swipe or a Back. Android's picture-in-picture is another app's task
+    # pinned above this one; the only thing that reliably takes it off the
+    # screen is stopping the app that owns it.
+    #
+    # Reported on 10 September as "a mini map getting in the way of starting
+    # a visit": Mobile Caregiver+ draws the patient's address as a link,
+    # tapping it opens Maps navigation, and coming back leaves Maps pinned
+    # over the bottom-right corner — where "Comenzar Visita" is.
+    #
+    # Never a care app, whatever the dump says. Force-stopping one of those
+    # to clear a corner would throw away the screen she is working on, and
+    # the four of them are exactly what this button exists to return her to.
+    floating = feed_mod.pinned_window()
+    owner = floating.get("app") or ""
+    if owner and owner not in feed_mod.CARE_APPS:
+        report("macro.step.closing_overlay")
+        _force_stop(owner)
+        time.sleep(1.0)
+        log.info("closed the floating window owned by %s", owner)
+
     # The shade is the case that produced this, but it is not the only panel
     # that can sit over the app — the volume dialog is the other one she can
     # raise by brushing a side button. The swipe above does nothing to that

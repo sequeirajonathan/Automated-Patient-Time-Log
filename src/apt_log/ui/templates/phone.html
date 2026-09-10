@@ -1461,6 +1461,37 @@
   /* Outranks the launcher card: while a panel is up, "which app is behind
      it" is not the question she needs answered. */
   body.covered #screenwrap, body.covered #offapp { display:none; }
+
+  /* The floating-window strip. Amber like the stand-down card and the
+     clock's pill, because it is the same kind of fact: nothing is broken,
+     but something is wrong that will cost a record if it goes unread.
+     Sticky, because the button it is warning about can be a scroll down and
+     the warning is worthless once it has scrolled off. */
+  #floating { display:flex; align-items:center; gap:10px; margin:0 0 10px;
+              padding:10px 12px; border-radius:14px;
+              background:hsl(38 90% 55% / .16);
+              border:1px solid hsl(38 90% 60% / .45);
+              position:sticky; top:0; z-index:5; }
+  #floating[hidden] { display:none; }
+  #floating svg { width:22px; height:22px; flex:none;
+                  color:hsl(40 100% 78%); }
+  #floating p { margin:0; flex:1; min-width:0; font-size:13.5px;
+                line-height:1.35; text-align:left; color:var(--ink); }
+  #floating button { appearance:none; border:0; border-radius:10px;
+                     padding:9px 13px; font:inherit; font-size:13.5px;
+                     font-weight:650; background:rgba(255,255,255,.92);
+                     color:#111; cursor:pointer; flex:none;
+                     min-height:40px;
+                     -webkit-tap-highlight-color:transparent; }
+  #floating button[disabled] { opacity:.55; }
+  /* Not on top of a card that has already taken the whole stage. */
+  body.covered #floating, body.asleep #floating,
+  body.offapp #floating { display:none; }
+  @media (max-width:380px) {
+    #floating { flex-wrap:wrap; }
+    #floating p { flex:1 1 100%; order:2; }
+    #floating button { order:3; margin-left:auto; }
+  }
   body.covered #covered { display:flex; }
 
   /* The update wall, wearing the same clothes as the covered card: same
@@ -2405,6 +2436,24 @@
     </div>
   </header>
   <div id="stage">
+    {# ANOTHER APP FLOATING OVER THIS ONE — a picture-in-picture window.
+       Deliberately a strip and not a card like #covered: that one hides the
+       screen because nothing on it can be reached, and this one covers a
+       corner while the rest of the page still works perfectly. Hiding a
+       screen that is nine-tenths usable would be the worse lie of the two.
+       The one thing it does hide is whatever is underneath it, and the
+       accessibility tree does not mention the floating window at all — so
+       this strip is the only place anybody is told, and the button is the
+       only way to move it. #}
+    <div id="floating" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"
+        ><rect x="2.5" y="4" width="19" height="16" rx="2.2"/>
+         <rect x="12.5" y="12" width="8" height="7" rx="1.4"
+               fill="currentColor" fill-opacity=".25"/></svg>
+      <p id="floating-said"></p>
+      <button type="button" id="floating-clear">{{ t('papp.floating_clear') }}</button>
+    </div>
     <div id="screenwrap">{% if m %}{% include '_screen.html' %}{% endif %}</div>
     {# The loading page: shown whole while the sketch and the phone
        disagree, so nobody ever reads stale rows as current ones. #}
@@ -3002,6 +3051,15 @@
       too_many_failures: {{ t('papp.authstop.too_many_failures')|tojson }},
       credentials_refused: {{ t('papp.authstop.credentials_refused')|tojson }},
       other: {{ t('papp.authstop.other', why='{why}')|tojson }}
+    },
+    floatingSaid: {{ t('papp.floating', app='{app}')|tojson }},
+    floatingCovered: {{ t('papp.floating_covered')|tojson }},
+    {# The one package ever seen doing this, in the words she would use for
+       it. Anything else falls back to the last piece of its package name,
+       which is ugly but true — better than a strip that will not name what
+       is in the way. #}
+    floatingNames: {
+      "com.google.android.apps.maps": {{ t('papp.floating_maps')|tojson }}
     },
     authStopResume: {{ t('papp.authstop.resume')|tojson }},
     authStopResumed: {{ t('papp.authstop.resumed')|tojson }},

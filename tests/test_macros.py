@@ -3311,7 +3311,8 @@ class TestClearScreen:
     went on rendering the app underneath as though it were in front.
     """
 
-    def _run(self, focus_seq, front_seq, last_care="com.inmyteam.inmyteam"):
+    def _run(self, focus_seq, front_seq, last_care="com.inmyteam.inmyteam",
+             floating=None):
         from apt_log import feed as feed_mod
 
         calls = []
@@ -3330,6 +3331,8 @@ class TestClearScreen:
                           if focus else ""), \
              patch.object(feed_mod, "_adb", side_effect=fake_adb), \
              patch.object(feed_mod, "last_care_app", return_value=last_care), \
+             patch.object(feed_mod, "pinned_window",
+                          return_value=dict(floating or {})), \
              patch.object(macros, "_front_package",
                           side_effect=lambda *a, **k: front.pop(0)
                           if len(front) > 1 else (front[0] if front else "")), \
@@ -3379,6 +3382,37 @@ class TestClearScreen:
         calls, _ = self._run(["com.android.settings/.Settings"],
                              ["com.android.settings"], last_care="")
         assert not [c for c in calls if "monkey" in c]
+
+    # A FLOATING WINDOW is the other thing that can be over the app, and it
+    # answers none of the above: it is another app's task pinned on top,
+    # so a shade swipe misses it, a Back goes to the app underneath, and
+    # bringing the care app to the front leaves it exactly where it was.
+    # Reported on 10 September as "a mini map getting in the way of starting
+    # a visit" — Maps navigation, opened from the address link on the visit,
+    # pinned over "Comenzar Visita".
+    def test_the_app_floating_over_this_one_is_stopped(self):
+        calls, _ = self._run(
+            ["com.tellus.evv.v2/.Dashboard"], ["com.tellus.evv.v2"],
+            last_care="com.tellus.evv.v2",
+            floating={"app": "com.google.android.apps.maps",
+                      "b": [480, 1300, 920, 1880]})
+        stops = [c for c in calls if "force-stop" in c]
+        assert stops and stops[0][-1] == "com.google.android.apps.maps"
+
+    def test_a_care_app_is_never_the_one_stopped(self):
+        """Whatever the dump says. Force-stopping one of the four to clear a
+        corner would throw away the screen she is working on — and those four
+        are exactly what this button exists to return her to."""
+        calls, _ = self._run(
+            ["com.tellus.evv.v2/.Dashboard"], ["com.tellus.evv.v2"],
+            last_care="com.tellus.evv.v2",
+            floating={"app": "com.tellus.evv.v2", "b": [0, 0, 100, 100]})
+        assert not [c for c in calls if "force-stop" in c]
+
+    def test_nothing_floating_means_nothing_stopped(self):
+        calls, _ = self._run(["com.inmyteam.inmyteam/.Main"],
+                             ["com.inmyteam.inmyteam"])
+        assert not [c for c in calls if "force-stop" in c]
 
     def test_it_is_offered_as_an_operation(self):
         assert "clear_screen" in macros.OPERATIONS

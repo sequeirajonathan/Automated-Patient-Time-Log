@@ -458,6 +458,22 @@ class TestPortal:
         r = client.post("/tap", json={"frame": "gone", "element": {"b": [0, 0, 1, 1]}})
         assert r.status_code == 409
 
+    def test_a_covered_aim_is_told_apart_from_a_stale_one(self, client):
+        """Both are 409, and only one of them is answered by looking again.
+        A floating window is still there on the next read, over the same
+        button — so the page must be able to say what is in the way instead
+        of sending her round the same loop."""
+        from apt_log import feed as feed_mod
+
+        with patch.object(feed_mod, "tap",
+                          side_effect=feed_mod.Covered(
+                              "com.google.android.apps.maps")):
+            r = client.post("/tap", json={"frame": "f",
+                                          "element": {"b": [0, 0, 1, 1]}})
+        assert r.status_code == 409
+        assert r.json() == {"error": "covered",
+                            "app": "com.google.android.apps.maps"}
+
     def test_the_page_never_offers_a_coordinate_field(self, client):
         """Coordinates are not accepted anywhere. The element identity is the
         only thing that can be posted, and that is the safety property."""
@@ -495,6 +511,25 @@ class TestLiveSocket:
                 if msg.get("type") == "tap_result":
                     break
         assert msg["ok"] is False
+
+    def test_the_socket_says_covered_rather_than_stale(self, client):
+        from apt_log import feed as feed_mod
+
+        with patch.object(feed_mod, "tap",
+                          side_effect=feed_mod.Covered(
+                              "com.google.android.apps.maps")):
+            with client.websocket_connect("/ws") as ws:
+                ws.receive_json()
+                ws.send_json({"type": "tap", "frame": "f",
+                              "element": {"rid": "x", "cls": "y",
+                                          "b": [0, 0, 1, 1]}})
+                while True:
+                    msg = ws.receive_json()
+                    if msg.get("type") == "tap_result":
+                        break
+        assert msg["ok"] is False
+        assert msg["reason"] == "covered"
+        assert msg["app"] == "com.google.android.apps.maps"
 
     def test_a_tap_without_a_frame_is_malformed_not_attempted(self, client):
         with client.websocket_connect("/ws") as ws:
