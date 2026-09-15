@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -727,6 +728,20 @@ class TestTheSwitchGovernsEverySurface:
         opening = body[i:i + 260]
         assert "disabled" not in opening
         assert 'aria-haspopup="dialog"' in opening
+
+    def test_the_page_treats_a_missing_answer_as_locked(self):
+        """A safety flag fails closed. The server already reads anything
+        that is not a clear yes as a no (prefs.set_clock_unlocked); the page
+        must not be the half that reads silence as permission.
+
+        `phoneClock` is seeded from the server's own first paint, so this
+        never fires today — which is exactly how it would rot unnoticed.
+        """
+        js = (Path(__file__).resolve().parents[1]
+              / "src/apt_log/ui/static/phone.js").read_text(encoding="utf-8")
+        assert "c.unlocked === true" in js
+        assert "c.unlocked !== false" not in js, "missing reads as unlocked"
+        assert "phoneClock.unlocked === true" in js
 
     def test_the_socket_carries_the_setting_so_an_open_page_follows_it(
             self, client, monkeypatch):

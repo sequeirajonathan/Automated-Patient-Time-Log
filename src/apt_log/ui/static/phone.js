@@ -961,7 +961,13 @@
     // left open when the setting changes stops being a button on the next
     // tick instead of the next reload.
     if (btn) {
-      const open = c.unlocked !== false;
+      // AN EXPLICIT YES, OR IT IS LOCKED. Same rule as the server's
+      // (prefs.set_clock_unlocked): a payload that cannot say yes clearly
+      // is a payload saying no. `phoneClock` is seeded from the server's
+      // own first paint so this never flickers in practice — but the day
+      // a reading arrives without the field, the safe reading of it is the
+      // one that does not hand her a control over every visit record.
+      const open = c.unlocked === true;
       btn.classList.toggle('locked', !open);
       if (open) {
         btn.removeAttribute('disabled');
@@ -1004,9 +1010,10 @@
 
   function openClockSheet() {
     if (clockPending) return;
-    // The setting is off. Nothing happens — deliberately nothing, not even
-    // a toast: she did not ask for anything, she pressed a clock.
-    if (phoneClock && phoneClock.unlocked === false) return;
+    // The setting is off, or nothing has said it is on. Nothing happens —
+    // deliberately nothing, not even a toast: she did not ask for anything,
+    // she pressed a clock. Fail-closed, as above.
+    if (!(phoneClock && phoneClock.unlocked === true)) return;
     const when = document.getElementById('clock-when');
     if (when) delete when.dataset.touched;
     fillClockSheet();
