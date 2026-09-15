@@ -4838,8 +4838,15 @@ class TestBackToTheAppsOwnFirstPage:
 
         return MagicMock()
 
-    def _run(self, screens, packages=None, pkg="com.tellus.evv.v2"):
-        """Drive the walk over a scripted sequence of screens."""
+    def _run(self, screens, packages=None, pkg="com.hhaexchange.uma"):
+        """Drive the walk over a scripted sequence of screens.
+
+        HHAeXchange+ rather than Mobile Caregiver+, and that is the point of
+        this class: it exercises the ATLAS path, where `screen_for` is the
+        answer. Mobile Caregiver+ has a page id instead (HOME_PAGE_IDS) and
+        never consults `screen_for` at all, so scripting it here would
+        script something the walk no longer reads.
+        """
         from unittest.mock import patch as patch_mod
 
         seen = {"backs": 0, "activated": 0}
@@ -4893,7 +4900,7 @@ class TestBackToTheAppsOwnFirstPage:
         """Back from an app's root pops the task stack into whatever was
         under it. One press out is a mistake; two is a pattern."""
         seen = self._run(["visit", "visit"],
-                         packages=["com.tellus.evv.v2", "com.other.app"])
+                         packages=["com.hhaexchange.uma", "com.other.app"])
         assert seen["activated"] == 1
         assert seen["backs"] == 1
 
@@ -5025,7 +5032,10 @@ class TestBackToTheAppsOwnFirstPage:
         better than no answer."""
         from unittest.mock import patch as patch_mod, PropertyMock
 
-        pkg = "com.tellus.evv.v2"
+        # The atlas app, like the rest of this class: the fallback under
+        # test is `_live_tree`'s, and reading it through an app whose home
+        # is a page id would test HOME_PAGE_IDS instead.
+        pkg = "com.hhaexchange.uma"
         driver = self._driver()
         type(driver).page_source = PropertyMock(side_effect=RuntimeError("no"))
         backs = []
@@ -7106,3 +7116,115 @@ class TestTheWalkStandsDownForADialog:
         window. The dialog has to be its own evidence."""
         assert macros.STITCH_TAP_QUIET > 0
         assert macros._a_dialog_is_up({"elements": [{"rid": "button1"}]})
+
+
+class TestHomeMeansTheDaysVisits:
+    """"The little home icon should return the user back to where all of the
+    patients are for the day ... after exiting it kinda gets stuck on the
+    completion."
+
+    It was stuck because the button did nothing at all. `feed.screen_for`
+    keys on the ACTIVITY, and Mobile Caregiver+ has exactly one:
+    DashboardActivity is the day's visit list, the visit detail and the
+    sign-off page alike. So the atlas answered "home" wherever it stood,
+    `_app_home` broke out of its loop having pressed nothing, and App Home
+    returned you to the page you were already on.
+
+    Watched live on the phone: run from a visit detail, it left the phone on
+    the visit detail. A plain Back from that same page DOES reach the list —
+    the navigation was never the problem, the question was.
+    """
+
+    FOCUS = "com.tellus.evv.v2/com.tellus.evv.activities.DashboardActivity"
+    LIST = '<node resource-id="com.tellus.evv.v2:id/compose_view_visit_calendar"/>'
+    DETAIL = '<node resource-id="com.tellus.evv.v2:id/compose_view_visit_details"/>'
+    SIGN_OFF = '<node resource-id="com.tellus.evv.v2:id/compose_view_visit_sign_off"/>'
+
+    def test_the_days_visits_are_home(self):
+        assert macros._at_app_home("com.tellus.evv.v2", self.FOCUS, self.LIST)
+
+    @pytest.mark.parametrize("page", ["DETAIL", "SIGN_OFF"])
+    def test_and_the_pages_she_gets_stuck_on_are_not(self, page):
+        """The two she reported: the visit detail after a check-in, and the
+        sign-off after a check-out. Both used to answer "home"."""
+        tree = getattr(self, page)
+        assert not macros._at_app_home("com.tellus.evv.v2", self.FOCUS, tree)
+
+    def test_an_unreadable_tree_falls_back_to_the_atlas(self):
+        """Never a blind Back. With nothing to read, this answers exactly
+        what it answered before the page ids existed — which on this app is
+        "home", so the walk stops rather than pressing into the dark."""
+        assert macros._at_app_home("com.tellus.evv.v2", self.FOCUS, "")
+
+    def test_an_app_with_no_page_ids_is_untouched(self):
+        """inMyTeam has its own answer to this question (`_the_drawer`) and
+        HHAeXchange+ has a real atlas. Neither changes."""
+        assert macros._at_app_home("com.inmyteam.inmyteam",
+                                   "com.inmyteam.inmyteam/.MainActivity",
+                                   self.DETAIL)
+
+    def test_the_ids_are_the_apps_own_and_the_three_pages_are_distinct(self):
+        """If the app ever renames them this falls back to the atlas, which
+        is where it was before — but the names are worth pinning, because a
+        typo here is a button that silently does nothing again."""
+        assert macros.HOME_PAGE_IDS["com.tellus.evv.v2"] == \
+            "compose_view_visit_calendar"
+        assert macros.HOME_PAGE_IDS["com.tellus.evv.v2"] not in self.DETAIL
+        assert macros.HOME_PAGE_IDS["com.tellus.evv.v2"] not in self.SIGN_OFF
+
+    def test_the_walk_presses_back_until_the_visits_list_appears(self):
+        """The end-to-end shape, and the coverage the atlas tests can no
+        longer give: from a visit detail, one Back reaches the list and the
+        walk stops there. Timed on the phone, that is exactly what happens —
+        the navigation was never broken, only the question."""
+        from unittest.mock import MagicMock, patch as patch_mod
+
+        pkg = "com.tellus.evv.v2"
+        pages = [self.DETAIL, self.DETAIL, self.LIST, self.LIST]
+        backs = []
+        driver = MagicMock()
+
+        with patch_mod.object(macros, "_front_package", return_value=pkg), \
+                patch_mod("apt_log.feed.current_focus",
+                          return_value=self.FOCUS), \
+                patch_mod.object(macros, "_live_tree",
+                                 side_effect=lambda _d:
+                                     pages.pop(0) if pages else self.LIST), \
+                patch_mod("apt_log.device.send_ui_action",
+                          lambda *a, **k: backs.append(1)), \
+                patch_mod.object(macros, "_forget_stitched", lambda _a: None), \
+                patch_mod("apt_log.macros.time.sleep"):
+            macros._app_home(driver, lambda _s: None)
+
+        assert backs == [1], "one Back from a visit detail, then stop"
+        driver.activate_app.assert_not_called()
+
+    def test_it_does_not_press_when_it_is_already_on_the_list(self):
+        """The commonest case: she presses Home from the list to refresh her
+        eyes on the statuses. Pressing Back from there would leave the app."""
+        from unittest.mock import MagicMock, patch as patch_mod
+
+        pkg = "com.tellus.evv.v2"
+        backs = []
+        driver = MagicMock()
+
+        with patch_mod.object(macros, "_front_package", return_value=pkg), \
+                patch_mod("apt_log.feed.current_focus",
+                          return_value=self.FOCUS), \
+                patch_mod.object(macros, "_live_tree",
+                                 side_effect=lambda _d: self.LIST), \
+                patch_mod("apt_log.device.send_ui_action",
+                          lambda *a, **k: backs.append(1)), \
+                patch_mod.object(macros, "_forget_stitched", lambda _a: None), \
+                patch_mod("apt_log.macros.time.sleep"):
+            macros._app_home(driver, lambda _s: None)
+
+        assert backs == []
+
+    def test_a_back_is_given_time_to_land_on_these_pages(self):
+        """BACK_SETTLE was measured for "a keyevent and a redraw". These
+        pages are Compose and took over three seconds on the phone; pressing
+        again at 0.9s would spend the whole budget while the first press was
+        still travelling and walk out of the app."""
+        assert macros.BACK_LANDED > macros.BACK_SETTLE * 3
+        assert macros.BACK_LANDED * 2 > macros.BACKS_TO_HOME * macros.BACK_SETTLE
