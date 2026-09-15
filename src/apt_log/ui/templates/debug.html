@@ -203,6 +203,12 @@
     <div class="banner bad">{{ t('debug.time.bad') }}</div>
   {% elif saved == 'time_failed' %}
     <div class="banner bad">{{ t('phone.failed') }}</div>
+  {% elif saved == 'clock_unlocked' %}
+    <div class="banner">{{ t('debug.saved.clock_unlocked') }}</div>
+  {% elif saved == 'clock_locked' %}
+    <div class="banner ok">{{ t('debug.saved.clock_locked') }}</div>
+  {% elif saved == 'clock_locked_no_reset' %}
+    <div class="banner bad">{{ t('debug.saved.clock_locked_no_reset') }}</div>
   {% endif %}
   {% if device_said == 'sent' %}
     <div class="banner ok">{{ t('debug.sent') }}</div>
@@ -267,6 +273,30 @@
     <h2>{{ t('debug.time.title') }}</h2>
     <p class="sub" style="margin:0 0 4px">{{ t('debug.time.explain') }}</p>
 
+    {# THE SWITCH OVER THE WHOLE SECTION, and off is what a fresh install
+       has. Every app on this phone stamps records with its clock, so moving
+       it is the ability to write a record asserting a caregiver was
+       somewhere at a time she was not. It exists because testing needs it
+       and for no other reason, so it is a thing somebody turns on for as
+       long as they need it rather than a control sitting on the page she
+       uses all day. Turning it off also puts the phone back on automatic —
+       "locked" plus "four hours behind" is the worst of both. #}
+    <div class="row">
+      <div class="k"><b>{{ t('debug.time.unlock') }}</b></div>
+      <form method="post" action="/debug/clock-lock" class="seg">
+        <button type="submit" name="on" value="1" data-on="1"
+                aria-pressed="{{ 'true' if clock_unlocked else 'false' }}">
+          {{ t('debug.on') }}</button>
+        <button type="submit" name="on" value="0" data-on="0"
+                aria-pressed="{{ 'false' if clock_unlocked else 'true' }}">
+          {{ t('debug.off') }}</button>
+      </form>
+    </div>
+    <p class="sub">{{ t('debug.time.unlock_note') }}</p>
+    {% if not clock_unlocked %}
+    <div class="banner">{{ t('debug.time.locked') }}</div>
+    {% endif %}
+
     <div class="row">
       <div class="k"><b>{{ t('debug.reading.clock') }}</b></div>
       <span class="v" data-reading="clock">{{ readings.by_id.clock.said }}</span>
@@ -282,6 +312,7 @@
                 aria-pressed="{{ 'true' if row.value == '1' else 'false' }}">
           {{ t('debug.on') }}</button>
         <button type="submit" name="on" value="0" data-on="0"
+                {% if not clock_unlocked %}disabled{% endif %}
                 aria-pressed="{{ 'true' if row.value == '0' else 'false' }}">
           {{ t('debug.off') }}</button>
       </form>
@@ -289,10 +320,14 @@
     {% endfor %}
 
     <form method="post" action="/debug/time/set" class="clockform" data-async>
-      <input type="datetime-local" name="when" id="when" step="60" required>
-      <button type="button" class="small" id="fill-now">
+      <input type="datetime-local" name="when" id="when" step="60" required
+             {% if not clock_unlocked %}disabled{% endif %}>
+      <button type="button" class="small" id="fill-now"
+              {% if not clock_unlocked %}disabled{% endif %}>
         {{ t('debug.time.fill_now') }}</button>
-      <button type="submit" class="small primary">{{ t('debug.time.set') }}</button>
+      <button type="submit" class="small primary"
+              {% if not clock_unlocked %}disabled{% endif %}>
+        {{ t('debug.time.set') }}</button>
     </form>
     <p class="sub">{{ t('debug.time.set_note') }}</p>
 

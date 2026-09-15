@@ -414,6 +414,11 @@ def phone_app(request: Request):
             # shows the reader's hour even for a second. Cached, not fresh:
             # a page open costs one adb read at most every few seconds.
             "clock": _clock_payload(),
+            # Whether the clock is a control on this page at all. Passed
+            # separately so the FIRST paint is already right: a clock that
+            # is a button for half a second and then stops being one is a
+            # button she may well have pressed.
+            "clock_unlocked": prefs.clock_unlocked(),
             "auth_stops": _auth_stops(),
             "KIND_SIGNATURE": KIND_SIGNATURE,
             "KIND_TOKEN": KIND_TOKEN,
@@ -693,6 +698,9 @@ def debug_settings(request: Request):
             "groups": phonesettings.panels_by_group(),
             "panel_index": phonesettings.PANEL_INDEX,
             "readings": _readings_said(t, phonesettings.readings()),
+            # Whether this section's controls do anything. Off on a fresh
+            # install — see the route and prefs.clock_unlocked.
+            "clock_unlocked": prefs.clock_unlocked(),
             "screen_doc": doc,
             "opened": opened,
             "saved": (request.query_params.get("saved") or "")[:24],
@@ -735,8 +743,16 @@ def debug_time_switch(request: Request, switch: str = Form(...),
     """
     from apt_log.ui import phonesettings
 
+    wanted_on = on == "1"
+    # Turning an automatic switch OFF is the same capability as setting the
+    # clock — it is how a hand-set time is made to stick — so the same
+    # setting governs it. Turning one back ON is always allowed: that is the
+    # direction the lock wants the phone to go.
+    if not wanted_on and not prefs.clock_unlocked():
+        return RedirectResponse(url="/debug?saved=clock_locked",
+                                status_code=303)
     try:
-        phonesettings.set_time_switch((switch or "")[:16], on == "1")
+        phonesettings.set_time_switch((switch or "")[:16], wanted_on)
     except (KeyError, phonesettings.SettingsUnavailable) as exc:
         log.warning("could not set the time switch: %s", exc)
         return RedirectResponse(url="/debug?saved=time_failed",
@@ -763,6 +779,13 @@ def debug_time_set(request: Request, when: str = Form(...)):
     # both pages ask the feed process to do the whole thing. The parse is
     # repeated here only so a typo answers on this page instead of as a
     # failed macro.
+    # Refused here as well as in the macro. The macro's check is the one
+    # that cannot be routed around; this one exists so the page says why
+    # instead of showing a macro that failed.
+    if not prefs.clock_unlocked():
+        return RedirectResponse(url="/debug?saved=clock_locked",
+                                status_code=303)
+
     wanted = (when or "")[:32].strip()
     try:
         if datetime.fromisoformat(wanted).tzinfo is not None:
@@ -795,6 +818,42 @@ def debug_time_reset(request: Request):
     return RedirectResponse(url="/debug?saved=reset", status_code=303)
 
 
+@app.post("/debug/clock-lock")
+def debug_clock_lock(request: Request, on: str = Form("")):
+    """Switch the ability to move the phone's clock on or off.
+
+    OFF IS NOT MERELY A WITHDRAWAL OF PERMISSION. Turning it off also puts
+    the phone back on automatic, because "locked" plus "four hours behind"
+    is the worst of both — a wrong clock with the control that fixes it
+    taken away. So the switch going off asks for `clock_reset`, which is
+    never gated for exactly this reason, and that macro closes every care
+    app so each one re-reads the network's time on its next open.
+
+    An installation-wide setting rather than a per-device one: the phone has
+    ONE clock, and a per-browser answer would let one portal unlock what
+    another had locked.
+    """
+    now_unlocked = prefs.set_clock_unlocked(on)
+    if now_unlocked:
+        log.info("moving the phone's clock has been switched ON")
+        return RedirectResponse(url="/debug?saved=clock_unlocked",
+                                status_code=303)
+
+    log.info("moving the phone's clock has been switched OFF — "
+             "putting the phone back on automatic")
+    try:
+        macros_mod.request("clock_reset")
+    except OSError as exc:
+        # The setting is off either way; that is the part that matters and
+        # it is already written. The reset is the courtesy on top, and a
+        # controller that cannot be asked for it says so rather than
+        # leaving the page claiming something it did not do.
+        log.warning("could not ask for the clock reset: %s", exc)
+        return RedirectResponse(url="/debug?saved=clock_locked_no_reset",
+                                status_code=303)
+    return RedirectResponse(url="/debug?saved=clock_locked", status_code=303)
+
+
 def _clock_payload(fresh: bool = False) -> dict:
     """The phone's clock as the socket and the launcher carry it: the
     words, the pieces the sheet prefills from, and the one flag that
@@ -804,7 +863,12 @@ def _clock_payload(fresh: bool = False) -> dict:
     doc = phonesettings.clock_state(fresh=fresh)
     return {"ok": bool(doc.get("ok")), "said": doc.get("said") or "",
             "date": doc.get("date") or "", "time": doc.get("time") or "",
-            "auto": doc.get("auto"), "auto_zone": doc.get("auto_zone")}
+            "auto": doc.get("auto"), "auto_zone": doc.get("auto_zone"),
+            # Whether the clock on the front page is a control at all. The
+            # page reads this to decide, so a portal left open when the
+            # setting changes stops being a button on the next tick rather
+            # than on the next reload.
+            "unlocked": prefs.clock_unlocked()}
 
 
 @app.get("/api/clock")

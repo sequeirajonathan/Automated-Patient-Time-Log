@@ -6652,8 +6652,15 @@ class TestTheClockRules:
     the page that asks.
     """
 
-    def _quiet(self, monkeypatch, front="com.tellus.evv.v2"):
+    def _quiet(self, monkeypatch, front="com.tellus.evv.v2", unlocked=True):
         stopped, launched = [], []
+        # Moving the clock is OFF by default now (prefs.clock_unlocked), so
+        # every test that moves it says so. The tests for the lock itself
+        # pass unlocked=False.
+        from apt_log import prefs
+
+        monkeypatch.setattr(prefs, "clock_unlocked",
+                            lambda *a, **k: unlocked)
         monkeypatch.setattr(macros, "_force_stop", stopped.append)
         monkeypatch.setattr(macros, "_forget_stitched", lambda _p: None)
         monkeypatch.setattr(macros, "wake_display", lambda: None)
@@ -6773,20 +6780,45 @@ class TestTheClockRules:
         steps = []
         macros.MACROS["clock_set"].run(MagicMock(), steps.append, "2026-09-02T15:30")
         assert set_to == ["2026-09-02T15:30"]
-        assert stopped == ["com.tellus.evv.v2"]
         assert launched and "com.tellus.evv.v2" in launched[0]
         assert "macro.step.clock_restart" in steps
         assert "com.tellus.evv.v2" not in macros._clock_dirty
 
-    def test_setting_the_clock_marks_a_closed_mobile_caregiver_for_a_cold_open(self, monkeypatch):
+    def test_every_care_app_is_closed_not_only_the_one_it_was_moved_for(
+            self, monkeypatch):
+        """A running app keeps the clock it started with. That was always
+        true of Mobile Caregiver+ and just as true of the other three, which
+        sat holding a stale hour until something else restarted them.
+
+        Asked for in those words: close all the apps after a change so they
+        can synchronise to the phone's time.
+        """
+        from apt_log import feed as feed_mod
+        from apt_log.ui import phonesettings
+
+        stopped, _ = self._quiet(monkeypatch, front="com.android.settings")
+        monkeypatch.setattr(feed_mod, "last_care_app", lambda: "")
+        monkeypatch.setattr(phonesettings, "set_clock", lambda _w: None)
+        monkeypatch.setattr(phonesettings, "forget_clock", lambda: None)
+        monkeypatch.setattr("apt_log.device.send_ui_action", lambda _a: None)
+        macros.MACROS["clock_set"].run(MagicMock(), lambda _k: None,
+                                       "2026-09-02T15:30")
+        assert set(stopped) == set(feed_mod.CARE_APPS)
+
+    def test_the_app_she_was_looking_at_is_the_one_brought_back(self, monkeypatch):
+        """Whichever care app was in front, not Mobile Caregiver+ by name. A
+        change made while looking at an app must not leave her on a
+        launcher — and the other three stay closed and marked, so their next
+        open is cold."""
         from apt_log.ui import phonesettings
 
         stopped, launched = self._quiet(monkeypatch, front="com.inmyteam.inmyteam")
         monkeypatch.setattr(phonesettings, "set_clock", lambda _w: None)
         monkeypatch.setattr(phonesettings, "forget_clock", lambda: None)
         macros.MACROS["clock_set"].run(MagicMock(), lambda _k: None, "2026-09-02T15:30")
-        assert stopped == ["com.tellus.evv.v2"]
-        assert launched == [], "the app in front was not the one restarted"
+        assert "com.tellus.evv.v2" in stopped and "com.inmyteam.inmyteam" in stopped
+        assert launched and "com.inmyteam.inmyteam" in launched[-1]
+        assert "com.inmyteam.inmyteam" not in macros._clock_dirty
         assert macros._clock_dirty.get("com.tellus.evv.v2") is True
 
     def test_a_change_made_on_the_settings_screen_leaves_it(self, monkeypatch):
@@ -6896,3 +6928,59 @@ class TestAStopThatCanBeSeenAndOutgrown:
         runner = self._runner(tmp_path)
         runner.stop_auth("inmyteam_login", "credentials_refused")
         assert runner.auth_stopped("inmyteam_login")["why"] == "credentials_refused"
+
+
+class TestTheClockCannotBeMovedWhileTheSettingIsOff:
+    """The gate is in the macro because the macro is where everything
+    arrives.
+
+    The launcher, the settings tab and anything written next all reach the
+    clock the same way: they ask this process to run `clock_set`. Hiding the
+    button is worth doing and is done, but a hidden button is a decoration
+    on top of a capability that still exists.
+    """
+
+    def _phone(self, monkeypatch, unlocked):
+        from apt_log import prefs
+        from apt_log.ui import phonesettings
+
+        set_to, reset = [], []
+        monkeypatch.setattr(prefs, "clock_unlocked", lambda *a, **k: unlocked)
+        monkeypatch.setattr(phonesettings, "set_clock", set_to.append)
+        monkeypatch.setattr(phonesettings, "reset_clock",
+                            lambda: reset.append(True))
+        monkeypatch.setattr(phonesettings, "forget_clock", lambda: None)
+        monkeypatch.setattr(macros, "_after_clock_change", lambda _r: None)
+        return set_to, reset
+
+    def test_a_locked_clock_refuses_the_set(self, monkeypatch):
+        set_to, _ = self._phone(monkeypatch, unlocked=False)
+        with pytest.raises(macros.ClockLocked):
+            macros.MACROS["clock_set"].run(MagicMock(), lambda _k: None,
+                                           "2026-09-02T15:30")
+        assert set_to == [], "the phone was written to anyway"
+
+    def test_and_nothing_is_reported_as_having_happened(self, monkeypatch):
+        """A refusal that has already said "Setting the phone's clock…" is a
+        refusal the page renders as a change."""
+        self._phone(monkeypatch, unlocked=False)
+        steps = []
+        with pytest.raises(macros.ClockLocked):
+            macros.MACROS["clock_set"].run(MagicMock(), steps.append,
+                                           "2026-09-02T15:30")
+        assert steps == []
+
+    def test_an_unlocked_clock_is_set_as_before(self, monkeypatch):
+        set_to, _ = self._phone(monkeypatch, unlocked=True)
+        macros.MACROS["clock_set"].run(MagicMock(), lambda _k: None,
+                                       "2026-09-02T15:30")
+        assert set_to == ["2026-09-02T15:30"]
+
+    @pytest.mark.parametrize("unlocked", [True, False])
+    def test_the_reset_is_never_gated(self, monkeypatch, unlocked):
+        """It moves the clock TOWARDS the network's time, which is the safe
+        direction — and the lock itself needs it: turning the setting off
+        puts the phone back on automatic."""
+        _, reset = self._phone(monkeypatch, unlocked=unlocked)
+        macros.MACROS["clock_reset"].run(MagicMock(), lambda _k: None)
+        assert reset == [True]

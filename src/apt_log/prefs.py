@@ -396,6 +396,54 @@ def set_global_density(value: Any, path: Path | None = None) -> int | None:
     return set_density(GLOBAL, value, path=path)
 
 
+# ------------------------------------------------- moving the phone's clock
+# OFF, AND OFF IS THE DEFAULT.
+#
+# Every app on this phone stamps EVV records with the phone's clock, so the
+# ability to move it is the ability to write a record that says a caregiver
+# was somewhere at a time she was not. It exists because testing needs it —
+# walking the clock forwards and back is how the visit flows get exercised —
+# and for no other reason.
+#
+# What it cost as an always-on control: the clock left on hand-set time,
+# four hours behind, with a visit due. Nobody meant to leave it there. The
+# control was simply present, one tap away, on the page she uses all day.
+#
+# So it is a setting, it is installation-wide (a phone has ONE clock; a
+# per-browser answer would let one portal unlock what another locked), and
+# it is off until somebody deliberately turns it on. Off means the clock
+# cannot be moved from here at all — the front page's clock is not a button,
+# and `clock_set` refuses in the process that would have run it.
+#
+# Turning it off is not just a withdrawal of permission. It puts the phone
+# back on automatic, because "locked" and "four hours behind" is the worst
+# of both: no way to fix it from the page that broke it.
+CLOCK_UNLOCKED = "clock_unlocked"
+
+
+def clock_unlocked(path: Path | None = None) -> bool:
+    """Whether the phone's clock may be moved from the portal at all.
+
+    False unless somebody has deliberately said otherwise — including on a
+    fresh install, an unreadable preferences file, and a value of any shape
+    this never wrote. A setting this one defaults to ON exactly once and
+    then nobody remembers it exists.
+    """
+    return load(path).get(CLOCK_UNLOCKED) is True
+
+
+def set_clock_unlocked(value: Any, path: Path | None = None) -> bool:
+    """Turn clock changes on or off. Returns what is now in force.
+
+    Anything that is not truthy locks it: a caller that cannot say yes
+    clearly is a caller saying no.
+    """
+    wanted = value is True or str(value).strip().lower() in (
+        "1", "true", "on", "yes")
+    _mutate(lambda doc: doc.__setitem__(CLOCK_UNLOCKED, wanted), path)
+    return wanted
+
+
 def overrides(path: Path | None = None) -> dict[str, int]:
     """Every override in force, for a page that lets you see and clear them."""
     return {k: v for k, v in load(path)["density"].items()
