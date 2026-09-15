@@ -5053,9 +5053,11 @@ CLOCK_RESTARTS = {
     "mobile_caregiver_pin": "com.tellus.evv.v2",
     "open_mobile_caregiver": "com.tellus.evv.v2",
 }
-# Which of those apps a clock change has stopped without reopening: the
-# next open force-stops it again (a no-op on a dead process) so the launch
-# is cold, then clears the mark. Process-local, like `_freshened`.
+# Which care apps a clock change has stopped without reopening: the next
+# open of one force-stops it again (a no-op on a dead process) so the
+# launch is cold, then clears the mark. Every care app can be in here — a
+# clock change closes all four, because a running app keeps the clock it
+# started with. Process-local, like `_freshened`.
 _clock_dirty: dict[str, bool] = {}
 # How long the network is given to answer after the switches go back on
 # before an app that reads the clock is started. NITZ on this carrier lands
@@ -5081,8 +5083,13 @@ def _clock_gate(name: str, report) -> None:
             # than the one it was started under.
             _force_stop(package)
             _forget_stitched(package)
+            _clock_dirty.pop(package, None)
             time.sleep(1.5)
-    package = CLOCK_RESTARTS.get(name)
+    # WHATEVER THIS MACRO OPENS, not only Mobile Caregiver+. A clock change
+    # now closes all four care apps, so any of them can be the one carrying
+    # the mark; force-stopping an already-dead process is a no-op, and the
+    # point is that the launch below is cold whichever app it is.
+    package = CLOCK_RESETS.get(name) or CLOCK_RESTARTS.get(name)
     if package and _clock_dirty.pop(package, False):
         report("macro.step.clock_restart")
         _force_stop(package)

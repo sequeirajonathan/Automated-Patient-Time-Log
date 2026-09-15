@@ -6704,6 +6704,39 @@ class TestTheClockRules:
         macros._clock_gate("open_hhax_uma", lambda _k: None)
         assert stopped == []
 
+    def test_any_care_app_left_closed_by_a_change_opens_cold(self, monkeypatch):
+        """The mark is set on all four now, so it has to be READ on all
+        four. It was only ever consumed for Mobile Caregiver+, which made
+        it a note nothing acted on for the other three."""
+        from apt_log.ui import phonesettings
+
+        stopped, _ = self._quiet(monkeypatch)
+        monkeypatch.setattr(phonesettings, "clock_state",
+                            lambda fresh=False: {"ok": True, "auto": True,
+                                                 "auto_zone": True})
+        macros._clock_dirty["com.inmyteam.inmyteam"] = True
+        steps = []
+        macros._clock_gate("open_inmyteam", steps.append)
+        assert stopped == ["com.inmyteam.inmyteam"]
+        assert "macro.step.clock_restart" in steps
+        assert "com.inmyteam.inmyteam" not in macros._clock_dirty
+
+    def test_an_app_the_reset_just_stopped_is_not_stopped_twice(self, monkeypatch):
+        """The reset branch above already closed it. Popping the mark there
+        keeps the macro from reporting a restart it did not do."""
+        from apt_log.ui import phonesettings
+
+        stopped, _ = self._quiet(monkeypatch)
+        monkeypatch.setattr(phonesettings, "clock_state",
+                            lambda fresh=False: {"ok": True, "auto": False,
+                                                 "auto_zone": True})
+        monkeypatch.setattr(phonesettings, "reset_clock", lambda: None)
+        macros._clock_dirty["com.inmyteam.inmyteam"] = True
+        steps = []
+        macros._clock_gate("open_inmyteam", steps.append)
+        assert stopped == ["com.inmyteam.inmyteam"], "stopped more than once"
+        assert "macro.step.clock_restart" not in steps
+
     def test_a_phone_that_will_not_say_is_not_a_reason_to_refuse(self, monkeypatch):
         from apt_log.ui import phonesettings
 
