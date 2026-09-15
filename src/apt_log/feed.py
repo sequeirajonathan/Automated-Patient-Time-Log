@@ -1093,22 +1093,50 @@ SIGNATURE_DENSITY = 105
 # screen, and the signature is accepted on the first press. Watched both
 # ways on the live phone.
 #
-# Anything above 1080*160/600 = 288 would clear the tablet breakpoint, but
-# the value handed back is the panel's own: it is the layout the app was
-# built and tested against, and the signature moment is the one moment this
-# phone is driven BY A HUMAN FINGER — the sister's and the patient's — so a
-# bigger pen is the right trade even when nothing is broken. The page is
-# found by its own id rather than by an activity name, because every screen
-# in this app is `dashboardactivity`.
-SIGNATURE_PAGES = {
-    "com.tellus.evv.v2": "compose_view_visit_sign_off",
+# THE PANEL'S OWN SIZE IS NOT THE ANSWER, though it was the first one here.
+# At 450 the page is unreadable — reported in those words, "density is all
+# wrong": the title wraps to three lines, the attestation runs off the
+# bottom, and neither Capturar Firma nor Complete la Visita fits on screen
+# with it. Correct and unusable is still unusable.
+#
+# 300 is the value, and it is not a compromise between the two faults —
+# it clears both:
+#
+#     1080 * 160 / 300 = 576dp  -> under sw600dp, so the PHONE layout,
+#                                  the pad opens landscape and its confirm
+#                                  accepts;
+#     and the whole sign-off page fits on one screen, both signature
+#     buttons and the commit included.
+#
+# Checked on the phone at 300 mid-checkout: the pad came up landscape and a
+# replay landed all three strokes into `canvas=[53,344,2307,590]` — an
+# inset canvas, not the root.
+SIGNATURE_DENSITY_BY_APP = {
+    "com.tellus.evv.v2": 300,
+}
+
+# THE PAGE **AND** THE PAD, and the second one was learned the hard way.
+#
+# The pad is a DIALOG, and the page's id is not in the dialog's tree. So
+# with only the page marked, the density flipped back to 200 the instant
+# she pressed Capturar Firma — watched live, mid-checkout, at the one
+# moment it must not:
+#
+#     17:21:14  density handed back to the phone (signing in ...)
+#     17:22:51  density 200 for com.tellus.evv.v2     <- pad had just opened
+#
+# The pad's own buttons are what say it is up. Found by id rather than by
+# activity name, because every screen in this app is `dashboardactivity`.
+SIGNATURE_MARKS = {
+    "com.tellus.evv.v2": ("compose_view_visit_sign_off",   # the page
+                          "buttonClearSignature"),         # the pad it opens
 }
 
 
 def _signature_page(pkg: str, hierarchy: str | None) -> bool:
-    """Whether this is an app's signature page, by the id it publishes."""
-    mark = SIGNATURE_PAGES.get(pkg)
-    return bool(mark and mark in (hierarchy or ""))
+    """Whether the app is at its signing moment — the page or the pad."""
+    tree = hierarchy or ""
+    return any(m in tree for m in SIGNATURE_MARKS.get(pkg, ()))
 
 # HANDING THE PHONE BACK AT ITS OWN SIZE.
 #
@@ -1215,12 +1243,11 @@ def _density_wanted(focus: str, hierarchy: str | None = None) -> int | None:
         _left_at[0] = 0.0
         if pkg == "com.hhaexchange.caregiver" and _looks_landscape(hierarchy):
             return SIGNATURE_DENSITY
-        # The other signature moment, and it wants the opposite of a tuned
-        # number — see SIGNATURE_PAGES. Above PAGE_DENSITY because a page
-        # value tuned for reading a schedule has nothing to say about a
-        # canvas somebody is about to sign on.
+        # The other signature moment — see SIGNATURE_MARKS. Above
+        # PAGE_DENSITY because a page value tuned for reading a schedule has
+        # nothing to say about a canvas somebody is about to sign on.
         if _signature_page(pkg, hierarchy):
-            return DENSITY_RESET
+            return SIGNATURE_DENSITY_BY_APP[pkg]
         # A measured screen beats the app's blanket value — see PAGE_DENSITY.
         low = (page or "").casefold()
         for mark, value in PAGE_DENSITY.get(pkg, ()):
