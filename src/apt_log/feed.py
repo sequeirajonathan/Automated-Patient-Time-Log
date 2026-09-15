@@ -1073,6 +1073,43 @@ PAGE_DENSITY = {
 # the one proven signature landed at; the sweet spot is tuned here.
 SIGNATURE_DENSITY = 105
 
+# ...AND MOBILE CAREGIVER+'S SIGNATURE PAGE NEEDS THE PHONE'S OWN SIZE.
+#
+# Reported as "I press the patient's button to auto sign but on confirmation
+# it disappears", and it was not the replay: a plain `input swipe` drawn by
+# hand vanished on Confirmar firma in exactly the same way. The app was
+# discarding EVERY signature.
+#
+# The cause is this density. `wm density` is what Android measures the
+# screen in dp with, and the app picks its layout off that:
+#
+#     override 200 -> 1080 * 160 / 200 = 864dp wide  -> sw600dp TABLET layout
+#     physical 450 -> 1080 * 160 / 450 = 384dp wide  -> the phone layout
+#
+# At 200 the app believes it is on a tablet, lays the pad out in a form its
+# own confirm handler mishandles — the dialog renders with two thirds of the
+# screen black and the nav bar stranded at the top — and throws the ink away
+# silently. At the phone's own density the pad turns landscape, fills the
+# screen, and the signature is accepted on the first press. Watched both
+# ways on the live phone.
+#
+# Anything above 1080*160/600 = 288 would clear the tablet breakpoint, but
+# the value handed back is the panel's own: it is the layout the app was
+# built and tested against, and the signature moment is the one moment this
+# phone is driven BY A HUMAN FINGER — the sister's and the patient's — so a
+# bigger pen is the right trade even when nothing is broken. The page is
+# found by its own id rather than by an activity name, because every screen
+# in this app is `dashboardactivity`.
+SIGNATURE_PAGES = {
+    "com.tellus.evv.v2": "compose_view_visit_sign_off",
+}
+
+
+def _signature_page(pkg: str, hierarchy: str | None) -> bool:
+    """Whether this is an app's signature page, by the id it publishes."""
+    mark = SIGNATURE_PAGES.get(pkg)
+    return bool(mark and mark in (hierarchy or ""))
+
 # HANDING THE PHONE BACK AT ITS OWN SIZE.
 #
 # `wm density` is a DISPLAY setting, not an app setting — Android has no
@@ -1178,6 +1215,12 @@ def _density_wanted(focus: str, hierarchy: str | None = None) -> int | None:
         _left_at[0] = 0.0
         if pkg == "com.hhaexchange.caregiver" and _looks_landscape(hierarchy):
             return SIGNATURE_DENSITY
+        # The other signature moment, and it wants the opposite of a tuned
+        # number — see SIGNATURE_PAGES. Above PAGE_DENSITY because a page
+        # value tuned for reading a schedule has nothing to say about a
+        # canvas somebody is about to sign on.
+        if _signature_page(pkg, hierarchy):
+            return DENSITY_RESET
         # A measured screen beats the app's blanket value — see PAGE_DENSITY.
         low = (page or "").casefold()
         for mark, value in PAGE_DENSITY.get(pkg, ()):
@@ -1250,7 +1293,12 @@ def _watch_density(focus: str, serial: str | None = None,
         if _density_now[0] == want:
             return
     if want == DENSITY_RESET:
-        log.info("density handed back to the phone (left %s)", pkg or "?")
+        # Two reasons to be here now: she has left the care apps, or she is
+        # on a signature page that wants the panel's own size. Saying which
+        # matters — one of these is her finishing a visit.
+        log.info("density handed back to the phone (%s)",
+                 f"signing in {pkg}" if _signature_page(pkg, hierarchy)
+                 else f"left {pkg or '?'}")
         try:
             _adb(["shell", "wm", "density", "reset"], serial)
             # THE SENTINEL, not the panel's number, and this is the whole bug

@@ -124,6 +124,45 @@ CANVAS_MIN_SHARE = 0.22
 CANVAS_MIN_WIDTH_SHARE = 0.40
 CANVAS_MIN_HEIGHT_SHARE = 0.08
 
+# ...AND SMALL ENOUGH TO BE A PAD RATHER THAN THE PAGE.
+#
+# THERE WAS ONLY A FLOOR HERE, AND ON 15 SEPTEMBER IT COST A LIVE CHECK-OUT.
+#
+# The phone was left at its own density, where this finder cannot tell the
+# pad from its surroundings. It said so once — "2 candidates, refusing" —
+# and then, on the next press, took the root view instead:
+#
+#     signature replay done  canvas=[0, 0, 1080, 2340]
+#     ink=369080->282285  strokes_ink=+9531/2, -1157/3, -105432/3
+#
+# Three strokes dragged corner to corner across the whole display. The
+# negative deltas are the replay wiping out the screen it was drawing on,
+# and one of those swipes landed on the control that cancels a check-out:
+# the visit went back to "En Progreso" and the record had to be made again.
+#
+# A floor alone cannot catch that, because the root view passes every test
+# a canvas passes — it is big, it is quiet, it holds no text. What separates
+# them is that A SIGNATURE PAD IS PART OF A PAGE. It has a title above it
+# and a Confirmar below it; it never IS the page. So a candidate that
+# occupies essentially the whole tree is the tree, and this refuses it.
+#
+# A SHARE OF THE TREE IS THE WRONG YARDSTICK FOR THIS, for the same reason
+# it was the wrong one above: in a tree that is mostly pad, the pad is
+# mostly the tree. The legacy app's candidate is 92% of its own extent and
+# is perfectly real.
+#
+# What is true of the root and false of every real pad is that it spans the
+# tree CORNER TO CORNER. A pad has a title over it and a Confirmar under it;
+# something is always outside it. So the test is reach, not area:
+#
+#     Mobile Caregiver+  [53,1010][1047,1208]  in 1080x1419 — inset all round
+#     HHAeXchange+       [11,...][1069,...]    in 1080x2340 — inset all round
+#     the legacy pair    [0,120][720,1532]     in  720x1532 — a bar above it
+#     the root view      [0,0][1080,2340]      in 1080x2340 — nothing outside
+#
+# Only the last one has no page around it, and only the last one is refused.
+CANVAS_PAGE_MARGIN = 0.01
+
 # Ink stays off the canvas edge. The app's own border, a watermark line, an "X"
 # baseline mark — the margin keeps the replay clear of all of it.
 CANVAS_INSET = 0.06
@@ -327,6 +366,14 @@ def find_canvas(xml: str, dump: bool = True) -> tuple[list[int] | None, str]:
     for raw, b in nodes:
         rid = _attr(raw, "resource-id").split("/")[-1].lower()
         cls = (_attr(raw, "class") or "").rsplit(".", 1)[-1]
+        # The page is not a pad — see CANVAS_PAGE_MARGIN. Before the hints
+        # as well as the shapes: an id hint on the root view would
+        # otherwise walk straight past every size test below it.
+        if (b[0] <= max_x * CANVAS_PAGE_MARGIN
+                and b[1] <= max_y * CANVAS_PAGE_MARGIN
+                and b[2] >= max_x * (1 - CANVAS_PAGE_MARGIN)
+                and b[3] >= max_y * (1 - CANVAS_PAGE_MARGIN)):
+            continue
         big = (b[2] - b[0]) * (b[3] - b[1]) >= screen_area * CANVAS_MIN_SHARE
         # Or big enough to sign on in its OWN right — see the constants.
         # A pad inside a dialog is a small share of a small tree, and the
