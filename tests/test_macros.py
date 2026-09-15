@@ -7017,3 +7017,92 @@ class TestTheClockCannotBeMovedWhileTheSettingIsOff:
         _, reset = self._phone(monkeypatch, unlocked=unlocked)
         macros.MACROS["clock_reset"].run(MagicMock(), lambda _k: None)
         assert reset == [True]
+
+
+class TestTheWalkStandsDownForADialog:
+    """"I cannot finalize a visit."
+
+    The log said it exactly:
+
+        11:05:53  the confirm dialog opens      (9 tappable -> 2)
+        11:05:54  walking the page for a whole-page document
+        11:06:20  stitched 10 captures
+        11:06:24  the dialog is gone, the visit not ended
+
+    "¿Estás seguro de que quieres terminar la visita?" went up, the walker
+    scrolled the screen out from under it, and it died before anybody could
+    press Sí. Every press of Finalize did this.
+    """
+
+    def _doc(self, tmp_path, elements):
+        doc = {"id": "f1", "app": "com.tellus.evv.v2",
+               "activity": "dashboardactivity", "blocked": "", "full": False,
+               "screen": "home", "canvas": False, "size": [1080, 2340],
+               "elements": elements, "statics": []}
+        target = tmp_path / "screen.json"
+        target.write_text(json.dumps(doc), encoding="utf-8")
+        return target
+
+    def _runner(self, target, monkeypatch):
+        """Past the gates that come BEFORE the one under test.
+
+        `maybe_stitch` refuses with no viewer and refuses over a running
+        macro, so a test that does not stub those proves nothing about the
+        guard below them — it would pass with the guard deleted.
+        """
+        class Idle:
+            state = "idle"
+
+        monkeypatch.setattr(macros, "someone_is_watching", lambda _p: True)
+        monkeypatch.setattr(macros, "read_status", lambda _p: Idle())
+        runner = macros.Runner()
+        runner._screen_path = target
+        return runner
+
+    DIALOG = [{"rid": "button2", "b": [0, 0, 10, 10]},
+              {"rid": "button1", "b": [20, 0, 30, 10]}]
+    PAGE = [{"rid": "main_back_button", "b": [0, 0, 10, 10]},
+            {"rid": "", "b": [20, 2119, 1060, 2189]},
+            {"rid": "action_tab_patient", "b": [0, 2210, 10, 2280]}]
+
+    def test_a_dialog_is_never_walked(self, tmp_path, monkeypatch):
+        from apt_log import sign as sign_mod
+
+        monkeypatch.setattr(sign_mod, "in_flight", lambda: False)
+        from apt_log import resident
+
+        walked = []
+        monkeypatch.setattr(resident, "run",
+                            lambda fn: walked.append(True) or True)
+        runner = self._runner(self._doc(tmp_path, self.DIALOG), monkeypatch)
+        assert runner.maybe_stitch() is False
+        assert walked == [], "the walk scrolled a dialog off the screen"
+
+    def test_the_same_page_without_one_is_walked_as_before(self, tmp_path,
+                                                           monkeypatch):
+        """The guard has to be the dialog, not the page: this is the very
+        screen Finalize sits on, and it is stitched normally."""
+        from apt_log import resident, sign as sign_mod
+
+        monkeypatch.setattr(sign_mod, "in_flight", lambda: False)
+        monkeypatch.setattr(resident, "run", lambda fn: True)
+        runner = self._runner(self._doc(tmp_path, self.PAGE), monkeypatch)
+        assert runner.maybe_stitch() is True
+
+    @pytest.mark.parametrize("rid", ["button1", "button2", "button3"])
+    def test_any_of_androids_own_alert_buttons_counts(self, rid):
+        """Framework ids, not this app's — which is what makes the guard
+        cover the dialogs nobody has met yet."""
+        assert macros._a_dialog_is_up({"elements": [{"rid": rid}]})
+
+    def test_and_an_ordinary_control_does_not(self):
+        assert not macros._a_dialog_is_up({"elements": [{"rid": "button_ok"}]})
+        assert not macros._a_dialog_is_up({"elements": [{"rid": ""}]})
+        assert not macros._a_dialog_is_up({})
+
+    def test_a_tap_of_ours_was_never_the_thing_that_saved_it(self):
+        """STITCH_TAP_QUIET watches the poke the WEB process writes. She was
+        at the phone pressing it with her thumb — no tap of ours, no quiet
+        window. The dialog has to be its own evidence."""
+        assert macros.STITCH_TAP_QUIET > 0
+        assert macros._a_dialog_is_up({"elements": [{"rid": "button1"}]})

@@ -215,6 +215,38 @@ SCAN_ACTIVE = threading.Event()
 # someone is driving the phone, and the walk waits its turn.
 STITCH_TAP_QUIET = 4.0
 
+# ...AND NEVER OVER A DIALOG, WHOEVER OPENED IT.
+#
+# Reported as "I cannot finalize a visit", and the log says it exactly:
+#
+#     11:05:53  the confirm dialog opens      (9 tappable -> 2)
+#     11:05:54  walking the page for a whole-page document
+#     11:06:20  stitched 10 captures
+#     11:06:24  the dialog is gone, the visit not ended
+#
+# "¿Estás seguro de que quieres terminar la visita?" went up, the walker
+# scrolled the screen out from under it, and the dialog died before anybody
+# could press Sí. Every press of Finalize did this, which is what made
+# finishing a visit impossible rather than merely awkward.
+#
+# `STITCH_TAP_QUIET` could not save it. That guard watches the poke the WEB
+# process writes, and she was standing at the phone pressing it with her
+# thumb — no tap of ours, no quiet window, nothing to wait out. So the test
+# has to be the dialog itself and not who raised it.
+#
+# Android's own ids, not this app's: an AlertDialog's buttons are
+# `android:id/button1..3` on every app on the phone, which is what makes
+# this one line cover the ones nobody has met yet. A dialog is also never a
+# thing worth stitching — it is one screenful by construction — so nothing
+# is lost by standing down.
+ALERT_BUTTON_IDS = ("button1", "button2", "button3")
+
+
+def _a_dialog_is_up(doc: dict) -> bool:
+    """Whether a system dialog owns the screen. See ALERT_BUTTON_IDS."""
+    return any((e.get("rid") or "") in ALERT_BUTTON_IDS
+               for e in doc.get("elements") or ())
+
 # The schedule's visit cards fold their details behind an accordion: a
 # collapsed card shows name and time with a sideways chevron; tapping the
 # row unfolds the EVV records and the details button beneath it. A scan
@@ -6176,6 +6208,11 @@ class Runner:
         # signature. The walk itself re-checks the live screen besides,
         # because this doc can be a page old by the time the swipe fires.
         if doc.get("canvas"):
+            return False
+        # Nor over a dialog — see ALERT_BUTTON_IDS. This is the one that
+        # made a visit impossible to finish: the walk scrolled the confirm
+        # out from under her every time she pressed Finalize.
+        if _a_dialog_is_up(doc):
             return False
         from apt_log import feed as feed_mod
 
