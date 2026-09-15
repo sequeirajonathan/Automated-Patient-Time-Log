@@ -1133,10 +1133,49 @@ SIGNATURE_MARKS = {
 }
 
 
+# THE SIGNING MOMENT IS A PHASE, NOT A SCREEN, AND ONE BAD TICK RUINS IT.
+#
+# Marking the page and then the pad was still not enough, because between
+# them there is an instant that reads as NEITHER — the dialog is opening,
+# the page is gone, and a read landing there says "not signing". Seen in a
+# live reading during the check-out:
+#
+#     sign-off page: False | pad open: False
+#
+# One such tick is all it takes. The density changes, Android re-lays-out
+# the app, the dialog is recreated, and the signature she had just drawn is
+# gone — which is how a caregiver in Miami ended up deleting the replayed
+# signature and signing the glass by hand.
+#
+# So leaving the phase takes EVIDENCE, not the absence of it: three
+# consecutive reads that are positively somewhere else. A transition costs
+# one, a slow frame two, and neither is enough. Coming back costs nothing —
+# a single sighting of the page or the pad re-enters the phase at once,
+# because being at the wrong density while signing is the expensive way to
+# be wrong and being at the signing density for three extra frames is free.
+SIGNING_HOLD = 3
+# Consecutive reads that were NOT the signing moment, per app. Reset by any
+# sighting of it; the phase ends once this reaches SIGNING_HOLD.
+_signing_missed: dict[str, int] = {}
+
+
 def _signature_page(pkg: str, hierarchy: str | None) -> bool:
-    """Whether the app is at its signing moment — the page or the pad."""
-    tree = hierarchy or ""
-    return any(m in tree for m in SIGNATURE_MARKS.get(pkg, ()))
+    """Whether the app is at its signing moment — the page, the pad, or the
+    breath between them. See SIGNING_HOLD."""
+    marks = SIGNATURE_MARKS.get(pkg, ())
+    if not marks:
+        return False
+    if any(m in (hierarchy or "") for m in marks):
+        _signing_missed[pkg] = 0
+        return True
+    missed = _signing_missed.get(pkg, SIGNING_HOLD)
+    # AN UNREADABLE TREE IS NOT EVIDENCE OF ANYTHING, so it is not counted
+    # as a read somewhere else — the same choice `_app_home` makes about a
+    # tree it cannot read. Never act on silence.
+    if hierarchy:
+        missed += 1
+        _signing_missed[pkg] = missed
+    return missed < SIGNING_HOLD
 
 # HANDING THE PHONE BACK AT ITS OWN SIZE.
 #

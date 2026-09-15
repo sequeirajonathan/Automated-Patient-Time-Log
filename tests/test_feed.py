@@ -3983,6 +3983,15 @@ class TestTheSignatureMomentGetsThePhonesOwnSize:
     Watched both ways on the live phone.
     """
 
+    @pytest.fixture(autouse=True)
+    def _fresh_phase(self):
+        """The signing moment is held across a few reads (SIGNING_HOLD), so
+        it is MODULE STATE — and module state that leaks between tests is
+        how a test passes for the wrong reason. Cleared either side."""
+        feed._signing_missed.clear()
+        yield
+        feed._signing_missed.clear()
+
     SIGN_PAGE = ('<node resource-id="com.tellus.evv.v2:id/'
                  'compose_view_visit_sign_off" bounds="[0,0][1080,2340]"/>')
     ORDINARY = '<node resource-id="com.tellus.evv.v2:id/container"/>'
@@ -4024,12 +4033,72 @@ class TestTheSignatureMomentGetsThePhonesOwnSize:
         the one page that a person signs on is different."""
         assert feed._density_wanted(self.FOCUS, self.ORDINARY) == 200
 
+    def test_a_transition_between_the_page_and_the_pad_holds_the_density(self):
+        """MARKING BOTH WAS STILL NOT ENOUGH. Between them is an instant
+        that reads as NEITHER — the dialog opening, the page already gone.
+        Caught in a live reading during the check-out:
+
+            sign-off page: False | pad open: False
+
+        One such tick changes the density, Android re-lays-out the app, the
+        dialog is recreated, and the signature just drawn is gone. That is
+        how a caregiver in Miami ended up deleting the replayed signature
+        and signing the glass by hand.
+        """
+        assert feed._signature_page("com.tellus.evv.v2", self.SIGN_PAGE)
+        assert feed._signature_page("com.tellus.evv.v2", self.ORDINARY), \
+            "one blank tick ended the signing moment"
+        assert feed._density_wanted(self.FOCUS, self.ORDINARY) == 300
+
+    def test_a_sighting_resets_the_grace_entirely(self):
+        """Coming back is free. Being at the wrong density while signing is
+        the expensive way to be wrong; being at the signing density for a
+        few extra frames costs nothing."""
+        feed._signing_missed.clear()
+        feed._signature_page("com.tellus.evv.v2", self.SIGN_PAGE)
+        feed._signature_page("com.tellus.evv.v2", self.ORDINARY)
+        feed._signature_page("com.tellus.evv.v2", self.ORDINARY)
+        feed._signature_page("com.tellus.evv.v2", self.PAD)      # back
+        for _ in range(feed.SIGNING_HOLD - 1):
+            assert feed._signature_page("com.tellus.evv.v2", self.ORDINARY)
+
+    def test_but_it_does_let_go_once_she_is_plainly_elsewhere(self):
+        """A hold that never releases would pin the whole app at the signing
+        density — the visits list included, which is tuned to 200."""
+        feed._signing_missed.clear()
+        feed._signature_page("com.tellus.evv.v2", self.SIGN_PAGE)
+        seen = [feed._signature_page("com.tellus.evv.v2", self.ORDINARY)
+                for _ in range(feed.SIGNING_HOLD)]
+        assert seen[-1] is False and all(seen[:-1])
+        assert feed._density_wanted(self.FOCUS, self.ORDINARY) == 200
+
+    def test_an_unreadable_tree_is_not_a_read_somewhere_else(self):
+        """Never act on silence — the same choice `_app_home` makes about a
+        tree it cannot read. A phone that will not answer must not be able
+        to end the signing moment by saying nothing."""
+        feed._signing_missed.clear()
+        feed._signature_page("com.tellus.evv.v2", self.SIGN_PAGE)
+        for _ in range(feed.SIGNING_HOLD * 3):
+            assert feed._signature_page("com.tellus.evv.v2", "")
+            assert feed._signature_page("com.tellus.evv.v2", None)
+
+    def test_a_cold_start_never_assumes_signing(self):
+        """The grace is only ever entered by seeing the moment, never by
+        starting up in the middle of nothing."""
+        assert not feed._signature_page("com.tellus.evv.v2", self.ORDINARY)
+        assert not feed._signature_page("com.tellus.evv.v2", "")
+
     def test_the_page_is_found_by_its_id_not_its_activity(self):
         """Every screen in this app is `dashboardactivity`, so an activity
         name cannot tell them apart. The page publishes its own id."""
         assert feed._signature_page("com.tellus.evv.v2", self.SIGN_PAGE)
         assert feed._signature_page("com.tellus.evv.v2", self.PAD)
+        # From a COLD phase for the negatives: after a sighting the grace
+        # holds for SIGNING_HOLD reads, and that is the point of it. What
+        # this test is about is the id, so it asks the id's question.
+        feed._signing_missed.clear()
         assert not feed._signature_page("com.tellus.evv.v2", self.ORDINARY)
+        feed._signing_missed.clear()
         assert not feed._signature_page("com.tellus.evv.v2", None)
 
     def test_another_apps_signing_is_not_touched_by_this(self):
