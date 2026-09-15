@@ -3035,6 +3035,52 @@ BACKS_TO_HOME = 6
 # the loop below does up to six of them while somebody waits.
 BACK_SETTLE = 0.9
 
+# THE APP'S OWN NAME FOR ITS FRONT PAGE, WHERE THE ATLAS CANNOT TELL.
+#
+# "The little home icon should return the user back to where all of the
+# patients are for the day ... after exiting it kinda gets stuck on the
+# completion." It was stuck because the button did nothing at all.
+#
+# `feed.screen_for` keys on the ACTIVITY, and Mobile Caregiver+ has exactly
+# one: DashboardActivity is the day's visit list, the visit detail and the
+# sign-off page alike. So the atlas answers "home" wherever it is standing,
+# `_app_home` breaks out of its loop having pressed nothing, and App Home is
+# a button that returns you to the page you are already on. Watched live:
+# run from a visit detail, it left the phone on the visit detail.
+#
+# This is the same fault `_the_drawer` records for inMyTeam, and it wants
+# the same kind of answer — something the APP distinguishes. This app hands
+# it over directly: each page carries its own Compose view id.
+#
+#     compose_view_visit_calendar   the day's visits      <- home
+#     compose_view_visit_details    one visit
+#     compose_view_visit_sign_off   the signatures
+#
+# Read-only, published by the app itself, and it cannot go stale the way a
+# map of the app would: if the id ever disappears this falls back to the
+# atlas, which is exactly where it was before.
+HOME_PAGE_IDS = {
+    "com.tellus.evv.v2": "compose_view_visit_calendar",
+}
+
+# How long ONE Back is given to land on an app whose front page is named
+# above. `BACK_SETTLE` was measured for "a keyevent and a redraw"; these
+# pages are Compose and take seconds — timed on the phone at more than
+# three. Pressing again at 0.9s would spend the whole budget while the
+# first press was still travelling, walk past the front page and out of
+# the app, which is the exact fault `_app_home` exists to prevent.
+BACK_LANDED = 8.0
+
+
+def _at_app_home(package: str, focus: str, tree: str) -> bool:
+    """Whether this is the app's own front page. See HOME_PAGE_IDS."""
+    from apt_log import feed as feed_mod
+
+    mark = HOME_PAGE_IDS.get(package)
+    if mark and tree:
+        return mark in tree
+    return feed_mod.screen_for(focus, tree) in HOME_SCREENS
+
 # APPS WHOSE OWN FLOW LEAVES THEIR PACKAGE.
 #
 # HHAeXchange+ signs in through a Chrome Custom Tab, so for the length of that
@@ -3106,12 +3152,19 @@ def _app_home(driver, report) -> None:
         #
         # Same fault, same file, third time: the agency walk below carries
         # the same note about the same frozen file.
-        if front == package and feed_mod.screen_for(
-                focus, _live_tree(driver)) in HOME_SCREENS:
+        if front == package and _at_app_home(package, focus,
+                                             _live_tree(driver)):
             break
         report("macro.step.navigating")
         device_mod.send_ui_action("back")
-        time.sleep(BACK_SETTLE)
+        if package in HOME_PAGE_IDS:
+            # WAIT FOR IT TO LAND rather than assuming — see BACK_LANDED.
+            # Stops the moment the front page appears, so the ordinary case
+            # (one Back from a visit detail) costs one press and one look.
+            wait_for(lambda: _at_app_home(package, focus, _live_tree(driver)),
+                     timeout=BACK_LANDED)
+        else:
+            time.sleep(BACK_SETTLE)
     else:
         # Ran out of presses without recognising a front page. Activating is
         # the last honest move: it returns the app's own task to the front
