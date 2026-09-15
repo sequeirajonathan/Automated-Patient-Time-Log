@@ -245,7 +245,17 @@ class TestWritePaths:
                          # And the undo: both automatic switches back on, the
                          # network restores the real time. No parameters at
                          # all — the safest write on the page.
-                         "/debug/time/reset"}
+                         "/debug/time/reset",
+                         # THE SWITCH OVER ALL THREE OF THOSE, and off is
+                         # what a fresh install has. Every app on the phone
+                         # stamps records with its clock, so moving it is
+                         # the ability to write a record asserting a
+                         # caregiver was somewhere at a time she was not;
+                         # it exists for testing and for nothing else.
+                         # Installation-wide, because the phone has one
+                         # clock. Turning it off also puts the phone back
+                         # on automatic — see the route.
+                         "/debug/clock-lock"}
 
     def test_no_route_accepts_a_raw_coordinate_or_keycode(self, client):
         """/tap takes an element from a named frame; /device takes an action

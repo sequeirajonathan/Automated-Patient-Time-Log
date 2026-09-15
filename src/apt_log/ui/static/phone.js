@@ -948,6 +948,29 @@
     const manual = !!(c.ok && c.auto === false);
     if (flag) flag.hidden = !manual;
     if (btn) btn.classList.toggle('manual', manual);
+    // ...AND WHETHER THIS IS A BUTTON AT ALL.
+    //
+    // Moving the phone's clock is a setting, and it is off unless somebody
+    // deliberately turned it on. Off means pressing the clock does nothing
+    // — no sheet, no hint, no press animation — because a control that
+    // opens something and then refuses is worse than no control: it
+    // teaches her the portal is broken. The face and the amber pill stay
+    // either way; those are facts about the phone, not offers.
+    //
+    // Read from the socket rather than baked into the page, so a portal
+    // left open when the setting changes stops being a button on the next
+    // tick instead of the next reload.
+    if (btn) {
+      const open = c.unlocked !== false;
+      btn.classList.toggle('locked', !open);
+      if (open) {
+        btn.removeAttribute('disabled');
+        btn.setAttribute('aria-haspopup', 'dialog');
+      } else {
+        btn.setAttribute('disabled', '');
+        btn.removeAttribute('aria-haspopup');
+      }
+    }
   }
 
   function applyClock(c) {
@@ -981,6 +1004,9 @@
 
   function openClockSheet() {
     if (clockPending) return;
+    // The setting is off. Nothing happens — deliberately nothing, not even
+    // a toast: she did not ask for anything, she pressed a clock.
+    if (phoneClock && phoneClock.unlocked === false) return;
     const when = document.getElementById('clock-when');
     if (when) delete when.dataset.touched;
     fillClockSheet();

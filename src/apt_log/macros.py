@@ -5053,9 +5053,11 @@ CLOCK_RESTARTS = {
     "mobile_caregiver_pin": "com.tellus.evv.v2",
     "open_mobile_caregiver": "com.tellus.evv.v2",
 }
-# Which of those apps a clock change has stopped without reopening: the
-# next open force-stops it again (a no-op on a dead process) so the launch
-# is cold, then clears the mark. Process-local, like `_freshened`.
+# Which care apps a clock change has stopped without reopening: the next
+# open of one force-stops it again (a no-op on a dead process) so the
+# launch is cold, then clears the mark. Every care app can be in here — a
+# clock change closes all four, because a running app keeps the clock it
+# started with. Process-local, like `_freshened`.
 _clock_dirty: dict[str, bool] = {}
 # How long the network is given to answer after the switches go back on
 # before an app that reads the clock is started. NITZ on this carrier lands
@@ -5081,8 +5083,13 @@ def _clock_gate(name: str, report) -> None:
             # than the one it was started under.
             _force_stop(package)
             _forget_stitched(package)
+            _clock_dirty.pop(package, None)
             time.sleep(1.5)
-    package = CLOCK_RESTARTS.get(name)
+    # WHATEVER THIS MACRO OPENS, not only Mobile Caregiver+. A clock change
+    # now closes all four care apps, so any of them can be the one carrying
+    # the mark; force-stopping an already-dead process is a no-op, and the
+    # point is that the launch below is cold whichever app it is.
+    package = CLOCK_RESETS.get(name) or CLOCK_RESTARTS.get(name)
     if package and _clock_dirty.pop(package, False):
         report("macro.step.clock_restart")
         _force_stop(package)
@@ -5117,45 +5124,62 @@ def _land_check(name: str, report) -> None:
 def _after_clock_change(report) -> None:
     """Everything a clock change owes the phone, set or reset alike.
 
-    Mobile Caregiver+ is stopped so its next start reads the new clock —
-    and reopened on the spot if it was the app in front, because a change
-    made while looking at it must not leave her on a launcher. Then, if the
-    phone is sitting on its own Settings (the debug tab opens it there),
-    the last care app is brought back so the next open lands on an app and
-    not on the Date & time screen she just left.
+    EVERY care app is stopped, not only the one the clock was moved for. A
+    running app keeps the clock it started with — that was always true of
+    Mobile Caregiver+ and is just as true of the other three, which sat
+    there holding a stale hour until something else happened to restart
+    them. Asked for in those words: close all the apps after a change so
+    they can synchronise to the phone's time.
+
+    Whichever care app was IN FRONT is reopened on the spot, because a
+    change made while looking at an app must not leave her on a launcher.
+    The rest are left closed and marked, so their next open is cold.
+
+    Then, if the phone is sitting on its own Settings (the debug tab opens
+    it there), the last care app is brought back so the next open lands on
+    an app and not on the Date & time screen she just left.
     """
     from apt_log import feed as feed_mod
     from apt_log.ui import phonesettings
 
     phonesettings.forget_clock()
-    mc = CLOCK_RESTARTS["open_mobile_caregiver"]
     front = _front_package()
-    _force_stop(mc)
-    _forget_stitched(mc)
-    if front == mc:
+    for package in feed_mod.CARE_APPS:
+        _force_stop(package)
+        _forget_stitched(package)
+        _clock_dirty[package] = True
+    if front in feed_mod.CARE_APPS:
         report("macro.step.clock_restart")
         time.sleep(1.5)
         wake_display()
-        feed_mod._adb(["shell", "monkey", "-p", mc,
+        feed_mod._adb(["shell", "monkey", "-p", front,
                        "-c", "android.intent.category.LAUNCHER", "1"])
-        if not wait_for(lambda: _front_package() == mc, timeout=25.0):
-            _clock_dirty[mc] = True
-            raise RuntimeError("Mobile Caregiver+ did not come back")
-        _clock_dirty.pop(mc, None)
+        if not wait_for(lambda: _front_package() == front, timeout=25.0):
+            raise RuntimeError("the app in front did not come back")
+        _clock_dirty.pop(front, None)
         return
-    _clock_dirty[mc] = True
     if front in feed_mod.SETTINGS_APPS:
         report("macro.step.clearing")
+        # Whichever care app she was last in, whatever it is. This used to
+        # exclude Mobile Caregiver+ because that was the one just stopped;
+        # now they are all stopped, so the only question is where to land,
+        # and the answer is the same as everywhere else in this file — the
+        # last app the watchdog actually saw, never a guess.
         back_to = feed_mod.last_care_app()
-        if back_to and back_to != mc:
+        if back_to:
             wake_display()
             feed_mod._adb(["shell", "monkey", "-p", back_to,
                            "-c", "android.intent.category.LAUNCHER", "1"])
-            wait_for(lambda: _front_package() == back_to, timeout=15.0)
+            if wait_for(lambda: _front_package() == back_to, timeout=15.0):
+                _clock_dirty.pop(back_to, None)
         else:
             from apt_log.device import send_ui_action
 
             send_ui_action("home")
+
+
+class ClockLocked(RuntimeError):
+    """Moving the phone's clock is switched off. See prefs.clock_unlocked."""
 
 
 def _clock_set(driver, report, arg: str) -> None:
@@ -5166,7 +5190,22 @@ def _clock_set(driver, report, arg: str) -> None:
     fails the macro rather than the page: the page validates first, so this
     is the belt for a request that did not come from the page.
     """
+    from apt_log import prefs
     from apt_log.ui import phonesettings
+
+    # THE LOCK IS CHECKED HERE BECAUSE HERE IS WHERE EVERYTHING ARRIVES.
+    #
+    # The launcher, the settings tab and anything written next all reach the
+    # clock the same way: they ask this process to run `clock_set`. Hiding
+    # the button is worth doing and is done, but a hidden button is a
+    # decoration on top of a capability that still exists. This is the
+    # capability.
+    #
+    # `clock_reset` has no such check on purpose. It moves the clock TOWARDS
+    # the network's time, which is the safe direction, and the lock itself
+    # needs it: turning the setting off resets the phone.
+    if not prefs.clock_unlocked():
+        raise ClockLocked("changing the phone's clock is switched off")
 
     report("macro.step.clock_setting")
     try:

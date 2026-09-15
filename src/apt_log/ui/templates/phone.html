@@ -108,6 +108,10 @@
                         -webkit-tap-highlight-color:transparent;
                         transition:transform .25s var(--spring); }
   #launcher .clockbtn:active { transform:scale(.96); }
+  /* ...and when moving the clock is switched off, it is not a button: no
+     pointer, no press, no hint. It reads as what it is — the time. */
+  #launcher .clockbtn.locked { cursor:default; }
+  #launcher .clockbtn.locked:active { transform:none; }
   /* "Set by hand" — amber, because it is a warning and not a label: the
      phone is stamping records with a time somebody typed. */
   .clockflag { font-size:11.5px; font-weight:700; letter-spacing:.06em;
@@ -2052,8 +2056,10 @@
      press opens the sheet below. The pill under it appears only when the
      phone is off automatic time — the state every visit record then
      rides, and the one thing on this screen that must not go unsaid. #}
-  <button type="button" id="clockbtn" class="clockbtn" aria-haspopup="dialog"
-          title="{{ t('papp.clock.hint') }}">
+  <button type="button" id="clockbtn"
+          class="clockbtn{{ '' if clock_unlocked else ' locked' }}"
+          {% if clock_unlocked %}aria-haspopup="dialog"
+          title="{{ t('papp.clock.hint') }}"{% else %}disabled{% endif %}>
     <time id="clock">{{ clock.said if clock and clock.ok else '' }}</time>
     <span id="clockflag" class="clockflag"
           {% if not (clock and clock.ok and clock.auto is sameas false) %}hidden{% endif %}>

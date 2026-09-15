@@ -403,6 +403,16 @@ class TestTheClockReading:
 
 
 class TestTheRoutes:
+    @pytest.fixture(autouse=True)
+    def _clock_unlocked(self, monkeypatch):
+        """Moving the clock is OFF on a fresh install now, and these tests
+        are about the controls rather than the switch over them — so they
+        say out loud that the switch is on. The tests for the switch itself
+        are in TestTheSwitchGovernsEverySurface."""
+        from apt_log import prefs
+
+        monkeypatch.setattr(prefs, "clock_unlocked", lambda *a, **k: True)
+
     def test_the_page_renders_with_no_phone_at_all(self, client, no_adb):
         """The person opening a debug page is diagnosing why adb went away.
         An exception page here is the tool failing at its one moment."""
@@ -531,3 +541,201 @@ class TestTheRoutes:
         """The tab strip, on both pages, each pointing at the other."""
         assert 'href="/debug"' in client.get("/console").text
         assert 'href="/console"' in client.get("/debug").text
+
+
+class TestMovingTheClockIsASettingAndItIsOff:
+    """"I shouldn't have to worry about clicking on the clock in the front
+    image — nothing should happen."
+
+    Every app on this phone stamps EVV records with the phone's clock, so
+    moving it is the ability to write a record asserting a caregiver was
+    somewhere at a time she was not. It exists because testing needs it and
+    for no other reason. What it cost as an always-on control: the clock
+    left four hours behind with a visit due, because nobody meant to leave
+    it there — the control was simply present, one tap away.
+    """
+
+    def test_a_fresh_install_cannot_move_the_clock(self, tmp_path):
+        from apt_log import prefs
+
+        assert prefs.clock_unlocked(tmp_path / "prefs.json") is False
+
+    def test_nor_can_one_whose_preferences_will_not_parse(self, tmp_path):
+        """The file is the only record of the decision. Unreadable means
+        nobody said yes, which means no."""
+        from apt_log import prefs
+
+        broken = tmp_path / "prefs.json"
+        broken.write_text("{not json", encoding="utf-8")
+        assert prefs.clock_unlocked(broken) is False
+
+    @pytest.mark.parametrize("junk", ["", "0", "no", "off", None, 0, [], {}])
+    def test_anything_that_is_not_a_clear_yes_is_a_no(self, tmp_path, junk):
+        from apt_log import prefs
+
+        path = tmp_path / "prefs.json"
+        prefs.set_clock_unlocked(True, path)
+        assert prefs.set_clock_unlocked(junk, path) is False
+        assert prefs.clock_unlocked(path) is False
+
+    @pytest.mark.parametrize("yes", [True, "1", "true", "on", "YES"])
+    def test_and_a_clear_yes_is_a_yes(self, tmp_path, yes):
+        from apt_log import prefs
+
+        path = tmp_path / "prefs.json"
+        assert prefs.set_clock_unlocked(yes, path) is True
+        assert prefs.clock_unlocked(path) is True
+
+    def test_it_survives_a_reread_rather_than_living_in_memory(self, tmp_path):
+        from apt_log import prefs
+
+        path = tmp_path / "prefs.json"
+        prefs.set_clock_unlocked(True, path)
+        assert "clock_unlocked" in json.loads(path.read_text())
+
+    def test_the_other_preferences_are_not_disturbed(self, tmp_path):
+        """It lives in the same file as the densities and the devices."""
+        from apt_log import prefs
+
+        path = tmp_path / "prefs.json"
+        prefs.set_global_density(120, path)
+        prefs.set_clock_unlocked(True, path)
+        assert prefs.global_density(path) == 120
+        prefs.set_clock_unlocked(False, path)
+        assert prefs.global_density(path) == 120
+
+
+class TestTheSwitchGovernsEverySurface:
+    """Off means off everywhere — the front page's clock, the settings tab's
+    controls, and the process that would have done the writing."""
+
+    def _lock(self, monkeypatch, unlocked):
+        from apt_log import prefs
+
+        monkeypatch.setattr(prefs, "clock_unlocked", lambda *a, **k: unlocked)
+
+    def test_the_set_route_refuses_and_says_why(self, client, monkeypatch):
+        """Refused at the route as well as in the macro. The macro's check is
+        the one that cannot be routed around; this one exists so the page
+        says why instead of showing a macro that failed."""
+        from apt_log import macros as macros_mod
+
+        self._lock(monkeypatch, False)
+        asked = []
+        monkeypatch.setattr(macros_mod, "request",
+                            lambda *a, **k: asked.append(a))
+        r = client.post("/debug/time/set", data={"when": "2026-09-02T15:30"},
+                        follow_redirects=False)
+        assert r.status_code == 303
+        assert "clock_locked" in r.headers["location"]
+        assert asked == [], "the controller was asked anyway"
+
+    def test_turning_an_automatic_switch_off_is_the_same_capability(
+            self, client, monkeypatch):
+        """It is how a hand-set time is made to stick, so the same setting
+        governs it."""
+        from apt_log.ui import phonesettings
+
+        self._lock(monkeypatch, False)
+        wrote = []
+        monkeypatch.setattr(phonesettings, "set_time_switch",
+                            lambda *a: wrote.append(a))
+        r = client.post("/debug/time/switch",
+                        data={"switch": "auto_time", "on": "0"},
+                        follow_redirects=False)
+        assert "clock_locked" in r.headers["location"]
+        assert wrote == []
+
+    def test_but_turning_one_back_on_is_always_allowed(self, client, monkeypatch):
+        """That is the direction the lock wants the phone to go."""
+        from apt_log.ui import phonesettings
+
+        self._lock(monkeypatch, False)
+        wrote = []
+        monkeypatch.setattr(phonesettings, "set_time_switch",
+                            lambda *a: wrote.append(a))
+        client.post("/debug/time/switch",
+                    data={"switch": "auto_time", "on": "1"},
+                    follow_redirects=False)
+        assert wrote == [("auto_time", True)]
+
+    def test_switching_it_off_puts_the_phone_back_on_automatic(
+            self, client, monkeypatch, tmp_path):
+        """"Locked" plus "four hours behind" is the worst of both: a wrong
+        clock with the control that fixes it taken away."""
+        from apt_log import macros as macros_mod
+        from apt_log import prefs
+
+        path = tmp_path / "prefs.json"
+        monkeypatch.setattr(prefs, "PREFS_PATH", path)
+        prefs.set_clock_unlocked(True, path)
+        asked = []
+        monkeypatch.setattr(macros_mod, "request",
+                            lambda name, **k: asked.append(name))
+        r = client.post("/debug/clock-lock", data={"on": "0"},
+                        follow_redirects=False)
+        assert asked == ["clock_reset"]
+        assert prefs.clock_unlocked(path) is False
+        assert "saved=clock_locked" in r.headers["location"]
+
+    def test_switching_it_on_moves_no_clock_by_itself(
+            self, client, monkeypatch, tmp_path):
+        """Permission is not an instruction."""
+        from apt_log import macros as macros_mod
+        from apt_log import prefs
+
+        path = tmp_path / "prefs.json"
+        monkeypatch.setattr(prefs, "PREFS_PATH", path)
+        asked = []
+        monkeypatch.setattr(macros_mod, "request",
+                            lambda name, **k: asked.append(name))
+        client.post("/debug/clock-lock", data={"on": "1"},
+                    follow_redirects=False)
+        assert asked == []
+        assert prefs.clock_unlocked(path) is True
+
+    def test_a_controller_that_cannot_be_asked_still_locks(
+            self, client, monkeypatch, tmp_path):
+        """The setting is the part that matters and it is already written.
+        The page says the reset did not happen rather than claiming it did."""
+        from apt_log import macros as macros_mod
+        from apt_log import prefs
+
+        path = tmp_path / "prefs.json"
+        monkeypatch.setattr(prefs, "PREFS_PATH", path)
+        prefs.set_clock_unlocked(True, path)
+        monkeypatch.setattr(macros_mod, "request",
+                            lambda *a, **k: (_ for _ in ()).throw(OSError("no")))
+        r = client.post("/debug/clock-lock", data={"on": "0"},
+                        follow_redirects=False)
+        assert prefs.clock_unlocked(path) is False
+        assert "clock_locked_no_reset" in r.headers["location"]
+
+    def test_the_front_page_clock_is_not_a_button_when_it_is_off(
+            self, client, monkeypatch):
+        self._lock(monkeypatch, False)
+        body = client.get("/app").text
+        i = body.index('id="clockbtn"')
+        opening = body[i:i + 260]
+        assert "disabled" in opening
+        assert "aria-haspopup" not in opening, "it still offers a dialog"
+
+    def test_and_is_one_again_when_it_is_on(self, client, monkeypatch):
+        self._lock(monkeypatch, True)
+        body = client.get("/app").text
+        i = body.index('id="clockbtn"')
+        opening = body[i:i + 260]
+        assert "disabled" not in opening
+        assert 'aria-haspopup="dialog"' in opening
+
+    def test_the_socket_carries_the_setting_so_an_open_page_follows_it(
+            self, client, monkeypatch):
+        """A portal left open when the setting changes must stop being a
+        button on the next tick, not the next reload."""
+        from importlib import import_module
+
+        ui_app = import_module("apt_log.ui.app")
+        self._lock(monkeypatch, False)
+        assert ui_app._clock_payload()["unlocked"] is False
+        self._lock(monkeypatch, True)
+        assert ui_app._clock_payload()["unlocked"] is True
