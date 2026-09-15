@@ -3988,8 +3988,35 @@ class TestTheSignatureMomentGetsThePhonesOwnSize:
     ORDINARY = '<node resource-id="com.tellus.evv.v2:id/container"/>'
     FOCUS = "com.tellus.evv.v2/com.tellus.evv.activities.DashboardActivity"
 
-    def test_the_signature_page_is_handed_the_phones_own_size(self):
-        assert feed._density_wanted(self.FOCUS, self.SIGN_PAGE) == \
+    PAD = '<node resource-id="com.tellus.evv.v2:id/buttonClearSignature"/>'
+
+    def test_the_signature_page_gets_the_signing_density(self):
+        assert feed._density_wanted(self.FOCUS, self.SIGN_PAGE) == 300
+
+    def test_and_so_does_the_pad_it_opens(self):
+        """THE PAD IS A DIALOG and the page's id is not in its tree. With
+        only the page marked, the density flipped back the instant she
+        pressed Capturar Firma — watched live, mid-checkout, at the one
+        moment it must not:
+
+            17:21:14  density handed back to the phone (signing in ...)
+            17:22:51  density 200 for com.tellus.evv.v2   <- pad just opened
+        """
+        assert feed._density_wanted(self.FOCUS, self.PAD) == 300
+
+    def test_the_value_clears_the_tablet_breakpoint(self):
+        """Android picks the layout off the screen's width in dp, and this
+        app's confirm mishandles its tablet form. 1080*160/300 = 576dp,
+        under sw600dp — so the pad opens landscape and accepts."""
+        want = feed.SIGNATURE_DENSITY_BY_APP["com.tellus.evv.v2"]
+        assert 1080 * 160 / want < 600
+
+    def test_and_is_not_the_panels_own_size(self):
+        """450 was the first answer here and it was reported as "density is
+        all wrong": the title wraps to three lines and neither Capturar
+        Firma nor Complete la Visita fits on screen. Correct and unusable
+        is still unusable."""
+        assert feed.SIGNATURE_DENSITY_BY_APP["com.tellus.evv.v2"] != \
             feed.DENSITY_RESET
 
     def test_every_other_page_of_that_app_is_unchanged(self):
@@ -4001,6 +4028,7 @@ class TestTheSignatureMomentGetsThePhonesOwnSize:
         """Every screen in this app is `dashboardactivity`, so an activity
         name cannot tell them apart. The page publishes its own id."""
         assert feed._signature_page("com.tellus.evv.v2", self.SIGN_PAGE)
+        assert feed._signature_page("com.tellus.evv.v2", self.PAD)
         assert not feed._signature_page("com.tellus.evv.v2", self.ORDINARY)
         assert not feed._signature_page("com.tellus.evv.v2", None)
 
@@ -4009,6 +4037,8 @@ class TestTheSignatureMomentGetsThePhonesOwnSize:
         phone-wide rule would have changed an app that was working."""
         assert feed._density_wanted("com.inmyteam.inmyteam/.Main",
                                     self.SIGN_PAGE) == 105
+        assert feed._density_wanted("com.inmyteam.inmyteam/.Main",
+                                    self.PAD) == 105
 
     def test_the_legacy_landscape_bump_still_wins_for_its_own_app(self):
         with patch.object(feed, "_looks_landscape", return_value=True):
