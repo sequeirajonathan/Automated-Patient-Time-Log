@@ -2206,3 +2206,58 @@ class TestTheSignatureIsFittedNotThePaperAroundIt:
             for x, y in path:
                 assert self.CANVAS[0] <= x <= self.CANVAS[2]
                 assert self.CANVAS[1] <= y <= self.CANVAS[3]
+
+
+class TestThePageIsNotThePad:
+    """A replay that can take the root view as its canvas is a replay that
+    can swipe across the whole phone.
+
+    It did, on 15 September, during a live check-out. The phone had been
+    left at its own density, where this finder cannot tell the pad from its
+    surroundings; it refused once ("2 candidates, refusing") and then on the
+    next press took the root view:
+
+        canvas=[0, 0, 1080, 2340]
+        ink=369080->282285  strokes_ink=+9531/2, -1157/3, -105432/3
+
+    Three strokes corner to corner across the display — the negative deltas
+    are the replay wiping out the screen it was drawing on — and one of them
+    landed on the control that cancels a check-out. The visit went back to
+    "En Progreso" and the record had to be made again.
+    """
+
+    def test_a_candidate_that_spans_the_whole_tree_is_refused(self):
+        root = ('<node class="android.view.View" '
+                'bounds="[0,0][1080,2340]"/>')
+        assert sign.find_canvas(root, dump=False) == (None, "no_canvas")
+
+    def test_even_when_it_carries_a_signature_id(self):
+        """The hints run before the size tests, so a hinted root would walk
+        straight past every one of them."""
+        root = ('<node class="android.widget.FrameLayout" '
+                'resource-id="app:id/signature_container" '
+                'bounds="[0,0][1080,2340]"/>')
+        assert sign.find_canvas(root, dump=False) == (None, "no_canvas")
+
+    def test_a_pad_with_a_page_around_it_is_still_found(self):
+        """The real thing is inset on every side — a title over it, a
+        Confirmar under it. That is what makes it a pad."""
+        pad = ('<node class="android.view.View" '
+               'resource-id="app:id/drawing_view_participant" '
+               'bounds="[53,1010][1047,1208]"/>'
+               '<node class="android.widget.Button" '
+               'resource-id="app:id/buttonComplete" text="Confirmar firma" '
+               'bounds="[732,1316][1047,1366]"/>')
+        box, why = sign.find_canvas(pad, dump=False)
+        assert why == "" and box == [53, 1010, 1047, 1208]
+
+    def test_and_so_is_one_with_only_a_bar_above_it(self):
+        """The legacy app's pair reaches both side edges and the foot of its
+        own tree; only the title bar is outside it. That is a page around
+        it, and it must go on being found — it is the shape a real refusal
+        was once reported for."""
+        pair = ('<node class="android.widget.FrameLayout" '
+                'resource-id="app:id/layout_tab_content_signature" '
+                'bounds="[0,120][720,1532]"/>')
+        box, why = sign.find_canvas(pair, dump=False)
+        assert why == "" and box == [0, 120, 720, 1532]

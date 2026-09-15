@@ -3961,3 +3961,65 @@ class TestTheDriveSignalCrossesProcesses:
             assert feed._last_driven() == 0.0
             feed.tap("", button, frame_path=frame)
             assert feed._last_driven() > 0.0
+
+
+class TestTheSignatureMomentGetsThePhonesOwnSize:
+    """"I press the patient's button to auto sign but on confirmation it
+    disappears."
+
+    It was not the replay. A plain `input swipe` drawn by hand vanished on
+    Confirmar firma in exactly the same way — the app was discarding EVERY
+    signature — and the cause was the density this controller sets.
+
+    `wm density` is what Android measures the screen in dp with, and the app
+    picks its layout off that:
+
+        override 200 -> 1080 * 160 / 200 = 864dp -> sw600dp TABLET layout
+        physical 450 -> 1080 * 160 / 450 = 384dp -> the phone layout
+
+    At 200 the app believes it is on a tablet and lays the pad out in a form
+    its own confirm mishandles. At the phone's own size the pad turns
+    landscape, fills the screen, and the signature is accepted first press.
+    Watched both ways on the live phone.
+    """
+
+    SIGN_PAGE = ('<node resource-id="com.tellus.evv.v2:id/'
+                 'compose_view_visit_sign_off" bounds="[0,0][1080,2340]"/>')
+    ORDINARY = '<node resource-id="com.tellus.evv.v2:id/container"/>'
+    FOCUS = "com.tellus.evv.v2/com.tellus.evv.activities.DashboardActivity"
+
+    def test_the_signature_page_is_handed_the_phones_own_size(self):
+        assert feed._density_wanted(self.FOCUS, self.SIGN_PAGE) == \
+            feed.DENSITY_RESET
+
+    def test_every_other_page_of_that_app_is_unchanged(self):
+        """The 200 was tuned for reading a schedule and it still is. Only
+        the one page that a person signs on is different."""
+        assert feed._density_wanted(self.FOCUS, self.ORDINARY) == 200
+
+    def test_the_page_is_found_by_its_id_not_its_activity(self):
+        """Every screen in this app is `dashboardactivity`, so an activity
+        name cannot tell them apart. The page publishes its own id."""
+        assert feed._signature_page("com.tellus.evv.v2", self.SIGN_PAGE)
+        assert not feed._signature_page("com.tellus.evv.v2", self.ORDINARY)
+        assert not feed._signature_page("com.tellus.evv.v2", None)
+
+    def test_another_apps_signing_is_not_touched_by_this(self):
+        """inMyTeam's signatures land at 105 and have done all along; a
+        phone-wide rule would have changed an app that was working."""
+        assert feed._density_wanted("com.inmyteam.inmyteam/.Main",
+                                    self.SIGN_PAGE) == 105
+
+    def test_the_legacy_landscape_bump_still_wins_for_its_own_app(self):
+        with patch.object(feed, "_looks_landscape", return_value=True):
+            assert feed._density_wanted("com.hhaexchange.caregiver/.Sign",
+                                        self.SIGN_PAGE) == \
+                feed.SIGNATURE_DENSITY
+
+    def test_a_person_who_set_a_value_for_that_page_still_outranks_it(self):
+        """Overrides sit above the code's table, and that order is the whole
+        design — see `_density_wanted`."""
+        from apt_log import prefs
+
+        with patch.object(prefs, "density_for", return_value=140):
+            assert feed._density_wanted(self.FOCUS, self.SIGN_PAGE) == 140
