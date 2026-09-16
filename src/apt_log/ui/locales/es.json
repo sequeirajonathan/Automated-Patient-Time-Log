@@ -408,6 +408,7 @@
  "phone.blocked.password_field": "Hay un campo de contraseña en esta pantalla, por eso no se muestra ninguna imagen. Los botones de abajo son los que hay en ella y siguen funcionando.",
  "phone.blocked.secure_screen": "La aplicación no permite tomar imágenes de esta pantalla. Los botones de abajo son los que hay en ella y siguen funcionando.",
  "phone.failed": "El teléfono no respondió.",
+ "phone.back_signing": "Atrás está desactivado mientras hay una firma en pantalla. Use Inicio si de verdad necesita salir.",
  "phone.home": "Inicio",
  "phone.live": "Se actualiza automáticamente.",
  "phone.nav_note": "Funcionan aunque la pantalla no tenga salida propia.",

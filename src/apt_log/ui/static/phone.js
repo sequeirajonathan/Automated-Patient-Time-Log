@@ -2306,7 +2306,12 @@
         return;
       }
       if (msg.type === 'device_result') {
-        if (!msg.ok) { unbusy(); toast(i18n.devfail || ''); }
+        // A refused Back is not a phone that failed to answer, and saying so
+        // is the difference between "press it again" and "of course".
+        if (!msg.ok) {
+          unbusy();
+          toast(msg.signing ? (i18n.backSigning || '') : (i18n.devfail || ''));
+        }
         return;
       }
       if (msg.type !== 'state') return;

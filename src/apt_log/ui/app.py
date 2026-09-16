@@ -2492,6 +2492,37 @@ def _back_would_leave() -> bool:
         return False
 
 
+# HOW STALE THE PUBLISHED TREE MAY BE AND STILL SPEAK FOR THE PHONE.
+#
+# The refusal below is worth having only while it is telling the truth. A pad
+# that closed a minute ago must not go on holding Back shut, and a feed that
+# has stopped writing must not be able to pin the button by falling silent.
+# Past this the honest answer is "no idea", and no idea means the press goes
+# through exactly as it did before this guard existed.
+SIGNING_TREE_MAX_AGE = 30.0
+
+
+def _signing_now() -> bool:
+    """Whether a signature pad is open on the phone right now.
+
+    READ-ONLY, and deliberately NOT `feed._signature_page`. That one is the
+    density's hysteresis and it keeps count: calling it from here would
+    advance a miss counter in this process against reads the feed never made,
+    and the two processes would disagree about the phase while believing they
+    agreed. This asks the smaller question the pad itself answers — is there a
+    canvas on the screen in front — off the tree the feed already publishes.
+    """
+    from apt_log import feed as feed_mod
+
+    try:
+        target = state_mod.STATE_DIR / feed_mod.HIERARCHY_NAME
+        if time.time() - target.stat().st_mtime > SIGNING_TREE_MAX_AGE:
+            return False
+        return feed_mod._has_canvas(target.read_text(encoding="utf-8"))
+    except OSError:
+        return False
+
+
 BACK_SETTLE = 0.7
 BACK_RETURN_TRIES = 3
 
@@ -2536,6 +2567,17 @@ async def _do_device(msg: dict) -> dict:
     action = msg.get("action")
     if not isinstance(action, str) or not action:
         return {"type": "device_result", "ok": False}
+    if action == "back" and await asyncio.to_thread(_signing_now):
+        # THE ONE PRESS THAT DESTROYS AN ATTESTATION. Back with a pad open
+        # dismisses it, and on Tellus it did worse than that live: it left the
+        # app, exposed the browser sitting behind it, and the return below
+        # relaunched the app cold into its PIN lock — a signature drawn three
+        # seconds earlier gone, and a caregiver in Miami signing the glass by
+        # hand. Refused ahead of `_back_would_leave` because it is the
+        # stronger reason and it holds on apps that publish no nav stack at
+        # all, which is the app this happened on.
+        log.info("back refused: a signature is on screen")
+        return {"type": "device_result", "ok": False, "signing": True}
     if action == "back" and await asyncio.to_thread(_back_would_leave):
         # NOT PRESSED, rather than pressed and undone. Back from an app's
         # first page pops Android's task stack into whatever was beneath —
@@ -3171,6 +3213,13 @@ def device_action(request: Request, action: str = Form(...)):
     what someone types into a form.
     """
     from apt_log.device import DeviceUnavailable, send_ui_action
+
+    # THE SAME REFUSAL AS THE SOCKET'S, because this is a second door onto the
+    # same phone and not a second policy. A guard on one door is not a guard.
+    if action == "back" and _signing_now():
+        log.info("back refused: a signature is on screen")
+        return RedirectResponse(url=_back_to(request) + "?device=signing",
+                                status_code=303)
 
     try:
         send_ui_action(action)

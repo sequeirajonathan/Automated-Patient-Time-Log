@@ -14,6 +14,7 @@ that, and the tests here cover the route not widening it on the way through.
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime
 from importlib import import_module
 from pathlib import Path
@@ -8347,3 +8348,146 @@ class TestTheSignOffPage:
         model, _ = self._model()
         assert [it.get("under") for it in self._named(model, "Capturar Firma")
                 ] == ["Beneficiario", "Cuidador/a"]
+
+
+class TestBackStandsDownWhileSheIsSigning:
+    """The press that cost a real signature.
+
+    Driving Onorina's 8 PM check-out, Back was pressed on the portal three
+    seconds after the patient's signature was confirmed. It left Tellus,
+    exposed the browser that had been sitting behind it since six o'clock,
+    and the portal's own "bring it back" relaunched the app cold — into its
+    PIN lock. From the feed's log that evening:
+
+        20:03:45  POST /tap                       <- Confirmar firma
+        20:03:48  back left com.tellus.evv.v2 — bringing it back
+        20:03:49  com.android.chrome/CustomTabActivity
+        20:03:51  com.tellus.evv.v2/SplashScreenActivity
+        20:03:52  com.tellus.evv.v2/PinActivity
+
+    `_back_would_leave` could not have stopped it: that guard reads a fragment
+    back stack and Tellus publishes none, so it answered "no idea" and the
+    press went through. The pad on the screen is the signal that does not
+    depend on the app being talkative.
+    """
+
+    def _tree(self, tmp_path, monkeypatch, xml, age=0.0):
+        import os
+        import time as _time
+
+        from apt_log import feed as feed_mod
+        from apt_log.ui import state as state_mod
+
+        target = tmp_path / feed_mod.HIERARCHY_NAME
+        target.write_text(xml, encoding="utf-8")
+        if age:
+            when = _time.time() - age
+            os.utime(target, (when, when))
+        # app.py holds this very module object, so one patch reaches both.
+        monkeypatch.setattr(state_mod, "STATE_DIR", tmp_path)
+        return target
+
+    PAD = ('<node resource-id="com.tellus.evv.v2:id/buttonClearSignature" '
+           'class="android.widget.Button"/>')
+    NO_PAD = '<node resource-id="com.tellus.evv.v2:id/main_back_button"/>'
+
+    def test_a_pad_on_the_screen_is_the_signal(self, tmp_path, monkeypatch):
+        from apt_log.ui.app import _signing_now
+
+        self._tree(tmp_path, monkeypatch, self.PAD)
+        assert _signing_now() is True
+
+    def test_and_an_ordinary_screen_is_not(self, tmp_path, monkeypatch):
+        from apt_log.ui.app import _signing_now
+
+        self._tree(tmp_path, monkeypatch, self.NO_PAD)
+        assert _signing_now() is False
+
+    def test_a_stale_tree_cannot_pin_the_button_shut(self, tmp_path,
+                                                     monkeypatch):
+        """The refusal is worth having only while it is telling the truth. A
+        pad that closed a minute ago, or a feed that has stopped writing
+        altogether, must not be able to hold Back shut by falling silent —
+        that would be a dead process disabling a button she needs to recover
+        the phone by hand."""
+        # `apt_log.ui` re-exports the FastAPI instance as `app`, which
+        # shadows the submodule of the same name — so the module has to
+        # be taken from sys.modules rather than imported by attribute.
+        app_mod = sys.modules["apt_log.ui.app"]
+
+        self._tree(tmp_path, monkeypatch, self.PAD,
+                   age=app_mod.SIGNING_TREE_MAX_AGE + 5)
+        assert app_mod._signing_now() is False
+
+    def test_and_no_tree_at_all_is_not_a_signature(self, tmp_path,
+                                                   monkeypatch):
+        # `apt_log.ui` re-exports the FastAPI instance as `app`, which
+        # shadows the submodule of the same name — so the module has to
+        # be taken from sys.modules rather than imported by attribute.
+        app_mod = sys.modules["apt_log.ui.app"]
+        from apt_log.ui import state as state_mod
+
+        monkeypatch.setattr(state_mod, "STATE_DIR", tmp_path)
+        assert app_mod._signing_now() is False
+
+    def test_the_socket_refuses_back_and_sends_nothing(self, client,
+                                                       monkeypatch):
+        """Refused, not pressed-and-undone. Undoing it is what relaunched the
+        app into the PIN lock in the first place."""
+        from apt_log import device as device_mod
+        # `apt_log.ui` re-exports the FastAPI instance as `app`, which
+        # shadows the submodule of the same name — so the module has to
+        # be taken from sys.modules rather than imported by attribute.
+        app_mod = sys.modules["apt_log.ui.app"]
+
+        monkeypatch.setattr(app_mod, "_signing_now", lambda: True)
+        with patch.object(device_mod, "send_ui_action") as send:
+            with client.websocket_connect("/ws") as ws:
+                ws.receive_json()
+                ws.send_json({"type": "device", "action": "back"})
+                while True:
+                    msg = ws.receive_json()
+                    if msg.get("type") == "device_result":
+                        break
+        assert msg["ok"] is False
+        assert msg["signing"] is True
+        assert send.call_count == 0
+
+    def test_the_form_door_refuses_it_too(self, client, monkeypatch):
+        """A guard on one door is not a guard."""
+        from apt_log import device as device_mod
+        # `apt_log.ui` re-exports the FastAPI instance as `app`, which
+        # shadows the submodule of the same name — so the module has to
+        # be taken from sys.modules rather than imported by attribute.
+        app_mod = sys.modules["apt_log.ui.app"]
+
+        monkeypatch.setattr(app_mod, "_signing_now", lambda: True)
+        with patch.object(device_mod, "send_ui_action") as send:
+            r = client.post("/device", data={"action": "back"},
+                            follow_redirects=False)
+        assert r.status_code == 303
+        assert "device=signing" in r.headers["location"]
+        assert send.call_count == 0
+
+    def test_home_is_still_hers_while_a_pad_is_open(self, client, monkeypatch):
+        """Leaving the app is Home's job and this does not take it away. She
+        has to be able to drive the phone by hand when something goes wrong —
+        a guard that also disabled the deliberate way out would be the trade
+        the hand-back rule exists to refuse."""
+        from apt_log import device as device_mod
+        # `apt_log.ui` re-exports the FastAPI instance as `app`, which
+        # shadows the submodule of the same name — so the module has to
+        # be taken from sys.modules rather than imported by attribute.
+        app_mod = sys.modules["apt_log.ui.app"]
+
+        monkeypatch.setattr(app_mod, "_signing_now", lambda: True)
+        with patch.object(device_mod, "send_ui_action") as send:
+            with client.websocket_connect("/ws") as ws:
+                ws.receive_json()
+                ws.send_json({"type": "device", "action": "home"})
+                while True:
+                    msg = ws.receive_json()
+                    if msg.get("type") == "device_result":
+                        break
+        assert msg["ok"] is True
+        assert send.call_args.args[0] == "home"
