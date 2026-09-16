@@ -1330,6 +1330,26 @@ def _physical_density(serial: str | None = None) -> int:
     return int(m.group(1)) if m else -1
 
 
+def override_density(serial: str | None = None) -> int:
+    """What the display is ACTUALLY overridden to, or -1 if it will not say.
+
+    The phone's own answer, deliberately not `_density_now` — that slot holds
+    what this process last ASKED FOR, which is a different fact and the wrong
+    one for anybody checking whether it is safe to act. They agree right up
+    until they matter: an `adb` that failed quietly, a value changed by hand,
+    a second process. -1 for the same reason `_physical_density` uses it —
+    every caller compares this against a wanted number, and an invented
+    default would compare equal to something.
+    """
+    try:
+        out = _adb(["shell", "wm", "density"], serial).stdout.decode(
+            "utf-8", "replace")
+    except (OSError, subprocess.SubprocessError):
+        return -1
+    m = re.search(r"Override density: (\d+)", out)
+    return int(m.group(1)) if m else -1
+
+
 def _watch_density(focus: str, serial: str | None = None,
                    hierarchy: str | None = None) -> None:
     pkg = (focus or "").split("/")[0]
@@ -1349,13 +1369,7 @@ def _watch_density(focus: str, serial: str | None = None,
         # First sight since this process started: learn what the device
         # is actually set to, so an already-right value is not re-applied
         # (each application re-lays-out every app on the phone).
-        try:
-            out = _adb(["shell", "wm", "density"], serial).stdout.decode(
-                "utf-8", "replace")
-            m = re.search(r"Override density: (\d+)", out)
-            _density_now[0] = int(m.group(1)) if m else -1
-        except (OSError, subprocess.SubprocessError, ValueError):
-            _density_now[0] = -1
+        _density_now[0] = override_density(serial)
         if _density_now[0] == want:
             return
     if want == DENSITY_RESET:

@@ -520,6 +520,7 @@
  "sign.who_signs": "Who is signing? ({n})",
  "sign.whose": "This screen is asking for {who}'s signature.",
  "sign.wrong_app": "The phone is not showing one of the care apps, so nothing was drawn.",
+ "sign.wrong_density": "The phone is not at its signing size yet, so nothing was drawn — a signature drawn now would be thrown away when you confirm it. Wait a moment and send again.",
  "signature.brush": "Pen width",
  "signature.clear": "Clear",
  "signature.empty": "Please sign before sending.",
