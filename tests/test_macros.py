@@ -7228,3 +7228,52 @@ class TestHomeMeansTheDaysVisits:
         still travelling and walk out of the app."""
         assert macros.BACK_LANDED > macros.BACK_SETTLE * 3
         assert macros.BACK_LANDED * 2 > macros.BACKS_TO_HOME * macros.BACK_SETTLE
+
+
+class TestTheCloseIsWhatSeparatesANoticeFromAWall:
+    """HHAeXchange+'s update dialog is dismissible until its deadline, and
+    not after. The same dialog means two different things either side of that
+    line, and the Close is the only thing that tells them apart:
+
+        Close present ..  a notice. `feed._watch_update_nag` takes it, the
+                          sign-in underneath is reachable, nobody is woken.
+        Close absent ...  a wall. This function's business — a card on the
+                          app page and the button that installs the update,
+                          behind a person's confirmation.
+    """
+
+    def _doc(self, *rids, app="com.hhaexchange.uma"):
+        return {"app": app,
+                "elements": [{"rid": r, "txt": ""} for r in rids],
+                "statics": []}
+
+    def test_a_dismissible_notice_is_not_a_wall(self):
+        doc = self._doc("app_update_dialog",
+                        "app_update_do_not_show_checkbox",
+                        "app_update_dialog_update_button",
+                        "app_update_dialog_close_button")
+        assert macros.update_wall_on_screen(doc) is False
+
+    def test_the_same_dialog_without_a_close_is(self):
+        doc = self._doc("app_update_dialog",
+                        "app_update_dialog_update_button")
+        assert macros.update_wall_on_screen(doc) is True
+
+    def test_an_ordinary_hhax_screen_is_neither(self):
+        assert macros.update_wall_on_screen(
+            self._doc("schedule_screen_visit_search")) is False
+
+    def test_mobile_caregivers_own_wall_still_reads(self):
+        """It has no Close and no ids worth keying on — one button and a
+        sentence — so it keeps the word markers it was found with."""
+        doc = {"app": "com.tellus.evv.v2",
+               "statics": [{"txt": "Existe una nueva versión disponible "
+                                   "en la Play Store"}],
+               "elements": [{"txt": "Actualizar ahora", "rid": ""}]}
+        assert macros.update_wall_on_screen(doc) is True
+
+    def test_and_an_app_nobody_has_mapped_is_never_walled(self):
+        assert macros.update_wall_on_screen(
+            {"app": "com.inmyteam.inmyteam",
+             "elements": [{"rid": "app_update_dialog", "txt": ""}],
+             "statics": []}) is False

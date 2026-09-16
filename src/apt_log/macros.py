@@ -932,9 +932,39 @@ UPDATE_WALL_MARKERS = {
 }
 
 
+# THE SAME WALL ON HHAeXchange+, TOLD APART FROM ITS OWN NOTICE.
+#
+# That app's update dialog is dismissible until its deadline: it carries a
+# Close, and `feed._watch_update_nag` takes it so the sign-in underneath can
+# be reached. Past the deadline the app stops offering the way by — the same
+# dialog with no Close — and there is nothing left for the dismisser to
+# press.
+#
+# So the Close is what separates the two, and it is the only thing that
+# does. Present: a notice, handled, nobody woken. Absent: a wall, which is
+# this function's business — a card on the app page and the button that
+# installs the update, behind a person's confirmation.
+#
+# Keyed on ids rather than the dialog's words because the phone is in
+# Spanish and this is the screen where being wrong means reporting an app
+# usable when it is not.
+UPDATE_WALL_IDS = {
+    "com.hhaexchange.uma": ("app_update_dialog",
+                            "app_update_dialog_close_button"),
+}
+
+
 def update_wall_on_screen(doc: dict | None) -> bool:
     """Whether the app in front is blocked behind a forced-update dialog."""
-    markers = UPDATE_WALL_MARKERS.get((doc or {}).get("app") or "")
+    app = (doc or {}).get("app") or ""
+    ids = UPDATE_WALL_IDS.get(app)
+    if ids:
+        dialog, close = ids
+        seen = {(n.get("rid") or "")
+                for n in ((doc or {}).get("statics") or [])
+                + ((doc or {}).get("elements") or [])}
+        return dialog in seen and close not in seen
+    markers = UPDATE_WALL_MARKERS.get(app)
     if not markers:
         return False
     words = " ".join(

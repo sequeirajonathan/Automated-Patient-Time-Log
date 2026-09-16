@@ -4122,3 +4122,119 @@ class TestTheSignatureMomentGetsThePhonesOwnSize:
 
         with patch.object(prefs, "density_for", return_value=140):
             assert feed._density_wanted(self.FOCUS, self.SIGN_PAGE) == 140
+
+
+# Off the live phone at 7:20 pm on 16 September, over the sign-in button,
+# with a check-in due at 8:05. Trimmed to the nodes this reads.
+NAG_XML = (
+    '<android.view.View resource-id="app_update_dialog" '
+    'bounds="[196,0][884,701]"/>'
+    '<android.widget.TextView resource-id="app_update_dialog_title" '
+    'text="Actualización disponible" bounds="[359,168][721,210]"/>'
+    '<android.widget.TextView resource-id="app_update_dialog_sub_title" '
+    'text="Se ha lanzado una nueva versión de la aplicación móvil.&#10;'
+    'Actualice a la última versión antes de September 23, 2026 '
+    '(dentro de 7 días) para poder seguir usando esta aplicación." '
+    'bounds="[218,300][862,600]"/>'
+    '<android.widget.CheckBox resource-id="app_update_do_not_show_checkbox" '
+    'bounds="[218,2064][270,2116]"/>'
+    '<android.view.View resource-id="app_update_dialog_update_button" '
+    'bounds="[218,2130][862,2186]"/>'
+    '<android.view.View resource-id="app_update_dialog_close_button" '
+    'bounds="[218,2200][862,2252]"/>'
+)
+NAG_FOCUS = "com.hhaexchange.uma/.ui.activities.LoginActivity"
+# The same dialog past its deadline: the app stops offering the way by.
+WALLED_XML = NAG_XML.replace(
+    '<android.view.View resource-id="app_update_dialog_close_button" '
+    'bounds="[218,2200][862,2252]"/>', '')
+
+
+class TestTheUpdateNoticeIsTakenOutOfTheWay:
+    """Found on the live phone over HHAeXchange+'s sign-in button, an hour
+    before a check-in. The app could not be signed into while it was up, and
+    signing in is the whole of the daily task."""
+
+    def _taps(self, monkeypatch):
+        sent = []
+
+        def fake(args, serial=None, timeout=None):
+            sent.append(list(args))
+            return type("R", (), {"returncode": 0, "stdout": b"",
+                                  "stderr": b""})()
+        monkeypatch.setattr(feed, "_adb", fake)
+        monkeypatch.setattr(feed.time, "sleep", lambda *_: None)
+        feed._last_nag[0] = 0.0
+        return sent
+
+    def _points(self, sent):
+        return [(int(a[-2]), int(a[-1])) for a in sent
+                if a[:3] == ["shell", "input", "tap"]]
+
+    def test_it_ticks_not_today_and_takes_the_close(self, monkeypatch):
+        sent = self._taps(monkeypatch)
+        feed._watch_update_nag(NAG_FOCUS, NAG_XML)
+        assert self._points(sent) == [(244, 2090), (540, 2226)]
+
+    def test_it_never_presses_actualizar(self, monkeypatch):
+        """That button leads to the Play Store, and installing a new version
+        of an app this project reads by resource-id changes every assumption
+        in the file. Dismissing a notice and accepting a software update are
+        different acts and this only does the first."""
+        sent = self._taps(monkeypatch)
+        feed._watch_update_nag(NAG_FOCUS, NAG_XML)
+        update_button = (540, 2158)     # [218,2130][862,2186]
+        assert update_button not in self._points(sent)
+        for _x, y in self._points(sent):
+            assert not 2130 <= y <= 2186, "a tap landed on Actualizar"
+
+    def test_a_notice_with_no_close_is_left_alone(self, monkeypatch):
+        """Past its deadline the dialog stops offering a way by. There is
+        nothing to dismiss, and pretending otherwise would be a tap loop
+        against an app that is not listening — `update_wall_on_screen` is
+        what speaks for that case."""
+        sent = self._taps(monkeypatch)
+        feed._watch_update_nag(NAG_FOCUS, WALLED_XML)
+        assert self._points(sent) == []
+
+    def test_another_app_is_not_touched(self, monkeypatch):
+        sent = self._taps(monkeypatch)
+        feed._watch_update_nag("com.tellus.evv.v2/.DashboardActivity", NAG_XML)
+        assert self._points(sent) == []
+
+    def test_an_ordinary_screen_costs_nothing(self, monkeypatch):
+        sent = self._taps(monkeypatch)
+        feed._watch_update_nag(NAG_FOCUS, "<node resource-id='whatever'/>")
+        assert self._points(sent) == []
+
+    def test_a_dialog_that_will_not_go_is_not_hammered(self, monkeypatch):
+        sent = self._taps(monkeypatch)
+        feed._watch_update_nag(NAG_FOCUS, NAG_XML)
+        first = len(self._points(sent))
+        feed._watch_update_nag(NAG_FOCUS, NAG_XML)
+        assert len(self._points(sent)) == first, "no cooldown"
+
+    def test_the_deadline_is_read_off_the_dialog(self):
+        """The app leaves the date in English inside the Spanish sentence."""
+        ids = feed.UPDATE_NAG_IDS["com.hhaexchange.uma"]
+        assert feed._nag_deadline(NAG_XML, ids) == "September 23, 2026"
+
+    def test_and_every_dismissal_says_what_it_postpones(self, monkeypatch,
+                                                        caplog):
+        """A dismissal repeated quietly every day is exactly how a countdown
+        runs out with nobody watching it, and the day it does the app stops
+        working mid-round."""
+        self._taps(monkeypatch)
+        with caplog.at_level("WARNING"):
+            feed._watch_update_nag(NAG_FOCUS, NAG_XML)
+        assert "September 23, 2026" in caplog.text
+        assert "com.hhaexchange.uma" in caplog.text
+
+    def test_a_phone_that_refuses_the_tap_does_not_crash_the_frame(
+            self, monkeypatch):
+        def boom(*a, **k):
+            raise OSError("no adb")
+        monkeypatch.setattr(feed, "_adb", boom)
+        monkeypatch.setattr(feed.time, "sleep", lambda *_: None)
+        feed._last_nag[0] = 0.0
+        feed._watch_update_nag(NAG_FOCUS, NAG_XML)   # must not raise
