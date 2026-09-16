@@ -520,6 +520,7 @@
  "sign.who_signs": "¿Quién firma? ({n})",
  "sign.whose": "Esta pantalla pide la firma de {who}.",
  "sign.wrong_app": "El teléfono no está mostrando una de las aplicaciones de cuidado, así que no se dibujó nada.",
+ "sign.wrong_density": "El teléfono aún no está en su tamaño de firma, así que no se dibujó nada: una firma hecha ahora se perdería al confirmarla. Espere un momento y envíe de nuevo.",
  "signature.brush": "Grosor del trazo",
  "signature.clear": "Borrar",
  "signature.empty": "Por favor, firme antes de enviar.",

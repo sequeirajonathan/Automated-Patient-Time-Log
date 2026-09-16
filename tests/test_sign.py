@@ -8,6 +8,7 @@ control, which is why zero candidates and two candidates are the same answer.
 
 from __future__ import annotations
 
+import inspect
 import json
 import time
 from unittest.mock import MagicMock, patch
@@ -2261,3 +2262,156 @@ class TestThePageIsNotThePad:
                 'bounds="[0,120][720,1532]"/>')
         box, why = sign.find_canvas(pair, dump=False)
         assert why == "" and box == [0, 120, 720, 1532]
+
+
+TELLUS_CANVAS = (
+    '<node resource-id="com.tellus.evv.v2:id/buttonClearSignature" '
+    'class="android.widget.Button" bounds="[59,946][751,1021]"/>'
+    '<node class="android.view.View" resource-id="signature_pad" '
+    'bounds="[59,179][2211,787]"/>'
+)
+
+
+class TestTheReplayWillNotDrawIntoAMomentThatDiscardsIt:
+    """A signature that looks fine and is silently thrown away.
+
+    Proved on the phone, same pad, same afternoon:
+
+        density 200 ......  6041 ink px drawn, WIPED to 0 on Confirmar firma
+        signing size ..... 11863 ink px drawn, accepted, pad closed
+
+    Every one of her failed attempts had the density at 200 at the moment she
+    confirmed, and what she saw was a signature sitting on the screen —
+    nothing about the drawing says it is about to be discarded. So the replay
+    would rather say "not now" than put ink somewhere it will not survive.
+    """
+
+    def _payload(self):
+        return {"id": "abc", "strokes": STROKES, "aspect": 2.2}
+
+    def _tellus(self):
+        driver = MagicMock()
+        driver.current_package = "com.tellus.evv.v2"
+        driver.page_source = TELLUS_CANVAS + CHROME
+        return driver
+
+    def test_the_wrong_size_refuses_and_draws_nothing(self, tmp_path,
+                                                      monkeypatch):
+        from apt_log import feed as feed_mod
+
+        monkeypatch.setattr(feed_mod, "override_density", lambda s=None: 200)
+        monkeypatch.setattr(sign, "DENSITY_WAIT", 0.0)
+        driver = self._tellus()
+        with patch.object(sign, "_perform") as perform, \
+             patch.object(sign, "_wipe_the_canvas") as wipe, \
+             patch("apt_log.resident.run", side_effect=lambda w: w(driver)):
+            status = sign.execute(self._payload(), tmp_path / "s.json")
+        assert status.state == "failed"
+        assert status.reason == "wrong_density"
+        perform.assert_not_called()
+        # AND THE PAD IS LEFT ALONE. `_wipe_the_canvas` clears what is already
+        # on it; a guard that refused after the wipe would destroy the very
+        # signature it exists to protect.
+        wipe.assert_not_called()
+
+    def test_the_signing_size_draws_as_before(self, tmp_path, monkeypatch):
+        from apt_log import feed as feed_mod
+
+        want = feed_mod.SIGNATURE_DENSITY_BY_APP["com.tellus.evv.v2"]
+        monkeypatch.setattr(feed_mod, "override_density", lambda s=None: want)
+        driver = self._tellus()
+        with patch.object(sign, "_perform",
+                          return_value=(0, 900, "+900/1")) as perform, \
+             patch("apt_log.resident.run", side_effect=lambda w: w(driver)):
+            status = sign.execute(self._payload(), tmp_path / "s.json")
+        assert status.state == "done"
+        perform.assert_called()
+
+    def test_an_app_with_no_signing_size_is_never_refused(self, tmp_path,
+                                                          monkeypatch):
+        """Two of the three care apps have no signing density, and an app the
+        table says nothing about must be drawn on exactly as before. A guard
+        that grew a new refusal for apps it was never about would be a
+        regression wearing a safety jacket.
+
+        The phone is not even asked: `override_density` raising here would
+        fail the test, which is the point — no adb round trip to answer a
+        question with no opinion behind it."""
+        from apt_log import feed as feed_mod
+
+        def never(*a, **k):
+            raise AssertionError("the phone was asked about an app with "
+                                 "no signing size")
+        monkeypatch.setattr(feed_mod, "override_density", never)
+        driver = MagicMock()
+        driver.current_package = "com.hhaexchange.caregiver"
+        driver.page_source = CANVAS + CHROME
+        with patch.object(sign, "_perform", return_value=(0, 900, "+900/1")), \
+             patch("apt_log.resident.run", side_effect=lambda w: w(driver)):
+            status = sign.execute(self._payload(), tmp_path / "s.json")
+        assert status.state == "done"
+
+    def test_a_size_still_on_its_way_is_waited_for_not_refused(
+            self, tmp_path, monkeypatch):
+        """The density is not applied by this code. The feed sets it when it
+        sees the signing moment, on a capture loop that runs about every two
+        seconds — so a press landing a beat after the pad opens arrives while
+        the right size is still in flight. Refusing THAT would tell her the
+        moment is wrong when it is merely early, which is a false alarm on a
+        real signature."""
+        from apt_log import feed as feed_mod
+
+        want = feed_mod.SIGNATURE_DENSITY_BY_APP["com.tellus.evv.v2"]
+        seen = iter([200, 200, want])
+        monkeypatch.setattr(feed_mod, "override_density",
+                            lambda s=None: next(seen))
+        monkeypatch.setattr(sign, "DENSITY_POLL", 0.0)
+        driver = self._tellus()
+        with patch.object(sign, "_perform",
+                          return_value=(0, 900, "+900/1")) as perform, \
+             patch("apt_log.resident.run", side_effect=lambda w: w(driver)):
+            status = sign.execute(self._payload(), tmp_path / "s.json")
+        assert status.state == "done"
+        perform.assert_called()
+
+    def test_a_phone_that_will_not_say_is_refused_not_assumed(
+            self, tmp_path, monkeypatch):
+        """`override_density` answers -1 when it cannot read the display, and
+        -1 must never compare equal to a wanted size. Not knowing whether the
+        moment is safe is not the same as knowing it is."""
+        from apt_log import feed as feed_mod
+
+        monkeypatch.setattr(feed_mod, "override_density", lambda s=None: -1)
+        monkeypatch.setattr(sign, "DENSITY_WAIT", 0.0)
+        driver = self._tellus()
+        with patch.object(sign, "_perform") as perform, \
+             patch("apt_log.resident.run", side_effect=lambda w: w(driver)):
+            status = sign.execute(self._payload(), tmp_path / "s.json")
+        assert status.state == "failed" and status.reason == "wrong_density"
+        perform.assert_not_called()
+
+    def test_the_check_is_written_above_the_wipe_and_the_page_read(self):
+        """Ordering, at the source, because the behavioural test above can
+        only catch it being moved below the wipe — not below `page_source`.
+
+        Waiting for the density can mean the density CHANGES, and a change
+        re-lays-out the app. Bounds read before it are bounds from a screen
+        that no longer exists, which is how strokes end up dragged across the
+        whole display — the way a real check-out was cancelled."""
+        body = inspect.getsource(sign.execute)
+        assert (body.index("_wait_for_signing_density(")
+                < body.index("driver.page_source")
+                < body.index("_wipe_the_canvas("))
+
+    def test_the_refusal_says_why_in_both_languages(self):
+        import json as _json
+        from pathlib import Path as _Path
+
+        root = _Path(__file__).resolve().parents[1]
+        for loc in ("en", "es"):
+            got = _json.loads(
+                (root / "src/apt_log/ui/locales" / f"{loc}.json")
+                .read_text(encoding="utf-8"))
+            # `app.py` looks the reason up as `sign.{reason}`; a refusal with
+            # no string is a refusal that shows her a bare key.
+            assert "sign.wrong_density" in got

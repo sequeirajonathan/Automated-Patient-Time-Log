@@ -1546,6 +1546,51 @@ def _wipe_the_canvas(driver, xml: str, placed) -> bool:
     return True
 
 
+# HOW LONG TO GIVE THE PHONE TO REACH THE SIGNING SIZE BEFORE REFUSING.
+#
+# The density is not applied by this code. The feed sets it when it sees the
+# signing moment, on its capture loop, and the loop runs about every two
+# seconds — so a press that lands a beat after the pad opens can arrive
+# while the right size is still on its way. Refusing THAT would be a false
+# alarm on a real signature, which is its own harm: she would be told the
+# moment is wrong when it is merely early.
+#
+# So the refusal waits first. Two capture cycles and change.
+DENSITY_WAIT = 6.0
+DENSITY_POLL = 0.75
+
+
+def _wait_for_signing_density(package: str,
+                              serial: str | None = None) -> tuple[bool, int, int]:
+    """Whether the phone is at the size this app's signing moment needs.
+
+    Returns (ok, wanted, seen). `wanted` is 0 when there is no opinion to
+    have — two of the three care apps have no signing density, and an app
+    this table says nothing about must be drawn on exactly as before. A
+    guard that grew a new refusal for apps it was never about would be a
+    regression wearing a safety jacket.
+
+    Asks the PHONE, through `feed.override_density`, and not the feed's note
+    of what it last asked for. The whole point of this check is to catch the
+    case where the two have come apart — an `adb` that failed quietly, a
+    value changed by hand — because that is exactly the case where the note
+    says "fine" and the ink is thrown away anyway.
+    """
+    from apt_log import feed as feed_mod
+
+    want = feed_mod.SIGNATURE_DENSITY_BY_APP.get(package)
+    if want is None:
+        return True, 0, 0
+    deadline = time.monotonic() + DENSITY_WAIT
+    while True:
+        seen = feed_mod.override_density(serial)
+        if seen == want:
+            return True, want, seen
+        if time.monotonic() >= deadline:
+            return False, want, seen
+        time.sleep(DENSITY_POLL)
+
+
 def execute(payload: dict, status_path: Path | None = None) -> Status:
     """Find the canvas, replay the strokes, publish the outcome."""
     from apt_log import resident
@@ -1567,6 +1612,36 @@ def execute(payload: dict, status_path: Path | None = None) -> Status:
         package = driver.current_package
         if package not in APP_PACKAGES:
             status.state, status.reason = "failed", "wrong_app"
+            return
+        # A SIGNATURE THAT LOOKS FINE AND IS SILENTLY THROWN AWAY.
+        #
+        # Proved on the phone, same pad, same afternoon: at density 200 the
+        # app believes it is on a tablet, and `Confirmar firma` wipes the ink
+        # instead of keeping it — 6041 ink pixels drawn, 0 after the press.
+        # At the signing size the identical act is accepted. Every one of her
+        # failed attempts had the density at 200 when she confirmed, and what
+        # she saw was a signature on the screen: nothing about the drawing
+        # says it is about to be discarded.
+        #
+        # So the replay would rather say "not now" than draw into that. A
+        # refusal she can see beats ink she trusts and loses.
+        #
+        # FIRST, AND THAT IS NOT AN ACCIDENT OF ORDERING. Two reasons it has
+        # to be here rather than further down:
+        #
+        #   - `_wipe_the_canvas` below CLEARS what is already on the pad. A
+        #     guard that refused after the wipe would destroy the very
+        #     signature it exists to protect — the failure mode it is named
+        #     for, caused by the thing meant to prevent it.
+        #   - waiting for the density can mean the density CHANGES, and a
+        #     change re-lays-out the app. Bounds read before it are bounds
+        #     from a screen that no longer exists, which is how strokes end
+        #     up dragged across the whole display.
+        ok, want, seen = _wait_for_signing_density(package)
+        if not ok:
+            log.warning("replay refused: %s signs at density %d, "
+                        "the phone is at %d", package, want, seen)
+            status.state, status.reason = "failed", "wrong_density"
             return
         xml = driver.page_source
         bounds, refusal = find_canvas(xml)
