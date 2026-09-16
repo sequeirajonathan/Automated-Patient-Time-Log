@@ -408,6 +408,7 @@
  "phone.blocked.password_field": "There is a password box on this screen, so no picture of it is shown. The buttons below are what is on it, and they still work.",
  "phone.blocked.secure_screen": "The app does not allow pictures of this screen. The buttons below are what is on it, and they still work.",
  "phone.failed": "The phone did not respond.",
+ "phone.back_signing": "Back is off while a signature is on screen. Use Home if you really need to leave.",
  "phone.home": "Home",
  "phone.live": "Updating automatically.",
  "phone.nav_note": "These work even when the screen has no way out of its own.",
