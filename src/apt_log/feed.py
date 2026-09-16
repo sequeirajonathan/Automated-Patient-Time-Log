@@ -909,6 +909,118 @@ def _watch_pip(serial: str | None = None) -> None:
         deny_pip(_pip_queue.pop(), serial)
 
 
+# THE UPDATE NOTICE, AND WHY IT IS DISMISSED RATHER THAN OBEYED.
+#
+# HHAeXchange+ raises this over its own LOGIN screen:
+#
+#     Actualización disponible
+#     Se ha lanzado una nueva versión de la aplicación móvil.
+#     Actualice a la última versión antes de September 23, 2026
+#     (dentro de 7 días) para poder seguir usando esta aplicación.
+#     [ ] No volver a mostrar esto hoy     [ Actualizar ]   [ Close ]
+#
+# Found on the live phone at 7:20 pm with a check-in due at 8:05, sitting on
+# top of the sign-in button. The app could not be signed into while it was
+# up, and signing in is the whole of the daily task.
+#
+# It is a NOTICE, not the wall `update_wall_on_screen` knows about: it has a
+# Close, and taking it costs nothing. So this takes it, ticking "not again
+# today" on the way past, and the app is usable again without anybody being
+# woken at six in the morning.
+#
+# WHAT IT NEVER PRESSES IS ACTUALIZAR. That button leads to the Play Store,
+# and installing a new version of an app this project reads by resource-id
+# changes every assumption in this file. Dismissing a notice and accepting a
+# software update are different acts and this only does the first — the same
+# line `_update_app` draws, which is why that one asks a person first.
+#
+# KEYED ON IDS, NOT WORDS. The phone is in Spanish, the dialog is translated,
+# and the date inside it is not; matching prose would break on the first
+# wording change or language switch. These ids came off the live tree.
+UPDATE_NAG_IDS = {
+    "com.hhaexchange.uma": {
+        "dialog": "app_update_dialog",
+        "subtitle": "app_update_dialog_sub_title",
+        "not_today": "app_update_do_not_show_checkbox",
+        "close": "app_update_dialog_close_button",
+    },
+}
+
+# Long enough that a dialog which does not go stays a line a minute in the
+# log rather than a tap loop against an app that is not listening.
+UPDATE_NAG_COOLDOWN = 60.0
+_last_nag = [0.0]
+
+# "…antes de September 23, 2026 (dentro de 7 días)…" — the app leaves the
+# date in English inside the Spanish sentence, so this reads the date rather
+# than the countdown beside it.
+_NAG_DEADLINE = re.compile(r"([A-Z][a-z]+ \d{1,2}, \d{4})")
+
+
+def _node_centre(xml: str | None, rid: str) -> tuple[int, int] | None:
+    """Where to tap for the node carrying this resource-id, or None."""
+    for raw in _NODE.findall(xml or ""):
+        if _attr(raw, "resource-id").rsplit("/", 1)[-1] != rid:
+            continue
+        m = _BOUNDS.search(_attr(raw, "bounds"))
+        if not m:
+            return None
+        x1, y1, x2, y2 = (int(v) for v in m.groups())
+        return (x1 + x2) // 2, (y1 + y2) // 2
+    return None
+
+
+def _nag_deadline(xml: str | None, ids: dict) -> str:
+    """The date the notice says the app stops working, or ''."""
+    for raw in _NODE.findall(xml or ""):
+        if _attr(raw, "resource-id").rsplit("/", 1)[-1] != ids["subtitle"]:
+            continue
+        found = _NAG_DEADLINE.search(_attr(raw, "text"))
+        return found.group(1) if found else ""
+    return ""
+
+
+def _watch_update_nag(focus: str, hierarchy: str | None,
+                      serial: str | None = None) -> None:
+    """Take the Close on an update notice so the app can be used.
+
+    Does NOTHING when the notice has no Close. That is not this function
+    being careful, it is the notice having become the wall — past its own
+    deadline the app stops offering a way by, and `update_wall_on_screen`
+    is what speaks for that case: it raises a card and the button that
+    installs the update, with a person's confirmation behind it. Dismissing
+    is only ever right while dismissing is on offer.
+    """
+    ids = UPDATE_NAG_IDS.get((focus or "").split("/")[0])
+    if not ids or not hierarchy or ids["dialog"] not in hierarchy:
+        return
+    close = _node_centre(hierarchy, ids["close"])
+    if close is None:
+        return
+    now = time.time()
+    if now - _last_nag[0] < UPDATE_NAG_COOLDOWN:
+        return
+    _last_nag[0] = now
+    # THE DEADLINE IS NOT SWALLOWED. A dismissal repeated quietly every day
+    # is exactly how a countdown runs out with nobody watching it, and the
+    # day it does the app stops working mid-round. So every dismissal says
+    # what it is postponing.
+    due = _nag_deadline(hierarchy, ids)
+    log.warning("update notice dismissed on %s — it must be updated%s",
+                (focus or "").split("/")[0],
+                f" before {due}" if due else " before its stated deadline")
+    try:
+        not_today = _node_centre(hierarchy, ids["not_today"])
+        if not_today is not None:
+            _adb(["shell", "input", "tap", str(not_today[0]),
+                  str(not_today[1])], serial, timeout=20.0)
+            time.sleep(0.4)
+        _adb(["shell", "input", "tap", str(close[0]), str(close[1])],
+             serial, timeout=20.0)
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("could not dismiss the update notice (%s)", exc)
+
+
 def _watch_floating(serial: str | None = None) -> None:
     """Get another app's floating window off the screen, and keep it off.
 
@@ -1695,6 +1807,11 @@ def capture(serial: str | None = None,
         # so containment looks straight past it and calls the screen well.
         # This is the check that does not.
         _watch_floating(serial)
+        # BEFORE containment and the density, because both of those ask what
+        # screen this is and a dialog over the sign-in makes that question
+        # answer wrongly — and because until it is gone nothing else on the
+        # phone can be done at all.
+        _watch_update_nag(focus, hierarchy, serial)
         _watch_containment(focus, serial)
         _watch_density(focus, serial, hierarchy)
         # Free on all but a handful of ticks in half a day — the timer is
