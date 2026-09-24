@@ -5,6 +5,23 @@
 # Restart=always with the default limit gives up after 5 starts in 10s and
 # leaves the unit failed, with nobody in the building to clear it.
 StartLimitIntervalSec=0
+
+# ...and so does OnFailure=, which sat in [Service] two lines below WatchdogSec
+# until 2026-09-24, ignored exactly the same way and for exactly the same
+# reason. The comment above fixed StartLimitIntervalSec and walked past its
+# neighbour. systemd said so on every single start --
+#
+#   /etc/systemd/system/aptlog-agent.service:25: Unknown key 'OnFailure' in
+#   section [Service], ignoring.
+#
+# -- three times in the journal on the morning this was found, which is the
+# "warning nobody was reading" the comment above is about, still not read.
+#
+# The cost is the one failure this project says it exists to prevent: the
+# agent could die and aptlog-alert@ would never fire, so nothing would reach
+# anybody. alert.sh's own header puts it plainly -- a silent alerting path is
+# indistinguishable from a healthy system.
+OnFailure=aptlog-alert@%n.service
 Description=APT Log agent (scheduler, location gate, check-off runner)
 After=aptlog-appium.service
 Requires=aptlog-appium.service
@@ -20,9 +37,6 @@ RestartSec=15
 # The agent pings systemd from its main loop; a wedged loop gets restarted
 # even though the process is technically alive.
 WatchdogSec=120
-
-# Surface failures instead of dying quietly in an empty room.
-OnFailure=aptlog-alert@%n.service
 
 [Install]
 WantedBy=multi-user.target
