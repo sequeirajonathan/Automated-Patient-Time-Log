@@ -44,6 +44,7 @@ from apt_log import __version__
 from apt_log import macros as macros_mod
 from apt_log import prefs
 from apt_log import schedule as schedule_mod
+from apt_log import signing_record
 from apt_log import video as video_mod
 from apt_log.ui import machine as machine_mod
 from apt_log.ui import opened as opened_mod
@@ -2577,6 +2578,7 @@ async def _do_device(msg: dict) -> dict:
         # stronger reason and it holds on apps that publish no nav stack at
         # all, which is the app this happened on.
         log.info("back refused: a signature is on screen")
+        signing_record.note_press("device_refused", action=action)
         return {"type": "device_result", "ok": False, "signing": True}
     if action == "back" and await asyncio.to_thread(_back_would_leave):
         # NOT PRESSED, rather than pressed and undone. Back from an app's
@@ -2622,6 +2624,7 @@ async def _do_device(msg: dict) -> dict:
         log.warning("device action refused: %s", exc)
         return {"type": "device_result", "ok": False}
     log.info("device action %s sent over the socket", action)
+    signing_record.note_press("device", action=action)
 
     if was:
         await asyncio.to_thread(_return_if_back_left, was)
@@ -2736,6 +2739,7 @@ async def sign_current_screen(request: Request):
         aspect = 1.0
     rid = sign_mod.request(strokes, aspect=aspect)
     log.info("signature replay queued (%s)", rid)
+    signing_record.note_press("draw", id=rid)
     return JSONResponse({"ok": True, "id": rid})
 
 
@@ -2758,6 +2762,7 @@ async def sign_action(request: Request):
         return JSONResponse({"error": "unknown"}, status_code=400)
     rid = sign_mod.request_action(kind)
     log.info("signature %s queued (%s)", kind, rid)
+    signing_record.note_press("sign_action", action=kind, id=rid)
     return JSONResponse({"ok": True, "id": rid})
 
 
@@ -3159,6 +3164,7 @@ async def signature_apply(request: Request):
                             enrolled_mod.digest_for(name, package=package),
                             package=package)
     log.info("adopted signature queued for replay (%s)", rid)
+    signing_record.note_press("apply", id=rid, package=package)
     return JSONResponse({"ok": True, "id": rid})
 
 
@@ -3218,6 +3224,7 @@ def device_action(request: Request, action: str = Form(...)):
     # same phone and not a second policy. A guard on one door is not a guard.
     if action == "back" and _signing_now():
         log.info("back refused: a signature is on screen")
+        signing_record.note_press("device_refused", action=action)
         return RedirectResponse(url=_back_to(request) + "?device=signing",
                                 status_code=303)
 
@@ -3228,6 +3235,7 @@ def device_action(request: Request, action: str = Form(...)):
         return RedirectResponse(url=_back_to(request) + "?device=failed",
                                 status_code=303)
     log.info("device action %s sent from the UI", action)
+    signing_record.note_press("device", action=action)
     return RedirectResponse(url=_back_to(request) + "?device=sent",
                             status_code=303)
 

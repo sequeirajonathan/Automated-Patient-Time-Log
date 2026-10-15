@@ -233,6 +233,22 @@ def _isolated_prefs(tmp_path, monkeypatch):
 # is genuine computation on a real JPEG and it is measuring a real claim about
 # size, so it costs what it costs.
 @pytest.fixture(autouse=True)
+def _isolated_signing_record(tmp_path, monkeypatch):
+    """The signing recorder writes beside the real state, and the deploy
+    gate runs this suite on the Pi: a test walking a sign-off page would
+    otherwise open a recording of a checkout that never happened, next to
+    the real ones somebody is about to read."""
+    from apt_log import signing_record
+
+    monkeypatch.setattr(signing_record, "RECORD_DIR",
+                        tmp_path / "signing-record")
+    monkeypatch.setattr(signing_record, "_session",
+                        {"dir": None, "last_seen": 0.0, "last_fed": 0.0,
+                         "frames": 0, "img": ""})
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _no_real_waiting(monkeypatch):
     from apt_log import feed, sign
     from apt_log.screens import agency

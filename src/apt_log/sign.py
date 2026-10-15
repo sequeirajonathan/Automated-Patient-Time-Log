@@ -1167,6 +1167,10 @@ def do_action(payload: dict, status_path: Path | None = None) -> Status:
     status.at = datetime.now().isoformat()
     write_status(status, status_path)
     log.info("signature %s %s (%s)", kind, status.state, status.reason or "ok")
+    from apt_log import signing_record
+
+    signing_record.note_press("pad_" + str(kind), state=status.state,
+                              reason=status.reason)
     return status
 
 
@@ -1760,6 +1764,10 @@ def execute(payload: dict, status_path: Path | None = None) -> Status:
              status.state, status.reason or status.digest[:8],
              len(strokes or []), shape or "-",
              float(payload.get("aspect") or 0), placed[0])
+    from apt_log import signing_record
+
+    signing_record.note_press("replay", state=status.state,
+                              reason=status.reason, placed=placed[0])
     return status
 
 
