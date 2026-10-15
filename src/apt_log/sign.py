@@ -163,6 +163,25 @@ CANVAS_MIN_HEIGHT_SHARE = 0.08
 # Only the last one has no page around it, and only the last one is refused.
 CANVAS_PAGE_MARGIN = 0.01
 
+# ...AND THE BOTTOM EDGE GETS ROOM FOR THE SYSTEM BARS.
+#
+# Corner-to-corner within 1% caught the root the first time and missed it
+# the second, on the night the Tellus update landed:
+#
+#     signature replay done  canvas=[0, 0, 1080, 2250]  ink=368378->368378
+#     signature replay failed (replay_failed) canvas=[0, 0, 1080, 2250]
+#
+# The page stopped 90 px short of the tree because the navigation bar sits
+# underneath it — 96% of the height, so three edges matched and the fourth
+# did not, and strokes went across the sign-off page twice while the
+# caregiver was trying to confirm.
+#
+# The side that made the rule right was always the TOP: a pad has a title
+# over it, so it never starts in the corner. Top, left and right stay
+# strict; only the bottom is allowed the depth of a system bar. Every real
+# pad in the table above is inset at the top, so none of them moves.
+CANVAS_PAGE_BOTTOM_SLACK = 0.10
+
 # Ink stays off the canvas edge. The app's own border, a watermark line, an "X"
 # baseline mark — the margin keeps the replay clear of all of it.
 CANVAS_INSET = 0.06
@@ -372,7 +391,7 @@ def find_canvas(xml: str, dump: bool = True) -> tuple[list[int] | None, str]:
         if (b[0] <= max_x * CANVAS_PAGE_MARGIN
                 and b[1] <= max_y * CANVAS_PAGE_MARGIN
                 and b[2] >= max_x * (1 - CANVAS_PAGE_MARGIN)
-                and b[3] >= max_y * (1 - CANVAS_PAGE_MARGIN)):
+                and b[3] >= max_y * (1 - CANVAS_PAGE_BOTTOM_SLACK)):
             continue
         big = (b[2] - b[0]) * (b[3] - b[1]) >= screen_area * CANVAS_MIN_SHARE
         # Or big enough to sign on in its OWN right — see the constants.

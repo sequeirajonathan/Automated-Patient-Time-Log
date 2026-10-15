@@ -2415,3 +2415,55 @@ class TestTheReplayWillNotDrawIntoAMomentThatDiscardsIt:
             # `app.py` looks the reason up as `sign.{reason}`; a refusal with
             # no string is a refusal that shows her a bare key.
             assert "sign.wrong_density" in got
+
+
+class TestThePageStopsShortOfTheNavigationBar:
+    """The root slipped the corner-to-corner guard by 90 pixels.
+
+    The night Mobile Caregiver+ updated to 26.21, the replay drew into the
+    whole sign-off page twice while the caregiver was trying to confirm:
+
+        signature replay done  canvas=[0, 0, 1080, 2250]  ink=368378->368378
+        signature replay failed (replay_failed) canvas=[0, 0, 1080, 2250]
+
+    The tree reached 2340 — the system navigation bar sits under the page —
+    so the page was 96% of the height, matched three edges of the guard and
+    missed the fourth.
+    """
+
+    @staticmethod
+    def _node(cls, b, rid="", text="", clickable="false"):
+        return (f'<node class="{cls}" resource-id="{rid}" text="{text}" '
+                f'clickable="{clickable}" bounds="[{b[0]},{b[1]}][{b[2]},{b[3]}]"/>')
+
+    def _tree(self, *extra):
+        n = self._node
+        return "".join((
+            n("android.widget.FrameLayout", (0, 0, 1080, 2340)),
+            # The navigation bar under the page, which is what stretched the
+            # tree to 2340 and let the root slip.
+            n("android.view.View", (0, 2250, 1080, 2340),
+              rid="android:id/navigationBarBackground"),
+            n("android.widget.TextView", (303, 126, 777, 191),
+              text="Firmas de la visita"),
+            n("android.view.View", (45, 1298, 1035, 1404), clickable="true"),
+        ) + extra)
+
+    def test_the_page_root_above_the_nav_bar_is_not_a_pad(self):
+        root = self._node("android.view.View", (0, 0, 1080, 2250))
+        bounds, reason = sign.find_canvas(self._tree(root), dump=False)
+        assert bounds is None, "drew across the whole sign-off page"
+        assert reason
+
+    def test_a_tall_pad_with_a_title_over_it_is_still_a_pad(self):
+        """The bottom is relaxed and nothing else. A pad that runs down to
+        the nav bar but has a title above it — inset at the top, as every
+        real pad is — must still be found."""
+        pad = self._node("android.view.View", (0, 210, 1080, 2250))
+        bounds, _ = sign.find_canvas(self._tree(pad), dump=False)
+        assert bounds == [0, 210, 1080, 2250]
+
+    def test_the_original_full_screen_root_is_still_refused(self):
+        root = self._node("android.view.View", (0, 0, 1080, 2340))
+        bounds, _ = sign.find_canvas(self._tree(root), dump=False)
+        assert bounds is None
