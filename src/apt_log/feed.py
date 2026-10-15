@@ -1205,29 +1205,26 @@ SIGNATURE_DENSITY = 105
 # screen, and the signature is accepted on the first press. Watched both
 # ways on the live phone.
 #
-# 300 WAS TRIED FOR READABILITY AND THE APP DISCARDED THE SIGNATURES.
+# THE PANEL'S OWN SIZE IS NOT THE ANSWER, though it was the first one here.
+# At 450 the page is unreadable — reported in those words, "density is all
+# wrong": the title wraps to three lines, the attestation runs off the
+# bottom, and neither Capturar Firma nor Complete la Visita fits on screen
+# with it. Correct and unusable is still unusable.
 #
-# At 450 the page wraps and needs a scroll, which was reported as "density is
-# all wrong", so 300 replaced it: 1080 * 160 / 300 = 576dp, under sw600dp.
-# But sw600dp was never the only line. Android also files the screen into a
-# SIZE class off both of its dp sides, and LARGE starts at 640x480dp:
+# 300 is the value, and it is not a compromise between the two faults —
+# it clears both:
 #
-#     200 -> 1872 x 864 dp  -> XLARGE   confirm drops the ink (watched)
-#     300 -> 1248 x 576 dp  -> LARGE    confirm drops the ink (below)
-#     450 ->  832 x 384 dp  -> NORMAL   confirm keeps it on the first press
+#     1080 * 160 / 300 = 576dp  -> under sw600dp, so the PHONE layout,
+#                                  the pad opens landscape and its confirm
+#                                  accepts;
+#     and the whole sign-off page fits on one screen, both signature
+#     buttons and the commit included.
 #
-# The ink landed on the real pad every time at 300; Confirmar firma then
-# returned to the sign-off page with Capturar Firma still unsigned. The log
-# shows it as the same signature pressed again and again: nine replays of
-# Onorina's on Oct 14, both of Marina's and Sadia's on Oct 15, ink 38k-65k on
-# `canvas=[59,179,2211,787]` each time and none of them kept.
-#
-# So the panel's own size, written as an explicit override and not a reset —
-# the replay's density check reads the "Override density" line, and a reset
-# phone has none. Scrolling to Complete la Visita is a cost; a visit that
-# cannot be signed is not one the caregiver can pay.
+# Checked on the phone at 300 mid-checkout: the pad came up landscape and a
+# replay landed all three strokes into `canvas=[53,344,2307,590]` — an
+# inset canvas, not the root.
 SIGNATURE_DENSITY_BY_APP = {
-    "com.tellus.evv.v2": 450,
+    "com.tellus.evv.v2": 300,
 }
 
 # THE PAGE **AND** THE PAD, and the second one was learned the hard way.
