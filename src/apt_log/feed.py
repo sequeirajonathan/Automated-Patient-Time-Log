@@ -2432,6 +2432,12 @@ def write_frame(path: Path, serial: str | None = None,
         tmp = path.with_suffix(".tmp")
         tmp.write_bytes(png)
         tmp.replace(path)
+    # The signing moment is kept frame by frame — see signing_record.
+    from apt_log import signing_record
+
+    signing_record.note_frame(png, hierarchy, focus or "",
+                              canvas=_has_canvas(hierarchy),
+                              density=_density_now[0])
     # The frame is published either way. "On the sign-in screen, no picture
     # available" is information; silence looks identical to the process being
     # dead.
@@ -3461,6 +3467,10 @@ def tap(claimed_frame: str, element: dict, serial: str | None = None,
     # log line cannot name a patient however the screen is laid out.
     log.info("tapped %s/%s at (%d,%d) on frame %s",
              match["cls"], match["rid"] or "-", cx, cy, claimed_frame)
+    from apt_log import signing_record
+
+    signing_record.note_press("tap", cls=match["cls"], rid=match["rid"],
+                              xy=[cx, cy], frame=claimed_frame)
 
     # Wake the hierarchy watcher in the feed process so the next wireframe
     # arrives as soon as the screen settles, not an interval later.
