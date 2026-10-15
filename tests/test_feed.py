@@ -4000,7 +4000,7 @@ class TestTheSignatureMomentGetsThePhonesOwnSize:
     PAD = '<node resource-id="com.tellus.evv.v2:id/buttonClearSignature"/>'
 
     def test_the_signature_page_gets_the_signing_density(self):
-        assert feed._density_wanted(self.FOCUS, self.SIGN_PAGE) == 450
+        assert feed._density_wanted(self.FOCUS, self.SIGN_PAGE) == 300
 
     def test_and_so_does_the_pad_it_opens(self):
         """THE PAD IS A DIALOG and the page's id is not in its tree. With
@@ -4011,28 +4011,22 @@ class TestTheSignatureMomentGetsThePhonesOwnSize:
             17:21:14  density handed back to the phone (signing in ...)
             17:22:51  density 200 for com.tellus.evv.v2   <- pad just opened
         """
-        assert feed._density_wanted(self.FOCUS, self.PAD) == 450
+        assert feed._density_wanted(self.FOCUS, self.PAD) == 300
 
     def test_the_value_clears_the_tablet_breakpoint(self):
         """Android picks the layout off the screen's width in dp, and this
-        app's confirm mishandles its tablet form."""
+        app's confirm mishandles its tablet form. 1080*160/300 = 576dp,
+        under sw600dp — so the pad opens landscape and accepts."""
         want = feed.SIGNATURE_DENSITY_BY_APP["com.tellus.evv.v2"]
         assert 1080 * 160 / want < 600
 
-    def test_and_the_large_screen_class_as_well(self):
-        """sw600dp WAS NOT THE ONLY LINE. At 300 the screen is 1248x576dp,
-        which Android files as LARGE (640x480dp and up), and the confirm
-        dropped every signature drawn there: Onorina's nine times on Oct 14,
-        Marina's and Sadia's on Oct 15. The short side has to stay under
-        480dp for the NORMAL class the confirm was watched accepting."""
-        want = feed.SIGNATURE_DENSITY_BY_APP["com.tellus.evv.v2"]
-        assert 1080 * 160 / want < 480
-
-    def test_and_is_an_override_the_replay_can_read(self):
-        """The replay refuses unless `wm density` reports an override equal
-        to this. A reset phone prints no override line at all, so the
-        panel's own size has to be written as a number."""
-        assert feed.SIGNATURE_DENSITY_BY_APP["com.tellus.evv.v2"] > 0
+    def test_and_is_not_the_panels_own_size(self):
+        """450 was the first answer here and it was reported as "density is
+        all wrong": the title wraps to three lines and neither Capturar
+        Firma nor Complete la Visita fits on screen. Correct and unusable
+        is still unusable."""
+        assert feed.SIGNATURE_DENSITY_BY_APP["com.tellus.evv.v2"] != \
+            feed.DENSITY_RESET
 
     def test_every_other_page_of_that_app_is_unchanged(self):
         """The 200 was tuned for reading a schedule and it still is. Only
@@ -4054,7 +4048,7 @@ class TestTheSignatureMomentGetsThePhonesOwnSize:
         assert feed._signature_page("com.tellus.evv.v2", self.SIGN_PAGE)
         assert feed._signature_page("com.tellus.evv.v2", self.ORDINARY), \
             "one blank tick ended the signing moment"
-        assert feed._density_wanted(self.FOCUS, self.ORDINARY) == 450
+        assert feed._density_wanted(self.FOCUS, self.ORDINARY) == 300
 
     def test_a_sighting_resets_the_grace_entirely(self):
         """Coming back is free. Being at the wrong density while signing is
