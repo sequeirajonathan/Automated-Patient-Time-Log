@@ -1624,12 +1624,16 @@ def _screen_fractions(bounds, xml: str) -> list:
     """`bounds` as fractions of the whole screen, in the tree's orientation.
 
     The panel's own size, not the tree's extent: the tree stops short of the
-    system bars and the picture does not. [] when the size cannot be read —
-    the portal then shows the whole picture, which is still the proof."""
+    system bars and the picture does not. [] when the size is not known —
+    the portal then shows the whole picture, which is still the proof.
+
+    READ FROM THE FEED'S CACHE, NEVER ASKED OF THE PHONE. The feed fills it on
+    every frame, so in service it is always there; asking `adb` here instead
+    put a real phone query inside the deploy gate's test run."""
     from apt_log import feed as feed_mod
 
     try:
-        w, h = feed_mod.screen_size()
+        w, h = feed_mod.SCREEN_SIZE
         tw, th = _extent(xml)
         if not (w and h and tw and th):
             return []
