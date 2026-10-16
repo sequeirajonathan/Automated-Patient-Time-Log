@@ -2293,6 +2293,8 @@ async def live(ws: WebSocket):
                                   else t(f"sign.state.{sig_kind}.done")
                                   if sig_kind and sig.state == "done"
                                   else t(f"sign.state.{sig.state}"))}
+            if sig.state == "done" and not sig_kind and sig.box:
+                sig_state["box"] = sig.box
             if sig_state != last.get("sign"):
                 payload["sign"] = last["sign"] = sig_state
             if macro_state != last.get("macro"):

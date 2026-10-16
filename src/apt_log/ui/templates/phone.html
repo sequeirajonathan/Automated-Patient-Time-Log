@@ -1961,6 +1961,25 @@
   .signhint { margin:10px 0 0; font-size:13px; line-height:1.4;
               color:var(--muted); text-align:center; }
   .signhint[hidden] { display:none; }
+  /* The phone's signature box, as the phone shows it. Sized to the drawer,
+     never taller than a thumb's reach so step two stays on screen. */
+  .signproof { margin:12px 0 0; text-align:center; }
+  .signproof[hidden] { display:none; }
+  .signproof-t { display:block; font-size:13px; color:var(--muted);
+                 margin-bottom:6px; }
+  #sign-proof-img { display:block; width:100%; max-height:120px;
+                    object-fit:contain; background:#fff; border-radius:10px;
+                    border:2px solid #2e9c63; }
+  /* While the phone's own picture of the signature is showing, the empty
+     hand pad goes: a blank "Firme aquí" under a signature that landed is
+     the very thing that read as "it did not work". Tapping the picture
+     brings the pad back for a hand-drawn redo. */
+  #signsheet.proofing #signpad, #signsheet.proofing .padstrip { display:none; }
+  #sign-proof-img { cursor:pointer; }
+  /* Once the ink is on the phone, the app's own confirm is THE button. */
+  #signsheet.drawn .onphone button.primary {
+    box-shadow:0 0 0 3px #2e9c63; animation:signnudge 1.6s ease-in-out 3; }
+  @keyframes signnudge { 50% { transform:scale(1.04); } }
   /* Once the signature is on the phone, the pad's own button stops being the
      thing to press — it only redraws — so it stands down and step two takes
      the emphasis. The whole failure was a button that looked like the finish
@@ -2730,6 +2749,20 @@
   <button type="button" id="sign-send" class="signsend">{{ t('sign.send') }}</button>
   {# Only after the ink has landed. Says the one thing that was missing. #}
   <p class="signhint" id="sign-hint" hidden>{{ t('sign.now_press') }}</p>
+  {# WHAT LANDED, SHOWN — cropped from the phone's own picture.
+
+     Recorded on 15 October: a saved signature pressed from this drawer
+     landed on the phone six times out of six, and the caregiver pressed the
+     name again, pressed Descartar firma and pressed the ✕ — because nothing
+     in this drawer ever showed it arriving. The pad up there stays blank (an
+     adopted signature never crosses to the portal, by design), and her view
+     of the phone did not refresh while the drawer was open. A blank pad
+     under a "done" toast reads as "it did not work". So the drawer shows the
+     phone's signature box itself, refreshed, until it is confirmed. #}
+  <div class="signproof" id="sign-proof" hidden>
+    <span class="signproof-t">{{ t('sign.proof') }}</span>
+    <img id="sign-proof-img" alt="">
+  </div>
 
   {# ADOPTION DOES NOT HAPPEN HERE ANY MORE.
 
@@ -3087,6 +3120,9 @@
     signSendAgain: {{ t('sign.send_again')|tojson }},
     signEmpty:   {{ t('signature.empty')|tojson }},
     signLockLapsed: {{ t('sign.lock_lapsed')|tojson }},
+    signNowConfirm: {{ t('sign.now_confirm')|tojson }},
+    signAgainAsk: {{ t('sign.again_ask')|tojson }},
+    signDiscardAsk: {{ t('sign.discard_ask')|tojson }},
     signWaitPhone: {{ t('sign.wait_phone')|tojson }},
     signNotHer:   {{ t('sign.not_her')|tojson }},
     signWhoSigns: {{ t('sign.who_signs')|tojson }},
