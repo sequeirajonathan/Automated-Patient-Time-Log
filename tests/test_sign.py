@@ -207,8 +207,17 @@ class TestExecute:
         # ("…:30.123456"), so asserting against the raw file failed about one
         # run in a hundred — on a suite that is the deploy gate, which turns a
         # coincidence of the clock into a rolled-back good deploy.
-        body = json.dumps({k: v for k, v in written.items() if k != "at"})
+        #
+        # And except the box: it is where the CANVAS is on the screen, which
+        # the tree says to anybody, not where any stroke went — and as
+        # fractions it is made of exactly the kind of digits this looks for.
+        # It is held to that separately below.
+        body = json.dumps({k: v for k, v in written.items()
+                           if k not in ("at", "box")})
         assert "0.1" not in body, "a stroke coordinate reached the status"
+        assert all(isinstance(v, float) for v in written.get("box", [])), \
+            "the box is four fractions of the screen or nothing"
+        assert len(written.get("box", [])) in (0, 4)
         assert "strokes" not in body
         assert sign.read_status(tmp_path / "s.json").digest
 

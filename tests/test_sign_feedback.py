@@ -25,20 +25,28 @@ class TestWhereTheInkWent:
     def test_the_box_is_a_fraction_of_the_whole_screen(self):
         """The panel's size, not the tree's: the tree stops short of the
         system bars and the mirror's picture does not."""
-        with patch("apt_log.feed.screen_size", return_value=[1080, 2340]):
+        with patch("apt_log.feed.SCREEN_SIZE", [1080, 2340]):
             box = sign._screen_fractions([59, 179, 2211, 787], PAD_TREE)
         assert box == [round(59 / 2340, 4), round(179 / 1080, 4),
                        round(2211 / 2340, 4), round(787 / 1080, 4)]
 
     def test_an_upright_page_is_measured_upright(self):
         tree = '<node bounds="[0,0][1080,2250]"/>'
-        with patch("apt_log.feed.screen_size", return_value=[1080, 2340]):
+        with patch("apt_log.feed.SCREEN_SIZE", [1080, 2340]):
             box = sign._screen_fractions([0, 1170, 1080, 2340], tree)
         assert box == [0.0, 0.5, 1.0, 1.0]
 
     def test_an_unknown_screen_gives_no_box_rather_than_a_wrong_one(self):
-        with patch("apt_log.feed.screen_size", return_value=[0, 0]):
+        with patch("apt_log.feed.SCREEN_SIZE", [0, 0]):
             assert sign._screen_fractions([1, 2, 3, 4], PAD_TREE) == []
+
+    def test_the_phone_is_never_asked(self):
+        """The deploy gate runs this suite on the Pi, next to the real
+        phone. The size comes from the feed's cache, not from adb."""
+        with patch("apt_log.feed.SCREEN_SIZE", [1080, 2340]), \
+             patch("apt_log.feed._adb") as adb:
+            sign._screen_fractions([59, 179, 2211, 787], PAD_TREE)
+        adb.assert_not_called()
 
     def test_the_status_carries_it_across_processes(self, tmp_path):
         path = tmp_path / "s.json"
