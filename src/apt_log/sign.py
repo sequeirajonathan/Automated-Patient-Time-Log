@@ -197,6 +197,12 @@ class Status:
     reason: str = ""          # no_canvas | ambiguous | wrong_app | replay_failed
     digest: str = ""          # sha256 of the strokes, for the audit trail
     kind: str = ""            # "" for a replay; "clear"/"confirm" for a press
+    # Where the ink went, as FRACTIONS of the screen in the orientation it
+    # was drawn in — the canvas the replay drew on. The portal crops the
+    # phone's picture to it, so the drawer can SHOW the signature that landed
+    # instead of an empty pad that says it did not. Fractions, because the
+    # picture the portal has is a thumbnail, not the panel.
+    box: list = field(default_factory=list)
     at: str = field(default_factory=lambda: datetime.now().isoformat())
 
 
@@ -1614,6 +1620,28 @@ def _wait_for_signing_density(package: str,
         time.sleep(DENSITY_POLL)
 
 
+def _screen_fractions(bounds, xml: str) -> list:
+    """`bounds` as fractions of the whole screen, in the tree's orientation.
+
+    The panel's own size, not the tree's extent: the tree stops short of the
+    system bars and the picture does not. [] when the size cannot be read —
+    the portal then shows the whole picture, which is still the proof."""
+    from apt_log import feed as feed_mod
+
+    try:
+        w, h = feed_mod.screen_size()
+        tw, th = _extent(xml)
+        if not (w and h and tw and th):
+            return []
+        long_, short = max(w, h), min(w, h)
+        sw, sh = (long_, short) if tw > th else (short, long_)
+        x1, y1, x2, y2 = (float(v) for v in bounds)
+        return [round(min(max(v, 0.0), 1.0), 4)
+                for v in (x1 / sw, y1 / sh, x2 / sw, y2 / sh)]
+    except Exception:  # noqa: BLE001 — a picture hint never breaks a replay
+        return []
+
+
 def execute(payload: dict, status_path: Path | None = None) -> Status:
     """Find the canvas, replay the strokes, publish the outcome."""
     from apt_log import resident
@@ -1707,6 +1735,7 @@ def execute(payload: dict, status_path: Path | None = None) -> Status:
         # already a request to put a specific signature on that canvas; it is
         # never on a timer and never on arrival at the screen.
         wiped = _wipe_the_canvas(driver, xml, placed)
+        status.box = _screen_fractions(bounds, xml)
         paths = build_paths(strokes, bounds, payload.get("aspect", 1.0),
                             rotate=sideways(xml, package))
         # ASSIGNED, NOT APPENDED, and the wipe writes to the same buffer three

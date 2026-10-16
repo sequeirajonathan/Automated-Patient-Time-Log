@@ -642,6 +642,7 @@
           for (let i = 0; i < slot.children.length; i += 1) {
             const b = slot.children[i];
             const kind = (sheetActions[i] || {}).kind || '';
+            if (kind) b.dataset.kind = kind;
             if (kind) {
               // THE APP'S OWN EMPHASIS, photographed rather than guessed.
               // Mobile Caregiver+ draws Descartar firma as a filled RED
@@ -666,6 +667,23 @@
             }
           }
           bindAims(slot);
+        }
+        // ASKED, NOT REFUSED, before the app's discard throws away a
+        // signature that has already landed. Recorded twice in one check-out
+        // on 15 October: the ink arrived, and the next press was Descartar
+        // firma. Capture phase, so it runs before the aim's own listener.
+        if (!slot.dataset.discardGuard) {
+          slot.dataset.discardGuard = '1';
+          slot.addEventListener('click', (ev) => {
+            const b = ev.target.closest('button[data-kind="discard"]');
+            if (!b || !isDrawn()) return;
+            const word = confirmLabel();
+            const ask = word
+              ? (i18n.signDiscardAsk || '').replace('{btn}', word) : '';
+            if (ask && !window.confirm(ask)) {
+              ev.stopImmediatePropagation(); ev.preventDefault();
+            }
+          }, true);
         }
       }
       // A rebuild mid-replay hands back live buttons — the row is redrawn
@@ -849,6 +867,9 @@
     // drawing surface reported at any orientation. Hidden only when all three
     // say there is nothing to sign on.
     const padHere = !!sheetActions.length || legacyUsable || !!meta.pad;
+    // The signature it was about has been saved or thrown away; either way
+    // the next pad starts from nothing.
+    if (!padHere && isDrawn()) markDrawn(false);
     const signBtn = document.getElementById('btn-sign');
     if (signBtn) signBtn.hidden = !padHere || onLauncher;
 
@@ -1513,7 +1534,15 @@
     unbusy();
     // done or failed, the sentence arrives rendered; show it either way. On
     // done it says to check the screen and press the app's own save.
-    toast(s.text || '');
+    //
+    // UNLESS THE APP'S SAVE HAS A NAME ON THIS SCREEN, and then it is named.
+    // "the app's own save button" is not a button anyone can see: Mobile
+    // Caregiver+ calls it Confirmar firma, and the button beside it — red,
+    // filled, the loudest thing on the pad — is Descartar firma.
+    const confirmWord = confirmLabel();
+    toast(s.state === 'done' && s.box && confirmWord && i18n.signNowConfirm
+      ? i18n.signNowConfirm.replace('{btn}', confirmWord) : (s.text || ''));
+    if (s.state === 'done' && s.box) showProof(s.box);
     // THE INK HAS LANDED, SO THE PAD'S BUTTON IS NO LONGER THE ONE TO PRESS.
     //
     // It only ever redrew, and pressing it again is exactly what happened six
@@ -1524,9 +1553,79 @@
     markDrawn(s.state === 'done');
   }
 
+  // The app's own confirm on this screen, by the server's word for it.
+  function confirmLabel() {
+    const b = document.querySelector('#sign-appbtns button[data-kind="confirm"]')
+      || document.querySelector('#sign-appbtns button.primary');
+    return b ? (b.textContent || '').trim() : '';
+  }
+
+  function isDrawn() {
+    const sheet = document.getElementById('signsheet');
+    return !!(sheet && sheet.classList.contains('drawn'));
+  }
+
+  // WHAT LANDED, CROPPED FROM THE PHONE'S OWN PICTURE, refreshed until the
+  // signature is saved or the pad goes. See #sign-proof in phone.html for
+  // the recording that asked for it.
+  const PROOF_EVERY = 2000;
+  const PROOF_FOR = 90000;
+  let proofTimer = 0;
+  let proofUntil = 0;
+
+  function proofing(on) {
+    const sheet = document.getElementById('signsheet');
+    if (!sheet || sheet.classList.contains('proofing') === !!on) return;
+    sheet.classList.toggle('proofing', !!on);
+    if (!on) { padFit(); padRedraw(); }
+  }
+
+  function stopProof() {
+    clearTimeout(proofTimer); proofTimer = 0; proofUntil = 0;
+    const wrapEl = document.getElementById('sign-proof');
+    if (wrapEl) wrapEl.hidden = true;
+    proofing(false);
+  }
+
+  function showProof(box) {
+    const wrapEl = document.getElementById('sign-proof');
+    const out = document.getElementById('sign-proof-img');
+    if (!wrapEl || !out || !Array.isArray(box)) return;
+    clearTimeout(proofTimer);
+    proofUntil = Date.now() + PROOF_FOR;
+    const tick = () => {
+      proofTimer = 0;
+      if (!isDrawn() || Date.now() > proofUntil) { stopProof(); return; }
+      const img = new Image();
+      img.onload = () => {
+        const W = img.naturalWidth, H = img.naturalHeight;
+        const [x1, y1, x2, y2] = box.map(Number);
+        // Fractions of the screen as the replay saw it, and the mirror's
+        // picture is captured the same way up. An empty or odd box shows the
+        // whole screen — still the proof, just smaller.
+        const fits = box.length === 4 && x2 > x1 && y2 > y1
+          && x1 >= 0 && y1 >= 0 && x2 <= 1 && y2 <= 1;
+        const sx = fits ? Math.round(x1 * W) : 0;
+        const sy = fits ? Math.round(y1 * H) : 0;
+        const sw = fits ? Math.max(1, Math.round((x2 - x1) * W)) : W;
+        const sh = fits ? Math.max(1, Math.round((y2 - y1) * H)) : H;
+        const c = document.createElement('canvas');
+        c.width = sw; c.height = sh;
+        c.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+        try { out.src = c.toDataURL('image/jpeg', 0.8); } catch (e) { return; }
+        if (isDrawn()) { wrapEl.hidden = false; proofing(true); }
+      };
+      img.src = '/screen.jpg?proof=' + Date.now();
+      proofTimer = setTimeout(tick, PROOF_EVERY);
+    };
+    // The capture after the last stroke, not the one during it.
+    proofTimer = setTimeout(tick, 1200);
+  }
+
   function markDrawn(on) {
     const sheet = document.getElementById('signsheet');
     if (sheet) sheet.classList.toggle('drawn', !!on);
+    if (!on) stopProof();
     const hint = document.getElementById('sign-hint');
     if (hint) hint.hidden = !on;
     const send = document.getElementById('sign-send');
@@ -3111,9 +3210,20 @@
       markSigner();
     });
 
+    const proofImg = document.getElementById('sign-proof-img');
+    if (proofImg) proofImg.addEventListener('click', () => stopProof());
+
     const padClose = document.getElementById('sign-close');
     if (padClose) padClose.addEventListener('click', () => {
       if (pad.waitingId) { toast(i18n.signWaitPhone || ''); return; }
+      // This ✕ presses the app's ✕, and the app's ✕ throws the signature
+      // away just as Descartar does — recorded on 15 October, two seconds
+      // after a Descartar. Asked the same question.
+      if (padDismiss && isDrawn()) {
+        const word = confirmLabel();
+        const ask = word ? (i18n.signDiscardAsk || '').replace('{btn}', word) : '';
+        if (ask && !window.confirm(ask)) return;
+      }
       // IT MUST NOT CLOSE ON A PRESS IT COULD NOT SEND.
       //
       // The first version shut the drawer whatever happened, so in watch-only
@@ -3145,6 +3255,14 @@
     if (adoptedRow) adoptedRow.addEventListener('click', (ev) => {
       const b = ev.target.closest('button');
       if (!b || !b.dataset.name || b.hidden) return;
+      // ALREADY ON THE PHONE. Pressing the name again wipes it and draws it
+      // again — recorded two seconds after one landed, the press that looks
+      // like "it did not work" and is really "I could not see that it did".
+      if (isDrawn()) {
+        const word = confirmLabel();
+        const ask = word ? (i18n.signAgainAsk || '').replace('{btn}', word) : '';
+        if (ask && !window.confirm(ask)) return;
+      }
       applyAdopted(b.dataset.name);
     });
     // The pad's own adoption form is gone — the mapping page owns
