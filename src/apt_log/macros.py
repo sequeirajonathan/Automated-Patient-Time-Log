@@ -417,6 +417,16 @@ class Status:
 # and both of its answers are known.
 AUTOFILL_DECLINE = "android:id/autofill_save_no"
 
+# CHROME'S SAVED-LOGIN SUGGESTION, the other autofill — Chrome's own, not the
+# system's. With a login form's email box focused, Chrome's keyboard accessory
+# shows a chip per saved login: a clickable row holding a `chip_view_start_icon`
+# (the key glyph) and the login's name. Recorded on the live phone, 21 October,
+# under the HHAeXchange sign-in form. Matched by that icon's id, so it cannot
+# catch the accessory's other buttons (the key menu, the card and address
+# sheets), which carry no such child.
+SAVED_LOGIN_CHIP = ('//*[@clickable="true"]'
+                    '[.//*[contains(@resource-id, "chip_view_start_icon")]]')
+
 
 def dismiss_autofill(driver) -> bool:
     """Decline the system offer to save the password. True if one was showing."""
@@ -674,6 +684,11 @@ def _hhax_uma_login(driver, report) -> None:
     # vendor splits the accounts — set them and they win; unset, nothing
     # more needs configuring than the legacy app already had. Either way
     # the read raises before any tap if nothing is configured.
+    #
+    # Still read up front, before any tap, even though Chrome's saved login
+    # is tried first (see `chrome_saved_login`): the stored one is the
+    # fallback, and a run that would need it must fail on a screen it has
+    # not touched.
     secrets = FileSecretProvider()
     try:
         email = secrets.get(UMA_USERNAME)
@@ -845,8 +860,58 @@ def _hhax_uma_login(driver, report) -> None:
                     raise
                 time.sleep(1.0)
 
-    type_into("email", email, clear=True)
-    type_into("password", password)
+    def chrome_saved_login(wait=5.0):
+        """Press Chrome's saved-login suggestion if it offers one.
+
+        The suggestion is a chip in Chrome's keyboard accessory, shown when
+        the email box has focus — the chip is the clickable row wrapping a
+        `chip_view_start_icon`. Focusing the box is a tap on a form field;
+        the chip is the one press this adds. True once the chip was pressed
+        and the email box is no longer empty.
+        """
+        try:
+            need("email").click()
+        except (StaleElementReferenceException, WebDriverException,
+                RuntimeError):
+            return False
+        end = time.monotonic() + wait
+        while time.monotonic() < end:
+            chips = driver.find_elements("xpath", SAVED_LOGIN_CHIP)
+            if chips:
+                try:
+                    chips[0].click()
+                except (StaleElementReferenceException, WebDriverException):
+                    time.sleep(0.5)
+                    continue
+                # Filled means the email box holds something. A remembered
+                # account's masked address counts too — Chrome's fill
+                # replaces it, and either way the page now has a login.
+                return bool(wait_for(
+                    lambda: bool((need("email").get_attribute("text")
+                                  or "").strip()),
+                    timeout=4.0, poll=0.5))
+            time.sleep(0.5)
+        return False
+
+    # CHROME'S OWN SAVED LOGIN FIRST, the stored one only if there is none.
+    #
+    # 21 October: the stored login was refused twice ("correo electrónico/
+    # nombre de usuario o contraseña incorrectos"), and twenty minutes later
+    # the caregiver signed in from the portal by tapping the suggestion
+    # Chrome offers under the email box. That suggestion's text was 22
+    # characters; the stored email is 23. The login that works is the one
+    # Chrome saved, not the one written down on the Pi — and Chrome keeps it
+    # current every time somebody signs in by hand, which a secrets file
+    # never will.
+    #
+    # Nothing is read back: the chip is pressed, Chrome fills both boxes
+    # itself, and this never learns what it filled.
+    if chrome_saved_login():
+        log.info("HHAeXchange+: signing in with Chrome's saved login")
+    else:
+        log.info("HHAeXchange+: no saved login offered; typing the stored one")
+        type_into("email", email, clear=True)
+        type_into("password", password)
 
     # The submit control carries no id and no text in the accessibility tree.
     # Discovery's recording: it is the one wide button below the password
