@@ -927,11 +927,20 @@
     if (blockedCode) body.classList.remove('peeking');
   }
 
+  // THE OPEN FOLDABLE GETS BOTH AT ONCE. The iPhone Duo unfolded is a
+  // landscape 890x626 with its fold straight down the middle, and there the
+  // photograph and the controls sit side by side, one each side of the
+  // crease (see the split rules in phone.html). The query is the same one
+  // the CSS uses, so the two can never disagree about which layout is up.
+  const SPLIT_QUERY = '(min-width: 820px) and (min-aspect-ratio: 5/4)';
+  const splitMQ = window.matchMedia ? window.matchMedia(SPLIT_QUERY) : null;
+  function split() { return !!(splitMQ && splitMQ.matches); }
+
   function applyFrame(frame) {
     // The photograph rides behind the wireframe, fetched only while she is
-    // actually peeking at it.
+    // actually peeking at it — or while it is always on screen, unfolded.
     frameImg = frame.img || '';
-    if (body.classList.contains('peeking')) refreshPeek();
+    if (body.classList.contains('peeking') || split()) refreshPeek();
   }
 
   function refreshPeek() {
@@ -3561,6 +3570,16 @@
     if (!nav) return;
     const h = Math.round(nav.getBoundingClientRect().height);
     if (h > 0) document.documentElement.style.setProperty('--chrome-h', h + 'px');
+    // And where the screen view's header ends: the unfolded layout pins the
+    // phone's photograph in the left pane from there down.
+    const hdr = document.querySelector('#screenview .hdr');
+    const hh = hdr ? Math.round(hdr.getBoundingClientRect().height) : 0;
+    if (hh > 0) document.documentElement.style.setProperty('--hdr-h', hh + 'px');
+  }
+  if (splitMQ) {
+    const onSplit = () => { measureChrome(); if (split()) refreshPeek(); };
+    if (splitMQ.addEventListener) splitMQ.addEventListener('change', onSplit);
+    else if (splitMQ.addListener) splitMQ.addListener(onSplit);
   }
   if (window.ResizeObserver) {
     const nav = document.querySelector('.navbar');
