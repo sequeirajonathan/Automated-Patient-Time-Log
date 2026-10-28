@@ -2051,6 +2051,64 @@
   body.toasting #toast { opacity:1; transform:translateX(-50%); }
   .muted { color:var(--muted); }
 
+  /* ------------------------------------------- the unfolded foldable
+     THE iPHONE DUO OPEN IS A LANDSCAPE 890x626 WITH ITS FOLD DOWN THE
+     MIDDLE. One column stretched across it put every full-width button —
+     Finalize la visita, Capturar Firma — straight across the crease, where
+     a finger lands on the hinge. So it becomes two panes, one each side:
+
+       left   the phone's own photograph, always up — the thing missing on
+              15 October, when the caregiver could not see a signature
+              land and pressed again;
+       right  the controls, the app's tabs and Back/Home, and every sheet,
+              so the drawer opens over the controls and never over the
+              photograph of the pad it is drawing on.
+
+     The same query lives in phone.js (SPLIT_QUERY) so the photograph is
+     fetched while it is showing. Closed (466x678) and open-portrait
+     (626x890) are ordinary phones and keep the single column. */
+  @media (min-width: 820px) and (min-aspect-ratio: 5/4) {
+    #stage { margin-left:calc(50% + 14px); }
+    #peekwrap { position:fixed; display:flex; align-items:flex-start;
+                justify-content:center; left:0; width:calc(50% - 14px);
+                top:var(--hdr-h, 112px); bottom:0; z-index:2;
+                padding:8px 12px calc(env(safe-area-inset-bottom) + 12px);
+                box-sizing:border-box; border-radius:0 18px 0 0; }
+    #peek, body.wide:not(.sideways) #peek {
+        width:auto; height:auto; max-width:100%; max-height:100%;
+        object-fit:contain; border-radius:12px; }
+    /* Both are up at once, so the toggle has nothing to toggle, and the
+       rules that hide one for the other stand down. */
+    #btn-peek { display:none; }
+    body.peeking #screenwrap { visibility:visible; }
+    body.peeking #stage { overflow-y:auto; }
+    /* No photograph of a password screen, same as everywhere else: the
+       pane goes rather than showing the last picture as if it were now. */
+    body.blocked #peekwrap, body.asleep #peekwrap { display:none; }
+    #peek-cap { position:fixed; left:calc(25% - 7px); }
+    .navbar { left:calc(50% + 14px); }
+    .sheet { left:calc(50% + 14px); }
+    /* A landscape photograph — the signature pad is the one — sits in the
+       middle of its pane, not pinned to the top over an empty half. */
+    body.wide #peekwrap { align-items:center; }
+
+    /* The home screen gets the same two sides: the clock and the app tiles
+       on the left, the next visit and everything under it on the right.
+       Stretched across the fold, the visit cards and their buttons ran
+       straight over the crease and the tiles sat 280px apart. */
+    #launcher { display:grid; grid-template-columns:1fr 1fr;
+                column-gap:56px; align-content:center; overflow-y:auto; }
+    #launcher > #clockbtn { grid-column:1; grid-row:1; align-self:end; }
+    #launcher > .date { grid-column:1; grid-row:2; }
+    #launcher > .springboard { grid-column:1; grid-row:3; align-self:start; }
+    #launcher > #authstops { grid-column:1; grid-row:4; }
+    #launcher > #upnext-wrap { grid-column:2; grid-row:1 / span 4;
+                               align-self:center; }
+    /* Language, notices and the status link go under the right side too:
+       centred across the whole width they sat exactly on the crease. */
+    #launcher > footer { grid-column:2; grid-row:5; }
+  }
+
 </style>
 </head>
 <body data-view="launcher" data-boot="{{ boot }}">
