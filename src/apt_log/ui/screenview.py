@@ -2429,11 +2429,18 @@ def build(doc: dict) -> dict | None:
     # "Visits | Plan of care" section switch is two half-width rows in one
     # band, and the left one matched the info-row shape. A statement
     # stands alone on its line.
+    #
+    # A row with NO AIM is never one of them: it has nothing to press, so it
+    # cannot be a control however it lines up. HHAeXchange+'s check-out
+    # record ("Registros de salida de EVV 9:00 a. m.") overlaps the top of
+    # the next visit's card by a few pixels, landed in that card's band, and
+    # was turned into a button with no aim — a 500 on the whole page.
     for band in bands:
         rows_here = [it for it in band if it["kind"] == "row"]
         if len(rows_here) >= 2:
             for it in rows_here:
-                it["info"] = False
+                if it.get("aim"):
+                    it["info"] = False
 
     # ...and when exactly one of them is DISABLED, that one is the section
     # she is already looking at. The app says so itself — inMyTeam disables

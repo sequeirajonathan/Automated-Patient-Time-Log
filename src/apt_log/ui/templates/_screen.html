@@ -307,7 +307,11 @@
                 data-aim='{{ it.aim | tojson }}'
                 aria-label="{{ it.aim.cls }}{% if it.aim.rid %} {{ it.aim.rid }}{% endif %}"
           ><span class="knob"></span></button>
-      {% elif it.kind == 'row' and it.info %}
+      {# A ROW WITH NOTHING TO PRESS IS A STATEMENT, whatever any rule above
+         decided. Drawn as a button it had no aim to carry, and `tojson` on
+         the missing aim took the whole page down with a 500 (30 October:
+         HHAeXchange+'s "Registros de salida de EVV" line). #}
+      {% elif it.kind == 'row' and (it.info or not it.aim) %}
         {# A statement, not a door: a status line the app drew as its own
            fact — "✓ Registros de entrada de EVV 6:00" — with the mark's
            colour as a soft chip and no chevron pretending it opens more. #}
