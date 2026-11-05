@@ -2459,6 +2459,12 @@ def build(doc: dict) -> dict | None:
             continue
         if not all(it.get("lines") or it.get("txt") for it in rows_here):
             continue
+        # Every part she could press must HAVE something to press. On 5
+        # November HHAeXchange+'s "Registros de entrada de EVV" line — a
+        # statement with no aim — tiled beside the disabled "La visita está
+        # en curso" and was taken for the other half of a section switch.
+        if not all(it.get("aim") for it in rows_here if it["enabled"]):
+            continue
         off = [it for it in rows_here if not it["enabled"]]
         if len(off) != 1:
             continue

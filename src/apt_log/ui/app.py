@@ -147,6 +147,29 @@ def _publish_viewers() -> None:
 
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+
+def _aimjson(value):
+    """An aim for a `data-aim` attribute, or null when there is none.
+
+    The reflow promises every control an aim, and twice a new screen shape
+    broke that promise: HHAeXchange+'s EVV record lines carry nothing to
+    press, and one rule after another dressed them as a button (30 Oct) and
+    then as half of a section switch (5 Nov). Plain `tojson` raises on the
+    missing value and the WHOLE PAGE answers 500. A control with no aim is
+    a dead button; a page that will not load is a caregiver locked out of
+    the phone in the middle of a visit. The script refuses a null aim.
+    """
+    from jinja2 import Undefined
+    from jinja2.utils import htmlsafe_json_dumps
+    from markupsafe import Markup
+
+    if value is None or isinstance(value, Undefined):
+        return Markup("null")
+    return htmlsafe_json_dumps(value)
+
+
+templates.env.filters["aimjson"] = _aimjson
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 queue = RelayQueue()
 

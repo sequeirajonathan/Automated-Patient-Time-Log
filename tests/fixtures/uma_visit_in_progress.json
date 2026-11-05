@@ -1,0 +1,2365 @@
+{
+ "size": [
+  1080,
+  2340
+ ],
+ "screen": "home",
+ "app": "com.hhaexchange.uma",
+ "activity": "homeactivity",
+ "nav": {},
+ "h_app": "com.hhaexchange.uma",
+ "blocked": "",
+ "notice": "",
+ "webview": false,
+ "scrollable": true,
+ "landscape": false,
+ "turn": false,
+ "canvas": false,
+ "covered": false,
+ "floating": {},
+ "full": true,
+ "elements": [
+  {
+   "rid": "schedule_screen_visit_search",
+   "cls": "View",
+   "b": [
+    650,
+    153,
+    770,
+    192
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    650,
+    153,
+    770,
+    192
+   ],
+   "step": 0
+  },
+  {
+   "rid": "",
+   "cls": "View",
+   "b": [
+    31,
+    256,
+    1056,
+    318
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    31,
+    256,
+    1056,
+    318
+   ],
+   "step": 0
+  },
+  {
+   "rid": "schedule_screen_patient_details",
+   "cls": "View",
+   "b": [
+    31,
+    331,
+    276,
+    370
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    31,
+    331,
+    276,
+    370
+   ],
+   "step": 0
+  },
+  {
+   "rid": "",
+   "cls": "View",
+   "b": [
+    31,
+    370,
+    478,
+    417
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": false,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    31,
+    370,
+    478,
+    417
+   ],
+   "step": 0
+  },
+  {
+   "rid": "",
+   "cls": "View",
+   "b": [
+    31,
+    417,
+    309,
+    464
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": false,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    31,
+    417,
+    309,
+    464
+   ],
+   "step": 0
+  },
+  {
+   "rid": "schedule_screen_continue_shift",
+   "cls": "View",
+   "b": [
+    34,
+    471,
+    1055,
+    513
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    34,
+    471,
+    1055,
+    513
+   ],
+   "step": 0
+  },
+  {
+   "rid": "",
+   "cls": "View",
+   "b": [
+    31,
+    564,
+    1056,
+    626
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    31,
+    564,
+    1056,
+    626
+   ],
+   "step": 0
+  },
+  {
+   "rid": "schedule_screen_patient_details",
+   "cls": "View",
+   "b": [
+    31,
+    639,
+    276,
+    678
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    31,
+    639,
+    276,
+    678
+   ],
+   "step": 0
+  },
+  {
+   "rid": "",
+   "cls": "View",
+   "b": [
+    31,
+    678,
+    754,
+    725
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": false,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    31,
+    678,
+    754,
+    725
+   ],
+   "step": 0
+  },
+  {
+   "rid": "",
+   "cls": "View",
+   "b": [
+    31,
+    725,
+    309,
+    772
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": false,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    31,
+    725,
+    309,
+    772
+   ],
+   "step": 0
+  },
+  {
+   "rid": "schedule_screen_continue_shift",
+   "cls": "View",
+   "b": [
+    34,
+    779,
+    1055,
+    821
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    34,
+    779,
+    1055,
+    821
+   ],
+   "step": 0
+  },
+  {
+   "rid": "schedule_screen_create_unscheduled_visit",
+   "cls": "View",
+   "b": [
+    22,
+    859,
+    1058,
+    898
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    22,
+    859,
+    1058,
+    898
+   ],
+   "step": 0
+  },
+  {
+   "rid": "",
+   "cls": "View",
+   "b": [
+    31,
+    973,
+    1056,
+    1035
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    31,
+    973,
+    1056,
+    1035
+   ],
+   "step": 0
+  },
+  {
+   "rid": "",
+   "cls": "View",
+   "b": [
+    31,
+    1123,
+    1056,
+    1185
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    31,
+    1123,
+    1056,
+    1185
+   ],
+   "step": 0
+  },
+  {
+   "rid": "",
+   "cls": "View",
+   "b": [
+    31,
+    1222,
+    1056,
+    1284
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    31,
+    1222,
+    1056,
+    1284
+   ],
+   "step": 0
+  },
+  {
+   "rid": "",
+   "cls": "View",
+   "b": [
+    31,
+    1372,
+    1056,
+    1434
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    31,
+    1372,
+    1056,
+    1434
+   ],
+   "step": 0
+  },
+  {
+   "rid": "",
+   "cls": "View",
+   "b": [
+    31,
+    1471,
+    1056,
+    1533
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    31,
+    1471,
+    1056,
+    1533
+   ],
+   "step": 0
+  },
+  {
+   "rid": "",
+   "cls": "View",
+   "b": [
+    31,
+    1621,
+    1056,
+    1683
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    31,
+    1621,
+    1056,
+    1683
+   ],
+   "step": 0
+  },
+  {
+   "rid": "",
+   "cls": "View",
+   "b": [
+    31,
+    1771,
+    1056,
+    1833
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    31,
+    1771,
+    1056,
+    1833
+   ],
+   "step": 0
+  },
+  {
+   "rid": "",
+   "cls": "View",
+   "b": [
+    31,
+    1870,
+    1056,
+    1932
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    31,
+    1870,
+    1056,
+    1932
+   ],
+   "step": 0
+  },
+  {
+   "rid": "help_button",
+   "cls": "View",
+   "b": [
+    1031,
+    106,
+    1077,
+    148
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    1031,
+    106,
+    1077,
+    148
+   ],
+   "step": 0
+  },
+  {
+   "rid": "",
+   "cls": "View",
+   "b": [
+    363,
+    2233,
+    718,
+    2301
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    363,
+    2233,
+    718,
+    2301
+   ],
+   "step": 0
+  },
+  {
+   "rid": "",
+   "cls": "View",
+   "b": [
+    725,
+    2233,
+    1080,
+    2301
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    725,
+    2233,
+    1080,
+    2301
+   ],
+   "step": 0
+  },
+  {
+   "rid": "",
+   "cls": "View",
+   "b": [
+    91,
+    199,
+    250,
+    238
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    91,
+    199,
+    250,
+    238
+   ],
+   "step": 1
+  },
+  {
+   "rid": "",
+   "cls": "View",
+   "b": [
+    91,
+    244,
+    636,
+    283
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    91,
+    244,
+    636,
+    283
+   ],
+   "step": 1
+  },
+  {
+   "rid": "",
+   "cls": "View",
+   "b": [
+    91,
+    289,
+    278,
+    328
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    91,
+    289,
+    278,
+    328
+   ],
+   "step": 1
+  },
+  {
+   "rid": "",
+   "cls": "View",
+   "b": [
+    11,
+    466,
+    534,
+    600
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    11,
+    466,
+    534,
+    600
+   ],
+   "step": 1
+  },
+  {
+   "rid": "",
+   "cls": "View",
+   "b": [
+    546,
+    466,
+    1069,
+    600
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    546,
+    466,
+    1069,
+    600
+   ],
+   "step": 1
+  },
+  {
+   "rid": "",
+   "cls": "View",
+   "b": [
+    11,
+    612,
+    534,
+    746
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    11,
+    612,
+    534,
+    746
+   ],
+   "step": 1
+  },
+  {
+   "rid": "",
+   "cls": "View",
+   "b": [
+    521,
+    2193,
+    560,
+    2232
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    521,
+    2193,
+    560,
+    2232
+   ],
+   "step": 1
+  },
+  {
+   "rid": "menu_top_bar_back_button",
+   "cls": "View",
+   "b": [
+    9,
+    107,
+    48,
+    146
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    9,
+    107,
+    48,
+    146
+   ],
+   "step": 1
+  },
+  {
+   "rid": "visit_details_continue_button_disabled",
+   "cls": "View",
+   "b": [
+    16,
+    2243,
+    1064,
+    2285
+   ],
+   "focused": false,
+   "selected": false,
+   "checked": false,
+   "enabled": true,
+   "has_text": false,
+   "txt": "",
+   "vb": [
+    16,
+    2243,
+    1064,
+    2285
+   ],
+   "step": 1
+  }
+ ],
+ "statics": [
+  {
+   "cls": "TextView",
+   "b": [
+    311,
+    159,
+    650,
+    187
+   ],
+   "txt": "Encontrará las visitas anteriores con",
+   "rid": "schedule_screen_past_visits_can_be_found",
+   "vb": [
+    311,
+    159,
+    650,
+    187
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    650,
+    159,
+    770,
+    187
+   ],
+   "txt": "Visita Buscar",
+   "vb": [
+    650,
+    159,
+    770,
+    187
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    11,
+    203,
+    269,
+    232
+   ],
+   "txt": "noviembre 4, 2026 (Hoy)",
+   "rid": "header_date",
+   "vb": [
+    11,
+    203,
+    269,
+    232
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    31,
+    256,
+    312,
+    285
+   ],
+   "txt": "PATIENT THREE",
+   "rid": "schedule_screen_accordion_title_c3c5f3bd-8456-4eed-92a8-0d8c0f3dbaa1",
+   "vb": [
+    31,
+    256,
+    312,
+    285
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    31,
+    285,
+    236,
+    318
+   ],
+   "txt": "8:00 p. m. - 9:00 p. m.",
+   "rid": "schedule_screen_accordion_sub_title_c3c5f3bd-8456-4eed-92a8-0d8c0f3dbaa1",
+   "vb": [
+    31,
+    285,
+    236,
+    318
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    1012,
+    259,
+    1032,
+    280
+   ],
+   "txt": "",
+   "vb": [
+    1012,
+    259,
+    1032,
+    280
+   ],
+   "step": 0
+  },
+  {
+   "cls": "View",
+   "b": [
+    1043,
+    259,
+    1056,
+    280
+   ],
+   "txt": "Expandido",
+   "vb": [
+    1043,
+    259,
+    1056,
+    280
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    1039,
+    263,
+    1060,
+    276
+   ],
+   "txt": "",
+   "vb": [
+    1039,
+    263,
+    1060,
+    276
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    31,
+    338,
+    48,
+    358
+   ],
+   "txt": "",
+   "vb": [
+    31,
+    338,
+    48,
+    358
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    51,
+    335,
+    276,
+    366
+   ],
+   "txt": "Detalles del paciente",
+   "vb": [
+    51,
+    335,
+    276,
+    366
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    41,
+    381,
+    59,
+    402
+   ],
+   "txt": "",
+   "vb": [
+    41,
+    381,
+    59,
+    402
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    62,
+    378,
+    468,
+    409
+   ],
+   "txt": "Registros de entrada de EVV 8:05 p. m.",
+   "vb": [
+    62,
+    378,
+    468,
+    409
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    41,
+    428,
+    61,
+    449
+   ],
+   "txt": "",
+   "vb": [
+    41,
+    428,
+    61,
+    449
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    64,
+    425,
+    299,
+    456
+   ],
+   "txt": "La visita está en curso",
+   "vb": [
+    64,
+    425,
+    299,
+    456
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    444,
+    478,
+    645,
+    506
+   ],
+   "txt": "Continuar visitando",
+   "vb": [
+    444,
+    478,
+    645,
+    506
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    31,
+    564,
+    312,
+    593
+   ],
+   "txt": "PATIENT THREE",
+   "rid": "schedule_screen_accordion_title_957aeadb-a251-4640-ba7c-525ba8be7f85",
+   "vb": [
+    31,
+    564,
+    312,
+    593
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    31,
+    593,
+    246,
+    626
+   ],
+   "txt": "9:00 p. m. - 10:00 p. m.",
+   "rid": "schedule_screen_accordion_sub_title_957aeadb-a251-4640-ba7c-525ba8be7f85",
+   "vb": [
+    31,
+    593,
+    246,
+    626
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    1012,
+    567,
+    1032,
+    588
+   ],
+   "txt": "",
+   "vb": [
+    1012,
+    567,
+    1032,
+    588
+   ],
+   "step": 0
+  },
+  {
+   "cls": "View",
+   "b": [
+    1043,
+    567,
+    1056,
+    588
+   ],
+   "txt": "Expandido",
+   "vb": [
+    1043,
+    567,
+    1056,
+    588
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    1039,
+    571,
+    1060,
+    584
+   ],
+   "txt": "",
+   "vb": [
+    1039,
+    571,
+    1060,
+    584
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    31,
+    646,
+    48,
+    666
+   ],
+   "txt": "",
+   "vb": [
+    31,
+    646,
+    48,
+    666
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    51,
+    643,
+    276,
+    674
+   ],
+   "txt": "Detalles del paciente",
+   "vb": [
+    51,
+    643,
+    276,
+    674
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    41,
+    689,
+    61,
+    710
+   ],
+   "txt": "",
+   "vb": [
+    41,
+    689,
+    61,
+    710
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    64,
+    686,
+    744,
+    717
+   ],
+   "txt": "Llamada EVV en 9:05 p. m. pendiente de aprobación de la oficina",
+   "vb": [
+    64,
+    686,
+    744,
+    717
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    41,
+    736,
+    61,
+    757
+   ],
+   "txt": "",
+   "vb": [
+    41,
+    736,
+    61,
+    757
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    64,
+    733,
+    299,
+    764
+   ],
+   "txt": "La visita está en curso",
+   "vb": [
+    64,
+    733,
+    299,
+    764
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    444,
+    786,
+    645,
+    814
+   ],
+   "txt": "Continuar visitando",
+   "vb": [
+    444,
+    786,
+    645,
+    814
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    389,
+    863,
+    691,
+    894
+   ],
+   "txt": "Iniciar visita no programada",
+   "vb": [
+    389,
+    863,
+    691,
+    894
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    11,
+    920,
+    206,
+    949
+   ],
+   "txt": "noviembre 5, 2026",
+   "rid": "header_date",
+   "vb": [
+    11,
+    920,
+    206,
+    949
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    31,
+    973,
+    312,
+    1002
+   ],
+   "txt": "PATIENT THREE",
+   "rid": "schedule_screen_accordion_title_b3029519-bcd6-4cfd-b819-072dc1704196",
+   "vb": [
+    31,
+    973,
+    312,
+    1002
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    31,
+    1002,
+    246,
+    1035
+   ],
+   "txt": "8:00 p. m. - 10:00 p. m.",
+   "rid": "schedule_screen_accordion_sub_title_b3029519-bcd6-4cfd-b819-072dc1704196",
+   "vb": [
+    31,
+    1002,
+    246,
+    1035
+   ],
+   "step": 0
+  },
+  {
+   "cls": "View",
+   "b": [
+    1043,
+    976,
+    1056,
+    997
+   ],
+   "txt": "Contraído",
+   "vb": [
+    1043,
+    976,
+    1056,
+    997
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    1043,
+    976,
+    1056,
+    997
+   ],
+   "txt": "",
+   "vb": [
+    1043,
+    976,
+    1056,
+    997
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    11,
+    1070,
+    206,
+    1099
+   ],
+   "txt": "noviembre 6, 2026",
+   "rid": "header_date",
+   "vb": [
+    11,
+    1070,
+    206,
+    1099
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    31,
+    1123,
+    312,
+    1152
+   ],
+   "txt": "PATIENT THREE",
+   "rid": "schedule_screen_accordion_title_870432f8-ffc1-46db-a656-ad75fd1e51cf",
+   "vb": [
+    31,
+    1123,
+    312,
+    1152
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    31,
+    1152,
+    236,
+    1185
+   ],
+   "txt": "8:00 p. m. - 9:00 p. m.",
+   "rid": "schedule_screen_accordion_sub_title_870432f8-ffc1-46db-a656-ad75fd1e51cf",
+   "vb": [
+    31,
+    1152,
+    236,
+    1185
+   ],
+   "step": 0
+  },
+  {
+   "cls": "View",
+   "b": [
+    1043,
+    1126,
+    1056,
+    1147
+   ],
+   "txt": "Contraído",
+   "vb": [
+    1043,
+    1126,
+    1056,
+    1147
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    1043,
+    1126,
+    1056,
+    1147
+   ],
+   "txt": "",
+   "vb": [
+    1043,
+    1126,
+    1056,
+    1147
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    31,
+    1222,
+    312,
+    1251
+   ],
+   "txt": "PATIENT THREE",
+   "rid": "schedule_screen_accordion_title_ed4902ee-b0f4-4624-b547-fed6d6ab6063",
+   "vb": [
+    31,
+    1222,
+    312,
+    1251
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    31,
+    1251,
+    246,
+    1284
+   ],
+   "txt": "9:00 p. m. - 10:00 p. m.",
+   "rid": "schedule_screen_accordion_sub_title_ed4902ee-b0f4-4624-b547-fed6d6ab6063",
+   "vb": [
+    31,
+    1251,
+    246,
+    1284
+   ],
+   "step": 0
+  },
+  {
+   "cls": "View",
+   "b": [
+    1043,
+    1225,
+    1056,
+    1246
+   ],
+   "txt": "Contraído",
+   "vb": [
+    1043,
+    1225,
+    1056,
+    1246
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    1043,
+    1225,
+    1056,
+    1246
+   ],
+   "txt": "",
+   "vb": [
+    1043,
+    1225,
+    1056,
+    1246
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    11,
+    1319,
+    206,
+    1348
+   ],
+   "txt": "noviembre 9, 2026",
+   "rid": "header_date",
+   "vb": [
+    11,
+    1319,
+    206,
+    1348
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    31,
+    1372,
+    312,
+    1401
+   ],
+   "txt": "PATIENT THREE",
+   "rid": "schedule_screen_accordion_title_5d0a20e8-e891-4e5f-8658-e69f6e04dcbc",
+   "vb": [
+    31,
+    1372,
+    312,
+    1401
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    31,
+    1401,
+    236,
+    1434
+   ],
+   "txt": "8:00 p. m. - 9:00 p. m.",
+   "rid": "schedule_screen_accordion_sub_title_5d0a20e8-e891-4e5f-8658-e69f6e04dcbc",
+   "vb": [
+    31,
+    1401,
+    236,
+    1434
+   ],
+   "step": 0
+  },
+  {
+   "cls": "View",
+   "b": [
+    1043,
+    1375,
+    1056,
+    1396
+   ],
+   "txt": "Contraído",
+   "vb": [
+    1043,
+    1375,
+    1056,
+    1396
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    1043,
+    1375,
+    1056,
+    1396
+   ],
+   "txt": "",
+   "vb": [
+    1043,
+    1375,
+    1056,
+    1396
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    31,
+    1471,
+    312,
+    1500
+   ],
+   "txt": "PATIENT THREE",
+   "rid": "schedule_screen_accordion_title_eae7390d-6324-483b-b78a-9d93bce77ebf",
+   "vb": [
+    31,
+    1471,
+    312,
+    1500
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    31,
+    1500,
+    246,
+    1533
+   ],
+   "txt": "9:00 p. m. - 10:00 p. m.",
+   "rid": "schedule_screen_accordion_sub_title_eae7390d-6324-483b-b78a-9d93bce77ebf",
+   "vb": [
+    31,
+    1500,
+    246,
+    1533
+   ],
+   "step": 0
+  },
+  {
+   "cls": "View",
+   "b": [
+    1043,
+    1474,
+    1056,
+    1495
+   ],
+   "txt": "Contraído",
+   "vb": [
+    1043,
+    1474,
+    1056,
+    1495
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    1043,
+    1474,
+    1056,
+    1495
+   ],
+   "txt": "",
+   "vb": [
+    1043,
+    1474,
+    1056,
+    1495
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    11,
+    1568,
+    219,
+    1597
+   ],
+   "txt": "noviembre 10, 2026",
+   "rid": "header_date",
+   "vb": [
+    11,
+    1568,
+    219,
+    1597
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    31,
+    1621,
+    312,
+    1650
+   ],
+   "txt": "PATIENT THREE",
+   "rid": "schedule_screen_accordion_title_d8c645e5-50e1-41fb-8606-fc5ce313af4f",
+   "vb": [
+    31,
+    1621,
+    312,
+    1650
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    31,
+    1650,
+    246,
+    1683
+   ],
+   "txt": "8:00 p. m. - 10:00 p. m.",
+   "rid": "schedule_screen_accordion_sub_title_d8c645e5-50e1-41fb-8606-fc5ce313af4f",
+   "vb": [
+    31,
+    1650,
+    246,
+    1683
+   ],
+   "step": 0
+  },
+  {
+   "cls": "View",
+   "b": [
+    1043,
+    1624,
+    1056,
+    1645
+   ],
+   "txt": "Contraído",
+   "vb": [
+    1043,
+    1624,
+    1056,
+    1645
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    1043,
+    1624,
+    1056,
+    1645
+   ],
+   "txt": "",
+   "vb": [
+    1043,
+    1624,
+    1056,
+    1645
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    11,
+    1718,
+    219,
+    1747
+   ],
+   "txt": "noviembre 11, 2026",
+   "rid": "header_date",
+   "vb": [
+    11,
+    1718,
+    219,
+    1747
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    31,
+    1771,
+    312,
+    1800
+   ],
+   "txt": "PATIENT THREE",
+   "rid": "schedule_screen_accordion_title_754ade04-c3c9-48a2-8cfc-8594679829cd",
+   "vb": [
+    31,
+    1771,
+    312,
+    1800
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    31,
+    1800,
+    236,
+    1833
+   ],
+   "txt": "8:00 p. m. - 9:00 p. m.",
+   "rid": "schedule_screen_accordion_sub_title_754ade04-c3c9-48a2-8cfc-8594679829cd",
+   "vb": [
+    31,
+    1800,
+    236,
+    1833
+   ],
+   "step": 0
+  },
+  {
+   "cls": "View",
+   "b": [
+    1043,
+    1774,
+    1056,
+    1795
+   ],
+   "txt": "Contraído",
+   "vb": [
+    1043,
+    1774,
+    1056,
+    1795
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    1043,
+    1774,
+    1056,
+    1795
+   ],
+   "txt": "",
+   "vb": [
+    1043,
+    1774,
+    1056,
+    1795
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    31,
+    1870,
+    312,
+    1899
+   ],
+   "txt": "PATIENT THREE",
+   "rid": "schedule_screen_accordion_title_fcb4efa3-4e73-45f4-9629-9c7f278dab52",
+   "vb": [
+    31,
+    1870,
+    312,
+    1899
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    31,
+    1899,
+    246,
+    1932
+   ],
+   "txt": "9:00 p. m. - 10:00 p. m.",
+   "rid": "schedule_screen_accordion_sub_title_fcb4efa3-4e73-45f4-9629-9c7f278dab52",
+   "vb": [
+    31,
+    1899,
+    246,
+    1932
+   ],
+   "step": 0
+  },
+  {
+   "cls": "View",
+   "b": [
+    1043,
+    1873,
+    1056,
+    1894
+   ],
+   "txt": "Contraído",
+   "vb": [
+    1043,
+    1873,
+    1056,
+    1894
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    1043,
+    1873,
+    1056,
+    1894
+   ],
+   "txt": "",
+   "vb": [
+    1043,
+    1873,
+    1056,
+    1894
+   ],
+   "step": 0
+  },
+  {
+   "cls": "View",
+   "b": [
+    1031,
+    106,
+    1077,
+    148
+   ],
+   "txt": "Ayuda",
+   "vb": [
+    1031,
+    106,
+    1077,
+    148
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    1041,
+    113,
+    1067,
+    141
+   ],
+   "txt": "",
+   "vb": [
+    1041,
+    113,
+    1067,
+    141
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    116,
+    2275,
+    239,
+    2298
+   ],
+   "txt": "Programación",
+   "rid": "bottom_bar_schedule_button",
+   "vb": [
+    116,
+    2275,
+    239,
+    2298
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    500,
+    2275,
+    580,
+    2298
+   ],
+   "txt": "Pacientes",
+   "rid": "bottom_bar_patient_button",
+   "vb": [
+    500,
+    2275,
+    580,
+    2298
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    879,
+    2275,
+    926,
+    2298
+   ],
+   "txt": "Menú",
+   "rid": "bottom_bar_menu_button",
+   "vb": [
+    879,
+    2275,
+    926,
+    2298
+   ],
+   "step": 0
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    23,
+    175,
+    68,
+    222
+   ],
+   "txt": "P3",
+   "rid": "visit_details_patient_name_avatar",
+   "vb": [
+    23,
+    175,
+    68,
+    222
+   ],
+   "step": 1
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    91,
+    164,
+    386,
+    193
+   ],
+   "txt": "PATIENT THREE",
+   "rid": "visit_details_patient_name",
+   "vb": [
+    91,
+    164,
+    386,
+    193
+   ],
+   "step": 1
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    91,
+    199,
+    111,
+    219
+   ],
+   "txt": "",
+   "vb": [
+    91,
+    199,
+    111,
+    219
+   ],
+   "step": 1
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    117,
+    199,
+    250,
+    238
+   ],
+   "txt": "555-555-0101",
+   "rid": "visit_details_patient_phone_number",
+   "vb": [
+    117,
+    199,
+    250,
+    238
+   ],
+   "step": 1
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    91,
+    244,
+    106,
+    264
+   ],
+   "txt": "",
+   "vb": [
+    91,
+    244,
+    106,
+    264
+   ],
+   "step": 1
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    112,
+    244,
+    636,
+    283
+   ],
+   "txt": "2 TEST ST, ANYTOWN, FL, 00000",
+   "rid": "visit_details_patient_address",
+   "vb": [
+    112,
+    244,
+    636,
+    283
+   ],
+   "step": 1
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    91,
+    289,
+    104,
+    309
+   ],
+   "txt": "",
+   "vb": [
+    91,
+    289,
+    104,
+    309
+   ],
+   "step": 1
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    110,
+    289,
+    278,
+    328
+   ],
+   "txt": "Más información",
+   "rid": "visit_details_patient_more_info_text",
+   "vb": [
+    110,
+    289,
+    278,
+    328
+   ],
+   "step": 1
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    430,
+    345,
+    651,
+    376
+   ],
+   "txt": "8:00 p. m. - 9:00 p. m.",
+   "rid": "visit_details_visit_time",
+   "vb": [
+    430,
+    345,
+    651,
+    376
+   ],
+   "step": 1
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    327,
+    405,
+    345,
+    426
+   ],
+   "txt": "",
+   "vb": [
+    327,
+    405,
+    345,
+    426
+   ],
+   "step": 1
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    348,
+    402,
+    754,
+    433
+   ],
+   "txt": "Registros de entrada de EVV 8:05 p. m.",
+   "vb": [
+    348,
+    402,
+    754,
+    433
+   ],
+   "step": 1
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    256,
+    498,
+    289,
+    533
+   ],
+   "txt": "",
+   "vb": [
+    256,
+    498,
+    289,
+    533
+   ],
+   "step": 1
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    234,
+    541,
+    312,
+    569
+   ],
+   "txt": "Deberes",
+   "rid": "visit_details_duties",
+   "vb": [
+    234,
+    541,
+    312,
+    569
+   ],
+   "step": 1
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    791,
+    498,
+    824,
+    533
+   ],
+   "txt": "",
+   "vb": [
+    791,
+    498,
+    824,
+    533
+   ],
+   "step": 1
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    780,
+    541,
+    835,
+    569
+   ],
+   "txt": "Notas",
+   "rid": "visit_details_notes",
+   "vb": [
+    780,
+    541,
+    835,
+    569
+   ],
+   "step": 1
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    256,
+    644,
+    289,
+    679
+   ],
+   "txt": "",
+   "vb": [
+    256,
+    644,
+    289,
+    679
+   ],
+   "step": 1
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    215,
+    687,
+    331,
+    715
+   ],
+   "txt": "Preferencias",
+   "rid": "visit_details_preferences",
+   "vb": [
+    215,
+    687,
+    331,
+    715
+   ],
+   "step": 1
+  },
+  {
+   "cls": "View",
+   "b": [
+    527,
+    2206,
+    553,
+    2219
+   ],
+   "txt": "1. Tab 1 of 2",
+   "vb": [
+    527,
+    2206,
+    553,
+    2219
+   ],
+   "step": 1
+  },
+  {
+   "cls": "View",
+   "b": [
+    9,
+    107,
+    48,
+    146
+   ],
+   "txt": "Atrás",
+   "vb": [
+    9,
+    107,
+    48,
+    146
+   ],
+   "step": 1
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    19,
+    114,
+    38,
+    139
+   ],
+   "txt": "",
+   "vb": [
+    19,
+    114,
+    38,
+    139
+   ],
+   "step": 1
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    436,
+    110,
+    645,
+    144
+   ],
+   "txt": "noviembre 4, 2026",
+   "rid": "title_bar_title",
+   "vb": [
+    436,
+    110,
+    645,
+    144
+   ],
+   "step": 1
+  },
+  {
+   "cls": "TextView",
+   "b": [
+    489,
+    2250,
+    592,
+    2278
+   ],
+   "txt": "Continuar",
+   "vb": [
+    489,
+    2250,
+    592,
+    2278
+   ],
+   "step": 1
+  }
+ ]
+}

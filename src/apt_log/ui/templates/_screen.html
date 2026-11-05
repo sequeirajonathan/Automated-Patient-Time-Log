@@ -34,7 +34,7 @@
          guess what it opens. Reported from the phone. The ellipsis is the
          last resort it was always meant to be, not the usual case. #}
       {% for b in ([m.nav.back] if m.nav.back else []) + m.nav.trailing %}
-      <button type="button" class="a-navbtn" data-aim='{{ b.aim | tojson }}'
+      <button type="button" class="a-navbtn" data-aim='{{ b.aim | aimjson }}'
         >{{ b.txt or (b.lines[0] if b.lines else '') or '···' }}</button>
       {% endfor %}
     </span>
@@ -94,7 +94,7 @@
     <div class="a-modal-acts{% if (m.alert.actions | default([])) | length > 1 %} two{% endif %}">
       {% for a in m.alert.actions | default([m.alert.action]) %}
       <button type="button" class="a-modal-go{% if a.danger %} danger{% endif %}"
-              data-aim='{{ a.aim | tojson }}'
+              data-aim='{{ a.aim | aimjson }}'
         >{{ a.txt }}</button>
       {% endfor %}
     </div>
@@ -117,14 +117,14 @@
       {% for c in m.permission.choices %}
       <button type="button" class="a-permchoice{% if c.on %} on{% endif %}"
               aria-pressed="{{ 'true' if c.on else 'false' }}"
-              data-aim='{{ c.aim | tojson }}'>{{ c.txt }}</button>
+              data-aim='{{ c.aim | aimjson }}'>{{ c.txt }}</button>
       {% endfor %}
     </div>
     {% endif %}
     <div class="a-permacts">
       {% for a in m.permission.actions %}
       <button type="button" class="a-permact {{ a.tone }}"
-              data-aim='{{ a.aim | tojson }}'>{{ a.txt }}</button>
+              data-aim='{{ a.aim | aimjson }}'>{{ a.txt }}</button>
       {% endfor %}
     </div>
   </div>
@@ -137,7 +137,7 @@
      bottom sheet — verified — so without this there is no third option
      beside Done and Clear. #}
   <div class="a-dismiss">
-    <button type="button" class="a-dismissbtn" data-aim='{{ m.dismiss.aim | tojson }}'>
+    <button type="button" class="a-dismissbtn" data-aim='{{ m.dismiss.aim | aimjson }}'>
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor"
            stroke-width="2" stroke-linecap="round"
         ><path d="M4 4 L12 12 M12 4 L4 12"/></svg>
@@ -161,7 +161,7 @@
     {% if row.tabs %}
     <div class="a-row a-tabs">
       {% for it in row['items'] %}
-      <button type="button" class="a-tab" data-aim='{{ it.aim | tojson }}'
+      <button type="button" class="a-tab" data-aim='{{ it.aim | aimjson }}'
               {% if not (it.txt or it.lines) %}aria-label="{{ it.aim.cls }}{% if it.aim.rid %} {{ it.aim.rid }}{% endif %}"{% endif %}
         >{{ it.txt or (it.lines[0] if it.lines else '·') }}</button>
       {% endfor %}
@@ -182,7 +182,7 @@
     <div class="a-row a-actions">
       {% for it in row['items'] %}
       <button type="button" class="a-actbtn{% if loop.last %} primary{% endif %}"
-              data-aim='{{ it.aim | tojson }}'
+              data-aim='{{ it.aim | aimjson }}'
         >{{ it.txt or (it.lines[0] if it.lines else '·') }}</button>
       {% endfor %}
     </div>
@@ -197,7 +197,7 @@
         {% for part in it.parts %}
           <button type="button" class="a-segbtn{% if part.checked %} on{% endif %}"
                   {% if part.checked %}aria-current="page" disabled{% endif %}
-                  data-aim='{{ part.aim | tojson }}'>{{ part.txt or '·' }}</button>
+                  data-aim='{{ part.aim | aimjson }}'>{{ part.txt or '·' }}</button>
         {% endfor %}
         </span>
       {% elif it.kind == 'button' %}
@@ -205,7 +205,7 @@
            as broken, and the visit detail's icon buttons shipped three. #}
         <button type="button" class="a-btn{% if it.small %} sm{% elif it.cta %} cta{% endif %}{% if not it.enabled %} off{% endif %}"
                 {% if not it.enabled %}disabled aria-disabled="true"{% endif %}
-                data-aim='{{ it.aim | tojson }}'
+                data-aim='{{ it.aim | aimjson }}'
                 {% if not it.txt %}aria-label="{{ it.aim.cls }}{% if it.aim.rid %} {{ it.aim.rid }}{% endif %}"{% endif %}
           >{{ it.txt or '···' }}</button>
       {% elif it.kind == 'canvas' %}
@@ -232,7 +232,7 @@
            which is what every select on every platform looks like, and the
            words that were floating beside it ride underneath as the note
            they always were. #}
-        <button type="button" class="a-select" data-aim='{{ it.aim | tojson }}'
+        <button type="button" class="a-select" data-aim='{{ it.aim | aimjson }}'
                 aria-haspopup="listbox">
           <span class="a-sel-face">
             <span class="a-sel-val">{{ it.txt or (it.lines[0] if it.lines else '···') }}</span>
@@ -249,11 +249,11 @@
            one control and looked like nowhere to type. #}
         <span class="a-fieldwrap">
           <button type="button" class="a-field{% if it.focused %} focus{% endif %}{% if not it.txt %} empty{% endif %}"
-                  data-aim='{{ it.aim | tojson }}'
+                  data-aim='{{ it.aim | aimjson }}'
                   {% if it.hint %}data-hint="{{ it.hint }}"{% endif %}
             >{{ it.txt or it.hint or '' }}</button>
           {% if it.submit %}
-          <button type="button" class="a-fieldgo" data-aim='{{ it.submit | tojson }}'
+          <button type="button" class="a-fieldgo" data-aim='{{ it.submit | aimjson }}'
                   aria-label="{{ it.hint or t('papp.search') }}"
             ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor"
                   stroke-width="2" stroke-linecap="round"
@@ -269,7 +269,7 @@
            rather than as one more identical grey switch. #}
         <button type="button" class="a-check a-refuse{% if it.checked %} on{% endif %}"
                 role="checkbox" aria-checked="{{ 'true' if it.checked else 'false' }}"
-                data-aim='{{ it.aim | tojson }}'
+                data-aim='{{ it.aim | aimjson }}'
                 aria-label="{{ t('papp.refused_col') }}"
           ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor"
                 stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"
@@ -296,7 +296,7 @@
            it — worse than the screen-reader sentence it replaced. #}
         <button type="button" class="a-check{% if it.checked %} on{% endif %}{% if it.txt %} named{% endif %}"
                 role="checkbox" aria-checked="{{ 'true' if it.checked else 'false' }}"
-                data-aim='{{ it.aim | tojson }}'
+                data-aim='{{ it.aim | aimjson }}'
                 {% if not it.txt %}aria-label="{{ it.aim.cls }}{% if it.aim.rid %} {{ it.aim.rid }}{% endif %}"{% endif %}
           ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor"
                 stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"
@@ -304,7 +304,7 @@
              class="a-check-t">{{ it.txt }}</span>{% endif %}</button>
       {% elif it.kind == 'toggle' %}
         <button type="button" class="a-switch{% if it.checked %} on{% endif %}"
-                data-aim='{{ it.aim | tojson }}'
+                data-aim='{{ it.aim | aimjson }}'
                 aria-label="{{ it.aim.cls }}{% if it.aim.rid %} {{ it.aim.rid }}{% endif %}"
           ><span class="knob"></span></button>
       {# A ROW WITH NOTHING TO PRESS IS A STATEMENT, whatever any rule above
@@ -330,7 +330,7 @@
            and the chip cannot shrink, so it spills across its neighbour. #}
         <button type="button" class="a-cell{% if it.cta or it.commit %} cta{% endif %}{% if it.danger %} danger{% endif %}{% if it.status and not it.lines and not it.txt %} chip{% endif %}{% if not it.enabled %} off{% endif %}"
                 {% if not it.enabled %}disabled aria-disabled="true"{% endif %}
-                data-aim='{{ it.aim | tojson }}'>
+                data-aim='{{ it.aim | aimjson }}'>
         {# A disabled row that carries words became an info row above; what
            reaches here disabled is a control with nothing to say — EXCEPT
            the press that ends a visit, which stays a control and says so.
@@ -375,12 +375,12 @@
         </button>
       {% elif it.kind == 'image' %}
         {% if it.aim %}
-        <button type="button" class="a-icon" data-aim='{{ it.aim | tojson }}'
+        <button type="button" class="a-icon" data-aim='{{ it.aim | aimjson }}'
                 aria-label="{{ it.aim.cls }}{% if it.aim.rid %} {{ it.aim.rid }}{% endif %}"
           >{{ it.txt or '' }}</button>
         {% endif %}
       {% elif it.kind == 'text' and it.aim %}
-        <button type="button" class="a-link" data-aim='{{ it.aim | tojson }}'
+        <button type="button" class="a-link" data-aim='{{ it.aim | aimjson }}'
           >{{ it.txt or '' }}</button>
       {% elif it.kind == 'summary' %}
         {# WHAT THIS PAGE IS ABOUT, said once at the top. The app hands this
@@ -447,7 +447,7 @@
        presses; there are simply two places to reach it from, because the
        drawer covers the phone's own corner. #}
     {% if m.dismiss %}
-    <button type="button" class="a-wait-out" data-aim='{{ m.dismiss.aim | tojson }}'>
+    <button type="button" class="a-wait-out" data-aim='{{ m.dismiss.aim | aimjson }}'>
       {{ m.dismiss.txt or t('sign.pad_close') }}</button>
     {% endif %}
     {# AND WHEN THE PAD WILL NOT CLOSE AT ALL.
