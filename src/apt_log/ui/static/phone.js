@@ -229,6 +229,9 @@
         }
         let aim;
         try { aim = JSON.parse(el.dataset.aim); } catch (e) { return; }
+        // A control the reflow could not give an aim is drawn but dead —
+        // see `_aimjson` in app.py. Nothing to send, so nothing is sent.
+        if (!aim) return;
         // The type bar exists for ONE moment: a screen asking for a
         // verification code. Offering it for every text field put a
         // "type here" prompt over the patients list's search box the

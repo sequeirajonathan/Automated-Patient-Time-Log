@@ -2507,7 +2507,7 @@ class TestTheSearchBoxAsDrawn:
             in self.STYLE.read_text(encoding="utf-8")
 
     def test_it_is_a_real_control_with_a_real_aim(self):
-        assert "data-aim='{{ it.submit | tojson }}'" in self._markup()
+        assert "data-aim='{{ it.submit | aimjson }}'" in self._markup()
 
     def test_and_it_never_sits_on_top_of_the_words(self):
         css = self.STYLE.read_text(encoding="utf-8")
