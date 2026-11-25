@@ -34,6 +34,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import unicodedata
 import uuid
@@ -1536,6 +1537,135 @@ def _perform(driver, paths, bounds=None, serial=None) -> None:
             ",".join(tally))
 
 
+
+def _engine_perform(driver, paths, bounds=None, serial=None):
+    """Draw the signature with whichever engine the switch names, and say
+    which one did it.
+
+    Returns `_perform`'s three readings plus a short engine note for the
+    log. The Appium path is `_perform` itself, unchanged. The scrcpy path
+    (scrcpy_ink) is tried first when the switch is on, and ANY failure in
+    it ends in the Appium path drawing whatever is still missing, in the
+    same replay. She never has to sign again because the fast path failed.
+    """
+    from apt_log import scrcpy_ink as ink
+
+    if not bounds or not paths or ink.engine() != ink.SCRCPY:
+        return _perform(driver, paths, bounds=bounds, serial=serial) + (
+            "appium",)
+    t0 = time.monotonic()
+    try:
+        return _perform_scrcpy(driver, paths, bounds, serial, t0)
+    except Exception as exc:  # noqa: BLE001 — the fallback is the point
+        # Only reached if nothing was drawn yet: `_perform_scrcpy` handles
+        # its own failures once a stroke has gone out.
+        reason = str(exc)[:120] or type(exc).__name__
+        log.warning("fast signature drawing could not start (%s); "
+                    "drawing it the old way", reason)
+        if not isinstance(exc, _NotScrcpysFault):
+            ink.note_failure(reason)
+        return _perform(driver, paths, bounds=bounds, serial=serial) + (
+            "appium(fallback:%s)" % reason[:60],)
+
+
+class _NotScrcpysFault(RuntimeError):
+    """The fast path was not tried for a reason the fast path did not cause
+    (the canvas could not be read at all). Not counted toward the trip."""
+
+
+def _perform_scrcpy(driver, paths, bounds, serial, t0):
+    from apt_log import feed as feed_mod
+    from apt_log import scrcpy_ink as ink
+
+    size = tuple(getattr(feed_mod, "SCREEN_SIZE", None) or (0, 0))
+    pen = ink.Pen(serial, size=size)
+    # Start the server while the before-shot is taken: both take most of a
+    # second and neither needs the other.
+    opened: list = []
+
+    def _open():
+        try:
+            pen.open()
+            opened.append(None)
+        except Exception as exc:  # noqa: BLE001
+            opened.append(exc)
+
+    starter = threading.Thread(target=_open, daemon=True)
+    starter.start()
+    before = ink.grab(bounds, serial)
+    starter.join(ink.CONNECT_TIMEOUT + 25)
+    if not opened or opened[0] is not None:
+        pen.close()
+        raise opened[0] if opened else ink.InkUnavailable("start timed out")
+    if before is None:
+        pen.close()
+        raise _NotScrcpysFault("canvas unreadable")
+
+    marks = ["s"] * len(paths)
+    sent = 0
+    failure = ""
+    try:
+        for i, path in enumerate(paths):
+            if i:
+                time.sleep(ink.LIFT_GAP)
+            if path:
+                pen.stroke(path, CLAIM_NUDGE, DOT_MARK, MOVE_MS)
+            sent = i + 1
+        drawn_in = time.monotonic() - t0
+        time.sleep(ink.PAINT_WAIT)
+        after = ink.grab(bounds, serial)
+        lost = ink.missing(before, after, paths, bounds) if after else []
+        if lost:
+            # Once more through the same pen, only the strokes that did not
+            # land. Never a clear: what landed stays.
+            log.info("fast path: strokes %s left no ink; sending them again",
+                     ",".join(str(i + 1) for i in lost))
+            for n, i in enumerate(lost):
+                if n:
+                    time.sleep(ink.LIFT_GAP)
+                pen.stroke(paths[i], CLAIM_NUDGE, DOT_MARK, MOVE_MS)
+                marks[i] = "s2"
+            time.sleep(ink.PAINT_WAIT)
+            again = ink.grab(bounds, serial)
+            if again is not None:
+                after = again
+                lost = ink.missing(before, after, paths, bounds)
+            if lost:
+                failure = "strokes %s did not land" % ",".join(
+                    str(i + 1) for i in lost)
+    except Exception as exc:  # noqa: BLE001
+        failure = "stopped at stroke %d: %s" % (sent + 1, str(exc)[:80])
+        after = None
+        lost = None
+    finally:
+        pen.close()
+
+    if failure:
+        ink.note_failure(failure)
+        if lost is None:
+            # Broke mid-signature. Strokes already sent are judged from the
+            # screen; if it cannot be read, everything from the broken
+            # stroke on is drawn again and nothing before it is.
+            after = ink.grab(bounds, serial)
+            lost = (ink.missing(before, after, paths, bounds) if after
+                    else list(range(sent, len(paths))))
+        log.warning("fast signature drawing fell short (%s); drawing %d "
+                    "stroke(s) the old way", failure, len(lost))
+        if lost:
+            _perform(driver, [paths[i] for i in lost], bounds=bounds,
+                     serial=serial)
+            for i in lost:
+                marks[i] = "a"
+        last = _canvas_ink(bounds, serial)
+        return (ink.dark_count(before), last, ",".join(marks),
+                "scrcpy+appium(%s) %.1fs" % (failure[:60],
+                                             time.monotonic() - t0))
+
+    ink.note_success("%d strokes in %.1fs" % (len(paths), drawn_in))
+    return (ink.dark_count(before),
+            ink.dark_count(after) if after is not None else None,
+            ",".join(marks), "scrcpy %.1fs" % (time.monotonic() - t0))
+
 # How long the app gets to repaint an emptied canvas before ink goes onto it.
 # The same argument as INK_PAINT and measured against the same evidence: this
 # surface has been seen taking seconds to produce a frame, and a stroke drawn
@@ -1758,7 +1888,9 @@ def execute(payload: dict, status_path: Path | None = None) -> Status:
         # question this replay has now raised twice, both times answerable
         # only by guessing at a screenshot afterwards. Two integers in the
         # log, and nothing reconstructable from them.
-        was, now_ink, per_stroke = _perform(driver, paths, bounds=bounds)
+        was, now_ink, per_stroke, engine_note = _engine_perform(
+            driver, paths, bounds=bounds)
+        placed[0] += " engine=%s" % engine_note.replace(" ", "_")
         if was is not None and now_ink is not None:
             placed[0] += " ink=%d->%d" % (was, now_ink)
         if per_stroke:

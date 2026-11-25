@@ -312,3 +312,27 @@ def strip_py_comments(source: str) -> str:
     """
     return "\n".join(line for line in source.splitlines()
                      if not line.lstrip().startswith("#"))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_sign_engine(tmp_path, monkeypatch):
+    """The signature-engine switch and the scrcpy server cache live beside
+    the real state, and the deploy gate runs this suite on the Pi. Each test
+    gets its own switch, set to the Appium path so a test that walks a
+    replay never starts a real scrcpy server on the real phone, and a
+    download that can only fail. Tests of the fast path turn it on
+    themselves."""
+    import json as _json
+
+    from apt_log import scrcpy_ink
+
+    flag = tmp_path / "sign-engine.json"
+    flag.write_text(_json.dumps({"engine": "appium", "fails": 0}))
+    monkeypatch.setattr(scrcpy_ink, "FLAG_PATH", flag)
+    monkeypatch.setattr(scrcpy_ink, "SERVER_CACHE",
+                        tmp_path / "scrcpy" / "scrcpy-server")
+
+    def _no_network(*_a, **_k):
+        raise OSError("no network in tests")
+
+    monkeypatch.setattr(scrcpy_ink, "urlopen", _no_network)

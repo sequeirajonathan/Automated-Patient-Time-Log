@@ -203,6 +203,8 @@
     <div class="banner bad">{{ t('debug.time.bad') }}</div>
   {% elif saved == 'time_failed' %}
     <div class="banner bad">{{ t('phone.failed') }}</div>
+  {% elif saved == 'engine' %}
+    <div class="banner ok">{{ t('debug.saved.engine') }}</div>
   {% elif saved == 'clock_unlocked' %}
     <div class="banner">{{ t('debug.saved.clock_unlocked') }}</div>
   {% elif saved == 'clock_locked' %}
@@ -269,6 +271,29 @@
      clock section. The switches are segmented controls showing the state the
      phone reported, refreshed after every press; the set control takes one
      typed time and does the disable-then-set dance in a single press. #}
+  {# HOW A STORED SIGNATURE IS DRAWN. A feature switch with its own undo:
+     Fast is scrcpy_ink, Old is the Appium path it replaced. The fast path
+     falls back to the old one by itself, and throws this switch back to
+     Old after repeated failures; this row is how somebody puts it back. #}
+  <section>
+    <h2>{{ t('debug.engine.title') }}</h2>
+    <div class="row">
+      <div class="k"><b>{{ t('debug.engine.title') }}</b></div>
+      <form method="post" action="/debug/sign-engine" class="seg">
+        <button type="submit" name="engine" value="scrcpy"
+                aria-pressed="{{ 'true' if sign_engine.fast else 'false' }}">
+          {{ t('debug.engine.fast') }}</button>
+        <button type="submit" name="engine" value="appium"
+                aria-pressed="{{ 'false' if sign_engine.fast else 'true' }}">
+          {{ t('debug.engine.old') }}</button>
+      </form>
+    </div>
+    <p class="sub">{{ t('debug.engine.explain') }}</p>
+    {% if sign_engine.tripped and not sign_engine.fast %}
+    <div class="banner bad">{{ t('debug.engine.tripped') }} {{ sign_engine.tripped }}</div>
+    {% endif %}
+  </section>
+
   <section>
     <h2>{{ t('debug.time.title') }}</h2>
     <p class="sub" style="margin:0 0 4px">{{ t('debug.time.explain') }}</p>
