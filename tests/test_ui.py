@@ -256,7 +256,15 @@ class TestWritePaths:
                          # Installation-wide, because the phone has one
                          # clock. Turning it off also puts the phone back
                          # on automatic — see the route.
-                         "/debug/clock-lock"}
+                         "/debug/clock-lock",
+                         # How a stored signature is DRAWN: the fast scrcpy
+                         # path or the old Appium one. Two names, one small
+                         # file on the controller; it changes no record and
+                         # presses nothing. It exists so the fast path can be
+                         # undone in one press, and the fast path throws it
+                         # back by itself after repeated failures — see
+                         # scrcpy_ink.
+                         "/debug/sign-engine"}
 
     def test_no_route_accepts_a_raw_coordinate_or_keycode(self, client):
         """/tap takes an element from a named frame; /device takes an action

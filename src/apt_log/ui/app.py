@@ -725,6 +725,8 @@ def debug_settings(request: Request):
             # Whether this section's controls do anything. Off on a fresh
             # install — see the route and prefs.clock_unlocked.
             "clock_unlocked": prefs.clock_unlocked(),
+            # The signature-drawing switch, and whether it threw itself.
+            "sign_engine": _sign_engine_state(),
             "screen_doc": doc,
             "opened": opened,
             "saved": (request.query_params.get("saved") or "")[:24],
@@ -732,6 +734,26 @@ def debug_settings(request: Request):
         },
     )
     return _remember(response, request, device_id, "/debug")
+
+
+def _sign_engine_state() -> dict:
+    from apt_log import scrcpy_ink
+
+    doc = scrcpy_ink.state()
+    return {"engine": doc["engine"], "fast": doc["engine"] == scrcpy_ink.SCRCPY,
+            "tripped": str(doc.get("tripped") or "")[:200]}
+
+
+@app.post("/debug/sign-engine")
+def debug_sign_engine(request: Request, engine: str = Form(...)):
+    """Switch how stored signatures are drawn: the fast scrcpy path or the
+    old Appium one. The revert for scrcpy_ink, kept one press away. Only the
+    two names are accepted; anything else means the old path."""
+    from apt_log import scrcpy_ink
+
+    chosen = scrcpy_ink.set_engine((engine or "")[:16])
+    log.info("signature engine switched to %s from the portal", chosen)
+    return RedirectResponse(url="/debug?saved=engine", status_code=303)
 
 
 @app.post("/debug/open")
